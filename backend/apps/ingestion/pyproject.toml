@@ -1,0 +1,23 @@
+[project]
+name = "agenticrag-rag-ingestion-worker"
+version = "0.0.0"
+description = "AgenticRAG native PDF ingestion worker."
+requires-python = ">=3.11"
+dependencies = [
+    "celery[redis]>=5.4,<6",
+    "fastembed>=0.8,<1",
+    "langgraph>=0.2,<1",
+    "minio>=7.2,<8",
+    "docling>=2.97,<3",
+    "pillow>=10,<13",
+    "PyMuPDF>=1.24,<2",
+    "pymupdf-layout>=1.27,<2",
+    "dateparser>=1.2,<2",
+    "langdetect>=1.0,<2",
+]
+
+[project.optional-dependencies]
+metadata-ner = [
+    "gliner>=0.2,<1",
+    "spacy>=3.7,<4",
+]

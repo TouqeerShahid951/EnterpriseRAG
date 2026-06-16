@@ -1,0 +1,66 @@
+"""Dispatch due scheduled folder ingestion jobs."""
+
+from __future__ import annotations
+
+import argparse
+import time
+
+from rag.core.config import settings
+from rag.repositories.documents import get_document_repository
+from rag.repositories.folder_schedules import get_folder_schedule_repository
+from rag.repositories.postgres import PostgresConnectionMixin
+from rag.services.folder_ingestion import dispatch_due_schedules
+from rag.services.folder_sources import get_minio_prefix_source
+from rag.services.ingest_queue import get_ingest_queue
+
+ADVISORY_LOCK_ID = 867530901
+
+
+class _LockConnection(PostgresConnectionMixin):
+    def __init__(self, database_url: str) -> None:
+        self.database_url = database_url
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Dispatch due folder ingestion schedules.")
+    parser.add_argument("--loop", action="store_true", help="Run forever, checking every configured interval.")
+    parser.add_argument("--once", action="store_true", help="Dispatch due schedules once and exit.")
+    args = parser.parse_args()
+
+    if not args.loop and not args.once:
+        args.once = True
+
+    while True:
+        dispatched = _dispatch_with_lock()
+        if dispatched:
+            print(f"dispatched_folder_schedules={','.join(dispatched)}")
+        if not args.loop:
+            return
+        time.sleep(max(5, settings.folder_scheduler_interval_seconds))
+
+
+def _dispatch_with_lock() -> list[str]:
+    if settings.document_repository == "postgres":
+        lock = _LockConnection(settings.database_url)
+        with lock._connect() as conn:
+            acquired = conn.execute("SELECT pg_try_advisory_lock(%s) AS acquired", (ADVISORY_LOCK_ID,)).fetchone()["acquired"]
+            if not acquired:
+                return []
+            try:
+                return _dispatch()
+            finally:
+                conn.execute("SELECT pg_advisory_unlock(%s)", (ADVISORY_LOCK_ID,))
+    return _dispatch()
+
+
+def _dispatch() -> list[str]:
+    return dispatch_due_schedules(
+        schedule_repo=get_folder_schedule_repository(),
+        document_repo=get_document_repository(),
+        queue=get_ingest_queue(),
+        minio_source=get_minio_prefix_source(),
+    )
+
+
+if __name__ == "__main__":
+    main()

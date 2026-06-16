@@ -1,0 +1,132 @@
+.faham-toast-viewport {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 10020;
+  display: flex;
+  width: min(24rem, calc(100vw - 2rem));
+  flex-direction: column;
+  gap: 0.625rem;
+  pointer-events: none;
+}
+
+.faham-toast {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.625rem;
+  background: color-mix(in srgb, var(--color-surface-container-high) 96%, transparent);
+  color: var(--color-on-surface);
+  padding: 0.875rem;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  pointer-events: auto;
+  animation: faham-toast-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.faham-toast[data-closing] {
+  animation: faham-toast-exit 180ms cubic-bezier(0.76, 0, 0.24, 1) both;
+}
+
+.faham-toast[data-tone="success"] {
+  border-color: color-mix(in srgb, var(--color-success) 34%, var(--color-surface-border));
+}
+
+.faham-toast[data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--color-warning-amber) 36%, var(--color-surface-border));
+}
+
+.faham-toast[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--color-error-red) 38%, var(--color-surface-border));
+}
+
+.faham-toast-icon {
+  display: inline-flex;
+  color: var(--color-secondary);
+}
+
+.faham-toast[data-tone="success"] .faham-toast-icon {
+  color: var(--color-success);
+}
+
+.faham-toast[data-tone="warning"] .faham-toast-icon {
+  color: var(--color-warning-amber);
+}
+
+.faham-toast[data-tone="error"] .faham-toast-icon {
+  color: var(--color-error-red);
+}
+
+.faham-toast-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.faham-toast-copy strong {
+  font-size: 0.84rem;
+  line-height: 1.25rem;
+}
+
+.faham-toast-copy span {
+  color: var(--color-on-surface-variant);
+  font-size: 0.78rem;
+  line-height: 1.2rem;
+}
+
+.faham-toast button {
+  display: inline-flex;
+  min-height: 2rem;
+  min-width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--color-secondary);
+}
+
+.faham-toast button:hover {
+  background: var(--color-surface-container-highest);
+  color: var(--color-on-surface);
+}
+
+@keyframes faham-toast-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(1rem, 0.5rem, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes faham-toast-exit {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(0.75rem, 0.25rem, 0) scale(0.98);
+  }
+}
+
+@media (max-width: 640px) {
+  .faham-toast-viewport {
+    right: 0.75rem;
+    bottom: 0.75rem;
+    width: calc(100vw - 1.5rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .faham-toast,
+  .faham-toast[data-closing] {
+    animation-duration: 1ms;
+  }
+}

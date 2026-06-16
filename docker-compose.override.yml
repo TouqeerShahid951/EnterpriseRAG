@@ -1,0 +1,3 @@
+# Local developer overrides live here. The base compose file is reconstructed
+# from the running AgenticRAG containers and already binds the frontend source.
+services: {}

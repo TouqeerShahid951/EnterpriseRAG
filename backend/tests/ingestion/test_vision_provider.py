@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from rag_ingestion.config import (
+    BackendConfig,
+    MinioConfig,
+    MockSwitches,
+    ModelProviderConfig,
+    QdrantConfig,
+    VisionConfig,
+    WorkerConfig,
+)
+from rag_ingestion.infrastructure import vision as vision_module
+from rag_ingestion.infrastructure.vision import OLLAMA_PROVIDER, VisionClient
+from rag_ingestion.service import _build_vision_client
+
+
+def test_ollama_runtime_config_routes_vision_to_ollama() -> None:
+    client = _build_vision_client(
+        _worker_config(),
+        SimpleNamespace(
+            provider="ollama",
+            base_url="http://ollama:11434",
+            ingestion_base_url="http://ollama-ingest:11434",
+            chat_model="qwen3.5:27b",
+            ingestion_model="llava:latest",
+            vision_model=None,
+        ),
+    )
+
+    assert client.provider == OLLAMA_PROVIDER
+    assert client.base_url == "http://ollama-ingest:11434"
+    assert client.model == "llava:latest"
+
+
+def test_ollama_runtime_config_prefers_saved_vision_model() -> None:
+    config = _worker_config(ollama_vision_model="llava-env:latest")
+    client = _build_vision_client(
+        config,
+        SimpleNamespace(
+            provider="ollama",
+            base_url="http://ollama:11434",
+            ingestion_base_url="http://ollama-ingest:11434",
+            chat_model="qwen3.5:27b",
+            ingestion_model="qwen3.5:27b",
+            vision_model="qwen3.5-vl:2b",
+        ),
+    )
+
+    assert client.provider == OLLAMA_PROVIDER
+    assert client.model == "qwen3.5-vl:2b"
+
+
+def test_ollama_runtime_config_uses_env_vision_fallback() -> None:
+    config = _worker_config(ollama_vision_model="qwen3.5-vl:2b")
+    client = _build_vision_client(
+        config,
+        SimpleNamespace(
+            provider="ollama",
+            base_url="http://ollama:11434",
+            ingestion_base_url="http://ollama-ingest:11434",
+            chat_model="qwen3.5:27b",
+            ingestion_model="qwen3.5:27b",
+            vision_model=None,
+        ),
+    )
+
+    assert client.provider == OLLAMA_PROVIDER
+    assert client.model == "qwen3.5-vl:2b"
+
+
+def test_vllm_runtime_config_keeps_openai_compatible_vision_endpoint() -> None:
+    client = _build_vision_client(
+        _worker_config(),
+        SimpleNamespace(provider="vllm", base_url="http://vllm-text:8000/v1"),
+    )
+
+    assert client.provider == "openai_compatible"
+    assert client.base_url == "http://vllm-vision:8000/v1"
+    assert client.model == "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
+
+
+def test_ollama_vision_client_uses_api_chat_images_payload(monkeypatch) -> None:
+    calls = []
+
+    def fake_request_json(base_url, path, **kwargs):
+        calls.append((base_url, path, kwargs))
+        return {
+            "message": {
+                "content": '{"extracted_text":"visible text","caption":"caption","confidence":0.75}'
+            }
+        }
+
+    monkeypatch.setattr(vision_module, "request_json", fake_request_json)
+    result = VisionClient(
+        provider="ollama",
+        base_url="http://ollama:11434",
+        model="llava:latest",
+        timeout_seconds=10,
+    ).analyze_image(content=b"image-bytes", content_type="image/png")
+
+    assert result.extracted_text == "visible text"
+    assert result.caption == "caption"
+    assert calls[0][0] == "http://ollama:11434"
+    assert calls[0][1] == "/api/chat"
+    payload = calls[0][2]["payload"]
+    assert payload["model"] == "llava:latest"
+    assert payload["stream"] is False
+    assert payload["think"] is False
+    assert payload["messages"][1]["images"] == ["aW1hZ2UtYnl0ZXM="]
+
+
+def _worker_config(*, ollama_vision_model: str = "") -> WorkerConfig:
+    return WorkerConfig(
+        redis_url="redis://redis:6379/0",
+        ingest_queue_name="ingest:jobs",
+        http_timeout_seconds=45,
+        heartbeat_interval_seconds=30,
+        ollama_retry_base_seconds=2,
+        embedding_batch_size=16,
+        worker_boot_concurrency=1,
+        weak_page_threshold=5,
+        full_doc_weak_page_ratio=0.25,
+        layered_docling_max_pages=40,
+        layered_docling_batch_pages=4,
+        ocr_review_confidence_threshold=0.8,
+        native_text_min_chars_per_page=10,
+        chunk_target_tokens=512,
+        chunk_overlap_tokens=64,
+        parent_max_tokens=2048,
+        metadata_use_gliner=False,
+        topic_taxonomy=("contracts",),
+        mock=MockSwitches(global_enabled=False, llm=False, embeddings=False, ocr=False),
+        model_provider=ModelProviderConfig(
+            provider="vllm",
+            ollama_base_url="http://ollama:11434",
+            ollama_chat_model="llama3.1:8b",
+            ollama_embed_model="nomic-embed-text:latest",
+            ollama_chat_timeout_seconds=180,
+            ollama_embed_timeout_seconds=45,
+            sparse_model="Qdrant/bm25",
+            sparse_cache_dir="/models/fastembed",
+        ),
+        backend=BackendConfig(internal_url="http://api:8000", service_token="token"),
+        minio=MinioConfig(
+            endpoint="minio:9000",
+            access_key="agenticrag",
+            secret_key="secret",
+            bucket="agenticrag-uploads",
+            secure=False,
+        ),
+        qdrant=QdrantConfig(url="http://qdrant:6333", collection="documents", upsert_batch_size=64),
+        vision=VisionConfig(
+            base_url="http://vllm-vision:8000/v1",
+            model="Qwen/Qwen2.5-VL-7B-Instruct-AWQ",
+            ollama_model=ollama_vision_model,
+        ),
+    )

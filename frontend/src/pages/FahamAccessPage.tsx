@@ -1,0 +1,696 @@
+import { useMemo, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, Check, Copy, Edit3, Eye, EyeOff, KeyRound, Plus, RefreshCw, Search, Trash2, UserCog, Users } from "lucide-react";
+
+import { adminApi } from "../api/contracts";
+import { accountTypeLabel, accountTypeOptions, canAssignAccountType, roleDescription } from "../authz";
+import { useToast } from "../components/feedback/ToastProvider";
+import { EmptyPanel, InlineMessage, Skeleton } from "../components/layout/Common";
+import { FahamBasicPage } from "../components/layout/FahamWorkspace";
+import { Modal } from "../components/layout/Modal";
+import type { RouteId } from "../routes";
+import type { AccountType, User as AuthUser, UserAdmin } from "../types/api";
+import { errorMessage } from "../utils/format";
+import { flattenGroups, nextSelectedGroups, userSpacesFromPaths, type GroupOption } from "../utils/groups";
+
+export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNavigate }: Props) {
+  const queryClient = useQueryClient();
+  const { notify } = useToast();
+  const [panel, setPanel] = useState<UserPanelState>(null);
+  const [search, setSearch] = useState("");
+  const [userDraft, setUserDraft] = useState<UserDraft>(() => createUserDraft());
+  const [showGeneratedPassword, setShowGeneratedPassword] = useState(false);
+  const [copyState, setCopyState] = useState<CopyState>("idle");
+  const [createdUserEmail, setCreatedUserEmail] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<UserAdmin | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+
+  const usersQuery = useQuery({ queryKey: ["admin", "users"], queryFn: adminApi.listUsers, retry: false });
+  const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.listGroups, retry: false });
+
+  const users = usersQuery.data?.items ?? [];
+  const groupOptions = useMemo(
+    () => (groupsQuery.data?.items ? flattenGroups(groupsQuery.data.items) : userSpacesFromPaths(currentUser.group_paths)),
+    [currentUser.group_paths, groupsQuery.data?.items],
+  );
+  const assignableAccountTypes = useMemo(
+    () => accountTypeOptions.filter((accountType) => canAssignAccountType(currentUser, accountType)),
+    [currentUser],
+  );
+  const filteredUsers = users.filter((user) => matchesUser(user, search));
+
+  const createUserMutation = useMutation({
+    mutationFn: (draft: UserDraft) =>
+      adminApi.createUser({
+        email: draft.email.trim(),
+        name: draft.name.trim(),
+        account_type: draft.accountType,
+        initial_password: draft.initialPassword,
+        group_paths: draft.groupPaths,
+        is_active: draft.isActive,
+      }),
+    onSuccess: (created) => {
+      setCreatedUserEmail(created.email);
+      void queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      notify({ title: "User created", description: `${created.email} is ready for credential handoff.`, tone: "success" });
+    },
+  });
+
+  const updateUserMutation = useMutation({
+    mutationFn: ({ draft, userId }: { draft: UserDraft; userId: string }) =>
+      adminApi.updateUser(userId, {
+        name: draft.name.trim(),
+        account_type: draft.accountType,
+        group_paths: draft.groupPaths,
+        is_active: draft.isActive,
+      }),
+    onSuccess: (updated) => {
+      closePanel();
+      void queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      if (updated.id === currentUser.user_id) onAuthChanged();
+      notify({ title: "User updated", description: updated.email, tone: "success" });
+    },
+    onError: (error) => notify({
+      title: "User update failed",
+      description: errorMessage(error, "Unable to update user."),
+      tone: "error",
+    }),
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: (userId: string) => adminApi.deleteUser(userId),
+    onSuccess: () => {
+      const deletedEmail = deleteTarget?.email ?? "The selected account";
+      setDeleteTarget(null);
+      setDeleteConfirmation("");
+      void queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      notify({ title: "User deleted", description: deletedEmail, tone: "success" });
+    },
+    onError: (error) => notify({
+      title: "User delete failed",
+      description: errorMessage(error, "Unable to delete user."),
+      tone: "error",
+    }),
+  });
+
+  function resetMutationState() {
+    createUserMutation.reset();
+    updateUserMutation.reset();
+  }
+
+  function openCreateUser() {
+    resetMutationState();
+    setUserDraft(createUserDraft());
+    setShowGeneratedPassword(false);
+    setCopyState("idle");
+    setCreatedUserEmail(null);
+    setPanel({ kind: "create-user" });
+  }
+
+  function openEditUser(user: UserAdmin) {
+    resetMutationState();
+    setUserDraft({
+      email: user.email,
+      accountType: user.account_type,
+      groupPaths: user.group_paths,
+      initialPassword: "",
+      isActive: user.is_active,
+      name: user.name,
+    });
+    setCreatedUserEmail(null);
+    setPanel({ kind: "edit-user", user });
+  }
+
+  function closePanel() {
+    resetMutationState();
+    setPanel(null);
+    setCreatedUserEmail(null);
+    setCopyState("idle");
+  }
+
+  function openDeleteUser(user: UserAdmin) {
+    deleteUserMutation.reset();
+    setDeleteConfirmation("");
+    setDeleteTarget(user);
+  }
+
+  function closeDeleteUser() {
+    if (deleteUserMutation.isPending) return;
+    deleteUserMutation.reset();
+    setDeleteTarget(null);
+    setDeleteConfirmation("");
+  }
+
+  function updateUserSpaces(groupPath: string, checked: boolean) {
+    setUserDraft((draft) => ({
+      ...draft,
+      groupPaths: nextSelectedGroups(draft.groupPaths, groupPath, checked, groupOptions),
+    }));
+  }
+
+  function regeneratePassword() {
+    setUserDraft((draft) => ({ ...draft, initialPassword: generateInitialPassword() }));
+    setShowGeneratedPassword(false);
+    setCopyState("idle");
+  }
+
+  async function copyInitialPassword() {
+    try {
+      await navigator.clipboard.writeText(userDraft.initialPassword);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1800);
+    } catch {
+      setCopyState("failed");
+    }
+  }
+
+  function submitUserForm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!panel || createdUserEmail) return;
+    if (panel.kind === "create-user") {
+      createUserMutation.mutate(userDraft);
+      return;
+    }
+    updateUserMutation.mutate({ draft: userDraft, userId: panel.user.id });
+  }
+
+  return (
+    <FahamBasicPage
+      activeRoute="access"
+      onLogout={onLogout}
+      onNavigate={onNavigate}
+      title="User Management"
+      subtitle="Create users, control account state, and assign Knowledge Spaces for retrieval access."
+      user={currentUser}
+    >
+      <div className="grid gap-3 md:grid-cols-3">
+        <AccessMetric label="Provisioned users" value={String(users.length)} loading={usersQuery.isLoading} />
+        <AccessMetric label="Active users" value={String(users.filter((user) => user.is_active).length)} loading={usersQuery.isLoading} />
+        <AccessMetric label="Knowledge spaces" value={String(groupOptions.length)} loading={groupsQuery.isLoading} />
+      </div>
+
+      <section className="sv-card mt-5 overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-surface-border p-4">
+          <div>
+            <h2 className="sv-section-title">Users</h2>
+            <p className="text-body-md text-on-surface-variant">API-backed user inventory and Knowledge Space assignment state.</p>
+          </div>
+          <button type="button" onClick={openCreateUser} className="sv-action-primary">
+            <Plus size={16} /> Create user
+          </button>
+        </div>
+        <div className="border-b border-surface-border p-4">
+          <label className="relative block max-w-xl">
+            <span className="sr-only">Search users</span>
+            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name, email, or space..." className="sv-input sv-input-with-leading-icon" />
+          </label>
+        </div>
+        {usersQuery.isError ? <InlineMessage tone="error">{errorMessage(usersQuery.error, "Unable to load users.")}</InlineMessage> : null}
+        {groupsQuery.isError ? <InlineMessage tone="warning">{errorMessage(groupsQuery.error, "Unable to load Knowledge Spaces for assignment.")}</InlineMessage> : null}
+        <div className="sv-table-wrap">
+          <table className="sv-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Knowledge Spaces</th>
+                <th>Permission</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredUsers.map((user) => (
+                <tr key={user.id} className="sv-table-row">
+                  <td>
+                    <strong className="text-on-surface">{user.name}</strong>
+                    <small className="block text-secondary">{user.email}</small>
+                    {user.id === currentUser.user_id ? <small className="mt-1 block font-semibold text-primary">Current session</small> : null}
+                  </td>
+                  <td>
+                    <strong className="block text-on-surface">{accountTypeLabel(user.account_type)}</strong>
+                    <small className="text-secondary">{roleDescription(user.account_type)}</small>
+                  </td>
+                  <td>{user.is_active ? <span className="sv-pill sv-pill-success">Active</span> : <span className="sv-pill">Inactive</span>}</td>
+                  <td>
+                    <SpacePathList paths={user.group_paths} />
+                  </td>
+                  <td className="font-semibold text-on-surface">v{user.permission_version}</td>
+                  <td>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => openEditUser(user)} className="sv-action-secondary min-h-9 px-3">
+                        <Edit3 size={15} /> Edit
+                      </button>
+                      {user.id !== currentUser.user_id ? (
+                        <button type="button" onClick={() => openDeleteUser(user)} className="sv-action-danger min-h-9 px-3">
+                          <Trash2 size={15} /> Delete
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {usersQuery.isLoading ? (
+                <UserTableSkeleton />
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        {!usersQuery.isLoading && filteredUsers.length === 0 ? (
+          <div className="p-4">
+            <EmptyPanel>No users match the selected filters.</EmptyPanel>
+          </div>
+        ) : null}
+      </section>
+
+      <Modal
+        description={panel?.kind === "create-user" ? "Generate credentials and assign the first Knowledge Spaces." : "Update account state and Knowledge Space memberships."}
+        icon={<UserCog size={18} />}
+        onClose={closePanel}
+        open={Boolean(panel)}
+        size="lg"
+        title={panel?.kind === "create-user" ? "Create user" : "Edit user"}
+      >
+        {panel ? (
+          <UserPanel
+            copyState={copyState}
+            createdUserEmail={createdUserEmail}
+            draft={userDraft}
+            accountTypes={assignableAccountTypes}
+            groupOptions={groupOptions}
+            isCreate={panel.kind === "create-user"}
+            isPending={createUserMutation.isPending || updateUserMutation.isPending}
+            mutationError={
+              panel.kind === "create-user"
+                ? createUserMutation.isError
+                  ? createUserMutation.error
+                  : null
+                : updateUserMutation.isError
+                  ? updateUserMutation.error
+                  : null
+            }
+            onChange={setUserDraft}
+            onClose={closePanel}
+            onCopyPassword={() => void copyInitialPassword()}
+            onCreateAnother={openCreateUser}
+            onRegeneratePassword={regeneratePassword}
+            onSpaceToggle={updateUserSpaces}
+            onSubmit={submitUserForm}
+            onTogglePassword={() => setShowGeneratedPassword((value) => !value)}
+            showGeneratedPassword={showGeneratedPassword}
+          />
+        ) : null}
+      </Modal>
+
+      <Modal
+        description="This permanently removes the account, its memberships, chat history, and generated artifacts. Documents and audit history are retained."
+        icon={<AlertTriangle size={18} />}
+        onClose={closeDeleteUser}
+        open={Boolean(deleteTarget)}
+        size="sm"
+        title="Delete user"
+      >
+        {deleteTarget ? (
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (deleteConfirmation === deleteTarget.email) deleteUserMutation.mutate(deleteTarget.id);
+            }}
+          >
+            <ReadOnlyField label="Account" value={deleteTarget.email} />
+            <label className="sv-field" htmlFor="delete-user-confirmation">
+              <span className="sv-label">Type the email address to confirm</span>
+              <input
+                autoComplete="off"
+                className="sv-input"
+                disabled={deleteUserMutation.isPending}
+                id="delete-user-confirmation"
+                onChange={(event) => setDeleteConfirmation(event.target.value)}
+                value={deleteConfirmation}
+              />
+            </label>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-surface-border pt-4">
+              <button type="button" onClick={closeDeleteUser} disabled={deleteUserMutation.isPending} className="sv-action-secondary">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={deleteConfirmation !== deleteTarget.email || deleteUserMutation.isPending}
+                className="sv-action-danger disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Trash2 size={16} /> {deleteUserMutation.isPending ? "Deleting" : "Delete user"}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </Modal>
+    </FahamBasicPage>
+  );
+}
+
+function UserPanel({
+  copyState,
+  createdUserEmail,
+  draft,
+  accountTypes,
+  groupOptions,
+  isCreate,
+  isPending,
+  mutationError,
+  onChange,
+  onClose,
+  onCopyPassword,
+  onCreateAnother,
+  onRegeneratePassword,
+  onSpaceToggle,
+  onSubmit,
+  onTogglePassword,
+  showGeneratedPassword,
+}: UserPanelProps) {
+  const createComplete = isCreate && Boolean(createdUserEmail);
+  const canSubmit = draft.name.trim().length > 0 && (!isCreate || (draft.email.trim().length > 0 && draft.initialPassword.length >= 8));
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      {isCreate ? (
+        <TextField
+          autoComplete="off"
+          disabled={createComplete || isPending}
+          label="Email"
+          onChange={(value) => onChange((current) => ({ ...current, email: value }))}
+          required
+          type="email"
+          value={draft.email}
+        />
+      ) : (
+        <ReadOnlyField label="Email" value={draft.email} />
+      )}
+
+      <TextField
+        autoComplete="off"
+        disabled={createComplete || isPending}
+        label="Name"
+        onChange={(value) => onChange((current) => ({ ...current, name: value }))}
+        required
+        value={draft.name}
+      />
+
+      <AccountTypePicker
+        accountTypes={accountTypes}
+        disabled={createComplete || isPending}
+        value={draft.accountType}
+        onChange={(accountType) => onChange((current) => ({ ...current, accountType }))}
+      />
+
+      {isCreate ? (
+        <div className="sv-field">
+          <span className="sv-label">Initial password</span>
+          <div className="flex gap-2">
+            <div className="relative min-w-0 flex-1">
+              <KeyRound size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
+              <input className="sv-input sv-input-with-leading-icon text-code-sm" readOnly type={showGeneratedPassword ? "text" : "password"} value={draft.initialPassword} />
+            </div>
+            <button type="button" onClick={onTogglePassword} className="sv-action-secondary min-h-11 px-3" aria-label={showGeneratedPassword ? "Hide generated password" : "Show generated password"}>
+              {showGeneratedPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={onCopyPassword} className="sv-action-secondary min-h-9 px-3">
+              {copyState === "copied" ? <Check size={15} /> : <Copy size={15} />} {copyState === "copied" ? "Copied" : "Copy"}
+            </button>
+            <button type="button" onClick={onRegeneratePassword} disabled={createComplete || isPending} className="sv-action-secondary min-h-9 px-3 disabled:cursor-not-allowed disabled:opacity-60">
+              <RefreshCw size={15} /> Regenerate
+            </button>
+          </div>
+          {copyState === "failed" ? <small className="text-error-red">Clipboard access is unavailable. Reveal and copy the password manually.</small> : null}
+        </div>
+      ) : null}
+
+      <label className="flex items-center gap-3 rounded-lg border border-surface-border bg-surface-container-low p-3 text-body-md text-on-surface">
+        <input
+          type="checkbox"
+          checked={draft.isActive}
+          disabled={createComplete || isPending}
+          onChange={(event) => onChange((current) => ({ ...current, isActive: event.target.checked }))}
+        />
+        Active account
+      </label>
+
+      <SpacePicker disabled={createComplete || isPending} groupOptions={groupOptions} onToggle={onSpaceToggle} selectedPaths={draft.groupPaths} />
+
+      {mutationError ? <InlineMessage tone="error">{errorMessage(mutationError, isCreate ? "Unable to create user." : "Unable to update user.")}</InlineMessage> : null}
+      {createdUserEmail ? <InlineMessage tone="success">User {createdUserEmail} was created. Copy the generated password before leaving this dialog.</InlineMessage> : null}
+
+      <div className="flex flex-wrap justify-end gap-2 border-t border-surface-border pt-4">
+        {createdUserEmail ? (
+          <>
+            <button type="button" onClick={onCreateAnother} className="sv-action-secondary">
+              <Plus size={16} /> Create another
+            </button>
+            <button type="button" onClick={onClose} className="sv-action-primary">
+              Done
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" onClick={onClose} className="sv-action-secondary" disabled={isPending}>
+              Cancel
+            </button>
+            <button type="submit" disabled={!canSubmit || isPending} className="sv-action-primary disabled:cursor-not-allowed disabled:opacity-60">
+              {isPending ? "Saving" : isCreate ? "Create user" : "Save user"}
+            </button>
+          </>
+        )}
+      </div>
+    </form>
+  );
+}
+
+function SpacePicker({ disabled, groupOptions, onToggle, selectedPaths }: SpacePickerProps) {
+  if (groupOptions.length === 0) return <EmptyPanel>No Knowledge Spaces are available for assignment.</EmptyPanel>;
+
+  return (
+    <fieldset className="space-y-2">
+      <legend className="sv-label">Knowledge Space memberships</legend>
+      <div className="max-h-72 overflow-auto rounded-lg border border-surface-border bg-surface-container-low p-2">
+        {groupOptions.map((group) => (
+          <label key={group.path} className="flex items-start gap-3 rounded-md p-2 text-body-md text-on-surface hover:bg-surface-container-high" style={{ paddingLeft: `${0.5 + group.depth * 1}rem` }}>
+            <input type="checkbox" checked={selectedPaths.includes(group.path)} disabled={disabled} onChange={(event) => onToggle(group.path, event.target.checked)} />
+            <span className="min-w-0">
+              <span className="block font-semibold">{group.name}</span>
+              <small className="block break-all text-secondary">{group.path}</small>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+function AccountTypePicker({ accountTypes, disabled, onChange, value }: AccountTypePickerProps) {
+  return (
+    <label className="sv-field" htmlFor="account-type">
+      <span className="sv-label">Account type</span>
+      <select
+        className="sv-select"
+        disabled={disabled}
+        id="account-type"
+        onChange={(event) => onChange(event.target.value as AccountType)}
+        value={value}
+      >
+        {accountTypes.map((accountType) => (
+          <option key={accountType} value={accountType}>
+            {accountTypeLabel(accountType)}
+          </option>
+        ))}
+      </select>
+      <small className="text-secondary">{roleDescription(value)}</small>
+    </label>
+  );
+}
+
+function SpacePathList({ paths }: { paths: string[] }) {
+  if (paths.length === 0) return <span className="text-secondary">No spaces</span>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {paths.map((path) => (
+        <span key={path} className="sv-pill">
+          {path}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AccessMetric({ label, loading, value }: { label: string; loading: boolean; value: string }) {
+  return (
+    <div className="sv-metric" aria-busy={loading} data-cursor-glow>
+      <div className="flex items-center gap-3">
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Users size={17} />
+        </span>
+        <span>
+          <span className="block text-label-md text-secondary">{label}</span>
+          {loading ? (
+            <>
+              <span className="sr-only">Loading {label.toLowerCase()}</span>
+              <Skeleton className="mt-1 h-5 w-12" />
+            </>
+          ) : <strong className="text-body-lg text-on-surface">{value}</strong>}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function UserTableSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 4 }, (_, index) => (
+        <tr key={index}>
+          <td colSpan={6}>
+            <div className="grid gap-2 py-1">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-64 max-w-full" />
+            </div>
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function TextField({ autoComplete, disabled, label, onChange, required, type = "text", value }: TextFieldProps) {
+  const id = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return (
+    <label className="sv-field" htmlFor={id}>
+      <span className="sv-label">{label}</span>
+      <input autoComplete={autoComplete} className="sv-input" disabled={disabled} id={id} onChange={(event) => onChange(event.target.value)} required={required} type={type} value={value} />
+    </label>
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="sv-metadata">{label}</span>
+      <p className="mt-1 break-all rounded-lg border border-surface-border bg-surface-container-low p-3 text-body-md font-semibold text-on-surface">{value}</p>
+    </div>
+  );
+}
+
+function matchesUser(user: UserAdmin, search: string): boolean {
+  const query = search.toLowerCase().trim();
+  if (!query) return true;
+  return (
+    user.name.toLowerCase().includes(query) ||
+    user.email.toLowerCase().includes(query) ||
+    accountTypeLabel(user.account_type).toLowerCase().includes(query) ||
+    user.group_paths.some((path) => path.toLowerCase().includes(query))
+  );
+}
+
+function createUserDraft(): UserDraft {
+  return {
+    accountType: "member",
+    email: "",
+    groupPaths: [],
+    initialPassword: generateInitialPassword(),
+    isActive: true,
+    name: "",
+  };
+}
+
+function generateInitialPassword(length = 16): string {
+  const requiredSets = ["ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnopqrstuvwxyz", "23456789", "!@#$%"];
+  const allCharacters = requiredSets.join("");
+  const characters = [
+    ...requiredSets.map((set) => pickCharacter(set)),
+    ...Array.from({ length: Math.max(0, length - requiredSets.length) }, () => pickCharacter(allCharacters)),
+  ];
+
+  for (let index = characters.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomIndex(index + 1);
+    [characters[index], characters[swapIndex]] = [characters[swapIndex], characters[index]];
+  }
+
+  return characters.join("");
+}
+
+function pickCharacter(characters: string): string {
+  return characters[randomIndex(characters.length)];
+}
+
+function randomIndex(max: number): number {
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    const values = new Uint32Array(1);
+    crypto.getRandomValues(values);
+    return values[0] % max;
+  }
+  return Math.floor(Math.random() * max);
+}
+
+type Props = {
+  currentUser: AuthUser;
+  onAuthChanged: () => void;
+  onLogout: () => void;
+  onNavigate: (route: RouteId) => void;
+};
+
+type CopyState = "idle" | "copied" | "failed";
+type UserPanelState = { kind: "create-user" } | { kind: "edit-user"; user: UserAdmin } | null;
+
+type UserDraft = {
+  accountType: AccountType;
+  email: string;
+  groupPaths: string[];
+  initialPassword: string;
+  isActive: boolean;
+  name: string;
+};
+
+type UserPanelProps = {
+  accountTypes: AccountType[];
+  copyState: CopyState;
+  createdUserEmail: string | null;
+  draft: UserDraft;
+  groupOptions: GroupOption[];
+  isCreate: boolean;
+  isPending: boolean;
+  mutationError: unknown;
+  onChange: Dispatch<SetStateAction<UserDraft>>;
+  onClose: () => void;
+  onCopyPassword: () => void;
+  onCreateAnother: () => void;
+  onRegeneratePassword: () => void;
+  onSpaceToggle: (groupPath: string, checked: boolean) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onTogglePassword: () => void;
+  showGeneratedPassword: boolean;
+};
+
+type TextFieldProps = {
+  autoComplete?: string;
+  disabled?: boolean;
+  label: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  type?: string;
+  value: string;
+};
+
+type SpacePickerProps = {
+  disabled?: boolean;
+  groupOptions: GroupOption[];
+  onToggle: (groupPath: string, checked: boolean) => void;
+  selectedPaths: string[];
+};
+
+type AccountTypePickerProps = {
+  accountTypes: AccountType[];
+  disabled?: boolean;
+  onChange: (accountType: AccountType) => void;
+  value: AccountType;
+};

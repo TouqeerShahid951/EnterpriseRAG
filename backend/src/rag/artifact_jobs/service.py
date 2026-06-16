@@ -1,0 +1,249 @@
+"""Application service for artifact-job submission and user actions."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from datetime import UTC, datetime
+
+from ..auth.context import UserContext
+from ..repositories.artifact_jobs import ArtifactJobRecord, ArtifactJobRepository
+from ..repositories.generated_artifact_models import GeneratedArtifactRepository
+from ..schemas.artifact_jobs import ArtifactJobDetail
+from ..schemas.query import ArtifactFormat, ArtifactJobSummary, GeneratedArtifact, QueryRequest
+from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
+from .queue import ArtifactJobQueue
+
+
+class ArtifactJobActionError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class ArtifactJobService:
+    def __init__(
+        self,
+        *,
+        repo_factory: Callable[[], ArtifactJobRepository],
+        artifact_repo_factory: Callable[[], GeneratedArtifactRepository],
+        queue_factory: Callable[[], ArtifactJobQueue],
+        retention_days: int,
+    ) -> None:
+        self.repo_factory = repo_factory
+        self.artifact_repo_factory = artifact_repo_factory
+        self.queue_factory = queue_factory
+        self.retention_days = retention_days
+
+    def submit(
+        self,
+        *,
+        request: QueryRequest,
+        user: UserContext,
+        trace_id: str,
+        session_id: str,
+        formats: tuple[ArtifactFormat, ...],
+        conversation_context: list[dict[str, object]],
+        seeded_plan: DocumentPlan | None = None,
+        seeded_evidence: EvidenceManifest | None = None,
+        seeded_bundle: ArtifactContentBundle | None = None,
+    ) -> ArtifactJobSummary:
+        repo = self.repo_factory()
+        client_request_id = request.client_request_id or trace_id
+        existing = repo.get_job_by_client_request(
+            user_id=user.user_id,
+            permission_version=user.permission_version,
+            client_request_id=client_request_id,
+        )
+        if existing is not None:
+            return self.summary(existing)
+        job = repo.create_job(
+            client_request_id=client_request_id,
+            user_id=user.user_id,
+            permission_version=user.permission_version,
+            user_email=user.email,
+            account_type=user.account_type,
+            group_paths=list(user.group_paths),
+            clearance_level=user.clearance_level,
+            session_id=session_id,
+            trace_id=trace_id,
+            original_request=request.query,
+            requested_formats=list(formats),
+            group_path=request.group_path,
+            document_ids=request.document_ids,
+            conversation_context=conversation_context,
+            retention_days=self.retention_days,
+        )
+        if seeded_plan is not None and seeded_evidence is not None and seeded_bundle is not None:
+            updated = repo.update_job(job.id, {
+                "plan_json": seeded_plan.model_dump(mode="json"),
+                "evidence_manifest_json": seeded_evidence.model_dump(mode="json"),
+                "content_spec_json": seeded_bundle.model_dump(mode="json"),
+                "prompt_versions": {"artifact_seed": "grounded-rag-response-v1"},
+            })
+            job = updated or job
+        self._enqueue_or_fail(repo, job.id)
+        return self.summary(job)
+
+    def get_for_user(self, job_id: str, user: UserContext) -> ArtifactJobDetail:
+        job = self._owned_job(job_id, user)
+        summary = self.summary(job)
+        plan = DocumentPlan.model_validate(job.plan_json) if job.plan_json else None
+        return ArtifactJobDetail(
+            **summary.model_dump(),
+            original_request=job.original_request,
+            group_path=job.group_path,
+            document_ids=list(job.document_ids),
+            plan=plan,
+            evidence_manifest=job.evidence_manifest_json,
+            content_specification=job.content_spec_json,
+            validation_results=job.validation_results_json,
+            stage_timings=_public_stage_timings(job.stage_timings_json),
+            errors=list(job.errors_json),
+            attempt_count=job.attempt_count,
+            max_attempts=job.max_attempts,
+            started_at=job.started_at.isoformat() if job.started_at else None,
+            completed_at=job.completed_at.isoformat() if job.completed_at else None,
+            last_heartbeat_at=job.last_heartbeat_at.isoformat() if job.last_heartbeat_at else None,
+        )
+
+    def add_clarifications(self, job_id: str, user: UserContext, answers: dict[str, str]) -> ArtifactJobSummary:
+        job = self._owned_job(job_id, user)
+        if job.status != "needs_input":
+            raise ArtifactJobActionError("artifact_job_not_waiting", "This job is not waiting for clarification.")
+        cleaned = {question.strip(): answer.strip() for question, answer in answers.items() if question.strip() and answer.strip()}
+        if not cleaned:
+            raise ArtifactJobActionError("artifact_clarification_empty", "At least one clarification answer is required.")
+        updated = self.repo_factory().update_job(job.id, {
+            "clarifications": {**job.clarifications, **cleaned},
+            "status": "queued",
+            "stage": "queued",
+            "progress_pct": 0,
+            "error_code": None,
+            "error_message_safe": None,
+        })
+        if updated is None:
+            raise ArtifactJobActionError("artifact_job_not_found", "Artifact job was not found.")
+        self._enqueue_or_fail(self.repo_factory(), job.id)
+        return self.summary(updated)
+
+    def cancel(self, job_id: str, user: UserContext) -> ArtifactJobSummary:
+        job = self._owned_job(job_id, user)
+        if job.status in {"complete", "partial", "failed", "cancelled"}:
+            return self.summary(job)
+        updated = self.repo_factory().update_job(job.id, {
+            "cancellation_requested": True,
+            "status": "cancelled",
+            "stage": "cancelled",
+            "progress_pct": 100,
+            "completed_at": datetime.now(UTC),
+        })
+        return self.summary(updated or job)
+
+    def retry(self, job_id: str, user: UserContext) -> ArtifactJobSummary:
+        job = self._owned_job(job_id, user)
+        if job.status not in {"failed", "partial", "cancelled"}:
+            raise ArtifactJobActionError("artifact_job_not_retryable", "Only failed, partial, or cancelled jobs can be retried.")
+        if job.attempt_count >= job.max_attempts:
+            raise ArtifactJobActionError("artifact_retry_exhausted", "This job has reached its retry limit.")
+        updated = self.repo_factory().update_job(job.id, {
+            "status": "queued",
+            "stage": "queued",
+            "progress_pct": 0,
+            "cancellation_requested": False,
+            "error_code": None,
+            "error_message_safe": None,
+            "completed_at": None,
+        })
+        if updated is None:
+            raise ArtifactJobActionError("artifact_job_not_found", "Artifact job was not found.")
+        self._enqueue_or_fail(self.repo_factory(), job.id)
+        return self.summary(updated)
+
+    def summary(self, job: ArtifactJobRecord) -> ArtifactJobSummary:
+        artifacts = [
+            GeneratedArtifact(
+                id=record.id,
+                filename=record.filename,
+                format=record.format,  # type: ignore[arg-type]
+                content_type=record.content_type,
+                size_bytes=record.size_bytes,
+                download_url=f"/api/v1/query/artifacts/{record.id}/content",
+                created_at=record.created_at.isoformat() if record.created_at else None,
+            )
+            for record in self.artifact_repo_factory().list_artifacts_for_job(job.id)
+        ]
+        plan = DocumentPlan.model_validate(job.plan_json) if job.plan_json else None
+        return ArtifactJobSummary(
+            id=job.id,
+            status=job.status,
+            stage=job.stage,
+            progress_pct=job.progress_pct,
+            requested_formats=list(job.requested_formats),  # type: ignore[arg-type]
+            clarification_questions=plan.clarification_questions if plan else [],
+            artifacts=artifacts,
+            error_code=job.error_code,
+            error_message=job.error_message_safe,
+            created_at=job.created_at.isoformat() if job.created_at else None,
+            updated_at=job.updated_at.isoformat() if job.updated_at else None,
+            expires_at=job.expires_at.isoformat() if job.expires_at else None,
+        )
+
+    def _owned_job(self, job_id: str, user: UserContext) -> ArtifactJobRecord:
+        job = self.repo_factory().get_job(job_id)
+        if job is None or job.user_id != user.user_id or job.permission_version != user.permission_version:
+            raise ArtifactJobActionError("artifact_job_not_found", "Artifact job was not found.")
+        return job
+
+    def _enqueue_or_fail(self, repo: ArtifactJobRepository, job_id: str) -> None:
+        try:
+            self.queue_factory().enqueue(job_id)
+        except RuntimeError as exc:
+            repo.update_job(job_id, {
+                "status": "failed",
+                "stage": "failed",
+                "progress_pct": 100,
+                "error_code": "artifact_enqueue_failed",
+                "error_message_safe": str(exc)[:300],
+                "completed_at": datetime.now(UTC),
+            })
+            raise ArtifactJobActionError("artifact_enqueue_failed", "Document generation could not be queued.") from exc
+
+
+def default_artifact_job_service() -> ArtifactJobService:
+    from ..core.config import settings
+    from ..repositories.artifact_jobs import get_artifact_job_repository
+    from ..repositories.generated_artifacts import get_generated_artifact_repository
+    from .queue import get_artifact_job_queue
+
+    return ArtifactJobService(
+        repo_factory=get_artifact_job_repository,
+        artifact_repo_factory=get_generated_artifact_repository,
+        queue_factory=get_artifact_job_queue,
+        retention_days=settings.artifact_retention_days,
+    )
+
+
+def get_artifact_job_service() -> ArtifactJobService:
+    return default_artifact_job_service()
+
+
+def _public_stage_timings(payload: dict[str, object] | None) -> dict[str, dict[str, object]]:
+    timings: dict[str, dict[str, object]] = {}
+    if not payload:
+        return timings
+    for stage, raw_timing in payload.items():
+        if not isinstance(raw_timing, dict):
+            continue
+        duration = raw_timing.get("duration_ms")
+        try:
+            duration_ms = max(0, int(duration))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        timing: dict[str, object] = {"duration_ms": duration_ms}
+        for field in ("started_at", "completed_at"):
+            value = raw_timing.get(field)
+            if value is None or isinstance(value, str):
+                timing[field] = value
+        timings[str(stage)] = timing
+    return timings

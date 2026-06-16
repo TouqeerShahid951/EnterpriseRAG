@@ -1,0 +1,38 @@
+[project]
+name = "agenticrag-backend"
+version = "0.0.0"
+description = "FastAPI backend for the AgenticRAG local enterprise RAG pilot."
+requires-python = ">=3.11"
+dependencies = [
+    "celery[redis]>=5.4,<6",
+    "fastapi>=0.111,<1",
+    "langgraph>=0.2,<1",
+    "minio>=7.2,<8",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.2,<3",
+    "fastembed>=0.8,<1",
+    "python-docx>=1.1,<2",
+    "python-pptx>=1.0,<2",
+    "python-multipart>=0.0.9,<1",
+    "redis>=5,<6",
+    "reportlab>=4.2,<5",
+    "uvicorn[standard]>=0.30,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.27,<1",
+    "pytest>=8,<9",
+]
+
+[tool.uvicorn]
+factory = true
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["rag*"]

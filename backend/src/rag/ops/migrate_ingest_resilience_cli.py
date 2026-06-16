@@ -1,0 +1,54 @@
+"""Idempotent schema migration for resilient ingestion execution."""
+
+from __future__ import annotations
+
+from rag.core.config import settings
+from rag.repositories.postgres import PostgresConnectionMixin
+
+
+DDL = """
+ALTER TABLE ingest_jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ingest_jobs ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMPTZ NULL;
+ALTER TABLE ingest_jobs ADD COLUMN IF NOT EXISTS warnings JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE ingest_jobs DROP CONSTRAINT IF EXISTS ingest_jobs_attempt_count_nonnegative;
+ALTER TABLE ingest_jobs ADD CONSTRAINT ingest_jobs_attempt_count_nonnegative CHECK (attempt_count >= 0);
+ALTER TABLE ingest_jobs DROP CONSTRAINT IF EXISTS ingest_jobs_warnings_array;
+ALTER TABLE ingest_jobs ADD CONSTRAINT ingest_jobs_warnings_array CHECK (jsonb_typeof(warnings) = 'array');
+
+CREATE TABLE IF NOT EXISTS workspace_ingest_config (
+    config_key TEXT PRIMARY KEY DEFAULT 'active',
+    worker_concurrency INTEGER NOT NULL DEFAULT 1,
+    updated_by UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT workspace_ingest_config_singleton CHECK (config_key = 'active'),
+    CONSTRAINT workspace_ingest_config_concurrency_range CHECK (worker_concurrency BETWEEN 1 AND 10)
+);
+INSERT INTO workspace_ingest_config (config_key, worker_concurrency)
+VALUES ('active', 1)
+ON CONFLICT (config_key) DO NOTHING;
+
+ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS chat_latency_ms DOUBLE PRECISION NULL;
+ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS embed_latency_ms DOUBLE PRECISION NULL;
+ALTER TABLE workspace_rag_config DROP CONSTRAINT IF EXISTS workspace_rag_config_latency_nonnegative;
+ALTER TABLE workspace_rag_config ADD CONSTRAINT workspace_rag_config_latency_nonnegative CHECK (
+    (chat_latency_ms IS NULL OR chat_latency_ms >= 0)
+    AND (embed_latency_ms IS NULL OR embed_latency_ms >= 0)
+);
+"""
+
+
+class _Migrator(PostgresConnectionMixin):
+    def __init__(self, database_url: str) -> None:
+        self.database_url = database_url
+
+
+def main() -> None:
+    migrator = _Migrator(settings.database_url)
+    with migrator._connect() as conn:
+        conn.execute(DDL)
+    print("Ingestion resilience schema migration complete.")
+
+
+if __name__ == "__main__":
+    main()

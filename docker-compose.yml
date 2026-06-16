@@ -1,0 +1,643 @@
+name: agenticrag
+
+x-backend-env: &backend-env
+  AIRGAP_RUNTIME_OFFLINE: ${AIRGAP_RUNTIME_OFFLINE:-1}
+  API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
+  API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:8000}
+  AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
+  AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+  AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://api:8000}
+  BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}
+  BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://api:8000}
+  BACKEND_PUBLIC_URL: ${BACKEND_PUBLIC_URL:-http://localhost:8000}
+  BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@faham.ai}
+  BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Platform Administrator}
+  BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-12345678}
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:agenticrag-local-redis-password@redis:6379/0}
+  CHAT_SERVICE_URL: ${CHAT_SERVICE_URL:-http://api:8000}
+  CLAMAV_HOST: ${CLAMAV_HOST:-clamav}
+  CLAMAV_PORT: ${CLAMAV_PORT:-3310}
+  CLAMAV_SCAN_ENABLED: ${CLAMAV_SCAN_ENABLED:-true}
+  CSRF_COOKIE_NAME: ${CSRF_COOKIE_NAME:-csrf_token}
+  CSRF_SECRET_KEY: ${CSRF_SECRET_KEY:-replace-with-local-csrf-secret}
+  DATABASE_URL: ${DATABASE_URL:-postgresql://agenticrag:agenticrag-local-password@postgres:5432/agenticrag}
+  DEPLOYMENT_CONTROLLER_TIMEOUT_SECONDS: ${DEPLOYMENT_CONTROLLER_TIMEOUT_SECONDS:-600}
+  DEPLOYMENT_CONTROLLER_URL: ${DEPLOYMENT_CONTROLLER_URL:-http://deployment-controller:8080}
+  DOCUMENT_REPOSITORY: ${DOCUMENT_REPOSITORY:-postgres}
+  DO_NOT_TRACK: ${DO_NOT_TRACK:-1}
+  EMBEDDING_MODEL_ID: ${EMBEDDING_MODEL_ID:-nomic-ai/nomic-embed-text-v1.5}
+  EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-http://vllm-embeddings:8000/v1}
+  ENABLE_MOCK_MODELS: ${ENABLE_MOCK_MODELS:-false}
+  FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-http://localhost:3000}
+  HF_DATASETS_OFFLINE: ${HF_DATASETS_OFFLINE:-1}
+  HF_HOME: ${HF_HOME:-/models/huggingface}
+  HF_HUB_DISABLE_TELEMETRY: ${HF_HUB_DISABLE_TELEMETRY:-1}
+  HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+  HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+  IDENTITY_REPOSITORY: ${IDENTITY_REPOSITORY:-postgres}
+  JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:-replace-with-local-jwt-secret}
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-agenticrag}
+  MINIO_BUCKET: ${MINIO_BUCKET:-agenticrag-uploads}
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-agenticrag-local-minio-password}
+  MINIO_SECURE: ${MINIO_SECURE:-false}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+  OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-llama3.1:8b}
+  OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text:latest}
+  OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-}
+  OLLAMA_THINKING_ENABLED: ${OLLAMA_THINKING_ENABLED:-false}
+  QDRANT_COLLECTION: ${QDRANT_COLLECTION:-documents}
+  QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+  RAG_FAITHFULNESS_MODEL: ${RAG_FAITHFULNESS_MODEL:-Qwen/Qwen3-8B-AWQ}
+  RAG_FAITHFULNESS_THRESHOLD: ${RAG_FAITHFULNESS_THRESHOLD:-0.8}
+  RAG_HTTP_TIMEOUT_SECONDS: ${RAG_HTTP_TIMEOUT_SECONDS:-180}
+  RAG_JSON_NUM_PREDICT: ${RAG_JSON_NUM_PREDICT:-4096}
+  RAG_MODEL_PROVIDER: ${RAG_MODEL_PROVIDER:-vllm}
+  RAG_OLLAMA_CHAT_TIMEOUT_SECONDS: ${RAG_OLLAMA_CHAT_TIMEOUT_SECONDS:-180}
+  RAG_OLLAMA_EMBED_TIMEOUT_SECONDS: ${RAG_OLLAMA_EMBED_TIMEOUT_SECONDS:-45}
+  RAG_REASONING_MODEL: ${RAG_REASONING_MODEL:-Qwen/Qwen3-8B-AWQ}
+  RAG_RETRIEVAL_MAX_RETRIES: ${RAG_RETRIEVAL_MAX_RETRIES:-1}
+  RAG_RETRIEVAL_TOKEN_BUDGET: ${RAG_RETRIEVAL_TOKEN_BUDGET:-12000}
+  RAG_ROUTE_LLM_VERIFIER_MODEL: ${RAG_ROUTE_LLM_VERIFIER_MODEL:-Qwen/Qwen3-8B-AWQ}
+  RAG_RERANKER_CACHE_DIR: ${RAG_RERANKER_CACHE_DIR:-/models/fastembed}
+  RAG_RERANKER_MAX_CANDIDATES: ${RAG_RERANKER_MAX_CANDIDATES:-40}
+  RAG_RERANKER_MODEL: ${RAG_RERANKER_MODEL:-jinaai/jina-reranker-v1-turbo-en}
+  RAG_SPARSE_CACHE_DIR: ${RAG_SPARSE_CACHE_DIR:-/models/fastembed}
+  RAG_SPARSE_MODEL: ${RAG_SPARSE_MODEL:-Qdrant/bm25}
+  REDIS_URL: ${REDIS_URL:-redis://:agenticrag-local-redis-password@redis:6379/0}
+  REFRESH_SESSION_PREFIX: ${REFRESH_SESSION_PREFIX:-auth:refresh}
+  REFRESH_SESSION_STORE: ${REFRESH_SESSION_STORE:-redis}
+  SERVICE_TOKEN: ${SERVICE_TOKEN:-replace-with-local-service-token}
+  S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+  UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-52428800}
+  UPLOAD_STORAGE_BACKEND: ${UPLOAD_STORAGE_BACKEND:-minio}
+  TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+  VLLM_BASE_URL: ${VLLM_BASE_URL:-http://vllm-text:8000/v1}
+  VLLM_CHAT_MODEL: ${VLLM_CHAT_MODEL:-Qwen/Qwen3-8B-AWQ}
+  VLLM_EMBED_GPU_MEMORY_UTILIZATION: ${VLLM_EMBED_GPU_MEMORY_UTILIZATION:-0.05}
+  VLLM_EMBED_MAX_MODEL_LEN: ${VLLM_EMBED_MAX_MODEL_LEN:-2048}
+  VLLM_EMBED_MAX_NUM_BATCHED_TOKENS: ${VLLM_EMBED_MAX_NUM_BATCHED_TOKENS:-2048}
+  VLLM_EMBED_MAX_NUM_SEQS: ${VLLM_EMBED_MAX_NUM_SEQS:-2}
+  VLLM_FAITHFULNESS_BASE_URL: ${VLLM_FAITHFULNESS_BASE_URL:-http://vllm-text:8000/v1}
+  VLLM_INGESTION_BASE_URL: ${VLLM_INGESTION_BASE_URL:-http://vllm-text:8000/v1}
+  VLLM_REASONING_BASE_URL: ${VLLM_REASONING_BASE_URL:-http://vllm-text:8000/v1}
+  VLLM_ROUTING_BASE_URL: ${VLLM_ROUTING_BASE_URL:-http://vllm-text:8000/v1}
+  VLLM_SMALL_BASE_URL: ${VLLM_SMALL_BASE_URL:-http://mock-vllm-small:8000/v1}
+  VLLM_TEXT_GPU_MEMORY_UTILIZATION: ${VLLM_TEXT_GPU_MEMORY_UTILIZATION:-0.12}
+  VLLM_TEXT_KV_CACHE_MEMORY_BYTES: ${VLLM_TEXT_KV_CACHE_MEMORY_BYTES:-2G}
+  VLLM_TEXT_MAX_MODEL_LEN: ${VLLM_TEXT_MAX_MODEL_LEN:-4096}
+  VLLM_TEXT_MAX_NUM_BATCHED_TOKENS: ${VLLM_TEXT_MAX_NUM_BATCHED_TOKENS:-4096}
+  VLLM_TEXT_MAX_NUM_SEQS: ${VLLM_TEXT_MAX_NUM_SEQS:-1}
+  VLLM_PRIMARY_BASE_URL: ${VLLM_PRIMARY_BASE_URL:-http://mock-vllm-primary:8000/v1}
+  VLLM_VISION_BASE_URL: ${VLLM_VISION_BASE_URL:-http://vllm-vision:8000/v1}
+  VLLM_VISION_GPU_MEMORY_UTILIZATION: ${VLLM_VISION_GPU_MEMORY_UTILIZATION:-0.10}
+  VLLM_VISION_KV_CACHE_MEMORY_BYTES: ${VLLM_VISION_KV_CACHE_MEMORY_BYTES:-2G}
+  VLLM_VISION_MAX_MODEL_LEN: ${VLLM_VISION_MAX_MODEL_LEN:-2048}
+  VLLM_VISION_MAX_NUM_BATCHED_TOKENS: ${VLLM_VISION_MAX_NUM_BATCHED_TOKENS:-2048}
+  VLLM_VISION_MAX_NUM_SEQS: ${VLLM_VISION_MAX_NUM_SEQS:-1}
+  WORKSPACE_TIMEZONE: ${WORKSPACE_TIMEZONE:-Asia/Karachi}
+
+x-artifact-env: &artifact-env
+  ARTIFACT_COMPOSER_TIMEOUT_SECONDS: ${ARTIFACT_COMPOSER_TIMEOUT_SECONDS:-60}
+  ARTIFACT_FAST_PAGINATED_RENDERER: ${ARTIFACT_FAST_PAGINATED_RENDERER:-true}
+  ARTIFACT_LIBREOFFICE_REQUIRED: ${ARTIFACT_LIBREOFFICE_REQUIRED:-false}
+  ARTIFACT_PIPELINE_VERSION: ${ARTIFACT_PIPELINE_VERSION:-v2}
+  ARTIFACT_QUEUE_BACKEND: ${ARTIFACT_QUEUE_BACKEND:-celery}
+  ARTIFACT_QUEUE_NAME: ${ARTIFACT_QUEUE_NAME:-artifact:jobs}
+  ARTIFACT_RENDERER_MODE: ${ARTIFACT_RENDERER_MODE:-sandbox}
+  ARTIFACT_RERANKER_MAX_CANDIDATES: ${ARTIFACT_RERANKER_MAX_CANDIDATES:-8}
+  ARTIFACT_RETENTION_DAYS: ${ARTIFACT_RETENTION_DAYS:-30}
+  ARTIFACT_SANDBOX_MAX_FILE_MB: ${ARTIFACT_SANDBOX_MAX_FILE_MB:-30}
+  ARTIFACT_SANDBOX_TIMEOUT_SECONDS: ${ARTIFACT_SANDBOX_TIMEOUT_SECONDS:-120}
+  ARTIFACT_SANDBOX_URL: ${ARTIFACT_SANDBOX_URL:-http://artifact-sandbox:8000}
+  ARTIFACT_TASK_NAME: ${ARTIFACT_TASK_NAME:-rag.artifact_jobs.tasks.generate_artifact_job}
+  ARTIFACT_WORKER_TIMEOUT_SECONDS: ${ARTIFACT_WORKER_TIMEOUT_SECONDS:-1800}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agenticrag}
+      POSTGRES_USER: ${POSTGRES_USER:-agenticrag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agenticrag-local-password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-agenticrag-local-redis-password}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-agenticrag-local-redis-password}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2024-07-16T23-46-41Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_BROWSER: "on"
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-agenticrag}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-agenticrag-local-minio-password}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.6
+    user: "0:0"
+    ports:
+      - "127.0.0.1:${QDRANT_HTTP_PORT:-6333}:6333"
+      - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  clamav:
+    image: clamav/clamav-debian:stable
+    environment:
+      CLAMAV_NO_FRESHCLAMD: ${CLAMAV_NO_FRESHCLAMD:-true}
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping=1 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 10
+
+  vllm-text:
+    image: vllm/vllm-openai:latest
+    profiles: ["vllm"]
+    ipc: host
+    gpus: all
+    environment:
+      AIRGAP_RUNTIME_OFFLINE: ${AIRGAP_RUNTIME_OFFLINE:-1}
+      DO_NOT_TRACK: ${DO_NOT_TRACK:-1}
+      HF_DATASETS_OFFLINE: ${HF_DATASETS_OFFLINE:-1}
+      HF_HOME: /models/huggingface
+      HF_HUB_DISABLE_TELEMETRY: ${HF_HUB_DISABLE_TELEMETRY:-1}
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      HF_TOKEN: ${HF_TOKEN:-}
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+    command:
+      - Qwen/Qwen3-8B-AWQ
+      - --served-model-name
+      - Qwen/Qwen3-8B-AWQ
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --dtype
+      - auto
+      - --max-model-len
+      - "${VLLM_TEXT_MAX_MODEL_LEN:-4096}"
+      - --gpu-memory-utilization
+      - "${VLLM_TEXT_GPU_MEMORY_UTILIZATION:-0.12}"
+      - --kv-cache-memory-bytes
+      - "${VLLM_TEXT_KV_CACHE_MEMORY_BYTES:-2G}"
+      - --max-num-seqs
+      - "${VLLM_TEXT_MAX_NUM_SEQS:-1}"
+      - --max-num-batched-tokens
+      - "${VLLM_TEXT_MAX_NUM_BATCHED_TOKENS:-4096}"
+    ports:
+      - "127.0.0.1:${VLLM_TEXT_PORT:-8010}:8000"
+    volumes:
+      - vllm-model-cache:/models
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/v1/models\", timeout=5)'"]
+      interval: 10s
+      timeout: 10s
+      start_period: 20m
+      retries: 120
+
+  vllm-embeddings:
+    image: vllm/vllm-openai:latest
+    profiles: ["vllm"]
+    ipc: host
+    gpus: all
+    environment:
+      AIRGAP_RUNTIME_OFFLINE: ${AIRGAP_RUNTIME_OFFLINE:-1}
+      DO_NOT_TRACK: ${DO_NOT_TRACK:-1}
+      HF_DATASETS_OFFLINE: ${HF_DATASETS_OFFLINE:-1}
+      HF_HOME: /models/huggingface
+      HF_HUB_DISABLE_TELEMETRY: ${HF_HUB_DISABLE_TELEMETRY:-1}
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      HF_TOKEN: ${HF_TOKEN:-}
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+    command:
+      - nomic-ai/nomic-embed-text-v1.5
+      - --served-model-name
+      - nomic-ai/nomic-embed-text-v1.5
+      - --runner
+      - pooling
+      - --convert
+      - embed
+      - --trust-remote-code
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --dtype
+      - auto
+      - --max-model-len
+      - "${VLLM_EMBED_MAX_MODEL_LEN:-2048}"
+      - --gpu-memory-utilization
+      - "${VLLM_EMBED_GPU_MEMORY_UTILIZATION:-0.05}"
+      - --max-num-seqs
+      - "${VLLM_EMBED_MAX_NUM_SEQS:-2}"
+      - --max-num-batched-tokens
+      - "${VLLM_EMBED_MAX_NUM_BATCHED_TOKENS:-2048}"
+    ports:
+      - "127.0.0.1:${VLLM_EMBED_PORT:-8011}:8000"
+    volumes:
+      - vllm-model-cache:/models
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/v1/models\", timeout=5)'"]
+      interval: 10s
+      timeout: 10s
+      start_period: 20m
+      retries: 120
+
+  vllm-vision:
+    image: vllm/vllm-openai:latest
+    profiles: ["vllm"]
+    ipc: host
+    gpus: all
+    environment:
+      AIRGAP_RUNTIME_OFFLINE: ${AIRGAP_RUNTIME_OFFLINE:-1}
+      DO_NOT_TRACK: ${DO_NOT_TRACK:-1}
+      HF_DATASETS_OFFLINE: ${HF_DATASETS_OFFLINE:-1}
+      HF_HOME: /models/huggingface
+      HF_HUB_DISABLE_TELEMETRY: ${HF_HUB_DISABLE_TELEMETRY:-1}
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      HF_TOKEN: ${HF_TOKEN:-}
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+    command:
+      - Qwen/Qwen2.5-VL-7B-Instruct-AWQ
+      - --served-model-name
+      - Qwen/Qwen2.5-VL-7B-Instruct-AWQ
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --dtype
+      - auto
+      - --max-model-len
+      - "${VLLM_VISION_MAX_MODEL_LEN:-2048}"
+      - --gpu-memory-utilization
+      - "${VLLM_VISION_GPU_MEMORY_UTILIZATION:-0.10}"
+      - --kv-cache-memory-bytes
+      - "${VLLM_VISION_KV_CACHE_MEMORY_BYTES:-2G}"
+      - --max-num-seqs
+      - "${VLLM_VISION_MAX_NUM_SEQS:-1}"
+      - --max-num-batched-tokens
+      - "${VLLM_VISION_MAX_NUM_BATCHED_TOKENS:-2048}"
+      - --limit-mm-per-prompt
+      - '{"image":1}'
+    ports:
+      - "127.0.0.1:${VLLM_VISION_PORT:-8016}:8000"
+    volumes:
+      - vllm-model-cache:/models
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/v1/models\", timeout=5)'"]
+      interval: 10s
+      timeout: 10s
+      start_period: 20m
+      retries: 120
+
+  deployment-controller:
+    image: agenticrag-api
+    user: "0:0"
+    command: ["python", "/workspace/deployment-controller/server.py"]
+    environment:
+      DEPLOYMENT_ALLOWED_SERVICES: vllm-text,vllm-embeddings,vllm-vision
+      DEPLOYMENT_COMPOSE_FILE: /workspace/docker-compose.yml
+      DEPLOYMENT_COMPOSE_PROJECT_DIR: /workspace
+      DEPLOYMENT_COMPOSE_PROJECT_NAME: agenticrag
+      DEPLOYMENT_COMPOSE_TIMEOUT_SECONDS: ${DEPLOYMENT_COMPOSE_TIMEOUT_SECONDS:-900}
+      DEPLOYMENT_CONTROLLER_TOKEN: ${SERVICE_TOKEN:-replace-with-local-service-token}
+      PORT: 8080
+    volumes:
+      - /usr/bin/docker:/usr/bin/docker:ro
+      - /usr/libexec/docker/cli-plugins/docker-compose:/usr/libexec/docker/cli-plugins/docker-compose:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health/live\", timeout=2)'"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 5
+
+  api:
+    image: agenticrag-api
+    build:
+      context: ./backend
+      dockerfile: apps/api/Dockerfile
+      args:
+        PREWARM_FASTEMBED: ${PREWARM_FASTEMBED:-false}
+    environment:
+      <<: [*backend-env, *artifact-env]
+      ACCESS_COOKIE_NAME: ${ACCESS_COOKIE_NAME:-agenticrag_access_token}
+      ADMIN_SERVICE_URL: ${ADMIN_SERVICE_URL:-http://api:8000}
+      EVALUATION_DIAGNOSTIC_TOP_K: ${EVALUATION_DIAGNOSTIC_TOP_K:-10}
+      EVALUATION_QUEUE_BACKEND: ${EVALUATION_QUEUE_BACKEND:-celery}
+      EVALUATION_QUEUE_NAME: ${EVALUATION_QUEUE_NAME:-evaluation:jobs}
+      EVALUATION_RETENTION_DAYS: ${EVALUATION_RETENTION_DAYS:-30}
+      EVALUATION_TASK_NAME: ${EVALUATION_TASK_NAME:-rag.evaluations.tasks.run_evaluation}
+      FOLDER_SCHEDULER_INTERVAL_SECONDS: ${FOLDER_SCHEDULER_INTERVAL_SECONDS:-60}
+      FOLDER_SNAPSHOT_MAX_BYTES: ${FOLDER_SNAPSHOT_MAX_BYTES:-5368709120}
+      FOLDER_SNAPSHOT_MAX_FILES: ${FOLDER_SNAPSHOT_MAX_FILES:-100}
+      INGEST_QUEUE_BACKEND: ${INGEST_QUEUE_BACKEND:-celery}
+      INGEST_QUEUE_NAME: ${INGEST_QUEUE_NAME:-ingest:jobs}
+      INGEST_TASK_NAME: ${INGEST_TASK_NAME:-apps.ingestion.tasks.ingest_document}
+      PORT: 8000
+      REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-agenticrag_refresh_token}
+      SERVICE_NAME: api
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    volumes:
+      - backend-reranker-cache:/models/fastembed
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      deployment-controller:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      clamav:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/live\", timeout=2)'"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 5
+
+  artifact-sandbox:
+    image: agenticrag-api
+    build:
+      context: ./backend
+      dockerfile: apps/api/Dockerfile
+      args:
+        PREWARM_FASTEMBED: ${PREWARM_FASTEMBED:-false}
+    command: ["uvicorn", "rag.artifact_sandbox.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      AIRGAP_RUNTIME_OFFLINE: ${AIRGAP_RUNTIME_OFFLINE:-1}
+      ARTIFACT_SANDBOX_WORK_ROOT: /work
+      DO_NOT_TRACK: ${DO_NOT_TRACK:-1}
+      HF_DATASETS_OFFLINE: ${HF_DATASETS_OFFLINE:-1}
+      HF_HOME: ${HF_HOME:-/models/huggingface}
+      HF_HUB_DISABLE_TELEMETRY: ${HF_HUB_DISABLE_TELEMETRY:-1}
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      SERVICE_KIND: artifact-sandbox-renderer
+      SERVICE_NAME: artifact-sandbox
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)\""]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 5
+
+  artifact-worker:
+    image: agenticrag-api
+    command: ["celery", "-A", "rag.artifact_jobs.celery_app", "worker", "--loglevel=INFO", "--queues=artifact:jobs"]
+    healthcheck:
+      disable: true
+    environment:
+      <<: [*backend-env, *artifact-env]
+      SERVICE_KIND: artifact-generation-worker-celery
+      SERVICE_NAME: artifact-worker
+    volumes:
+      - backend-reranker-cache:/models/fastembed
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      api:
+        condition: service_started
+      artifact-sandbox:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+  ingestion-worker:
+    image: agenticrag-ingestion-worker
+    build:
+      context: ./backend
+      dockerfile: apps/ingestion/Dockerfile
+      args:
+        PREWARM_FASTEMBED: ${PREWARM_FASTEMBED:-true}
+        PREWARM_DOCLING: ${PREWARM_DOCLING:-false}
+    environment:
+      <<: *backend-env
+      DOCLING_ARTIFACTS_PATH: /models/docling
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+      INGEST_HEARTBEAT_INTERVAL_SECONDS: ${INGEST_HEARTBEAT_INTERVAL_SECONDS:-30}
+      INGEST_QUEUE_NAME: ${INGEST_QUEUE_NAME:-ingest:jobs}
+      INGEST_WORKER_BOOT_CONCURRENCY: ${INGEST_WORKER_BOOT_CONCURRENCY:-1}
+      LAYERED_DOCLING_BATCH_PAGES: ${LAYERED_DOCLING_BATCH_PAGES:-4}
+      LAYERED_DOCLING_MAX_PAGES: ${LAYERED_DOCLING_MAX_PAGES:-40}
+      NATIVE_TEXT_MIN_CHARS_PER_PAGE: ${NATIVE_TEXT_MIN_CHARS_PER_PAGE:-10}
+      OCR_REVIEW_CONFIDENCE_THRESHOLD: ${OCR_REVIEW_CONFIDENCE_THRESHOLD:-0.8}
+      OLLAMA_EMBED_BATCH_SIZE: ${OLLAMA_EMBED_BATCH_SIZE:-16}
+      OLLAMA_RETRY_BASE_SECONDS: ${OLLAMA_RETRY_BASE_SECONDS:-2}
+      PDF_FULL_DOC_WEAK_PAGE_RATIO: ${PDF_FULL_DOC_WEAK_PAGE_RATIO:-0.25}
+      PDF_WEAK_PAGE_THRESHOLD: ${PDF_WEAK_PAGE_THRESHOLD:-5}
+      QDRANT_UPSERT_BATCH_SIZE: ${QDRANT_UPSERT_BATCH_SIZE:-64}
+      RAG_CHUNK_MAX_CHARS: ${RAG_CHUNK_MAX_CHARS:-1200}
+      RAG_CHUNK_OVERLAP_CHARS: ${RAG_CHUNK_OVERLAP_CHARS:-160}
+      RAG_CHUNK_OVERLAP_TOKENS: ${RAG_CHUNK_OVERLAP_TOKENS:-64}
+      RAG_CHUNK_TARGET_TOKENS: ${RAG_CHUNK_TARGET_TOKENS:-512}
+      RAG_PARENT_MAX_TOKENS: ${RAG_PARENT_MAX_TOKENS:-2048}
+      SERVICE_KIND: rag-ingestion-worker-celery
+      SERVICE_NAME: ingestion-worker
+      VLLM_VISION_MODEL_ID: ${VLLM_VISION_MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - backend-reranker-cache:/models/fastembed
+      - backend-docling-cache:/models/docling
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -m apps.ingestion.healthcheck"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  docling-prewarm:
+    image: agenticrag-ingestion-worker
+    profiles: ["prewarm"]
+    command: ["python", "-m", "rag_ingestion.ops.prewarm_docling"]
+    environment:
+      DOCLING_ARTIFACTS_PATH: /models/docling
+      AIRGAP_RUNTIME_OFFLINE: "0"
+      HF_HUB_OFFLINE: "0"
+      TRANSFORMERS_OFFLINE: "0"
+      HF_DATASETS_OFFLINE: "0"
+      HF_HUB_DISABLE_TELEMETRY: ${HF_HUB_DISABLE_TELEMETRY:-1}
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+      DO_NOT_TRACK: ${DO_NOT_TRACK:-1}
+    volumes:
+      - backend-docling-cache:/models/docling
+
+  evaluation-worker:
+    image: agenticrag-api
+    command: ["celery", "-A", "rag.evaluations.celery_app", "worker", "--loglevel=INFO", "--queues=evaluation:jobs"]
+    healthcheck:
+      disable: true
+    environment:
+      <<: *backend-env
+      EVALUATION_DIAGNOSTIC_TOP_K: ${EVALUATION_DIAGNOSTIC_TOP_K:-10}
+      EVALUATION_QUEUE_NAME: ${EVALUATION_QUEUE_NAME:-evaluation:jobs}
+      EVALUATION_RETENTION_DAYS: ${EVALUATION_RETENTION_DAYS:-30}
+      EVALUATION_TASK_NAME: ${EVALUATION_TASK_NAME:-rag.evaluations.tasks.run_evaluation}
+      EVALUATION_WORKER_TIMEOUT_SECONDS: ${EVALUATION_WORKER_TIMEOUT_SECONDS:-3600}
+      RAG_DEFER_FAITHFULNESS: ${RAG_DEFER_FAITHFULNESS:-true}
+      RAG_SESSION_PREFIX: ${RAG_SESSION_PREFIX:-rag:session}
+      RAG_SESSION_STORE: ${RAG_SESSION_STORE:-redis}
+      SERVICE_KIND: rag-evaluation-worker-celery
+      SERVICE_NAME: evaluation-worker
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+  folder-scheduler:
+    image: agenticrag-api
+    command: ["python", "-m", "rag.ops.folder_ingest_scheduler_cli", "--loop"]
+    healthcheck:
+      disable: true
+    environment:
+      <<: *backend-env
+      FOLDER_SCHEDULER_INTERVAL_SECONDS: ${FOLDER_SCHEDULER_INTERVAL_SECONDS:-60}
+      INGEST_QUEUE_BACKEND: ${INGEST_QUEUE_BACKEND:-celery}
+      INGEST_QUEUE_NAME: ${INGEST_QUEUE_NAME:-ingest:jobs}
+      INGEST_TASK_NAME: ${INGEST_TASK_NAME:-apps.ingestion.tasks.ingest_document}
+      SERVICE_KIND: scheduled-folder-ingestion-dispatcher
+      SERVICE_NAME: folder-scheduler
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  ingest-maintenance:
+    image: agenticrag-api
+    command: ["python", "-m", "rag.ops.ingest_maintenance_cli", "--loop"]
+    healthcheck:
+      disable: true
+    environment:
+      <<: *backend-env
+      INGEST_MAINTENANCE_INTERVAL_SECONDS: ${INGEST_MAINTENANCE_INTERVAL_SECONDS:-30}
+      INGEST_QUEUE_BACKEND: ${INGEST_QUEUE_BACKEND:-celery}
+      INGEST_QUEUE_NAME: ${INGEST_QUEUE_NAME:-ingest:jobs}
+      INGEST_STALE_AFTER_SECONDS: ${INGEST_STALE_AFTER_SECONDS:-120}
+      INGEST_TASK_NAME: ${INGEST_TASK_NAME:-apps.ingestion.tasks.ingest_document}
+      INGEST_WORKER_BOOT_CONCURRENCY: ${INGEST_WORKER_BOOT_CONCURRENCY:-1}
+      SERVICE_KIND: ingestion-recovery-and-capacity-controller
+      SERVICE_NAME: ingest-maintenance
+    depends_on:
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: agenticrag-frontend
+    build:
+      context: ./frontend
+      target: dev
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+        VITE_POLLING_INTERVAL_MS: ${VITE_POLLING_INTERVAL_MS:-2000}
+    environment:
+      PORT: 3000
+      SERVICE_NAME: frontend
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      VITE_POLLING_INTERVAL_MS: ${VITE_POLLING_INTERVAL_MS:-2000}
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+volumes:
+  backend-docling-cache:
+  backend-reranker-cache:
+  frontend-node-modules:
+  minio-data:
+  postgres-data:
+  qdrant-data:
+  redis-data:
+  vllm-model-cache:
