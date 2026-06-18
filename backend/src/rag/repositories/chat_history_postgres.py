@@ -14,13 +14,11 @@ class PostgresChatHistoryRepository(PostgresConnectionMixin):
         self.database_url = database_url
         self._ensure_tables()
 
-    def list_sessions(self, *, user_id: str, permission_version: int, limit: int = 30) -> list[ChatSessionRecord]:
+    def list_sessions(self, *, user_id: str, permission_version: int, limit: int = 30, offset: int = 0) -> list[ChatSessionRecord]:
         rows = self._execute_all(
             """
-            SELECT s.*, COALESCE(
-                jsonb_agg(t.payload ORDER BY t.turn_index) FILTER (WHERE t.turn_index IS NOT NULL),
-                '[]'::jsonb
-            ) AS turns
+            SELECT s.*,
+                   COALESCE(COUNT(t.turn_index) FILTER (WHERE t.role = 'user'), 0)::int AS question_count
             FROM chat_sessions s
             LEFT JOIN chat_session_turns t
               ON t.session_id = s.id
@@ -30,10 +28,22 @@ class PostgresChatHistoryRepository(PostgresConnectionMixin):
             GROUP BY s.id, s.user_id, s.permission_version
             ORDER BY s.updated_at DESC, s.id DESC
             LIMIT %s
+            OFFSET %s
             """,
-            (user_id, permission_version, limit),
+            (user_id, permission_version, limit, offset),
         )
         return [session_from_row(row) for row in rows]
+
+    def count_sessions(self, *, user_id: str, permission_version: int) -> int:
+        row = self._execute_one(
+            """
+            SELECT COUNT(*) AS total
+            FROM chat_sessions
+            WHERE user_id = %s AND permission_version = %s
+            """,
+            (user_id, permission_version),
+        )
+        return int(row["total"])
 
     def get_session(self, *, session_id: str, user_id: str, permission_version: int) -> ChatSessionRecord | None:
         row = self._execute_optional(
@@ -180,6 +190,7 @@ def session_from_row(row: dict[str, Any]) -> ChatSessionRecord:
         turns=tuple(turn for turn in turns if isinstance(turn, dict)),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
+        question_count=int(row["question_count"]) if row.get("question_count") is not None else None,
     )
 
 

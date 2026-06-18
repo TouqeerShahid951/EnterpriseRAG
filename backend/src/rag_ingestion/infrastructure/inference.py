@@ -25,6 +25,7 @@ def build_ingestion_inference_client(
     timeout_seconds: float,
     retry_base_seconds: float,
     embedding_batch_size: int,
+    num_ctx: int | None = None,
 ) -> IngestionInferenceClient:
     if runtime_config.provider == "vllm":
         from .openai_compatible import OpenAICompatibleClient
@@ -53,4 +54,5 @@ def build_ingestion_inference_client(
         thinking_enabled=runtime_config.thinking_enabled,
         retry_base_seconds=retry_base_seconds,
         embedding_batch_size=embedding_batch_size,
+        num_ctx=num_ctx,
     )

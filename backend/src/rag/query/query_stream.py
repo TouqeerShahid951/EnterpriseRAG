@@ -157,7 +157,7 @@ def _terminal_warnings(
 
 def _faithfulness_warnings(response: RAGResponse, nodes: QueryNodes) -> Iterator[QueryStreamEvent]:
     if (
-        response.faithfulness_status in {"checked", "failed"}
+        response.faithfulness_status == "checked"
         and response.faithfulness_score < nodes.config.rag_faithfulness_threshold
     ):
         yield QueryStreamEvent(

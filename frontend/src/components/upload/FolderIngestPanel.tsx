@@ -1,8 +1,9 @@
 import { useMemo, useState, type ChangeEvent, type FormEvent, type InputHTMLAttributes } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, CalendarClock, ChevronDown, ChevronRight, Database, FileText, FolderOpen, Loader2, PauseCircle, PlayCircle } from "lucide-react";
+import { Ban, CalendarClock, ChevronDown, ChevronRight, Database, FileText, FolderOpen, Loader2, PauseCircle, PlayCircle, X } from "lucide-react";
 
 import { folderIngestApi } from "../../api/contracts";
+import { clearanceLevelDescription, clearanceLevelLabel, clearanceLevelsAssignableBy } from "../../authz";
 import { InlineMessage } from "../layout/Common";
 import {
   buildMinioPrefixScheduleRequest,
@@ -10,13 +11,15 @@ import {
   defaultFolderScheduleDraft,
   FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES,
   formatFolderCount,
+  folderSnapshotLabel,
   FOLDER_SNAPSHOT_MAX_BYTES,
   summarizeFolderFiles,
   WORKSPACE_TIMEZONE,
+  type FolderFileEntry,
   type FolderScheduleDraft,
 } from "../../state/folderIngest";
 import { formatFileSize } from "../../state/pdfUploadBatch";
-import type { DocType, FolderRun, FolderSchedule, FolderScheduleStatus } from "../../types/api";
+import type { ClearanceLevel, FolderRun, FolderSchedule, FolderScheduleStatus, User as AuthUser } from "../../types/api";
 import { errorMessage } from "../../utils/format";
 
 const folderPickerAttributes = {
@@ -34,12 +37,14 @@ const dayOptions = [
   { value: 6, label: "Sun" },
 ];
 
-export function FolderIngestPanel({ docTypes, groupsLoading, writableSpacePaths }: Props) {
+export function FolderIngestPanel({ currentUser, groupsLoading, writableSpacePaths }: Props) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<FolderScheduleDraft>(() => defaultFolderScheduleDraft(""));
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const selection = useMemo(() => summarizeFolderFiles(selectedFiles), [selectedFiles]);
+  const snapshotLabel = useMemo(() => folderSnapshotLabel(selection.entries), [selection.entries]);
+  const clearanceOptions = useMemo(() => clearanceLevelsAssignableBy(currentUser), [currentUser]);
   const schedulesQuery = useQuery({
     queryKey: ["folder-ingest", "schedules"],
     queryFn: folderIngestApi.listSchedules,
@@ -77,6 +82,10 @@ export function FolderIngestPanel({ docTypes, groupsLoading, writableSpacePaths 
   function handleFolderChange(event: ChangeEvent<HTMLInputElement>) {
     setSelectedFiles(Array.from(event.target.files ?? []));
     event.target.value = "";
+  }
+
+  function removeSelectedFile(file: File) {
+    setSelectedFiles((current) => current.filter((candidate) => candidate !== file));
   }
 
   function toggleDay(day: number) {
@@ -118,9 +127,9 @@ export function FolderIngestPanel({ docTypes, groupsLoading, writableSpacePaths 
         <div className="grid gap-3 md:grid-cols-2" role="radiogroup" aria-label="Folder source mode">
           <SourceModeButton
             active={draft.sourceMode === "snapshot"}
-            detail="Pick a local folder once. Browser access is a snapshot, not a watched folder."
+            detail="Browse a local folder and stage a one-time snapshot. Future local edits are not tracked."
             icon={<FolderOpen size={18} />}
-            label="Browser folder"
+            label="Browse Folder"
             onClick={() => patchDraft({ sourceMode: "snapshot", scheduleType: "one_time" })}
           />
           <SourceModeButton
@@ -135,7 +144,7 @@ export function FolderIngestPanel({ docTypes, groupsLoading, writableSpacePaths 
         {draft.sourceMode === "snapshot" ? (
           <div className="rounded-lg border border-surface-border bg-surface-container-low p-4">
             <label className="sv-field">
-              <span className="sv-label">Folder Snapshot</span>
+              <span className="sv-label">Browse Folder</span>
               <input
                 {...folderPickerAttributes}
                 type="file"
@@ -145,29 +154,30 @@ export function FolderIngestPanel({ docTypes, groupsLoading, writableSpacePaths 
                 className="sv-input file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-bold file:text-on-primary"
               />
               <small className="text-secondary">
-                Directory picker preserves relative paths as metadata. Limit: {FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES} supported files or {formatFileSize(FOLDER_SNAPSHOT_MAX_BYTES)} total.
+                Select a folder to upload a one-time snapshot. Relative paths are preserved; local changes after selection are not watched. Limit: {FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES} supported files or {formatFileSize(FOLDER_SNAPSHOT_MAX_BYTES)} total.
               </small>
             </label>
             {selectedFiles.length > 0 ? (
-              <div className="mt-3 rounded-md border border-surface-border bg-surface px-3 py-2 text-body-md text-on-surface-variant">
-                <strong className="text-on-surface">{formatFolderCount(selection.supportedEntries.length, "supported file")}</strong>
-                {" "}selected across {formatFolderCount(selection.entries.length, "folder item")}; {formatFileSize(selection.supportedBytes)} will be staged.
-                {selection.unsupportedEntries.length > 0 ? (
-                  <span className="block text-secondary">{formatFolderCount(selection.unsupportedEntries.length, "unsupported item")} will be recorded as skipped.</span>
-                ) : null}
-              </div>
+              <FolderSnapshotReview
+                label={snapshotLabel}
+                onClear={() => setSelectedFiles([])}
+                onRemove={removeSelectedFile}
+                selection={selection}
+              />
             ) : null}
             {selection.validationMessages.map((message) => <InlineMessage key={message} tone="warning">{message}</InlineMessage>)}
           </div>
         ) : (
-          <div className="grid gap-4 rounded-lg border border-surface-border bg-surface-container-low p-4 md:grid-cols-2">
+          <div className="grid items-start gap-4 rounded-lg border border-surface-border bg-surface-container-low p-4 md:grid-cols-2">
             <label className="sv-field">
               <span className="sv-label">Bucket</span>
               <input value={draft.bucket} onChange={(event) => patchDraft({ bucket: event.target.value })} placeholder="enterprise-docs" className="sv-input" />
+              <small className="text-secondary">S3 or MinIO bucket containing source files.</small>
             </label>
             <label className="sv-field">
               <span className="sv-label">Prefix</span>
               <input value={draft.prefix} onChange={(event) => patchDraft({ prefix: event.target.value })} placeholder="finance/policies/" className="sv-input" />
+              <small className="text-secondary">Folder prefix to scan inside the selected bucket.</small>
             </label>
             <p className="md:col-span-2 text-body-md text-on-surface-variant">
               Credentials stay on the backend. This stores only bucket, prefix, schedule, and metadata.
@@ -175,26 +185,30 @@ export function FolderIngestPanel({ docTypes, groupsLoading, writableSpacePaths 
           </div>
         )}
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid items-start gap-4 md:grid-cols-2">
           <label className="sv-field">
             <span className="sv-label">Schedule Name</span>
             <input value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} placeholder="Finance policies off-peak sync" className="sv-input" />
+            <small className="text-secondary">Used to identify this ingestion schedule in activity history.</small>
           </label>
-          <SelectField label="Knowledge Space" value={draft.groupPath} onChange={(value) => patchDraft({ groupPath: value })} options={["", ...writableSpacePaths]} emptyLabel={groupsLoading ? "Loading spaces" : "Select ingestion space"} />
+          <SelectField label="Knowledge Space" value={draft.groupPath} onChange={(value) => patchDraft({ groupPath: value })} options={["", ...writableSpacePaths]} emptyLabel={groupsLoading ? "Loading spaces" : "Select ingestion space"} helper="Files inherit this space for retrieval filtering." />
+          <ClearanceSelect value={draft.clearanceLevel} onChange={(clearanceLevel) => patchDraft({ clearanceLevel })} options={clearanceOptions} />
           <label className="sv-field">
             <span className="sv-label">Effective Date <span className="font-normal text-secondary">(optional)</span></span>
             <input type="date" value={draft.effectiveDate} onChange={(event) => patchDraft({ effectiveDate: event.target.value })} className="sv-input" />
+            <small className="text-secondary">Optional start date applied to ingested files.</small>
           </label>
           <label className="sv-field">
             <span className="sv-label">Expiry Date</span>
             <input type="date" value={draft.expiryDate} onChange={(event) => patchDraft({ expiryDate: event.target.value })} className="sv-input" />
+            <small className="text-secondary">Leave blank unless these files should expire from current use.</small>
           </label>
-          <SelectField label="Document Type" value={draft.docType} onChange={(value) => patchDraft({ docType: value as DocType })} options={docTypes} />
           <SelectField
             label="Schedule Type"
             value={draft.scheduleType}
             onChange={(value) => patchDraft({ scheduleType: value as FolderScheduleDraft["scheduleType"] })}
             options={draft.sourceMode === "snapshot" ? ["one_time"] : ["one_time", "recurring"]}
+            helper="One-time runs once; recurring follows the selected window."
           />
         </div>
 
@@ -202,9 +216,10 @@ export function FolderIngestPanel({ docTypes, groupsLoading, writableSpacePaths 
           <label className="sv-field">
             <span className="sv-label">Start Time ({WORKSPACE_TIMEZONE})</span>
             <input type="datetime-local" value={draft.scheduledAt} onChange={(event) => patchDraft({ scheduledAt: event.target.value })} className="sv-input" />
+            <small className="text-secondary">Queue this one-time run at the selected local time.</small>
           </label>
         ) : (
-          <div className="grid gap-4 rounded-lg border border-surface-border bg-surface-container-low p-4 md:grid-cols-[1fr_auto_auto]">
+          <div className="grid items-start gap-4 rounded-lg border border-surface-border bg-surface-container-low p-4 md:grid-cols-[1fr_auto_auto]">
             <fieldset>
               <legend className="sv-label mb-2">Recurring Days</legend>
               <div className="flex flex-wrap gap-2">
@@ -215,14 +230,17 @@ export function FolderIngestPanel({ docTypes, groupsLoading, writableSpacePaths 
                   </label>
                 ))}
               </div>
+              <small className="mt-2 block text-secondary">Choose the weekdays when this schedule may run.</small>
             </fieldset>
             <label className="sv-field">
               <span className="sv-label">Window Start</span>
               <input type="time" value={draft.recurrenceStartTime} onChange={(event) => patchDraft({ recurrenceStartTime: event.target.value })} className="sv-input" />
+              <small className="text-secondary">Earliest local time this recurring schedule may start.</small>
             </label>
             <label className="sv-field">
               <span className="sv-label">Window End</span>
               <input type="time" value={draft.recurrenceEndTime} onChange={(event) => patchDraft({ recurrenceEndTime: event.target.value })} className="sv-input" />
+              <small className="text-secondary">Latest local time this recurring schedule may run.</small>
             </label>
           </div>
         )}
@@ -230,6 +248,7 @@ export function FolderIngestPanel({ docTypes, groupsLoading, writableSpacePaths 
         <label className="sv-field">
           <span className="sv-label">Description</span>
           <textarea value={draft.description} onChange={(event) => patchDraft({ description: event.target.value })} placeholder="Optional shared context for staged folder files" className="sv-input min-h-20" />
+          <small className="text-secondary">Shared context attached to every staged folder file.</small>
         </label>
 
         {formError ? <InlineMessage tone="warning">{formError}</InlineMessage> : null}
@@ -262,6 +281,82 @@ export function FolderIngestPanel({ docTypes, groupsLoading, writableSpacePaths 
   );
 }
 
+function FolderSnapshotReview({ label, onClear, onRemove, selection }: FolderSnapshotReviewProps) {
+  return (
+    <div className="mt-3 rounded-lg border border-surface-border bg-surface p-3 text-body-md text-on-surface-variant">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-body-md font-extrabold text-on-surface">
+            <FolderOpen className="shrink-0 text-primary" size={17} />
+            <span className="truncate">{label}</span>
+          </p>
+          <p className="mt-1 text-label-md text-secondary">Snapshot ready for review. Re-browse this folder later to stage a newer copy.</p>
+        </div>
+        <button type="button" onClick={onClear} className="rounded-md border border-surface-border bg-surface-container-low px-3 py-2 text-label-md font-bold text-on-surface hover:border-primary">
+          Clear folder
+        </button>
+      </div>
+
+      <dl className="mt-3 grid gap-2 sm:grid-cols-3">
+        <SnapshotMetric label="Supported" value={formatFolderCount(selection.supportedEntries.length, "file")} />
+        <SnapshotMetric label="Skipped" value={formatFolderCount(selection.unsupportedEntries.length, "item")} />
+        <SnapshotMetric label="Staged size" value={formatFileSize(selection.supportedBytes)} />
+      </dl>
+
+      {selection.entries.length > 0 ? (
+        <div className="mt-3">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <strong className="text-label-md uppercase tracking-wide text-secondary">Folder items</strong>
+            <span className="text-label-md text-secondary">{formatFolderCount(selection.entries.length, "item")}</span>
+          </div>
+          <ul className="max-h-64 overflow-auto rounded-md border border-surface-border" aria-label="Selected folder snapshot files">
+            {selection.entries.map((entry) => (
+              <FolderSnapshotFileRow key={`${entry.relativePath}:${entry.file.size}:${entry.file.lastModified}`} entry={entry} onRemove={onRemove} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {selection.unsupportedEntries.length > 0 ? (
+        <p className="mt-3 rounded-md border border-surface-border bg-surface-container-low px-3 py-2 text-label-md text-secondary">
+          {formatFolderCount(selection.unsupportedEntries.length, "unsupported item")} will be recorded as skipped because only PDF, DOCX, JPG, PNG, and JSON files are ingested.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function SnapshotMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-surface-border bg-surface-container-low px-3 py-2">
+      <dt className="text-label-md font-bold uppercase tracking-wide text-secondary">{label}</dt>
+      <dd className="mt-0.5 font-extrabold text-on-surface">{value}</dd>
+    </div>
+  );
+}
+
+function FolderSnapshotFileRow({ entry, onRemove }: FolderSnapshotFileRowProps) {
+  return (
+    <li className="flex items-center gap-3 border-b border-surface-border px-3 py-2 last:border-b-0">
+      <FileText className="shrink-0 text-primary" size={16} />
+      <span className="min-w-0 flex-1">
+        <strong className="block truncate text-body-md text-on-surface">{entry.file.name}</strong>
+        <small className="block truncate text-secondary">{entry.relativePath}</small>
+      </span>
+      <span className="shrink-0 text-label-md text-secondary">{formatFileSize(entry.file.size)}</span>
+      <span className={entry.supported ? "sv-pill sv-pill-success shrink-0" : "sv-pill shrink-0"}>{entry.supported ? "Supported" : "Skipped"}</span>
+      <button
+        type="button"
+        onClick={() => onRemove(entry.file)}
+        className="rounded p-2 text-secondary hover:bg-surface-container-low hover:text-on-surface"
+        aria-label={`Remove ${entry.file.name}`}
+      >
+        <X size={15} />
+      </button>
+    </li>
+  );
+}
+
 function SourceModeButton({ active, detail, icon, label, onClick }: SourceModeButtonProps) {
   return (
     <button
@@ -279,13 +374,26 @@ function SourceModeButton({ active, detail, icon, label, onClick }: SourceModeBu
   );
 }
 
-function SelectField({ emptyLabel, label, onChange, options, value }: SelectProps) {
+function SelectField({ emptyLabel, helper, label, onChange, options, value }: SelectProps) {
   return (
     <label className="sv-field">
       <span className="sv-label">{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value)} className="sv-select">
         {options.map((option) => <option key={option || "empty"} value={option}>{option || emptyLabel || option}</option>)}
       </select>
+      {helper ? <small className="text-secondary">{helper}</small> : null}
+    </label>
+  );
+}
+
+function ClearanceSelect({ onChange, options, value }: ClearanceSelectProps) {
+  return (
+    <label className="sv-field">
+      <span className="sv-label">Clearance Level</span>
+      <select value={value} onChange={(event) => onChange(event.target.value as ClearanceLevel)} className="sv-select">
+        {options.map((option) => <option key={option} value={option}>{clearanceLevelLabel(option)}</option>)}
+      </select>
+      <small className="text-secondary">{clearanceLevelDescription(value)}</small>
     </label>
   );
 }
@@ -318,7 +426,7 @@ function ScheduleCard({ onAction, pendingAction, schedule }: ScheduleCardProps) 
             <StatusPill status={schedule.status} />
           </div>
           <p className="mt-1 text-label-md text-secondary">
-            {schedule.source_type === "snapshot" ? "Browser snapshot" : "S3/MinIO prefix"} · {schedule.group_path} · {schedule.schedule_type === "recurring" ? "Recurring window" : "One-time start"}
+            {schedule.source_type === "snapshot" ? "Browser snapshot" : "S3/MinIO prefix"} · {schedule.group_path} · {clearanceLevelLabel(schedule.clearance_level)} · {schedule.schedule_type === "recurring" ? "Recurring window" : "One-time start"}
           </p>
         </div>
         <div className="flex gap-2">
@@ -447,17 +555,24 @@ function formatLatestRun(schedule: FolderSchedule): string {
 }
 
 type Props = {
-  docTypes: DocType[];
+  currentUser: AuthUser;
   groupsLoading: boolean;
   writableSpacePaths: string[];
 };
 
 type SelectProps = {
   emptyLabel?: string;
+  helper?: string;
   label: string;
   onChange: (value: string) => void;
   options: string[];
   value: string;
+};
+
+type ClearanceSelectProps = {
+  onChange: (value: ClearanceLevel) => void;
+  options: ClearanceLevel[];
+  value: ClearanceLevel;
 };
 
 type SourceModeButtonProps = {
@@ -472,6 +587,18 @@ type ScheduleCardProps = {
   onAction: (action: "pause" | "resume" | "cancel") => void;
   pendingAction: boolean;
   schedule: FolderSchedule;
+};
+
+type FolderSnapshotReviewProps = {
+  label: string;
+  onClear: () => void;
+  onRemove: (file: File) => void;
+  selection: ReturnType<typeof summarizeFolderFiles>;
+};
+
+type FolderSnapshotFileRowProps = {
+  entry: FolderFileEntry;
+  onRemove: (file: File) => void;
 };
 
 type IconActionProps = {

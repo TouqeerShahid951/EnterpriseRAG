@@ -54,6 +54,7 @@ class ArtifactBlock:
 class ArtifactSection:
     def __init__(self, section: ContentSection) -> None:
         self.title = section.title
+        self.objective = section.title
         self.blocks = [ArtifactBlock(block) for block in section.blocks]
 
 

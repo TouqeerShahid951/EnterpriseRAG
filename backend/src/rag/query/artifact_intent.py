@@ -30,6 +30,10 @@ LEADING_WRAPPER_RE = re.compile(
     re.IGNORECASE,
 )
 LEADING_FILLER_RE = re.compile(r"^(?:please|a|an|the|and|or|about|on|for|of|with|based\s+on)\b[\s:,-]*", re.IGNORECASE)
+LEADING_DETAIL_MODIFIER_RE = re.compile(
+    r"^(?:detailed|comprehensive|full|complete)\s+(?:of\s+)?",
+    re.IGNORECASE,
+)
 EMPTY_TOPICS = {
     "",
     "it",
@@ -47,6 +51,14 @@ EMPTY_TOPICS = {
 DOCUMENT_SCOPE_REQUIRED_RE = re.compile(
     r"^(?:summari[sz]e|summary\s+of|outline|describe|explain)\s+(?:the\s+|this\s+|selected\s+)?documents?$",
     re.IGNORECASE,
+)
+LEADING_OPERATION_NORMALIZERS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^summari[sz]ing\b", re.IGNORECASE), "summarize"),
+    (re.compile(r"^describing\b", re.IGNORECASE), "describe"),
+    (re.compile(r"^explaining\b", re.IGNORECASE), "explain"),
+    (re.compile(r"^analy[sz]ing\b", re.IGNORECASE), "analyze"),
+    (re.compile(r"^identifying\b", re.IGNORECASE), "identify"),
+    (re.compile(r"^listing\b", re.IGNORECASE), "list"),
 )
 
 
@@ -88,10 +100,16 @@ def cleaned_content_query(query: str) -> str:
         previous = cleaned
         cleaned = LEADING_WRAPPER_RE.sub("", cleaned).strip()
         cleaned = LEADING_FILLER_RE.sub("", cleaned).strip()
+        cleaned = LEADING_DETAIL_MODIFIER_RE.sub("", cleaned).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r"\bwith\s+details?\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bin\s+the\s+all\b", "in all", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned)
     cleaned = re.sub(r"^list\s+of\s+all\b", "list all", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^a\s+list\s+of\b", "list", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^list\s+all\s+the\b", "list all", cleaned, flags=re.IGNORECASE)
+    for pattern, replacement in LEADING_OPERATION_NORMALIZERS:
+        cleaned = pattern.sub(replacement, cleaned)
     return cleaned.strip(" :,-.")
 
 

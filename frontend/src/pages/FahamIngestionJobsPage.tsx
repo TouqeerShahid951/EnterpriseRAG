@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ChevronLeft, ChevronRight, FileClock, FileSearch, Search, Upload } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, ChevronLeft, ChevronRight, FileClock, FileSearch, Search, Upload, XCircle } from "lucide-react";
 
 import { adminApi, ingestJobsApi } from "../api/contracts";
-import { canManageSpaces, canUpload, canViewSpaceMetadata } from "../authz";
+import { canManageSpaces, canUpload, canViewSpaceMetadata, canWriteDocument, clearanceLevelLabel } from "../authz";
 import { InlineMessage, Skeleton } from "../components/layout/Common";
 import { FahamWorkspace } from "../components/layout/FahamWorkspace";
 import type { RouteId } from "../routes";
-import { formatStageProgress } from "../state/uploadJobProgress";
+import { formatStageProgress, formatUploadWarning, isUploadCancellableStatus } from "../state/uploadJobProgress";
 import type { IngestJob, IngestJobOrigin, ParserProvenance, UploadJobState, User as AuthUser } from "../types/api";
 import { errorMessage, formatDateTime } from "../utils/format";
 import { flattenGroups, userSpacesFromPaths } from "../utils/groups";
@@ -22,7 +22,14 @@ export function FahamIngestionJobsPage({ onLogout, onNavigate, user }: Props) {
   const [createdFrom, setCreatedFrom] = useState(() => initialActivityStringParam("created_from"));
   const [createdTo, setCreatedTo] = useState(() => initialActivityStringParam("created_to"));
   const [offset, setOffset] = useState(() => initialActivityOffsetFromUrl());
+  const queryClient = useQueryClient();
   const canLoadDirectory = canManageSpaces(user) || canViewSpaceMetadata(user);
+  const summaryRequest = {
+    group_path: groupPath || undefined,
+    created_from: createdFrom ? `${createdFrom}T00:00:00Z` : undefined,
+    created_to: createdTo ? `${createdTo}T23:59:59Z` : undefined,
+  };
+  const hasSummaryFilters = Boolean(summaryRequest.group_path || summaryRequest.created_from || summaryRequest.created_to);
   const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.listGroups, enabled: canLoadDirectory, retry: false });
   const spaceOptions = useMemo(
     () => (canLoadDirectory ? flattenGroups(groupsQuery.data?.items ?? []) : userSpacesFromPaths(user.group_paths)),
@@ -45,15 +52,19 @@ export function FahamIngestionJobsPage({ onLogout, onNavigate, user }: Props) {
     retry: false,
   });
   const summaryQuery = useQuery({
-    queryKey: ["ingest-jobs", "summary", "page", groupPath, createdFrom, createdTo],
-    queryFn: () =>
-      ingestJobsApi.summary({
-        group_path: groupPath || undefined,
-        created_from: createdFrom ? `${createdFrom}T00:00:00Z` : undefined,
-        created_to: createdTo ? `${createdTo}T23:59:59Z` : undefined,
-      }),
+    queryKey: hasSummaryFilters ? ["ingest-jobs", "summary", summaryRequest] : ["ingest-jobs", "summary"],
+    queryFn: () => ingestJobsApi.summary(summaryRequest),
     refetchInterval: (query) => query.state.data?.active ? 2500 : false,
+    staleTime: 4000,
     retry: false,
+  });
+  const cancelMutation = useMutation({
+    mutationFn: (jobId: string) => ingestJobsApi.cancel(jobId),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["upload"] });
+      void queryClient.invalidateQueries({ queryKey: ["documents"] });
+    },
   });
   const items = jobsQuery.data?.items ?? [];
   const total = jobsQuery.data?.total ?? 0;
@@ -110,21 +121,24 @@ export function FahamIngestionJobsPage({ onLogout, onNavigate, user }: Props) {
                 <span className="sr-only">Search ingestion jobs</span>
                 <input value={search} onChange={(event) => resetOffset(setSearch, event.target.value)} placeholder="Search document, job ID, or space..." />
               </label>
-              <FilterSelect label="Status" value={status} onChange={(value) => resetOffset(setStatus, value as UploadJobState | "")} options={["", "scheduled", "queued", "processing", "human_review", "failed", "complete"]} />
-              <FilterSelect label="Origin" value={origin} onChange={(value) => resetOffset(setOrigin, value as IngestJobOrigin | "")} options={["", "upload", "folder", "reingest", "restore", "unknown"]} />
-              <FilterSelect label="Knowledge Space" value={groupPath} onChange={(value) => resetOffset(setGroupPath, value)} options={["", ...spaceOptions.map((space) => space.path)]} />
+              <FilterSelect label="Status" value={status} onChange={(value) => resetOffset(setStatus, value as UploadJobState | "")} options={["", "scheduled", "queued", "processing", "human_review", "cancelled", "failed", "complete"]} helper="Filter by current ingestion state." />
+              <FilterSelect label="Origin" value={origin} onChange={(value) => resetOffset(setOrigin, value as IngestJobOrigin | "")} options={["", "upload", "folder", "reingest", "restore", "unknown"]} helper="Filter by how the job entered the queue." />
+              <FilterSelect label="Knowledge Space" value={groupPath} onChange={(value) => resetOffset(setGroupPath, value)} options={["", ...spaceOptions.map((space) => space.path)]} helper="Limit activity to one retrieval space." />
               <label className="sv-field">
                 <span className="sv-label">From</span>
                 <input type="date" className="sv-input" value={createdFrom} onChange={(event) => resetOffset(setCreatedFrom, event.target.value)} />
+                <small className="text-secondary">Show jobs created on or after this date.</small>
               </label>
               <label className="sv-field">
                 <span className="sv-label">To</span>
                 <input type="date" className="sv-input" value={createdTo} onChange={(event) => resetOffset(setCreatedTo, event.target.value)} />
+                <small className="text-secondary">Show jobs created on or before this date.</small>
               </label>
             </div>
           </section>
 
           {jobsQuery.isError ? <InlineMessage tone="error">{errorMessage(jobsQuery.error, "Unable to load ingestion jobs.")}</InlineMessage> : null}
+          {cancelMutation.isError ? <InlineMessage tone="error">{errorMessage(cancelMutation.error, "Unable to cancel ingestion job.")}</InlineMessage> : null}
           <section className="sv-panel overflow-hidden">
             <div className="ingest-job-list-header">
               <div>
@@ -148,7 +162,14 @@ export function FahamIngestionJobsPage({ onLogout, onNavigate, user }: Props) {
                 <p>Adjust the filters or upload a document to start a new job.</p>
               </div>
             ) : null}
-            {!jobsQuery.isLoading && items.length > 0 ? <JobTable items={items} /> : null}
+            {!jobsQuery.isLoading && items.length > 0 ? (
+              <JobTable
+                cancelingJobId={cancelMutation.isPending ? cancelMutation.variables ?? null : null}
+                items={items}
+                onCancelJob={(jobId) => cancelMutation.mutate(jobId)}
+                user={user}
+              />
+            ) : null}
           </section>
         </div>
       </main>
@@ -156,7 +177,7 @@ export function FahamIngestionJobsPage({ onLogout, onNavigate, user }: Props) {
   );
 }
 
-function JobTable({ items }: { items: IngestJob[] }) {
+function JobTable({ cancelingJobId, items, onCancelJob, user }: { cancelingJobId: string | null; items: IngestJob[]; onCancelJob: (jobId: string) => void; user: AuthUser }) {
   return (
     <div className="knowledge-doc-surface">
       <table className="sv-table ingest-job-table">
@@ -168,11 +189,13 @@ function JobTable({ items }: { items: IngestJob[] }) {
             <th>Progress</th>
             <th>Started</th>
             <th>Details</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {items.map((job) => {
             const progressDetail = formatStageProgress(job.stage_progress);
+            const canCancel = isUploadCancellableStatus(job.status) && canWriteDocument(user, job.group_path, job.clearance_level);
             return (
               <tr key={job.job_id} className="sv-table-row">
                 <td data-label="Document">
@@ -180,7 +203,7 @@ function JobTable({ items }: { items: IngestJob[] }) {
                     <FileClock size={17} />
                     <span>
                       <strong>{job.document_title}</strong>
-                      <small>{job.group_path} · {job.job_id}</small>
+                      <small>{job.group_path} · {clearanceLevelLabel(job.clearance_level)} · {job.job_id}</small>
                     </span>
                   </a>
                 </td>
@@ -201,10 +224,18 @@ function JobTable({ items }: { items: IngestJob[] }) {
                   <p className="text-on-surface-variant">{job.error_message || job.stage_detail}</p>
                   {job.error_code ? <span className="ingest-job-error"><AlertTriangle size={13} /> {job.error_code}</span> : null}
                   {job.warnings.map((warning) => (
-                    <span className="ingest-job-error text-warning-amber" key={warning}><AlertTriangle size={13} /> {labelize(warning)}</span>
+                    <span className="ingest-job-error text-warning-amber" key={warning}><AlertTriangle size={13} /> {formatUploadWarning(warning)}</span>
                   ))}
                   {job.parser_provenance ? <ParserProvenanceDetails provenance={job.parser_provenance} /> : null}
                   <small>Attempt {job.attempt_count} of {job.max_attempts}</small>
+                </td>
+                <td data-label="Actions">
+                  {canCancel ? (
+                    <CancelJobControl
+                      disabled={cancelingJobId === job.job_id}
+                      onCancel={() => onCancelJob(job.job_id)}
+                    />
+                  ) : null}
                 </td>
               </tr>
             );
@@ -212,6 +243,41 @@ function JobTable({ items }: { items: IngestJob[] }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function CancelJobControl({ disabled, onCancel }: { disabled: boolean; onCancel: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  if (confirming) {
+    return (
+      <div className="flex min-w-32 flex-wrap gap-1.5">
+        <button
+          className="rounded-md border border-error-red/30 px-2 py-1 text-label-md font-bold text-error-red hover:bg-error-container disabled:opacity-50"
+          disabled={disabled}
+          onClick={() => {
+            onCancel();
+            setConfirming(false);
+          }}
+          type="button"
+        >
+          {disabled ? "Cancelling" : "Cancel"}
+        </button>
+        <button className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface" disabled={disabled} onClick={() => setConfirming(false)} type="button">
+          Keep
+        </button>
+      </div>
+    );
+  }
+  return (
+    <button
+      className="inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface hover:text-error-red disabled:opacity-50"
+      disabled={disabled}
+      onClick={() => setConfirming(true)}
+      type="button"
+    >
+      <XCircle size={13} />
+      {disabled ? "Cancelling" : "Cancel"}
+    </button>
   );
 }
 
@@ -285,19 +351,22 @@ function JobStatusPill({ status, warnings }: { status: UploadJobState; warnings:
     ? "sv-pill sv-pill-success"
     : status === "failed"
       ? "sv-pill knowledge-status-failed"
+      : status === "cancelled"
+        ? "sv-pill sv-pill-warning"
       : status === "human_review"
         ? "sv-pill knowledge-status-human_review"
         : "sv-pill knowledge-status-processing";
   return <span className={className}>{status === "complete" && warnings.length > 0 ? "Indexed with warnings" : labelize(status)}</span>;
 }
 
-function FilterSelect({ label, onChange, options, value }: { label: string; onChange: (value: string) => void; options: string[]; value: string }) {
+function FilterSelect({ helper, label, onChange, options, value }: { helper?: string; label: string; onChange: (value: string) => void; options: string[]; value: string }) {
   return (
     <label className="sv-field">
       <span className="sv-label">{label}</span>
       <select className="sv-select" value={value} onChange={(event) => onChange(event.target.value)}>
         {options.map((option) => <option key={option || "all"} value={option}>{option ? labelize(option) : `All ${label}`}</option>)}
       </select>
+      {helper ? <small className="text-secondary">{helper}</small> : null}
     </label>
   );
 }
@@ -369,7 +438,7 @@ function isJobOrigin(value: string): value is IngestJobOrigin {
 }
 
 function isJobStatus(value: string): value is UploadJobState {
-  return value === "scheduled" || value === "queued" || value === "processing" || value === "human_review" || value === "failed" || value === "complete";
+  return value === "scheduled" || value === "queued" || value === "processing" || value === "human_review" || value === "cancelled" || value === "failed" || value === "complete";
 }
 
 type ActivityUrlState = { createdFrom: string; createdTo: string; groupPath: string; offset: number; origin: IngestJobOrigin | ""; search: string; status: UploadJobState | "" };

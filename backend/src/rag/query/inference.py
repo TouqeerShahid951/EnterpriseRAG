@@ -109,4 +109,5 @@ def build_inference_client(config: RagConfigRecord, *, settings: Settings) -> In
         embed_timeout_seconds=config.embed_timeout_seconds,
         thinking_enabled=config.thinking_enabled,
         json_num_predict=config.json_num_predict,
+        num_ctx=settings.ollama_num_ctx,
     )

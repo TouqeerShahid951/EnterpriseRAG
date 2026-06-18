@@ -6,6 +6,7 @@ import json
 import re
 
 from ..repositories.artifact_jobs import ArtifactJobRecord
+from ..query.artifact_intent import cleaned_content_query
 from .contracts import DocumentPlan, DocumentPlanSection
 from .llm_json import generate_contract
 
@@ -144,16 +145,17 @@ def _requests_exhaustive_rows(lowered_request: str) -> bool:
 
 
 def _extract_topic(request: str) -> str:
-    text = re.sub(r"\s+", " ", request).strip(" .")
+    text = re.sub(r"\s+", " ", cleaned_content_query(request) or request).strip(" .")
     text = re.sub(
         r"(?i)^(please\s+)?(generate|create|make|prepare|draft|write|build)\s+"
-        r"(an?\s+)?(pdf|docx|pptx|powerpoint|presentation|slide\s+deck|report|document|artifact)"
+        r"(an?\s+)?(?:(detailed|comprehensive|full|complete)\s+)?"
+        r"(pdf|docx|pptx|powerpoint|presentation|slide\s+deck|report|document|artifact)"
         r"(\s+(report|document|presentation|deck|file))?\s*",
         "",
         text,
     )
     text = re.sub(r"(?i)^(?:file\s+)?(?:summari[sz](?:e|ing)|summary\s+of|overview\s+of|explain(?:ing)?|describe|describing|analy[sz](?:e|ing)|identify(?:ing)?|list(?:ing)?)\s+", "", text).strip(" .")
-    text = re.sub(r"(?i)^(on|about|for|covering|with)\s+", "", text).strip(" .")
+    text = re.sub(r"(?i)^(on|about|for|of|covering|with)\s+", "", text).strip(" .")
     text = re.sub(r"(?i)^(the|this|selected)\s+", "", text).strip(" .")
     text = re.sub(r"(?i)\b(as|in)\s+(pdf|docx|pptx|powerpoint|presentation|slides?)\b", "", text).strip(" .")
     if len(text) < 4:
@@ -164,9 +166,16 @@ def _extract_topic(request: str) -> str:
 
 
 def _title_from_topic(topic: str) -> str:
-    words = [word for word in re.split(r"\s+", topic.strip()) if word]
-    titled = " ".join(word.upper() if word.isupper() else word.capitalize() for word in words[:12])
+    normalized = re.sub(r"(?i)\bcommited\b", "committed", topic.strip())
+    words = [word for word in re.split(r"\s+", normalized) if word]
+    titled = " ".join(_title_word(word) for word in words[:12])
     return titled[:180] or "Generated Artifact"
+
+
+def _title_word(word: str) -> str:
+    if word.isupper() or (len(word) <= 5 and word[:-1].isupper() and word[-1:] == "s"):
+        return word
+    return word.upper() if word.isupper() else word.capitalize()
 
 
 def _document_type(formats: tuple[str, ...]) -> str:

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from hashlib import sha256
+import re
 
 from ..auth.abac import build_abac_filter
 from ..auth.context import UserContext
+from ..auth.document_access import can_read_document
 from ..core.config import Settings
 from ..query.qdrant import QdrantClient, SearchHit
 from ..query.state import initial_state
@@ -19,6 +22,7 @@ from ..query.intent_router import route_query
 from ..query.sources import dedupe_hits
 from ..query.temporal import add_effective_date_scope, target_date_for_query
 from ..repositories.artifact_jobs import ArtifactJobRecord
+from ..repositories.document_models import DocumentRecord, DocumentRepository
 from ..repositories.rag_config_models import RagConfigRecord
 from ..schemas.query import QueryRequest
 from .contracts import (
@@ -31,7 +35,42 @@ from .contracts import (
 
 
 SELECTED_DOCUMENT_SCAN_LIMIT = 4000
-AUTHORIZED_SCOPE_SCAN_LIMIT = 4000
+INFERRED_DOCUMENT_SCOPE_LIMIT = 100
+SCOPE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
+SCOPE_STOP_TOKENS = {
+    "about",
+    "all",
+    "artifact",
+    "complete",
+    "comprehensive",
+    "create",
+    "deck",
+    "detail",
+    "detailed",
+    "details",
+    "doc",
+    "docs",
+    "docx",
+    "document",
+    "documents",
+    "file",
+    "files",
+    "for",
+    "from",
+    "generate",
+    "in",
+    "list",
+    "make",
+    "pdf",
+    "pptx",
+    "presentation",
+    "report",
+    "slides",
+    "summarize",
+    "summary",
+    "the",
+    "with",
+}
 
 
 def retrieve_document_evidence(
@@ -42,6 +81,7 @@ def retrieve_document_evidence(
     qdrant: QdrantClient,
     config: Settings,
     rag_config: RagConfigRecord,
+    document_repo: DocumentRepository | None = None,
 ) -> EvidenceManifest:
     user = UserContext(
         user_id=job.user_id,
@@ -51,9 +91,10 @@ def retrieve_document_evidence(
         clearance_level=job.clearance_level,
         permission_version=job.permission_version,
     )
+    scoped_job = _with_inferred_document_scope(job, plan, user=user, document_repo=document_repo)
     sections = [
         _retrieve_section(
-            job,
+            scoped_job,
             section,
             user=user,
             inference=inference,
@@ -66,7 +107,7 @@ def retrieve_document_evidence(
     if any(section.coverage_status in {"none", "partial"} for section in sections):
         sections = [
             _retry_section(
-                job,
+                scoped_job,
                 plan_section,
                 current,
                 user=user,
@@ -111,16 +152,6 @@ def _retrieve_section(
         )
         scanned = True
         hits.extend(scan_hits)
-    elif section.retrieval_mode == "structured_rows" and hasattr(qdrant, "retrieve_authorized_chunks"):
-        qdrant_filter = _authorized_filter(job, user, query=" ".join(section.retrieval_queries))
-        scan_limit = AUTHORIZED_SCOPE_SCAN_LIMIT
-        scan_hits = qdrant.retrieve_authorized_chunks(
-            qdrant_filter=qdrant_filter,
-            structured_only=True,
-            limit=scan_limit,
-        )
-        scanned = True
-        hits.extend(scan_hits)
     for query in section.retrieval_queries:
         query_hits = _retrieve_query(
             job,
@@ -149,6 +180,87 @@ def _retrieve_section(
         scan_limit_reached=bool(scan_limit and len(scan_hits) >= scan_limit),
         scope_scan_without_selected_docs=section.retrieval_mode == "structured_rows" and scanned and not job.document_ids,
     )
+
+
+def _with_inferred_document_scope(
+    job: ArtifactJobRecord,
+    plan: DocumentPlan,
+    *,
+    user: UserContext,
+    document_repo: DocumentRepository | None,
+) -> ArtifactJobRecord:
+    if job.document_ids or document_repo is None:
+        return job
+    document_ids = _infer_document_scope(job, plan, user=user, document_repo=document_repo)
+    if not document_ids:
+        return job
+    return replace(job, document_ids=tuple(document_ids))
+
+
+def _infer_document_scope(
+    job: ArtifactJobRecord,
+    plan: DocumentPlan,
+    *,
+    user: UserContext,
+    document_repo: DocumentRepository,
+) -> list[str]:
+    scope_terms = _requested_document_scope_terms(job, plan)
+    if not scope_terms:
+        return []
+    matches: list[DocumentRecord] = []
+    for document in document_repo.list_documents():
+        if document.ingest_status != "complete" or not document.is_current:
+            continue
+        if job.group_path and document.group_path != job.group_path:
+            continue
+        if not can_read_document(user, document):  # type: ignore[arg-type]
+            continue
+        if _document_matches_scope_terms(document, scope_terms):
+            matches.append(document)
+    return [document.id for document in matches[:INFERRED_DOCUMENT_SCOPE_LIMIT]]
+
+
+def _requested_document_scope_terms(job: ArtifactJobRecord, plan: DocumentPlan) -> list[str]:
+    text = " ".join([
+        job.original_request,
+        plan.title,
+        plan.purpose,
+        *[query for section in plan.sections for query in section.retrieval_queries],
+    ])
+    return sorted(_scope_tokens(text))
+
+
+def _document_matches_scope_terms(document: DocumentRecord, scope_terms: list[str]) -> bool:
+    return bool(set(scope_terms) & _document_scope_tokens(document))
+
+
+def _document_scope_tokens(document: DocumentRecord) -> set[str]:
+    return _scope_tokens(_document_identity_text(document))
+
+
+def _document_identity_text(document: DocumentRecord) -> str:
+    values = [document.title, document.source_id, document.file_path]
+    return " ".join(str(value).lower() for value in values if value)
+
+
+def _scope_tokens(text: str) -> set[str]:
+    tokens: set[str] = set()
+    for match in SCOPE_TOKEN_RE.finditer(text):
+        token = _normalize_scope_token(match.group(0))
+        if token and token not in SCOPE_STOP_TOKENS:
+            tokens.add(token)
+    return tokens
+
+
+def _normalize_scope_token(token: str) -> str:
+    normalized = token.lower()
+    if normalized.isdigit() or len(normalized) < 3:
+        return ""
+    if normalized.endswith("ies") and len(normalized) > 4:
+        normalized = normalized[:-3] + "y"
+    elif normalized.endswith("s") and len(normalized) > 3:
+        normalized = normalized[:-1]
+    return normalized
 
 
 def _retry_section(

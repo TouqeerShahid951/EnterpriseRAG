@@ -6,9 +6,10 @@ from dataclasses import replace
 from typing import Callable
 
 from ..errors import UnsupportedDocumentError, UnsupportedPdfError, WorkerStepError
-from .docling_adapter import parse_docling_docx, parse_docling_pdf
+from .docling_adapter import DoclingProgressCallback, parse_docling_docx, parse_docling_pdf
 from .hierarchy import apply_hierarchy
 from .images import ImageAnalyzer, ImageAssetStore, docx_image_sources, image_sources_to_items, parse_image_document, pdf_image_sources
+from .json import parse_json_document
 from .models import DocumentParseResult, ParsedImageAsset, ParsedPdfItem
 from .pdf import parse_pdf_document
 from .provenance import base_report, parser_item_counts, parser_page_counts, quality_flag_counts
@@ -17,6 +18,7 @@ PDF_CONTENT_TYPE = "application/pdf"
 DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 JPEG_CONTENT_TYPE = "image/jpeg"
 PNG_CONTENT_TYPE = "image/png"
+JSON_CONTENT_TYPE = "application/json"
 PageProgressCallback = Callable[[int, int], None]
 
 
@@ -31,11 +33,14 @@ def parse_document(
     layered_docling_max_pages: int = 40,
     layered_docling_batch_pages: int = 4,
     page_progress_callback: PageProgressCallback | None = None,
+    docling_progress_callback: DoclingProgressCallback | None = None,
     doc_id: str | None = None,
     image_asset_store: ImageAssetStore | None = None,
     image_analyzer: ImageAnalyzer | None = None,
 ) -> DocumentParseResult:
     kind = _document_kind(content_type, file_path)
+    if kind == "json" or (kind == "pdf" and _looks_like_json_bytes(file_bytes)):
+        return parse_json_document(file_bytes)
     image_context = _image_context(doc_id, image_asset_store, image_analyzer)
     if kind == "pdf":
         parsed = _parse_pdf_with_ocr_fallback(
@@ -46,6 +51,7 @@ def parse_document(
             layered_docling_max_pages=layered_docling_max_pages,
             layered_docling_batch_pages=layered_docling_batch_pages,
             page_progress_callback=page_progress_callback,
+            docling_progress_callback=docling_progress_callback,
         )
         if image_context is None:
             return parsed
@@ -105,6 +111,7 @@ def _parse_pdf_with_ocr_fallback(
     layered_docling_max_pages: int,
     layered_docling_batch_pages: int,
     page_progress_callback: PageProgressCallback | None = None,
+    docling_progress_callback: DoclingProgressCallback | None = None,
 ) -> DocumentParseResult:
     try:
         return parse_pdf_document(
@@ -115,10 +122,17 @@ def _parse_pdf_with_ocr_fallback(
             layered_docling_max_pages=layered_docling_max_pages,
             layered_docling_batch_pages=layered_docling_batch_pages,
             page_progress_callback=page_progress_callback,
+            docling_progress_callback=docling_progress_callback,
         )
     except UnsupportedPdfError:
         try:
-            items = parse_docling_pdf(file_bytes, allow_page_repair=True, mark_ocr=True)
+            items = parse_docling_pdf(
+                file_bytes,
+                allow_page_repair=True,
+                mark_ocr=True,
+                progress_callback=docling_progress_callback,
+                progress_phase="ocr_fallback",
+            )
         except ImportError as exc:
             raise WorkerStepError("ocr_dependency_missing", "Docling OCR dependency is not installed.") from exc
         if not items:
@@ -165,12 +179,24 @@ def _document_kind(content_type: str | None, file_path: str) -> str:
         return "docx"
     if normalized in {JPEG_CONTENT_TYPE, PNG_CONTENT_TYPE}:
         return "image"
+    if normalized == JSON_CONTENT_TYPE:
+        return "json"
     lowered_path = file_path.lower()
     if lowered_path.endswith((".jpg", ".jpeg", ".png")):
         return "image"
     if lowered_path.endswith(".docx"):
         return "docx"
+    if lowered_path.endswith(".json"):
+        return "json"
     return "pdf" if lowered_path.endswith(".pdf") or not normalized else "unsupported"
+
+
+def _looks_like_json_bytes(file_bytes: bytes) -> bool:
+    sample = file_bytes[:4096]
+    if sample.startswith(b"\xef\xbb\xbf"):
+        sample = sample[3:]
+    sample = sample.lstrip()
+    return sample.startswith((b"{", b"["))
 
 
 def _page_count(items: list[ParsedPdfItem]) -> int:

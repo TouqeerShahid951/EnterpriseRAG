@@ -1,4 +1,4 @@
-import type { AccountType, User } from "./types/api";
+import type { AccountType, ClearanceLevel, User } from "./types/api";
 
 export const accountTypeOptions: AccountType[] = [
   "platform_admin",
@@ -11,6 +11,18 @@ export const accountTypeOptions: AccountType[] = [
   "member",
 ];
 
+export const clearanceLevelOptions: ClearanceLevel[] = [
+  "NATO_UNCLASSIFIED",
+  "NATO_RESTRICTED",
+  "NATO_CONFIDENTIAL",
+  "NATO_SECRET",
+  "COSMIC_TOP_SECRET",
+];
+
+export const defaultClearanceLevel: ClearanceLevel = "NATO_RESTRICTED";
+
+const clearanceRanks = new Map<ClearanceLevel, number>(clearanceLevelOptions.map((level, index) => [level, index]));
+
 export function accountTypeLabel(accountType: AccountType): string {
   return {
     platform_admin: "Platform Admin",
@@ -22,6 +34,39 @@ export function accountTypeLabel(accountType: AccountType): string {
     auditor: "Auditor",
     member: "Member",
   }[accountType];
+}
+
+export function clearanceLevelLabel(clearanceLevel: ClearanceLevel): string {
+  return {
+    NATO_UNCLASSIFIED: "Unclassified",
+    NATO_RESTRICTED: "Restricted",
+    NATO_CONFIDENTIAL: "Confidential",
+    NATO_SECRET: "Secret",
+    COSMIC_TOP_SECRET: "Top Secret",
+  }[clearanceLevel];
+}
+
+export function clearanceLevelDescription(clearanceLevel: ClearanceLevel): string {
+  return {
+    NATO_UNCLASSIFIED: "Lowest classification; visible to every cleared account in scope.",
+    NATO_RESTRICTED: "Default document and account level for restricted internal material.",
+    NATO_CONFIDENTIAL: "Requires confidential clearance or higher inside the selected Knowledge Space.",
+    NATO_SECRET: "Requires secret clearance or higher inside the selected Knowledge Space.",
+    COSMIC_TOP_SECRET: "Highest level; reserved for global administrators and explicitly cleared users.",
+  }[clearanceLevel];
+}
+
+export function clearanceRank(clearanceLevel: ClearanceLevel): number {
+  return clearanceRanks.get(clearanceLevel) ?? 0;
+}
+
+export function canAccessClearance(user: User, clearanceLevel: ClearanceLevel): boolean {
+  return clearanceRank(clearanceLevel) <= clearanceRank(user.clearance_level);
+}
+
+export function clearanceLevelsAssignableBy(user: User): ClearanceLevel[] {
+  if (isGlobalAdmin(user)) return clearanceLevelOptions;
+  return clearanceLevelOptions.filter((level) => canAccessClearance(user, level));
 }
 
 export function roleDescription(accountType: AccountType): string {
@@ -52,8 +97,8 @@ export function canUploadToSpace(user: User, groupPath: string): boolean {
   return false;
 }
 
-export function canWriteDocument(user: User, groupPath: string): boolean {
-  return canUploadToSpace(user, groupPath);
+export function canWriteDocument(user: User, groupPath: string, clearanceLevel?: ClearanceLevel): boolean {
+  return canUploadToSpace(user, groupPath) && (!clearanceLevel || canAccessClearance(user, clearanceLevel));
 }
 
 export function canReview(user: User): boolean {

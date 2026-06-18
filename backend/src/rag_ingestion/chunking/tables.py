@@ -519,6 +519,9 @@ def _form_like_fields(items: list[ParsedPdfItem]) -> list[dict[str, str]]:
 
 
 def _extract_inline_key_value_fields(text: str) -> list[dict[str, str]]:
+    line_fields = _line_delimited_fields(text)
+    if line_fields:
+        return line_fields
     normalized = collapse_whitespace(text)
     if not normalized:
         return []
@@ -526,6 +529,20 @@ def _extract_inline_key_value_fields(text: str) -> list[dict[str, str]]:
     if fields:
         return fields
     return _alternating_row_fields(normalized.split("|"))
+
+
+def _line_delimited_fields(text: str) -> list[dict[str, str]]:
+    fields: list[dict[str, str]] = []
+    for raw_line in text.splitlines():
+        line = collapse_whitespace(raw_line)
+        if not line or ":" not in line:
+            continue
+        label, value = line.split(":", 1)
+        label = collapse_whitespace(label).rstrip(":")
+        value = collapse_whitespace(value.strip(" |,;"))
+        if _looks_like_field_label(label) and value:
+            fields.append({"label": label, "value": value})
+    return fields
 
 
 def _colon_delimited_fields(text: str) -> list[dict[str, str]]:

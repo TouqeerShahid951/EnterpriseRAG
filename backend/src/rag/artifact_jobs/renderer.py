@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
@@ -22,6 +23,28 @@ CONTENT_TYPES: dict[ArtifactFormat, str] = {
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "pdf": "application/pdf",
 }
+PPTX_MAX_BULLETS_PER_SLIDE = 8
+PPTX_MAX_TEXT_UNITS_PER_SLIDE = 7
+PPTX_TEXT_UNIT_CHARS = 150
+PPTX_MAX_SOURCE_LABELS = 5
+PPTX_TITLE_BACKGROUND = (23, 59, 63)
+PPTX_CONTENT_BACKGROUNDS = (
+    (220, 235, 232),
+    (246, 231, 203),
+    (226, 232, 245),
+    (241, 224, 220),
+    (229, 235, 213),
+)
+PPTX_CONTENT_BACKGROUND = PPTX_CONTENT_BACKGROUNDS[0]
+_REFERENCE_SLIDE_TITLES = {"reference", "references", "source", "sources", "citation", "citations", "bibliography"}
+PDF_BRAND = "#173B3F"
+PDF_ACCENT = "#C8A24A"
+PDF_TEXT = "#253538"
+PDF_MUTED = "#53676A"
+PDF_RULE = "#D7E1E2"
+PDF_ROW = "#F6FAFA"
+PDF_CALLOUT = "#F8F1E3"
+PDF_WIDE_TABLE_COLUMNS = 5
 
 
 @dataclass(frozen=True)
@@ -39,13 +62,14 @@ def render_document(
     bundle: ArtifactContentBundle,
     generated_at: datetime,
     require_libreoffice: bool,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> RenderedV2Artifact:
     if artifact_format == "docx":
         content = _render_docx(bundle, generated_at)
     elif artifact_format == "pdf":
         content = _render_pdf(bundle, generated_at)
     elif artifact_format == "pptx":
-        content = _render_pptx(bundle, generated_at)
+        content = _render_pptx(bundle, generated_at, progress_callback=progress_callback)
     else:
         raise ValueError(f"unsupported artifact format: {artifact_format}")
     _validate_package(artifact_format, content)
@@ -65,11 +89,15 @@ def render_document(
 
 def _render_docx(bundle: ArtifactContentBundle, generated_at: datetime) -> bytes:
     from docx import Document
+    from docx.enum.section import WD_ORIENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Inches, Pt
 
     document = Document()
     section = document.sections[0]
+    if _has_wide_table(bundle):
+        section.orientation = WD_ORIENT.LANDSCAPE
+        section.page_width, section.page_height = section.page_height, section.page_width
     section.top_margin = Inches(0.75)
     section.bottom_margin = Inches(0.75)
     section.left_margin = Inches(0.8)
@@ -103,6 +131,22 @@ def _render_docx(bundle: ArtifactContentBundle, generated_at: datetime) -> bytes
     return buffer.getvalue()
 
 
+def _has_wide_table(bundle: ArtifactContentBundle) -> bool:
+    return any(
+        block.table is not None and len(block.table.headers) > 5
+        for section in bundle.paginated.sections
+        for block in section.blocks
+    )
+
+
+def _has_wide_pdf_table(bundle: ArtifactContentBundle) -> bool:
+    return any(
+        block.table is not None and len(block.table.headers) >= PDF_WIDE_TABLE_COLUMNS
+        for section in bundle.paginated.sections
+        for block in section.blocks
+    )
+
+
 def _append_docx_block(document, block: ContentBlock, citations: dict[str, EvidenceCitation]) -> None:
     if block.kind == "heading":
         document.add_heading(block.text or "", level=block.level)
@@ -129,6 +173,7 @@ def _append_docx_block(document, block: ContentBlock, citations: dict[str, Evide
     if block.kind == "key_value":
         table = document.add_table(rows=0, cols=3)
         table.style = "Table Grid"
+        table.autofit = True
         for entry in block.entries:
             cells = table.add_row().cells
             cells[0].text = entry.key
@@ -138,6 +183,7 @@ def _append_docx_block(document, block: ContentBlock, citations: dict[str, Evide
     if block.kind == "table" and block.table is not None:
         table = document.add_table(rows=1, cols=len(block.table.headers) + 1)
         table.style = "Table Grid"
+        table.autofit = True
         for index, header in enumerate(block.table.headers):
             table.rows[0].cells[index].text = header
         table.rows[0].cells[-1].text = "Source"
@@ -155,7 +201,6 @@ def _render_pdf(bundle: ArtifactContentBundle, generated_at: datetime) -> bytes:
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
     from reportlab.platypus import (
-        KeepTogether,
         PageBreak,
         Paragraph,
         SimpleDocTemplate,
@@ -164,11 +209,7 @@ def _render_pdf(bundle: ArtifactContentBundle, generated_at: datetime) -> bytes:
         TableStyle,
     )
 
-    wide = any(
-        block.table is not None and len(block.table.headers) > 5
-        for section in bundle.paginated.sections
-        for block in section.blocks
-    )
+    wide = _has_wide_pdf_table(bundle)
     buffer = BytesIO()
     document = SimpleDocTemplate(
         buffer,
@@ -176,85 +217,204 @@ def _render_pdf(bundle: ArtifactContentBundle, generated_at: datetime) -> bytes:
         title=bundle.paginated.title,
         leftMargin=16 * mm,
         rightMargin=16 * mm,
-        topMargin=15 * mm,
-        bottomMargin=16 * mm,
+        topMargin=22 * mm,
+        bottomMargin=17 * mm,
     )
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="CenteredMetaV2", parent=styles["Normal"], alignment=TA_CENTER, textColor=colors.HexColor("#53676A")))
+    _apply_pdf_style_defaults(styles, colors)
+    styles.add(ParagraphStyle(name="CenteredMetaV2", parent=styles["Normal"], alignment=TA_CENTER, textColor=colors.HexColor(PDF_MUTED), fontSize=8.5, leading=11))
+    styles.add(ParagraphStyle(name="CalloutV2", parent=styles["BodyText"], textColor=colors.HexColor(PDF_TEXT), fontSize=9.2, leading=12.5))
+    styles.add(ParagraphStyle(name="QuoteV2", parent=styles["BodyText"], fontName="Helvetica-Oblique", textColor=colors.HexColor(PDF_MUTED), leftIndent=10, rightIndent=6))
+    styles.add(ParagraphStyle(name="ReferenceV2", parent=styles["BodyText"], fontSize=8, leading=10, textColor=colors.HexColor(PDF_MUTED)))
+    styles.add(ParagraphStyle(name="TableCellV2", parent=styles["BodyText"], fontSize=7.7, leading=9.5, wordWrap="CJK"))
+    styles.add(ParagraphStyle(name="TableHeaderV2", parent=styles["TableCellV2"], textColor=colors.white, fontName="Helvetica-Bold", leading=9.8))
     citations = {item.evidence_id: item for item in bundle.content.citations}
-    story = [
-        Paragraph(escape(bundle.paginated.title), styles["Title"]),
-        Paragraph(escape(bundle.paginated.subtitle or ""), styles["CenteredMetaV2"]),
+    story = [Paragraph(escape(bundle.paginated.title), styles["Title"])]
+    if bundle.paginated.subtitle:
+        story.append(Paragraph(escape(bundle.paginated.subtitle), styles["CenteredMetaV2"]))
+    story.extend([
         Paragraph(escape(f"Generated {generated_at.strftime('%Y-%m-%d %H:%M UTC')}"), styles["CenteredMetaV2"]),
-        Spacer(1, 12),
-    ]
+        Spacer(1, 14),
+    ])
     if bundle.paginated.include_coverage_notes and bundle.content.warnings:
         story.append(Paragraph("Coverage Notes", styles["Heading2"]))
-        for warning in bundle.content.warnings:
-            story.append(Paragraph(escape(f"- {warning}"), styles["BodyText"]))
+        story.extend(_pdf_list_flowables([(warning, []) for warning in bundle.content.warnings], citations, styles, bullet_type="bullet"))
     for semantic_section in bundle.paginated.sections:
         story.append(Paragraph(escape(semantic_section.title), styles["Heading1"]))
         for block in semantic_section.blocks:
-            story.extend(_pdf_block(block, citations, styles, colors, Table, TableStyle, KeepTogether, Paragraph, Spacer, PageBreak))
+            story.extend(_pdf_block(block, citations, styles, colors, Table, TableStyle, Paragraph, Spacer, PageBreak, document.width))
     if bundle.paginated.include_references:
         story.extend([PageBreak(), Paragraph("References", styles["Heading1"])])
         for index, citation in enumerate(bundle.content.citations, start=1):
-            story.append(Paragraph(escape(_reference_line(index, citation)), styles["BodyText"]))
+            story.extend([
+                Paragraph(escape(_reference_line(index, citation)), styles["ReferenceV2"]),
+                Spacer(1, 3),
+            ])
     document.build(story, onFirstPage=_pdf_footer, onLaterPages=_pdf_footer)
     return buffer.getvalue()
 
 
-def _pdf_block(block, citations, styles, colors, table_cls, table_style_cls, keep_together, paragraph_cls, spacer_cls, page_break_cls):
+def _apply_pdf_style_defaults(styles, colors) -> None:
+    styles["Normal"].fontName = "Helvetica"
+    styles["Normal"].fontSize = 9.6
+    styles["Normal"].leading = 13
+    styles["Normal"].textColor = colors.HexColor(PDF_TEXT)
+    styles["BodyText"].fontName = "Helvetica"
+    styles["BodyText"].fontSize = 9.6
+    styles["BodyText"].leading = 13
+    styles["BodyText"].spaceAfter = 2
+    styles["BodyText"].textColor = colors.HexColor(PDF_TEXT)
+    styles["Title"].fontName = "Helvetica-Bold"
+    styles["Title"].fontSize = 22
+    styles["Title"].leading = 26
+    styles["Title"].spaceAfter = 7
+    styles["Title"].textColor = colors.HexColor(PDF_BRAND)
+    for name, size, leading, before, after in (
+        ("Heading1", 14, 17, 12, 7),
+        ("Heading2", 11.5, 14, 9, 5),
+        ("Heading3", 10.3, 12.5, 7, 4),
+    ):
+        style = styles[name]
+        style.fontName = "Helvetica-Bold"
+        style.fontSize = size
+        style.leading = leading
+        style.spaceBefore = before
+        style.spaceAfter = after
+        style.keepWithNext = 1
+        style.textColor = colors.HexColor(PDF_BRAND)
+
+
+def _pdf_block(block, citations, styles, colors, table_cls, table_style_cls, paragraph_cls, spacer_cls, page_break_cls, available_width):
     if block.kind in {"page_break", "section_break"}:
         return [page_break_cls()]
     if block.kind == "heading":
         return [paragraph_cls(escape(block.text or ""), styles[f"Heading{min(block.level + 1, 3)}"])]
-    if block.kind in {"paragraph", "quotation", "callout"}:
-        style = styles["Italic"] if block.kind == "quotation" else styles["BodyText"]
+    if block.kind == "callout":
+        return _pdf_callout_flowables(block.text or "", block.evidence_ids, citations, styles, colors, table_cls, table_style_cls, paragraph_cls, spacer_cls, available_width)
+    if block.kind in {"paragraph", "quotation"}:
+        style = styles["QuoteV2"] if block.kind == "quotation" else styles["BodyText"]
         return [
-            paragraph_cls(escape(_with_sources(block.text or "", block.evidence_ids, citations)), style),
-            spacer_cls(1, 5),
+            paragraph_cls(_pdf_with_sources_markup(block.text or "", block.evidence_ids, citations), style),
+            spacer_cls(1, 6),
         ]
     if block.kind in {"bullet_list", "numbered_list"}:
-        prefix = "- " if block.kind == "bullet_list" else ""
-        return [
-            paragraph_cls(
-                escape(f"{index}. {item_text}" if block.kind == "numbered_list" else f"{prefix}{item_text}")
-                + escape(f" {_source_summary(evidence_ids, citations)}"),
-                styles["BodyText"],
-            )
-            for index, (item_text, evidence_ids) in enumerate(_list_items(block), start=1)
-        ]
+        bullet_type = "1" if block.kind == "numbered_list" else "bullet"
+        return _pdf_list_flowables(_list_items(block), citations, styles, bullet_type=bullet_type)
     if block.kind == "key_value":
         rows = [["Field", "Value", "Source"]] + [
-            [entry.key, entry.value, _source_summary(entry.evidence_ids, citations)]
+            [entry.key, entry.value, _source_label(entry.evidence_ids, citations)]
             for entry in block.entries
         ]
-        return [keep_together(_styled_pdf_table(rows, colors, table_cls, table_style_cls))]
+        return [_styled_pdf_table(rows, colors, table_cls, table_style_cls, styles, available_width), spacer_cls(1, 9)]
     if block.kind == "table" and block.table is not None:
         rows = [[*block.table.headers, "Source"]] + [
-            [*row.values, _source_summary(row.evidence_ids, citations)]
+            [*row.values, _source_label(row.evidence_ids, citations)]
             for row in block.table.rows
         ]
-        return [_styled_pdf_table(rows, colors, table_cls, table_style_cls)]
+        return [_styled_pdf_table(rows, colors, table_cls, table_style_cls, styles, available_width), spacer_cls(1, 9)]
     return []
 
 
-def _styled_pdf_table(rows, colors, table_cls, table_style_cls):
-    table = table_cls(rows, repeatRows=1, hAlign="LEFT")
+def _pdf_callout_flowables(text, evidence_ids, citations, styles, colors, table_cls, table_style_cls, paragraph_cls, spacer_cls, available_width):
+    callout = paragraph_cls(f"<b>Important</b><br/>{_pdf_with_sources_markup(text, evidence_ids, citations)}", styles["CalloutV2"])
+    table = table_cls([[callout]], colWidths=[available_width], hAlign="LEFT")
     table.setStyle(table_style_cls([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#173B3F")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(PDF_CALLOUT)),
+        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#E3D4B3")),
+        ("LINEBEFORE", (0, 0), (0, -1), 3, colors.HexColor(PDF_ACCENT)),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]))
+    return [table, spacer_cls(1, 8)]
+
+
+def _pdf_list_flowables(items: list[tuple[str, list[str]]], citations, styles, *, bullet_type: str):
+    from reportlab.platypus import ListFlowable, ListItem, Paragraph, Spacer
+
+    list_items = [
+        ListItem(Paragraph(_pdf_with_sources_markup(item_text, evidence_ids, citations), styles["BodyText"]), leftIndent=0)
+        for item_text, evidence_ids in items
+        if item_text
+    ]
+    if not list_items:
+        return []
+    return [
+        ListFlowable(list_items, bulletType=bullet_type, leftIndent=16, bulletIndent=4),
+        Spacer(1, 6),
+    ]
+
+
+def _pdf_with_sources_markup(text: str, evidence_ids: list[str], citations: dict[str, EvidenceCitation]) -> str:
+    summary = _source_summary(evidence_ids, citations)
+    if not summary:
+        return escape(text)
+    return f"{escape(text)} <font color=\"{PDF_MUTED}\" size=\"8\">({escape(summary)})</font>"
+
+
+def _source_label(evidence_ids: list[str], citations: dict[str, EvidenceCitation]) -> str:
+    return _source_summary(evidence_ids, citations).removeprefix("Sources: ")
+
+
+def _styled_pdf_table(rows, colors, table_cls, table_style_cls, styles, available_width):
+    from reportlab.platypus import Paragraph
+
+    normalized = _normalized_table_rows(rows)
+    table_rows = [
+        [
+            Paragraph(escape(str(cell)), styles["TableHeaderV2" if row_index == 0 else "TableCellV2"])
+            for cell in row
+        ]
+        for row_index, row in enumerate(normalized)
+    ]
+    table = table_cls(
+        table_rows,
+        colWidths=_pdf_col_widths(normalized, available_width),
+        repeatRows=1,
+        hAlign="LEFT",
+        splitByRow=1,
+    )
+    table.setStyle(table_style_cls([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(PDF_BRAND)),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(PDF_ROW)]),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#AAB7B8")),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.9, colors.HexColor(PDF_ACCENT)),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor(PDF_RULE)),
+        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#AAB7B8")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
     return table
 
 
-def _render_pptx(bundle: ArtifactContentBundle, generated_at: datetime) -> bytes:
+def _normalized_table_rows(rows) -> list[list[str]]:
+    width = max((len(row) for row in rows), default=1)
+    return [[str(cell) for cell in row] + [""] * (width - len(row)) for row in rows]
+
+
+def _pdf_col_widths(rows: list[list[str]], available_width: float) -> list[float]:
+    columns = max((len(row) for row in rows), default=1)
+    if columns <= 1:
+        return [available_width]
+    has_source_column = rows and rows[0] and rows[0][-1].strip().lower() == "source"
+    if has_source_column and columns > 2:
+        source_width = min(available_width * 0.22, 95)
+        body_width = (available_width - source_width) / (columns - 1)
+        return [body_width] * (columns - 1) + [source_width]
+    return [available_width / columns] * columns
+
+
+def _render_pptx(
+    bundle: ArtifactContentBundle,
+    generated_at: datetime,
+    *,
+    progress_callback: Callable[[int, int, str], None] | None = None,
+) -> bytes:
     from pptx import Presentation
     from pptx.dml.color import RGBColor
     from pptx.util import Inches, Pt
@@ -263,50 +423,102 @@ def _render_pptx(bundle: ArtifactContentBundle, generated_at: datetime) -> bytes
     presentation.slide_width = Inches(13.333)
     presentation.slide_height = Inches(7.5)
     citations = {item.evidence_id: item for item in bundle.content.citations}
+    total_slides = _pptx_render_slide_count(bundle)
+    rendered_slides = 0
+    content_slide_index = 0
+
+    def record_slide(label: str) -> None:
+        nonlocal rendered_slides
+        rendered_slides += 1
+        if progress_callback:
+            progress_callback(rendered_slides, total_slides, label)
+
+    def add_content_slide(title: str):
+        nonlocal content_slide_index
+        slide = _add_base_content_slide(presentation, title, content_slide_index)
+        content_slide_index += 1
+        return slide
+
     title_slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-    _set_slide_background(title_slide, RGBColor(23, 59, 63))
-    _add_slide_text(title_slide, bundle.presentation.title, 0.8, 1.45, 11.7, 1.0, 30, "FFFFFF", bold=True)
-    _add_slide_text(title_slide, bundle.presentation.subtitle or "", 0.85, 2.75, 10.8, 0.9, 17, "D6E4E5")
+    _set_slide_background(title_slide, RGBColor(*PPTX_TITLE_BACKGROUND))
+    _add_slide_text(title_slide, bundle.presentation.title, 0.8, 1.25, 11.7, 1.45, _title_font_size(bundle.presentation.title), "FFFFFF", bold=True)
+    _add_slide_text(title_slide, bundle.presentation.subtitle or "", 0.85, 2.95, 10.8, 0.8, 16, "D6E4E5")
     _add_slide_text(title_slide, generated_at.date().isoformat(), 0.85, 6.6, 3.0, 0.25, 10, "AFC7C9")
-    for slide_spec in bundle.presentation.slides:
+    record_slide("Title slide")
+    for slide_spec in _content_slides(bundle.presentation.slides):
         table_block = next((block for block in slide_spec.blocks if block.kind == "table" and block.table), None)
         if table_block is not None:
             chunks = _table_block_chunks(table_block, max_body_rows=9)
             for chunk_index, chunk in enumerate(chunks, start=1):
                 title = slide_spec.title if len(chunks) == 1 else f"{slide_spec.title} ({chunk_index}/{len(chunks)})"
-                slide = _add_base_content_slide(presentation, title)
+                slide = add_content_slide(title)
                 _add_slide_table(slide, chunk)
                 _add_slide_sources(slide, _block_evidence_ids(chunk), citations)
+                record_slide(title)
             continue
 
-        slide = _add_base_content_slide(presentation, slide_spec.title)
-        _add_slide_bullets(slide, _slide_lines(slide_spec.blocks))
         evidence_ids = list(dict.fromkeys(
             evidence_id
             for block in slide_spec.blocks
             for evidence_id in _block_evidence_ids(block)
         ))
-        _add_slide_sources(slide, evidence_ids, citations)
+        line_chunks = _slide_line_chunks(_slide_lines(slide_spec.blocks) or ["No supported content was generated."])
+        for chunk_index, line_chunk in enumerate(line_chunks, start=1):
+            title = slide_spec.title if len(line_chunks) == 1 else f"{slide_spec.title} ({chunk_index}/{len(line_chunks)})"
+            slide = add_content_slide(title)
+            _add_slide_bullets(slide, line_chunk)
+            _add_slide_sources(slide, evidence_ids, citations)
+            record_slide(title)
     if bundle.presentation.include_references_slide:
         slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-        _set_slide_background(slide, RGBColor(247, 249, 248))
+        _set_slide_background(slide, RGBColor(*_content_background(content_slide_index)))
         _add_slide_text(slide, "References", 0.65, 0.3, 12.0, 0.55, 23, "173B3F", bold=True)
         _add_slide_bullets(
             slide,
             [_reference_line(index, citation) for index, citation in enumerate(bundle.content.citations[:18], start=1)],
         )
+        record_slide("References")
     buffer = BytesIO()
     presentation.save(buffer)
     return buffer.getvalue()
 
 
-def _add_base_content_slide(presentation, title: str):
+def _pptx_render_slide_count(bundle: ArtifactContentBundle) -> int:
+    total = 1
+    for slide_spec in _content_slides(bundle.presentation.slides):
+        table_block = next((block for block in slide_spec.blocks if block.kind == "table" and block.table), None)
+        if table_block is not None:
+            total += len(_table_block_chunks(table_block, max_body_rows=9))
+        else:
+            total += len(_slide_line_chunks(_slide_lines(slide_spec.blocks) or ["No supported content was generated."]))
+    if bundle.presentation.include_references_slide:
+        total += 1
+    return max(total, 1)
+
+
+def _add_base_content_slide(presentation, title: str, content_slide_index: int):
     from pptx.dml.color import RGBColor
 
     slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-    _set_slide_background(slide, RGBColor(247, 249, 248))
-    _add_slide_text(slide, title, 0.65, 0.3, 12.0, 0.55, 23, "173B3F", bold=True)
+    _set_slide_background(slide, RGBColor(*_content_background(content_slide_index)))
+    _add_slide_text(slide, title, 0.65, 0.28, 12.0, 0.7, _heading_font_size(title), "173B3F", bold=True)
     return slide
+
+
+def _content_background(index: int) -> tuple[int, int, int]:
+    return PPTX_CONTENT_BACKGROUNDS[index % len(PPTX_CONTENT_BACKGROUNDS)]
+
+
+def _content_slides(slides):
+    return [slide for slide in slides if not _is_generated_references_slide(slide)]
+
+
+def _is_generated_references_slide(slide) -> bool:
+    return _normalized_reference_title(slide.title) in _REFERENCE_SLIDE_TITLES
+
+
+def _normalized_reference_title(value: str) -> str:
+    return re.sub(r"[^a-z]+", " ", value.lower()).strip()
 
 
 def _add_slide_sources(slide, evidence_ids: list[str], citations: dict[str, EvidenceCitation]) -> None:
@@ -336,6 +548,21 @@ def _add_slide_text(slide, text, left, top, width, height, size, color, *, bold=
     paragraph.font.color.rgb = RGBColor.from_string(color)
 
 
+def _title_font_size(text: str) -> int:
+    length = len(_compact(text, 180))
+    if length <= 45:
+        return 30
+    if length <= 70:
+        return 25
+    if length <= 95:
+        return 21
+    return 18
+
+
+def _heading_font_size(text: str) -> int:
+    return 23 if len(text) <= 60 else 19
+
+
 def _add_slide_bullets(slide, lines: list[str]) -> None:
     from pptx.util import Inches, Pt
 
@@ -343,11 +570,14 @@ def _add_slide_bullets(slide, lines: list[str]) -> None:
     frame = box.text_frame
     frame.clear()
     frame.word_wrap = True
-    for index, line in enumerate(lines[:12] or ["No supported content was generated."]):
+    display_lines = lines or ["No supported content was generated."]
+    max_length = max((len(line) for line in display_lines), default=0)
+    font_size = 15 if len(display_lines) <= 4 and max_length <= 220 else 13 if len(display_lines) <= 6 else 12
+    for index, line in enumerate(display_lines):
         paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
-        paragraph.text = _compact(line, 420)
+        paragraph.text = _compact(line, 320)
         paragraph.font.name = "Aptos"
-        paragraph.font.size = Pt(16 if len(lines) <= 7 else 13)
+        paragraph.font.size = Pt(font_size)
         paragraph.space_after = Pt(8)
 
 
@@ -416,18 +646,44 @@ def _table_block_chunks(block: ContentBlock, *, max_body_rows: int) -> list[Cont
     ]
 
 
+def _slide_line_chunks(lines: list[str]) -> list[list[str]]:
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    current_units = 0
+    for line in lines:
+        units = _pptx_text_units(line)
+        if current and (
+            len(current) >= PPTX_MAX_BULLETS_PER_SLIDE
+            or current_units + units > PPTX_MAX_TEXT_UNITS_PER_SLIDE
+        ):
+            chunks.append(current)
+            current = []
+            current_units = 0
+        current.append(line)
+        current_units += units
+    if current:
+        chunks.append(current)
+    return chunks or [[]]
+
+
+def _pptx_text_units(text: str) -> int:
+    return max(1, (len(text.strip()) + PPTX_TEXT_UNIT_CHARS - 1) // PPTX_TEXT_UNIT_CHARS)
+
+
 def _with_sources(text: str, evidence_ids: list[str], citations: dict[str, EvidenceCitation]) -> str:
     summary = _source_summary(evidence_ids, citations)
     return f"{text} ({summary})" if summary else text
 
 
 def _source_summary(evidence_ids: list[str], citations: dict[str, EvidenceCitation]) -> str:
-    labels = [
+    labels = list(dict.fromkeys([
         _short_citation(citations[evidence_id])
         for evidence_id in evidence_ids
         if evidence_id in citations
-    ]
-    return "Sources: " + "; ".join(dict.fromkeys(labels)) if labels else ""
+    ]))
+    if len(labels) > PPTX_MAX_SOURCE_LABELS:
+        labels = [*labels[:PPTX_MAX_SOURCE_LABELS], f"+{len(labels) - PPTX_MAX_SOURCE_LABELS} more"]
+    return "Sources: " + "; ".join(labels) if labels else ""
 
 
 def _short_citation(citation: EvidenceCitation) -> str:
@@ -444,10 +700,24 @@ def _reference_line(index: int, citation: EvidenceCitation) -> str:
 
 
 def _pdf_footer(canvas, document) -> None:
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+
     canvas.saveState()
+    width, height = document.pagesize
+    left = document.leftMargin
+    right = width - document.rightMargin
+    canvas.setStrokeColor(colors.HexColor(PDF_RULE))
+    canvas.setLineWidth(0.6)
+    canvas.line(left, height - 16 * mm, right, height - 16 * mm)
+    canvas.line(left, 12 * mm, right, 12 * mm)
+    canvas.setFont("Helvetica-Bold", 8.5)
+    canvas.setFillColor(colors.HexColor(PDF_BRAND))
+    canvas.drawString(left, height - 12.4 * mm, "Faham AI")
     canvas.setFont("Helvetica", 8)
-    canvas.setFillColorRGB(0.32, 0.4, 0.42)
-    canvas.drawCentredString(document.pagesize[0] / 2, 28, f"Faham AI | Page {document.page}")
+    canvas.setFillColor(colors.HexColor(PDF_MUTED))
+    canvas.drawCentredString(width / 2, 8 * mm, "Evidence-backed artifact")
+    canvas.drawRightString(right, 8 * mm, f"Page {document.page}")
     canvas.restoreState()
 
 
@@ -493,7 +763,10 @@ def _office_smoke_check(
         )
         converted = Path(temp_dir) / "artifact.pdf"
         if result.returncode != 0 or not converted.exists() or converted.stat().st_size < 500:
-            raise RuntimeError(f"LibreOffice smoke check failed: {(result.stderr or result.stdout)[-500:]}")
+            message = f"LibreOffice smoke check failed: {(result.stderr or result.stdout)[-500:]}"
+            if require_libreoffice:
+                raise RuntimeError(message)
+            return (message,)
         pdftotext = shutil.which("pdftotext")
         if pdftotext:
             text_result = subprocess.run(
@@ -505,7 +778,10 @@ def _office_smoke_check(
             )
             pages = text_result.stdout.split("\f")
             if any(not page.strip() for page in pages[:-1]):
-                raise RuntimeError("LibreOffice smoke check found a blank output page")
+                message = "LibreOffice smoke check found a blank output page"
+                if require_libreoffice:
+                    raise RuntimeError(message)
+                return (message,)
     return ()
 
 
@@ -517,3 +793,7 @@ def _safe_filename(value: str) -> str:
 def _compact(value: str, limit: int) -> str:
     normalized = re.sub(r"\s+", " ", value).strip()
     return normalized if len(normalized) <= limit else normalized[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _chunks(values: list[str], size: int) -> list[list[str]]:
+    return [values[offset : offset + size] for offset in range(0, len(values), size)]

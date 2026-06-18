@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from ..auth.abac import normalize_group_path
-from ..shared.contracts.clearance import normalize_clearance_level
+from ..shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
 from .document_models import (
     AuditEventRecord,
     DocumentCrossReferenceRecord,
@@ -65,6 +65,19 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None:
         deleted_clause = "" if include_deleted else "AND deleted_at IS NULL"
         row = self._execute_optional(f"SELECT * FROM documents WHERE id = %s {deleted_clause}", (document_id,))
+        return document_from_row(row) if row else None
+
+    def update_document_clearance(self, document_id: str, clearance_level: ClearanceLevel) -> DocumentRecord | None:
+        row = self._execute_optional(
+            """
+            UPDATE documents
+            SET clearance_level = %s,
+                updated_at = NOW()
+            WHERE id = %s AND deleted_at IS NULL
+            RETURNING *
+            """,
+            (normalize_clearance_level(clearance_level), document_id),
+        )
         return document_from_row(row) if row else None
 
     def save_document_metadata(
@@ -232,7 +245,7 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                 row = conn.execute(
                     """
                     INSERT INTO ingest_jobs (doc_id, origin, status, progress_pct, completed_at)
-                    VALUES (%s, %s, %s, %s, CASE WHEN %s IN ('complete', 'failed', 'human_review') THEN NOW() END)
+                    VALUES (%s, %s, %s, %s, CASE WHEN %s IN ('complete', 'failed', 'human_review', 'cancelled') THEN NOW() END)
                     RETURNING *
                     """,
                     (doc_id, origin, status, progress_pct, status),
@@ -271,8 +284,10 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                         warnings = COALESCE(%s::jsonb, warnings),
                         error_code = %s, error_message_safe = %s,
                         updated_at = NOW(),
-                        completed_at = CASE WHEN %s IN ('complete', 'failed', 'human_review') THEN NOW() END
-                    WHERE id = %s RETURNING *
+                        completed_at = CASE WHEN %s IN ('complete', 'failed', 'human_review', 'cancelled') THEN NOW() END
+                    WHERE id = %s
+                      AND NOT (status = 'cancelled' AND %s <> 'cancelled')
+                    RETURNING *
                     """,
                     (
                         kwargs["status"],
@@ -283,11 +298,12 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                         kwargs.get("error_message_safe"),
                         kwargs["status"],
                         job_id,
+                        kwargs["status"],
                     ),
                 ).fetchone()
                 if row:
                     conn.execute("UPDATE documents SET ingest_status = %s, updated_at = NOW() WHERE id = %s", (kwargs["status"], row["doc_id"]))
-        return job_from_row(row) if row else None
+        return job_from_row(row) if row else self.get_ingest_job(job_id)
 
     def requeue_stale_ingest_job(
         self,
@@ -391,6 +407,31 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                     )
         return job_from_row(row) if row else None
 
+    def cancel_review_batch_for_job(self, job_id: str) -> int:
+        with self._connect() as conn:
+            with conn.transaction():
+                item_rows = conn.execute(
+                    """
+                    UPDATE human_review_queue
+                    SET status = 'rejected', updated_at = NOW()
+                    WHERE status = 'pending'
+                      AND batch_id IN (
+                          SELECT id FROM human_review_batches WHERE job_id = %s
+                      )
+                    RETURNING id
+                    """,
+                    (job_id,),
+                ).fetchall()
+                conn.execute(
+                    """
+                    UPDATE human_review_batches
+                    SET status = 'rejected', updated_at = NOW()
+                    WHERE job_id = %s AND status = 'pending'
+                    """,
+                    (job_id,),
+                )
+        return len(item_rows)
+
     def mark_superseded(self, *, new_doc_id: str, old_doc_ids: list[str]) -> list[DocumentRecord]:
         with self._connect() as conn:
             with conn.transaction():
@@ -460,7 +501,7 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
             ORDER BY created_at DESC, id DESC
             LIMIT %s
             """,
-            (max(1, min(limit, 500)),),
+            (max(1, min(limit, 5000)),),
         )
         return [audit_event_from_row(row) for row in rows]
 

@@ -1,21 +1,20 @@
-import { useEffect, useMemo, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, AlertTriangle, CheckCircle2, Clock3, CloudUpload, FileClock, FileSearch, FileText, Loader2, ShieldCheck, TimerReset, X, XCircle } from "lucide-react";
 
 import { adminApi } from "../api/contracts";
-import { canManageSpaces, canUploadToSpace, canWriteDocument } from "../authz";
+import { canManageSpaces, canUploadToSpace, canWriteDocument, clearanceLevelDescription, clearanceLevelLabel, clearanceLevelsAssignableBy } from "../authz";
 import { InlineMessage } from "../components/layout/Common";
 import { FahamWorkspace } from "../components/layout/FahamWorkspace";
 import type { RouteId } from "../routes";
 import { formatFileSize, mergeDocumentFiles } from "../state/pdfUploadBatch";
-import type { DocType, Document, UploadJobStep, User as AuthUser } from "../types/api";
+import type { ClearanceLevel, Document, UploadJobStep, User as AuthUser } from "../types/api";
 import type { PdfUploadDraft, UploadBatchItemView, UploadJobView } from "../types/chat";
 import { errorMessage } from "../utils/format";
 import { flattenGroups, userSpacesFromPaths } from "../utils/groups";
-import { formatStageProgress } from "../state/uploadJobProgress";
+import { formatStageProgress, formatUploadWarning, isUploadCancellableStatus } from "../state/uploadJobProgress";
 
-export function FahamUploadPage({ batchItems, currentDocuments, currentUser, onLogout, onNavigate, onPdfDraftChange, onPdfSubmit, pdfDraft, selectionError, uploadPending }: Props) {
-  const docTypes: DocType[] = ["policy", "procedure", "report", "contract", "memo", "manual", "other"];
+export function FahamUploadPage({ batchItems, cancelingJobId, currentDocuments, currentUser, onCancelIngestJob, onLogout, onNavigate, onPdfDraftChange, onPdfSubmit, pdfDraft, selectionError, uploadPending }: Props) {
   const canLoadSpaceDirectory = canManageSpaces(currentUser);
   const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.listGroups, retry: false, enabled: canLoadSpaceDirectory });
   const uploadSpaceOptions = useMemo(
@@ -25,7 +24,8 @@ export function FahamUploadPage({ batchItems, currentDocuments, currentUser, onL
   const writableSpacePaths = uploadSpaceOptions
     .filter((space) => canUploadToSpace(currentUser, space.path))
     .map((space) => space.path);
-  const writableCurrentDocuments = currentDocuments.filter((document) => canWriteDocument(currentUser, document.group_path));
+  const clearanceOptions = useMemo(() => clearanceLevelsAssignableBy(currentUser), [currentUser]);
+  const writableCurrentDocuments = currentDocuments.filter((document) => canWriteDocument(currentUser, document.group_path, document.clearance_level));
   const selectedSpaceIsWritable = Boolean(pdfDraft.groupPath && canUploadToSpace(currentUser, pdfDraft.groupPath));
 
   useEffect(() => {
@@ -47,7 +47,7 @@ export function FahamUploadPage({ batchItems, currentDocuments, currentUser, onL
             <div>
               <p className="sv-eyebrow">Document Intake</p>
               <h1 className="sv-page-title">Add Files</h1>
-              <p className="sv-page-subtitle">Upload one or more PDF, DOCX, JPG, and PNG files, or schedule folder ingestion into off-peak indexing windows.</p>
+              <p className="sv-page-subtitle">Upload one or more PDF, DOCX, JPG, PNG, and JSON files, or schedule folder ingestion into off-peak indexing windows.</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => onNavigate("ingestion-jobs")} className="sv-action-secondary">
@@ -74,7 +74,7 @@ export function FahamUploadPage({ batchItems, currentDocuments, currentUser, onL
               <label className="sv-field">
                 <span className="sv-label">Document Files</span>
                 <input
-                  accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png"
+                  accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png,application/json,.json"
                   type="file"
                   multiple
                   disabled={uploadPending}
@@ -84,7 +84,7 @@ export function FahamUploadPage({ batchItems, currentDocuments, currentUser, onL
                   }}
                   className="sv-input file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-bold file:text-on-primary"
                 />
-                <small className="text-secondary">Select multiple PDF, DOCX, JPG, or PNG files, up to 50 MB each. Every file receives its own ingestion job.</small>
+                <small className="text-secondary">Select multiple PDF, DOCX, JPG, PNG, or JSON files, up to 50 MB each. Every file receives its own ingestion job.</small>
               </label>
               {pdfDraft.files.length > 0 ? (
                 <ul className="mt-3 grid gap-2" aria-label="Selected documents">
@@ -107,11 +107,19 @@ export function FahamUploadPage({ batchItems, currentDocuments, currentUser, onL
                 </ul>
               ) : null}
               {selectionError ? <InlineMessage tone="warning">{selectionError}</InlineMessage> : null}
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <SelectField disabled={uploadPending} label="Knowledge Space" value={pdfDraft.groupPath} onChange={(value) => onPdfDraftChange({ groupPath: value })} options={["", ...writableSpacePaths]} emptyLabel={groupsQuery.isLoading && canLoadSpaceDirectory ? "Loading spaces" : "Select upload space"} />
-                <label className="sv-field"><span className="sv-label">Effective Date <span className="font-normal text-secondary">(optional)</span></span><input disabled={uploadPending} type="date" value={pdfDraft.effectiveDate} onChange={(event) => onPdfDraftChange({ effectiveDate: event.target.value })} className="sv-input" /></label>
-                <label className="sv-field"><span className="sv-label">Expiry Date</span><input disabled={uploadPending} type="date" value={pdfDraft.expiryDate} onChange={(event) => onPdfDraftChange({ expiryDate: event.target.value })} className="sv-input" /></label>
-                <SelectField disabled={uploadPending} label="Document Type" value={pdfDraft.docType} onChange={(value) => onPdfDraftChange({ docType: value as DocType })} options={docTypes} />
+              <div className="mt-5 grid items-start gap-4 md:grid-cols-2">
+                <SelectField disabled={uploadPending} label="Knowledge Space" value={pdfDraft.groupPath} onChange={(value) => onPdfDraftChange({ groupPath: value })} options={["", ...writableSpacePaths]} emptyLabel={groupsQuery.isLoading && canLoadSpaceDirectory ? "Loading spaces" : "Select upload space"} helper="Documents inherit this space for retrieval filtering." />
+                <ClearanceSelect disabled={uploadPending} value={pdfDraft.clearanceLevel} onChange={(clearanceLevel) => onPdfDraftChange({ clearanceLevel })} options={clearanceOptions} />
+                <label className="sv-field">
+                  <span className="sv-label">Effective Date <span className="font-normal text-secondary">(optional)</span></span>
+                  <input disabled={uploadPending} type="date" value={pdfDraft.effectiveDate} onChange={(event) => onPdfDraftChange({ effectiveDate: event.target.value })} className="sv-input" />
+                  <small className="text-secondary">Optional start date for time-aware retrieval.</small>
+                </label>
+                <label className="sv-field">
+                  <span className="sv-label">Expiry Date</span>
+                  <input disabled={uploadPending} type="date" value={pdfDraft.expiryDate} onChange={(event) => onPdfDraftChange({ expiryDate: event.target.value })} className="sv-input" />
+                  <small className="text-secondary">Leave blank unless the document should age out of current use.</small>
+                </label>
                 <label className="sv-field">
                   <span className="sv-label">Supersedes</span>
                   <input disabled={uploadPending || pdfDraft.files.length !== 1} list="supersedes-options" value={pdfDraft.supersedesText} onChange={(event) => onPdfDraftChange({ supersedesText: event.target.value })} placeholder="Comma-separated document IDs" className="sv-input" />
@@ -122,6 +130,7 @@ export function FahamUploadPage({ batchItems, currentDocuments, currentUser, onL
               <label className="sv-field mt-4">
                 <span className="sv-label">Description</span>
                 <textarea disabled={uploadPending} value={pdfDraft.description} onChange={(event) => onPdfDraftChange({ description: event.target.value })} placeholder="Optional shared context for library display and reviewer notes" className="sv-input min-h-24" />
+                <small className="text-secondary">Shared context appears with the document for reviewers and library users.</small>
               </label>
               {groupsQuery.isError && canLoadSpaceDirectory ? <InlineMessage tone="error">{errorMessage(groupsQuery.error, "Unable to load writable Knowledge Spaces.")}</InlineMessage> : null}
               {!groupsQuery.isLoading && writableSpacePaths.length === 0 ? <InlineMessage tone="warning">No writable Knowledge Spaces are available for this account.</InlineMessage> : null}
@@ -133,7 +142,7 @@ export function FahamUploadPage({ batchItems, currentDocuments, currentUser, onL
                     ? "Select documents to upload"
                     : `Upload ${pdfDraft.files.length} document${pdfDraft.files.length === 1 ? "" : "s"}`}
               </button>
-              {batchItems.length > 0 ? <BatchUploadStatus items={batchItems} /> : null}
+              {batchItems.length > 0 ? <BatchUploadStatus cancelingJobId={cancelingJobId} currentUser={currentUser} items={batchItems} onCancelIngestJob={onCancelIngestJob} /> : null}
             </form>
 
             <aside className="space-y-4">
@@ -162,13 +171,33 @@ export function FahamUploadPage({ batchItems, currentDocuments, currentUser, onL
   );
 }
 
-function SelectField({ disabled, emptyLabel, label, onChange, options, value }: SelectProps) {
-  return <label className="sv-field"><span className="sv-label">{label}</span><select disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} className="sv-select">{options.map((option) => <option key={option || "empty"} value={option}>{option || emptyLabel || option}</option>)}</select></label>;
+function SelectField({ disabled, emptyLabel, helper, label, onChange, options, value }: SelectProps) {
+  return (
+    <label className="sv-field">
+      <span className="sv-label">{label}</span>
+      <select disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)} className="sv-select">
+        {options.map((option) => <option key={option || "empty"} value={option}>{option || emptyLabel || option}</option>)}
+      </select>
+      {helper ? <small className="text-secondary">{helper}</small> : null}
+    </label>
+  );
 }
 
-function BatchUploadStatus({ items }: { items: UploadBatchItemView[] }) {
+function ClearanceSelect({ disabled, onChange, options, value }: ClearanceSelectProps) {
+  return (
+    <label className="sv-field">
+      <span className="sv-label">Clearance Level</span>
+      <select disabled={disabled} value={value} onChange={(event) => onChange(event.target.value as ClearanceLevel)} className="sv-select">
+        {options.map((option) => <option key={option} value={option}>{clearanceLevelLabel(option)}</option>)}
+      </select>
+      <small className="text-secondary">{clearanceLevelDescription(value)}</small>
+    </label>
+  );
+}
+
+function BatchUploadStatus({ cancelingJobId, currentUser, items, onCancelIngestJob }: { cancelingJobId: string | null; currentUser: AuthUser; items: UploadBatchItemView[]; onCancelIngestJob: (jobId: string) => void }) {
   const completeCount = items.filter((item) => item.job?.status === "complete").length;
-  const attentionCount = items.filter((item) => item.requestState === "failed" || item.job?.status === "failed" || item.job?.status === "human_review").length;
+  const attentionCount = items.filter((item) => item.requestState === "failed" || item.job?.status === "failed" || item.job?.status === "human_review" || item.job?.status === "cancelled").length;
   return (
     <section className="mt-6 border-t border-surface-border pt-5" aria-label="Document batch progress" aria-live="polite">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -176,16 +205,19 @@ function BatchUploadStatus({ items }: { items: UploadBatchItemView[] }) {
         <p className="text-label-md text-secondary">{completeCount} complete{attentionCount > 0 ? ` · ${attentionCount} need attention` : ""}</p>
       </div>
       <ol className="mt-3 grid gap-3">
-        {items.map((item) => <BatchUploadRow item={item} key={item.id} />)}
+        {items.map((item) => <BatchUploadRow cancelingJobId={cancelingJobId} currentUser={currentUser} item={item} key={item.id} onCancelIngestJob={onCancelIngestJob} />)}
       </ol>
     </section>
   );
 }
 
-function BatchUploadRow({ item }: { item: UploadBatchItemView }) {
+function BatchUploadRow({ cancelingJobId, currentUser, item, onCancelIngestJob }: { cancelingJobId: string | null; currentUser: AuthUser; item: UploadBatchItemView; onCancelIngestJob: (jobId: string) => void }) {
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const job = item.job;
   const progressPct = job ? Math.max(0, Math.min(100, job.progressPct)) : item.requestState === "uploading" ? 8 : 0;
   const rowStatus = item.requestState === "failed" ? "failed" : job?.status ?? "processing";
+  const canCancel = Boolean(job && isUploadCancellableStatus(job.status) && canWriteDocument(currentUser, item.groupPath, item.clearanceLevel));
+  const canceling = Boolean(job && cancelingJobId === job.jobId);
   const stageProgress = formatStageProgress(job?.stageProgress);
   const error = item.uploadError
     ? errorMessage(item.uploadError, "Document upload failed.")
@@ -203,12 +235,20 @@ function BatchUploadRow({ item }: { item: UploadBatchItemView }) {
             <h3 className="min-w-0 truncate text-body-md font-extrabold text-on-surface">{item.fileName}</h3>
             <strong className={`text-label-md ${progressTextClass(rowStatus)}`}>{progressPct}%</strong>
           </div>
-          <p className="mt-0.5 text-label-md text-secondary">{formatFileSize(item.fileSize)} · {item.groupPath}{job ? ` · Job ${job.jobId.slice(0, 8)}` : ""}</p>
+          <p className="mt-0.5 text-label-md text-secondary">{formatFileSize(item.fileSize)} · {item.groupPath} · {clearanceLevelLabel(item.clearanceLevel)}{job ? ` · Job ${job.jobId.slice(0, 8)}` : ""}</p>
           <p className="mt-1 text-body-md text-on-surface-variant">
             {item.requestState === "uploading" ? "Validating, scanning, and queueing this document." : item.requestState === "failed" ? "The document was not queued." : job?.stageDetail}
           </p>
           {stageProgress ? <p className="mt-1 text-label-md font-extrabold text-primary">{stageProgress}</p> : null}
           {job ? <UploadJobRuntimeDetail job={job} stageProgress={stageProgress} /> : null}
+          {canCancel && job ? (
+            <CancelIngestControl
+              confirming={confirmCancel}
+              disabled={canceling}
+              onCancel={() => onCancelIngestJob(job.jobId)}
+              onConfirmingChange={setConfirmCancel}
+            />
+          ) : null}
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface">
             <div
               aria-label={`${item.fileName} ingestion progress`}
@@ -231,8 +271,10 @@ function UploadJobRuntimeDetail({ job, stageProgress }: { job: UploadJobView; st
   const isActive = job.status === "scheduled" || job.status === "queued" || job.status === "processing";
   const currentStep = currentJobStep(job);
   const nextStep = nextJobStep(job);
-  const parserNote = parserProgressNote(job, stageProgress);
+  const activeStageNote = activeStageProgressNote(job, stageProgress);
   const parserSummary = parserSummaryText(job);
+  const elapsedLabel = elapsedText(job);
+  const durationLabel = durationTakenText(job);
   return (
     <div className="mt-3 rounded-md border border-surface-border bg-surface/45 p-2.5">
       <div className="flex flex-wrap items-center gap-2 text-label-md text-secondary">
@@ -240,10 +282,16 @@ function UploadJobRuntimeDetail({ job, stageProgress }: { job: UploadJobView; st
           {isActive ? <Activity className="animate-pulse" size={13} /> : terminalDetailIcon(job)}
           {jobActivityText(job)}
         </span>
-        {elapsedText(job) ? (
+        {elapsedLabel ? (
           <span className="inline-flex items-center gap-1">
             <Clock3 size={13} />
-            {elapsedText(job)}
+            {elapsedLabel}
+          </span>
+        ) : null}
+        {durationLabel ? (
+          <span className="inline-flex items-center gap-1">
+            <TimerReset size={13} />
+            {durationLabel}
           </span>
         ) : null}
         <span>Attempt {Math.max(1, job.attemptCount || 1)} of {job.maxAttempts || 3}</span>
@@ -254,7 +302,7 @@ function UploadJobRuntimeDetail({ job, stageProgress }: { job: UploadJobView; st
           {nextStep ? <span className="text-secondary"> Next: {nextStep.label}.</span> : null}
         </p>
       ) : null}
-      {parserNote ? <p className="mt-1 text-label-md text-secondary">{parserNote}</p> : null}
+      {activeStageNote ? <p className="mt-1 text-label-md text-secondary">{activeStageNote}</p> : null}
       {parserSummary ? <p className="mt-1 text-label-md text-secondary">{parserSummary}</p> : null}
       <ol className="mt-2 flex flex-wrap gap-1.5" aria-label="Ingestion pipeline step status">
         {job.steps.map((step) => (
@@ -269,12 +317,47 @@ function UploadJobRuntimeDetail({ job, stageProgress }: { job: UploadJobView; st
           {job.warnings.map((warning) => (
             <span className="inline-flex items-center gap-1 rounded-full border border-warning-amber/30 bg-warning-amber/10 px-2 py-1 text-[11px] font-bold text-warning-amber" key={warning}>
               <AlertTriangle size={12} />
-              {labelize(warning)}
+              {formatUploadWarning(warning)}
             </span>
           ))}
         </div>
       ) : null}
     </div>
+  );
+}
+
+function CancelIngestControl({ confirming, disabled, onCancel, onConfirmingChange }: { confirming: boolean; disabled: boolean; onCancel: () => void; onConfirmingChange: (value: boolean) => void }) {
+  if (confirming) {
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-label-md">
+        <span className="font-semibold text-error-red">Cancel this ingestion job?</span>
+        <button
+          className="rounded-md border border-error-red/30 px-2 py-1 font-bold text-error-red hover:bg-error-container disabled:opacity-50"
+          disabled={disabled}
+          onClick={() => {
+            onCancel();
+            onConfirmingChange(false);
+          }}
+          type="button"
+        >
+          {disabled ? "Cancelling" : "Cancel job"}
+        </button>
+        <button className="rounded-md border border-surface-border px-2 py-1 font-bold text-secondary hover:bg-surface" disabled={disabled} onClick={() => onConfirmingChange(false)} type="button">
+          Keep running
+        </button>
+      </div>
+    );
+  }
+  return (
+    <button
+      className="mt-2 inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface hover:text-error-red disabled:opacity-50"
+      disabled={disabled}
+      onClick={() => onConfirmingChange(true)}
+      type="button"
+    >
+      <XCircle size={13} />
+      {disabled ? "Cancelling" : "Cancel job"}
+    </button>
   );
 }
 
@@ -287,16 +370,18 @@ function Guardrail({ detail, icon, title }: { detail: string; icon: JSX.Element;
   );
 }
 
-type SelectProps = { disabled?: boolean; emptyLabel?: string; label: string; onChange: (value: string) => void; options: string[]; value: string };
+type SelectProps = { disabled?: boolean; emptyLabel?: string; helper?: string; label: string; onChange: (value: string) => void; options: string[]; value: string };
+type ClearanceSelectProps = { disabled?: boolean; onChange: (value: ClearanceLevel) => void; options: ClearanceLevel[]; value: ClearanceLevel };
 type Props = {
-  batchItems: UploadBatchItemView[]; currentDocuments: Document[]; currentUser: AuthUser;
-  onLogout: () => void; onNavigate: (route: RouteId) => void; onPdfDraftChange: (patch: Partial<PdfUploadDraft>) => void;
+  batchItems: UploadBatchItemView[]; cancelingJobId: string | null; currentDocuments: Document[]; currentUser: AuthUser;
+  onCancelIngestJob: (jobId: string) => void; onLogout: () => void; onNavigate: (route: RouteId) => void; onPdfDraftChange: (patch: Partial<PdfUploadDraft>) => void;
   onPdfSubmit: (event: FormEvent<HTMLFormElement>) => void; pdfDraft: PdfUploadDraft; selectionError: string | null; uploadPending: boolean;
 };
 
 function stageIcon(job: UploadJobView) {
   if (job.status === "complete") return <CheckCircle2 aria-hidden="true" size={18} />;
   if (job.status === "failed") return <XCircle aria-hidden="true" size={18} />;
+  if (job.status === "cancelled") return <XCircle aria-hidden="true" size={18} />;
   if (job.status === "human_review") return <AlertTriangle aria-hidden="true" size={18} />;
   return <Loader2 aria-hidden="true" className="animate-spin" size={18} />;
 }
@@ -304,6 +389,7 @@ function stageIcon(job: UploadJobView) {
 function jobPanelClass(status: UploadJobView["status"] | "processing") {
   if (status === "complete") return "border-success/30 bg-success/10";
   if (status === "failed") return "border-error-red/25 bg-error-container";
+  if (status === "cancelled") return "border-warning-amber/30 bg-warning-amber/10";
   if (status === "human_review") return "border-warning-amber/30 bg-warning-amber/10";
   return "border-surface-border bg-surface-container-low";
 }
@@ -311,6 +397,7 @@ function jobPanelClass(status: UploadJobView["status"] | "processing") {
 function progressFillClass(status: UploadJobView["status"] | "processing") {
   if (status === "complete") return "bg-success";
   if (status === "failed") return "bg-error-red";
+  if (status === "cancelled") return "bg-warning-amber";
   if (status === "human_review") return "bg-warning-amber";
   return "bg-primary";
 }
@@ -318,6 +405,7 @@ function progressFillClass(status: UploadJobView["status"] | "processing") {
 function progressTextClass(status: UploadJobView["status"] | "processing") {
   if (status === "complete") return "text-success";
   if (status === "failed") return "text-error-red";
+  if (status === "cancelled") return "text-warning-amber";
   if (status === "human_review") return "text-warning-amber";
   return "text-primary";
 }
@@ -325,6 +413,7 @@ function progressTextClass(status: UploadJobView["status"] | "processing") {
 function stageIconClass(status: UploadJobView["status"] | "processing") {
   if (status === "complete") return "bg-success/10 text-success";
   if (status === "failed") return "bg-error-container text-error-red";
+  if (status === "cancelled") return "bg-warning-amber/10 text-warning-amber";
   if (status === "human_review") return "bg-warning-amber/10 text-warning-amber";
   return "bg-primary/10 text-primary";
 }
@@ -342,6 +431,7 @@ function nextJobStep(job: UploadJobView): UploadJobStep | null {
 function jobActivityText(job: UploadJobView): string {
   if (job.status === "complete") return job.warnings.length > 0 ? "Indexed with warnings" : "Indexed";
   if (job.status === "failed") return "Failed";
+  if (job.status === "cancelled") return "Cancelled";
   if (job.status === "human_review") return "Needs review";
   if (job.status === "scheduled") return "Scheduled";
   if (job.status === "queued") return "Waiting for worker";
@@ -355,6 +445,7 @@ function jobActivityText(job: UploadJobView): string {
 function jobActivityClass(job: UploadJobView): string {
   if (job.status === "complete") return "bg-success/10 text-success";
   if (job.status === "failed") return "bg-error-container text-error-red";
+  if (job.status === "cancelled") return "bg-warning-amber/10 text-warning-amber";
   if (job.status === "human_review") return "bg-warning-amber/10 text-warning-amber";
   const heartbeat = relativeAge(job.lastHeartbeatAt);
   if (job.status === "processing" && heartbeat && heartbeat.seconds > 180) return "bg-warning-amber/10 text-warning-amber";
@@ -364,12 +455,28 @@ function jobActivityClass(job: UploadJobView): string {
 function elapsedText(job: UploadJobView): string | null {
   const started = relativeAge(job.createdAt);
   if (!started) return null;
-  if (job.status === "complete" || job.status === "failed" || job.status === "human_review") return `Started ${agoText(started.label)}`;
+  if (job.status === "complete" || job.status === "failed" || job.status === "human_review" || job.status === "cancelled") return `Started ${agoText(started.label)}`;
   return `Running ${started.label}`;
+}
+
+function durationTakenText(job: UploadJobView): string | null {
+  if (job.status !== "complete" && job.status !== "failed" && job.status !== "human_review" && job.status !== "cancelled") return null;
+  const seconds = secondsBetween(job.createdAt, job.completedAt ?? job.updatedAt);
+  if (seconds === null) return null;
+  return `Took ${exactDurationLabel(seconds)}`;
+}
+
+function activeStageProgressNote(job: UploadJobView, stageProgress: string | null): string | null {
+  if (job.status !== "processing") return null;
+  if (job.stage !== "parsing_document") return stageProgress;
+  return parserProgressNote(job, stageProgress);
 }
 
 function parserProgressNote(job: UploadJobView, stageProgress: string | null): string | null {
   if (job.status !== "processing" || job.stage !== "parsing_document") return null;
+  if (stageProgress && stageProgress.toLowerCase().includes("docling")) {
+    return "Docling is repairing selected pages before metadata generation starts.";
+  }
   if (job.stageProgress?.unit === "pages" && job.stageProgress.total <= 1 && job.stageProgress.current >= job.stageProgress.total) {
     return "Page parsing is complete; OCR, layout, and table structure can still run before metadata starts.";
   }
@@ -389,6 +496,7 @@ function stepChipClass(state: UploadJobStep["state"]): string {
   if (state === "complete") return "border-success/30 bg-success/10 text-success";
   if (state === "active") return "border-primary/40 bg-primary/10 text-primary";
   if (state === "failed") return "border-error-red/30 bg-error-container text-error-red";
+  if (state === "cancelled") return "border-warning-amber/30 bg-warning-amber/10 text-warning-amber";
   if (state === "needs_review") return "border-warning-amber/30 bg-warning-amber/10 text-warning-amber";
   return "border-surface-border bg-surface-container-low text-secondary";
 }
@@ -396,6 +504,7 @@ function stepChipClass(state: UploadJobStep["state"]): string {
 function stepStateIcon(step: UploadJobStep) {
   if (step.state === "complete") return <CheckCircle2 aria-hidden="true" size={12} />;
   if (step.state === "failed") return <XCircle aria-hidden="true" size={12} />;
+  if (step.state === "cancelled") return <XCircle aria-hidden="true" size={12} />;
   if (step.state === "needs_review") return <AlertTriangle aria-hidden="true" size={12} />;
   if (step.state === "active") return <Loader2 aria-hidden="true" className="animate-spin" size={12} />;
   return <span aria-hidden="true" className="h-2 w-2 rounded-full bg-current opacity-40" />;
@@ -404,6 +513,7 @@ function stepStateIcon(step: UploadJobStep) {
 function terminalDetailIcon(job: UploadJobView) {
   if (job.status === "complete") return <CheckCircle2 aria-hidden="true" size={13} />;
   if (job.status === "failed") return <XCircle aria-hidden="true" size={13} />;
+  if (job.status === "cancelled") return <XCircle aria-hidden="true" size={13} />;
   if (job.status === "human_review") return <AlertTriangle aria-hidden="true" size={13} />;
   return <Activity aria-hidden="true" size={13} />;
 }
@@ -425,6 +535,25 @@ function durationLabel(totalSeconds: number): string {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function exactDurationLabel(totalSeconds: number): string {
+  if (totalSeconds < 1) return "<1s";
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return seconds > 0 ? `${totalMinutes}m ${seconds}s` : `${totalMinutes}m`;
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  return seconds > 0 ? `${hours}h ${minutes}m ${seconds}s` : `${hours}h ${minutes}m`;
+}
+
+function secondsBetween(startValue: string | null, endValue: string | null): number | null {
+  if (!startValue || !endValue) return null;
+  const start = Date.parse(startValue);
+  const end = Date.parse(endValue);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.max(0, Math.round((end - start) / 1000));
 }
 
 function agoText(label: string): string {

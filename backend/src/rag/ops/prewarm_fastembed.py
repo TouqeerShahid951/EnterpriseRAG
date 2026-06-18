@@ -1,0 +1,117 @@
+"""Download or verify FastEmbed sparse and reranker models."""
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+from typing import Any
+
+from rag.shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL, SUPPORTED_RERANKER_MODELS
+from rag.shared.runtime_offline import apply_runtime_offline_defaults
+
+DEFAULT_SPARSE_MODEL = "Qdrant/bm25"
+DEFAULT_FASTEMBED_CACHE_DIR = Path("/models/fastembed")
+
+
+def prewarm_fastembed_models(
+    *,
+    sparse_model: str,
+    reranker_models: list[str],
+    sparse_cache_dir: Path,
+    reranker_cache_dir: Path,
+) -> None:
+    apply_runtime_offline_defaults()
+    _load_sparse_model(sparse_model, sparse_cache_dir)
+    for reranker_model in reranker_models:
+        _load_reranker_model(reranker_model, reranker_cache_dir)
+
+
+def _load_sparse_model(model_name: str, cache_dir: Path) -> Any:
+    try:
+        from fastembed import SparseTextEmbedding
+
+        model = SparseTextEmbedding(model_name, cache_dir=str(cache_dir))
+        next(model.embed(["airgap sparse verification"]))
+        return model
+    except Exception as exc:
+        raise RuntimeError(
+            f"FastEmbed sparse model {model_name!r} is unavailable in cache {cache_dir}. "
+            "Seed model-cache/fastembed while connected."
+        ) from exc
+
+
+def _load_reranker_model(model_name: str, cache_dir: Path) -> Any:
+    try:
+        from fastembed.rerank.cross_encoder import TextCrossEncoder
+
+        model = TextCrossEncoder(model_name=model_name, cache_dir=str(cache_dir))
+        scores = model.rerank("airgap reranker verification", ["airgap reranker verification"])
+        if len(list(scores)) != 1:
+            raise RuntimeError("reranker probe returned an unexpected score count")
+        return model
+    except Exception as exc:
+        raise RuntimeError(
+            f"FastEmbed reranker model {model_name!r} is unavailable in cache {cache_dir}. "
+            "Seed model-cache/fastembed while connected."
+        ) from exc
+
+
+def _env_value(name: str, default: str) -> str:
+    value = os.getenv(name, "").strip()
+    return value or default
+
+
+def _env_path(name: str, default: Path) -> Path:
+    value = os.getenv(name, "").strip()
+    return Path(value) if value else default
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--sparse-model", default=_env_value("RAG_SPARSE_MODEL", DEFAULT_SPARSE_MODEL))
+    parser.add_argument(
+        "--reranker-model",
+        action="append",
+        help="FastEmbed reranker model to download or verify. Can be repeated.",
+    )
+    parser.add_argument(
+        "--all-rerankers",
+        action="store_true",
+        help="Download or verify every supported local reranker model.",
+    )
+    parser.add_argument(
+        "--sparse-cache-dir",
+        type=Path,
+        default=_env_path("RAG_SPARSE_CACHE_DIR", DEFAULT_FASTEMBED_CACHE_DIR),
+    )
+    parser.add_argument(
+        "--reranker-cache-dir",
+        type=Path,
+        default=_env_path("RAG_RERANKER_CACHE_DIR", DEFAULT_FASTEMBED_CACHE_DIR),
+    )
+    parser.add_argument("--verify-only", action="store_true", help="Validate the local cache without downloading.")
+    args = parser.parse_args()
+    if args.verify_only:
+        os.environ.setdefault("AIRGAP_RUNTIME_OFFLINE", "1")
+    reranker_models = (
+        list(SUPPORTED_RERANKER_MODELS)
+        if args.all_rerankers
+        else args.reranker_model or [_env_value("RAG_RERANKER_MODEL", DEFAULT_RERANKER_MODEL)]
+    )
+    prewarm_fastembed_models(
+        sparse_model=args.sparse_model,
+        reranker_models=reranker_models,
+        sparse_cache_dir=args.sparse_cache_dir,
+        reranker_cache_dir=args.reranker_cache_dir,
+    )
+    action = "verified" if args.verify_only else "downloaded and verified"
+    reranker_label = "all supported rerankers" if args.all_rerankers else ", ".join(reranker_models)
+    print(
+        "FastEmbed sparse/reranker models "
+        f"{action} in {args.sparse_cache_dir} and {args.reranker_cache_dir}: {reranker_label}"
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -89,7 +89,7 @@ class DocumentMetadataSaveRequest(ContractModel):
     metadata_version: int | None = Field(default=None, ge=1)
     metadata_confidence: dict[str, Any] = Field(default_factory=dict)
     metadata_provenance: dict[str, Any] = Field(default_factory=dict)
-    doc_type: DocType | None = None
+    doc_type: DocType | None = Field(default=None, max_length=80)
     auto_doc_type: str | None = None
     extracted_dates: dict[str, Any] = Field(default_factory=dict)
     metadata_flags: dict[str, Any] = Field(default_factory=dict)
@@ -134,6 +134,12 @@ class InternalJobStatusRequest(ContractModel):
 
 class InternalMutationResponse(ContractModel):
     status: Literal["accepted"] = "accepted"
+
+
+class InternalJobStatusResponse(ContractModel):
+    job_id: str
+    doc_id: str
+    status: UploadJobState
 
 
 class InternalJobAttemptResponse(ContractModel):

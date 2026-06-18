@@ -2,19 +2,34 @@
 
 from __future__ import annotations
 
-import os
+from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import replace
 from io import BytesIO
-from pathlib import Path
+import os
+import signal
+import threading
+import time
 from typing import Any, Iterable, Iterator
 
-from rag.shared.runtime_offline import apply_runtime_offline_defaults
+from rag.shared.runtime_offline import apply_runtime_offline_defaults, runtime_offline_enabled
+from rag_ingestion.docling_models import (
+    build_rapidocr_options,
+    configured_docling_artifacts_path,
+    verify_docling_offline_artifacts,
+)
 
 from .layout_blocks import LayoutBlock, blocks_to_items
 from .models import BBox, ParsedPdfItem
 from .tables import _markdown_table
 
 DOCLING_SOURCE_FLAG = "source:docling_layout"
+DEFAULT_DOCLING_CONVERT_TIMEOUT_SECONDS = 180.0
+DoclingProgressCallback = Callable[[dict[str, object]], None]
+
+
+class DoclingConversionTimeoutError(TimeoutError):
+    """Raised when a single Docling conversion batch exceeds its local budget."""
 
 
 def parse_docling_pdf(
@@ -24,6 +39,8 @@ def parse_docling_pdf(
     allow_page_repair: bool = True,
     mark_ocr: bool = False,
     page_batch_size: int | None = None,
+    progress_callback: DoclingProgressCallback | None = None,
+    progress_phase: str = "docling",
 ) -> list[ParsedPdfItem]:
     if pages is not None and not pages:
         return []
@@ -32,8 +49,23 @@ def parse_docling_pdf(
     if isinstance(converter, type):
         converter = converter()
     groups: list[set[int] | None] = page_groups or [pages]
+    group_count = len(groups)
+    total_pages = len(pages) if pages else 1
+    completed_pages = 0
     items: list[ParsedPdfItem] = []
-    for page_group in groups:
+    for group_index, page_group in enumerate(groups, start=1):
+        _emit_docling_progress(
+            progress_callback,
+            phase=progress_phase,
+            status="running",
+            pages=page_group,
+            current=completed_pages,
+            total=total_pages,
+            group_index=group_index,
+            group_count=group_count,
+            allow_page_repair=allow_page_repair,
+            mark_ocr=mark_ocr,
+        )
         items.extend(
             _parse_docling_pdf_group(
                 file_bytes,
@@ -43,6 +75,19 @@ def parse_docling_pdf(
                 allow_page_repair=allow_page_repair,
                 mark_ocr=mark_ocr,
             )
+        )
+        completed_pages = min(total_pages, completed_pages + _group_page_count(page_group, total_pages))
+        _emit_docling_progress(
+            progress_callback,
+            phase=progress_phase,
+            status="complete",
+            pages=page_group,
+            current=completed_pages,
+            total=total_pages,
+            group_index=group_index,
+            group_count=group_count,
+            allow_page_repair=allow_page_repair,
+            mark_ocr=mark_ocr,
         )
     return _renumber_items(items)
 
@@ -135,11 +180,17 @@ def _docling_imports(*, allow_ocr: bool, input_format: str) -> tuple[Any, type[A
         raise ImportError("Docling dependency is not installed.") from exc
     options: dict[Any, Any] = {}
     if input_format == "pdf":
-        artifacts_path = os.getenv("DOCLING_ARTIFACTS_PATH", "").strip()
+        artifacts_path = configured_docling_artifacts_path()
+        if runtime_offline_enabled() and artifacts_path is None:
+            raise RuntimeError("DOCLING_ARTIFACTS_PATH must be set when AIRGAP_RUNTIME_OFFLINE is enabled.")
+        if runtime_offline_enabled() and artifacts_path is not None:
+            verify_docling_offline_artifacts(artifacts_path, require_ocr=allow_ocr)
         pipeline_options = PdfPipelineOptions(
             do_ocr=allow_ocr,
-            artifacts_path=Path(artifacts_path) if artifacts_path else None,
+            artifacts_path=artifacts_path,
         )
+        if allow_ocr:
+            pipeline_options.ocr_options = build_rapidocr_options()
         options[InputFormat.PDF] = PdfFormatOption(pipeline_options=pipeline_options)
     elif input_format == "docx":
         try:
@@ -161,10 +212,91 @@ def _docling_imports(*, allow_ocr: bool, input_format: str) -> tuple[Any, type[A
 def _convert_docling(converter: Any, stream: Any, kwargs: dict[str, object]) -> Any:
     if isinstance(converter, type):
         converter = converter()
-    return converter.convert(stream, **kwargs)
+    with _docling_conversion_deadline(_docling_convert_timeout_seconds()):
+        return converter.convert(stream, **kwargs)
+
+
+def _emit_docling_progress(
+    callback: DoclingProgressCallback | None,
+    *,
+    phase: str,
+    status: str,
+    pages: set[int] | None,
+    current: int,
+    total: int,
+    group_index: int,
+    group_count: int,
+    allow_page_repair: bool,
+    mark_ocr: bool,
+) -> None:
+    if callback is None:
+        return
+    callback(
+        {
+            "phase": phase,
+            "status": status,
+            "pages": tuple(sorted(pages)) if pages else (),
+            "current": max(0, current),
+            "total": max(0, total),
+            "group_index": max(1, group_index),
+            "group_count": max(1, group_count),
+            "allow_page_repair": allow_page_repair,
+            "mark_ocr": mark_ocr,
+        }
+    )
+
+
+def _group_page_count(pages: set[int] | None, fallback_total: int) -> int:
+    if pages:
+        return len(pages)
+    return max(1, fallback_total)
+
+
+def _docling_convert_timeout_seconds() -> float:
+    value = os.getenv("DOCLING_CONVERT_TIMEOUT_SECONDS", str(DEFAULT_DOCLING_CONVERT_TIMEOUT_SECONDS)).strip()
+    return max(0.0, float(value or DEFAULT_DOCLING_CONVERT_TIMEOUT_SECONDS))
+
+
+@contextmanager
+def _docling_conversion_deadline(timeout_seconds: float) -> Iterator[None]:
+    if timeout_seconds <= 0 or not hasattr(signal, "SIGALRM") or threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def raise_timeout(_signum: int, _frame: object) -> None:
+        raise DoclingConversionTimeoutError(f"Docling conversion exceeded {timeout_seconds:g}s.")
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    started = time.monotonic()
+    signal.signal(signal.SIGALRM, raise_timeout)
+    signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+    try:
+        yield
+    finally:
+        elapsed = time.monotonic() - started
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer[0] > 0:
+            signal.setitimer(signal.ITIMER_REAL, max(0.001, previous_timer[0] - elapsed), previous_timer[1])
 
 
 def _iter_docling_items(document: Any) -> Iterator[tuple[Any, int | None]]:
+    yielded = False
+    body = getattr(document, "body", None)
+    seen_refs: set[str] = set()
+    seen_ids: set[int] = set()
+    for item, depth in _walk_docling_tree(body, document, depth=1, seen_refs=seen_refs, seen_ids=seen_ids):
+        yielded = True
+        yield item, depth
+    if yielded:
+        return
+    for collection_name in ("texts", "tables", "pictures"):
+        for item in getattr(document, collection_name, []) or []:
+            yield item, None
+            yielded = True
+    if yielded:
+        return
     iterator = getattr(document, "iterate_items", None)
     if iterator is not None:
         try:
@@ -173,30 +305,36 @@ def _iter_docling_items(document: Any) -> Iterator[tuple[Any, int | None]]:
                     yield value[0], _int_or_none(value[1])
                 else:
                     yield value, None
-            return
         except Exception:
             pass
-    yielded = False
-    body = getattr(document, "body", None)
-    for item, depth in _walk_docling_tree(body, document, depth=1):
-        yielded = True
-        yield item, depth
-    if yielded:
-        return
-    for collection_name in ("texts", "tables", "pictures"):
-        for item in getattr(document, collection_name, []) or []:
-            yield item, None
 
 
-def _walk_docling_tree(node: Any, document: Any, *, depth: int) -> Iterator[tuple[Any, int]]:
+def _walk_docling_tree(
+    node: Any,
+    document: Any,
+    *,
+    depth: int,
+    seen_refs: set[str],
+    seen_ids: set[int],
+) -> Iterator[tuple[Any, int]]:
     if node is None:
         return
     for child in getattr(node, "children", []) or []:
         resolved = _resolve_docling_ref(child, document)
         if resolved is None:
             continue
+        ref = _self_ref(resolved)
+        if ref:
+            if ref in seen_refs:
+                continue
+            seen_refs.add(ref)
+        else:
+            identity = id(resolved)
+            if identity in seen_ids:
+                continue
+            seen_ids.add(identity)
         yield resolved, depth
-        yield from _walk_docling_tree(resolved, document, depth=depth + 1)
+        yield from _walk_docling_tree(resolved, document, depth=depth + 1, seen_refs=seen_refs, seen_ids=seen_ids)
 
 
 def _resolve_docling_ref(value: Any, document: Any) -> Any | None:

@@ -11,9 +11,7 @@ from .dates import days_between, extract_dates
 from .entities import extract_named_entities
 from .language import detect_language
 from .models import DocumentMetadataBundle
-from .topics import classify_doc_type, classify_topics
-
-DOC_TYPES = {"policy", "procedure", "report", "contract", "memo", "manual", "other"}
+from .topics import classify_topics
 
 
 def build_metadata_bundle(
@@ -25,12 +23,11 @@ def build_metadata_bundle(
     use_gliner: bool,
 ) -> DocumentMetadataBundle:
     auto_topics, topic_scores = classify_topics(text, topic_taxonomy)
-    auto_doc_type, auto_doc_type_confidence = classify_doc_type(text)
     extracted_dates = extract_dates(text)
     language = detect_language(text)
     llm_topics = _string_list(llm_metadata.get("llm_topics") or llm_metadata.get("topics"))[:8]
     topics = _unique([*auto_topics, *_taxonomy_matches(llm_topics, topic_taxonomy)])
-    metadata_flags = _metadata_flags(job, extracted_dates, auto_doc_type, auto_doc_type_confidence)
+    metadata_flags = _metadata_flags(job, extracted_dates)
     extraction = _dict(llm_metadata.get("_metadata_extraction"))
     if extraction:
         metadata_flags["metadata_extraction"] = extraction
@@ -44,14 +41,13 @@ def build_metadata_bundle(
         topic_scores=topic_scores,
         llm_topics=llm_topics,
         doc_type=llm_doc_type,
-        auto_doc_type=auto_doc_type,
-        auto_doc_type_confidence=auto_doc_type_confidence,
+        auto_doc_type="",
+        auto_doc_type_confidence=0.0,
         metadata_confidence=_metadata_confidence(
             summary=str(llm_metadata.get("summary", "")).strip(),
             llm_doc_type=llm_doc_type,
             llm_topics=llm_topics,
             topic_scores=topic_scores,
-            auto_doc_type_confidence=auto_doc_type_confidence,
             entities=entities,
             extracted_dates=extracted_dates,
             claims=claims,
@@ -69,8 +65,6 @@ def build_metadata_bundle(
 def _metadata_flags(
     job: IngestJobPayload,
     extracted_dates: dict[str, Any],
-    auto_doc_type: str,
-    auto_doc_type_confidence: float,
 ) -> dict[str, Any]:
     flags: dict[str, Any] = {}
     body_effective = extracted_dates.get("effective_date_body")
@@ -86,13 +80,6 @@ def _metadata_flags(
                 "detected": body_effective,
                 "delta_days": delta,
             }
-    declared_doc_type = job.doc_type.strip().lower()
-    if declared_doc_type != "other" and auto_doc_type != "other" and auto_doc_type != declared_doc_type and auto_doc_type_confidence > 0.85:
-        flags["doc_type_mismatch"] = {
-            "declared": declared_doc_type,
-            "detected": auto_doc_type,
-            "confidence": auto_doc_type_confidence,
-        }
     supersession_refs = extracted_dates.get("supersession_refs")
     if isinstance(supersession_refs, list) and supersession_refs and not job.supersedes:
         flags["supersession_suggested"] = {"references": supersession_refs[:10]}
@@ -125,8 +112,7 @@ def _claims(value: Any) -> list[dict[str, str]]:
 
 
 def _doc_type(value: Any) -> str:
-    doc_type = str(value or "other").strip().lower()
-    return doc_type if doc_type in DOC_TYPES else "other"
+    return " ".join(str(value or "").strip().lower().split())[:80]
 
 
 def _metadata_confidence(
@@ -135,7 +121,6 @@ def _metadata_confidence(
     llm_doc_type: str,
     llm_topics: list[str],
     topic_scores: dict[str, float],
-    auto_doc_type_confidence: float,
     entities: list[Any],
     extracted_dates: dict[str, Any],
     claims: list[dict[str, str]],
@@ -143,7 +128,7 @@ def _metadata_confidence(
     topic_confidence = max(topic_scores.values()) if topic_scores else (0.7 if llm_topics else 0.0)
     return {
         "summary": 0.75 if summary else 0.0,
-        "doc_type": 0.82 if llm_doc_type != "other" else round(auto_doc_type_confidence, 3),
+        "doc_type": 0.82 if llm_doc_type else 0.0,
         "topics": round(min(1.0, topic_confidence), 3),
         "entities": 0.65 if entities else 0.0,
         "dates": 0.8 if extracted_dates else 0.0,
@@ -155,9 +140,8 @@ def _metadata_provenance(*, llm_doc_type: str, extraction: dict[str, Any]) -> di
     mode = str(extraction.get("mode", "single_pass_v1") if extraction else "single_pass_v1")
     return {
         "summary": "llm",
-        "doc_type": "llm" if llm_doc_type != "other" else "deterministic_keyword",
+        "doc_type": "llm" if llm_doc_type else "not_inferred",
         "topics": "deterministic_taxonomy+llm_taxonomy",
-        "auto_doc_type": "deterministic_keyword",
         "entities": "deterministic_or_gliner",
         "dates": "deterministic_regex",
         "claims": "llm",

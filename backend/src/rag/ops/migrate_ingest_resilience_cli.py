@@ -18,15 +18,25 @@ ALTER TABLE ingest_jobs ADD CONSTRAINT ingest_jobs_warnings_array CHECK (jsonb_t
 CREATE TABLE IF NOT EXISTS workspace_ingest_config (
     config_key TEXT PRIMARY KEY DEFAULT 'active',
     worker_concurrency INTEGER NOT NULL DEFAULT 1,
+    ocr_review_confidence_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.9,
     updated_by UUID NULL REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT workspace_ingest_config_singleton CHECK (config_key = 'active'),
-    CONSTRAINT workspace_ingest_config_concurrency_range CHECK (worker_concurrency BETWEEN 1 AND 10)
+    CONSTRAINT workspace_ingest_config_concurrency_range CHECK (worker_concurrency BETWEEN 1 AND 10),
+    CONSTRAINT workspace_ingest_config_ocr_review_threshold CHECK (
+        ocr_review_confidence_threshold >= 0 AND ocr_review_confidence_threshold <= 1
+    )
 );
 INSERT INTO workspace_ingest_config (config_key, worker_concurrency)
 VALUES ('active', 1)
 ON CONFLICT (config_key) DO NOTHING;
+ALTER TABLE workspace_ingest_config
+    ADD COLUMN IF NOT EXISTS ocr_review_confidence_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.9;
+ALTER TABLE workspace_ingest_config DROP CONSTRAINT IF EXISTS workspace_ingest_config_ocr_review_threshold;
+ALTER TABLE workspace_ingest_config ADD CONSTRAINT workspace_ingest_config_ocr_review_threshold CHECK (
+    ocr_review_confidence_threshold >= 0 AND ocr_review_confidence_threshold <= 1
+);
 
 ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS chat_latency_ms DOUBLE PRECISION NULL;
 ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS embed_latency_ms DOUBLE PRECISION NULL;

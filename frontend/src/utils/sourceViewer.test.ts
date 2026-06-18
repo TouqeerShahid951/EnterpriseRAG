@@ -8,6 +8,8 @@ import {
   fitContentWidthScale,
   fitPdfPageScale,
   fitPdfWidthScale,
+  jsonDocumentText,
+  jsonHighlightRange,
   sourcePageFromInput,
   sourceDocumentKind,
   sourceRegionsForPage,
@@ -24,6 +26,7 @@ const source: SourceAnchor = {
   doc_title: "Records Policy.pdf",
   effective_date: "2026-01-01",
   excerpt: "Records must be retained for seven years.",
+  clearance_level: "NATO_RESTRICTED",
   group_path: "/legal",
   highlight_ranges: [],
   page: 4,
@@ -51,9 +54,11 @@ describe("source viewer utilities", () => {
     });
   });
 
-  it("detects PDF, DOCX, JPEG, and PNG content from media type or filename", () => {
+  it("detects PDF, DOCX, JSON, JPEG, and PNG content from media type or filename", () => {
     expect(sourceDocumentKind("application/pdf", "document")).toBe("pdf");
     expect(sourceDocumentKind("", "policy.DOCX")).toBe("docx");
+    expect(sourceDocumentKind("application/json", "records")).toBe("json");
+    expect(sourceDocumentKind("", "records.JSON")).toBe("json");
     expect(sourceDocumentKind("image/jpeg", "scan")).toBe("image");
     expect(sourceDocumentKind("", "photo.JPEG")).toBe("image");
     expect(sourceDocumentKind("image/png", "chart")).toBe("image");
@@ -65,6 +70,18 @@ describe("source viewer utilities", () => {
     expect(citedSourcePage(source)).toBe(4);
     expect(sourceRegionsForPage(source, 4)).toHaveLength(1);
     expect(sourceTextCandidates(source)).toEqual(["Records must be retained for seven years."]);
+  });
+
+  it("pretty-prints JSON and highlights cited values from JSON evidence excerpts", () => {
+    const encoded = new TextEncoder().encode('{"case_id":"FIR-001","accused":"Sajjad Hussain"}');
+    const { prettyText } = jsonDocumentText(encoded.buffer as ArrayBuffer);
+    const range = jsonHighlightRange(prettyText, [
+      "JSON path: cases[0]\naccused: Sajjad Hussain\nJSON path for accused: cases[0].accused",
+    ]);
+
+    expect(prettyText).toContain('"case_id": "FIR-001"');
+    expect(range).not.toBeNull();
+    expect(prettyText.slice(range?.start, range?.end)).toBe("Sajjad Hussain");
   });
 
   it("falls back to page one and excerpt text for old source anchors", () => {

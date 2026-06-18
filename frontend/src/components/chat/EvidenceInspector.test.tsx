@@ -10,6 +10,7 @@ const source: SourceAnchor = {
   doc_title: "Records Policy.pdf",
   effective_date: "2026-01-01",
   excerpt: "Records must be retained for seven years.",
+  clearance_level: "NATO_RESTRICTED",
   group_path: "/legal",
   highlight_ranges: [],
   page: 4,

@@ -8,7 +8,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from ..auth.abac import normalize_group_path
-from ..shared.contracts.clearance import normalize_clearance_level
+from ..shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
 from .document_models import (
     AuditEventRecord,
     DocumentCrossReferenceRecord,
@@ -85,6 +85,18 @@ class InMemoryDocumentRepository:
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None:
         document = self._documents.get(document_id)
         return None if document is None or (document.deleted_at is not None and not include_deleted) else document
+
+    def update_document_clearance(self, document_id: str, clearance_level: ClearanceLevel) -> DocumentRecord | None:
+        document = self.get_document(document_id)
+        if document is None:
+            return None
+        updated = replace(
+            document,
+            clearance_level=normalize_clearance_level(clearance_level),
+            updated_at=datetime.now(UTC),
+        )
+        self._documents[document_id] = updated
+        return updated
 
     def find_current_by_content_hash(self, content_hash: str) -> DocumentRecord | None:
         return next(
@@ -203,7 +215,7 @@ class InMemoryDocumentRepository:
             error_message_safe=None,
             created_at=now,
             updated_at=now,
-            completed_at=now if status in {"complete", "failed", "human_review"} else None,
+            completed_at=now if status in {"complete", "failed", "human_review", "cancelled"} else None,
         )
         self._jobs[job.id] = job
         self._documents[doc_id] = replace(self._documents[doc_id], ingest_status=status, updated_at=now)
@@ -232,6 +244,8 @@ class InMemoryDocumentRepository:
         job = self._jobs.get(job_id)
         if job is None:
             return None
+        if job.status == "cancelled" and kwargs["status"] != "cancelled":
+            return job
         now = datetime.now(UTC)
         status = kwargs["status"]
         updated = replace(
@@ -243,7 +257,7 @@ class InMemoryDocumentRepository:
             error_code=kwargs.get("error_code"),
             error_message_safe=kwargs.get("error_message_safe"),
             updated_at=now,
-            completed_at=now if status in {"complete", "failed", "human_review"} else None,
+            completed_at=now if status in {"complete", "failed", "human_review", "cancelled"} else None,
         )
         self._jobs[job_id] = updated
         self._documents[job.doc_id] = replace(self._documents[job.doc_id], ingest_status=status, updated_at=now)
@@ -335,6 +349,21 @@ class InMemoryDocumentRepository:
             payload={"doc_id": job.doc_id, "provenance": dict(provenance)},
         )
         return updated
+
+    def cancel_review_batch_for_job(self, job_id: str) -> int:
+        batches = [batch for batch in self._review_batches.values() if batch.job_id == job_id and batch.status == "pending"]
+        if not batches:
+            return 0
+        now = datetime.now(UTC)
+        batch_ids = {batch.id for batch in batches}
+        cancelled_items = 0
+        for batch in batches:
+            self._review_batches[batch.id] = replace(batch, status="rejected", updated_at=now)
+        for item_id, item in list(self._review_items.items()):
+            if item.batch_id in batch_ids and item.status == "pending":
+                self._review_items[item_id] = replace(item, status="rejected", updated_at=now)
+                cancelled_items += 1
+        return cancelled_items
 
     def mark_superseded(self, *, new_doc_id: str, old_doc_ids: list[str]) -> list[DocumentRecord]:
         return mark_superseded(self, new_doc_id=new_doc_id, old_doc_ids=old_doc_ids)

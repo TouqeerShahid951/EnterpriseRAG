@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Database,
   FileSearch,
@@ -35,9 +36,10 @@ import {
 } from "../../routes";
 import type { User as AuthUser } from "../../types/api";
 
-export const FAHAM_SIDEBAR_MIN_WIDTH = 240;
-export const FAHAM_SIDEBAR_MAX_WIDTH = 400;
-export const FAHAM_SIDEBAR_DEFAULT_WIDTH = 280;
+export const FAHAM_SIDEBAR_MIN_WIDTH = 184;
+export const FAHAM_SIDEBAR_MAX_WIDTH = 280;
+export const FAHAM_SIDEBAR_DEFAULT_WIDTH = 208;
+export const FAHAM_SIDEBAR_COLLAPSED_WIDTH = 56;
 
 const iconByKey: Record<NavigationIcon, LucideIcon> = {
   audit: FolderKanban,
@@ -57,8 +59,10 @@ export function FahamSidebar({
   isLightMode,
   onLogout,
   onNavigate,
+  onSidebarCollapsedChange,
   onSidebarWidthChange,
   onToggleTheme,
+  sidebarCollapsed,
   sidebarWidth,
   user,
 }: Props) {
@@ -69,16 +73,18 @@ export function FahamSidebar({
   const drawerRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const jobsSummaryQuery = useQuery({
-    queryKey: ["ingest-jobs", "summary", "sidebar"],
+    queryKey: ["ingest-jobs", "summary"],
     queryFn: () => ingestJobsApi.summary(),
     enabled: canAccessRoute(user, "ingestion-jobs"),
     refetchInterval: 5000,
+    staleTime: 4000,
     retry: false,
   });
   const trashQuery = useQuery({
     queryKey: ["documents", "list", "deleted"],
     queryFn: () => documentsApi.list({ state: "deleted" }),
     enabled: canAccessRoute(user, "document-trash"),
+    staleTime: 15000,
     retry: false,
   });
   const reviewQuery = useQuery({
@@ -86,6 +92,7 @@ export function FahamSidebar({
     queryFn: reviewApi.list,
     enabled: canAccessRoute(user, "review"),
     refetchInterval: 5000,
+    staleTime: 4000,
     retry: false,
   });
 
@@ -147,6 +154,7 @@ export function FahamSidebar({
   }
 
   function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
+    if (sidebarCollapsed) return;
     if (event.button !== 0) return;
     event.preventDefault();
 
@@ -173,6 +181,7 @@ export function FahamSidebar({
   }
 
   function handleResizeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (sidebarCollapsed) return;
     if (event.key === "ArrowLeft") onSidebarWidthChange(clampSidebarWidth(sidebarWidth - 8));
     else if (event.key === "ArrowRight") onSidebarWidthChange(clampSidebarWidth(sidebarWidth + 8));
     else if (event.key === "Home") onSidebarWidthChange(FAHAM_SIDEBAR_MIN_WIDTH);
@@ -180,6 +189,12 @@ export function FahamSidebar({
     else return;
     event.preventDefault();
   }
+
+  const sidebarClassName = [
+    "faham-sidebar",
+    sidebarCollapsed ? "faham-sidebar-collapsed" : "",
+    mobileOpen ? "faham-sidebar-mobile-open" : "",
+  ].filter(Boolean).join(" ");
 
   return (
     <>
@@ -192,14 +207,14 @@ export function FahamSidebar({
           </span>
         </div>
         <button ref={triggerRef} type="button" onClick={() => setMobileOpen(true)} aria-expanded={mobileOpen} aria-controls="faham-primary-sidebar" aria-label="Open workspace navigation">
-          <Menu size={20} />
+          <Menu size={18} />
         </button>
       </div>
       <button type="button" className={mobileOpen ? "faham-sidebar-backdrop faham-sidebar-backdrop-visible" : "faham-sidebar-backdrop"} onClick={closeMobileDrawer} aria-label="Close workspace navigation" tabIndex={mobileOpen ? 0 : -1} />
       <aside
         ref={drawerRef}
         id="faham-primary-sidebar"
-        className={mobileOpen ? "faham-sidebar faham-sidebar-mobile-open" : "faham-sidebar"}
+        className={sidebarClassName}
         aria-label="Workspace navigation"
         onKeyDown={handleDrawerKeyDown}
       >
@@ -209,7 +224,7 @@ export function FahamSidebar({
             <strong>Faham AI</strong>
           </span>
           <button type="button" onClick={closeMobileDrawer} aria-label="Close workspace navigation">
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
         <div className={headerContent ? "faham-sidebar-header faham-sidebar-header-context" : "faham-sidebar-header"}>
@@ -218,9 +233,12 @@ export function FahamSidebar({
               <div className="faham-sidebar-context-heading">
                 <FahamBrandMark />
                 <div className="min-w-0">
-                  <p>Faham AI</p>
-                  <h2>Knowledge Space</h2>
+                  <h2>Faham AI</h2>
                 </div>
+                <SidebarCollapseButton
+                  collapsed={sidebarCollapsed}
+                  onToggle={() => onSidebarCollapsedChange(!sidebarCollapsed)}
+                />
               </div>
               <div className="faham-sidebar-space-control">{headerContent}</div>
             </div>
@@ -231,6 +249,10 @@ export function FahamSidebar({
                 <h2 className="truncate text-label-md font-bold uppercase text-on-surface">Faham AI</h2>
                 <p className="truncate text-[11px] font-semibold text-on-surface-variant">{primarySpace}</p>
               </div>
+              <SidebarCollapseButton
+                collapsed={sidebarCollapsed}
+                onToggle={() => onSidebarCollapsedChange(!sidebarCollapsed)}
+              />
             </div>
           )}
         </div>
@@ -240,6 +262,7 @@ export function FahamSidebar({
             badgeValue={badgeValue}
             expandedGroup={expandedGroup}
             items={items}
+            sidebarCollapsed={sidebarCollapsed}
             onExpand={setExpandedGroup}
             onNavigate={navigate}
           />
@@ -251,8 +274,9 @@ export function FahamSidebar({
             className={activeRoute === "account" ? "faham-account-button faham-account-button-active" : "faham-account-button"}
             aria-current={activeRoute === "account" ? "page" : undefined}
             aria-label={`Account management for ${user.email}`}
+            title={`Account: ${user.email}`}
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-fixed text-on-primary-fixed text-[12px] font-bold">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary-fixed text-on-primary-fixed text-[11px] font-bold">
               {user.email.slice(0, 2).toUpperCase()}
             </div>
             <div>
@@ -268,9 +292,10 @@ export function FahamSidebar({
               aria-label={isLightMode ? "Switch to dark mode" : "Switch to light mode"}
               className="faham-theme-switch"
               onClick={onToggleTheme}
+              title="Theme"
             >
               <span className="faham-theme-switch-label">
-                {isLightMode ? <Sun size={17} aria-hidden="true" /> : <Moon size={17} aria-hidden="true" />}
+                {isLightMode ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
                 <span>
                   <strong>Theme</strong>
                   <small>{isLightMode ? "Light mode" : "Dark mode"}</small>
@@ -282,13 +307,13 @@ export function FahamSidebar({
             </button>
           ) : null}
           {onLogout ? (
-            <button type="button" onClick={onLogout} className="faham-signout-button">
-              <LogOut size={15} aria-hidden="true" />
+            <button type="button" onClick={onLogout} className="faham-signout-button" title="Sign out">
+              <LogOut size={14} aria-hidden="true" />
               Sign out
             </button>
           ) : null}
         </div>
-        <div
+        {!sidebarCollapsed ? <div
           className="faham-sidebar-resize-handle"
           role="separator"
           aria-label="Resize sidebar"
@@ -300,14 +325,29 @@ export function FahamSidebar({
           onPointerDown={handleResizeStart}
           tabIndex={0}
         >
-          <GripVertical size={14} aria-hidden="true" />
-        </div>
+          <GripVertical size={12} aria-hidden="true" />
+        </div> : null}
       </aside>
     </>
   );
 }
 
-function SidebarItems({ activeRoute, badgeValue, expandedGroup, items, onExpand, onNavigate }: SidebarItemsProps) {
+function SidebarCollapseButton({ collapsed, onToggle }: SidebarCollapseButtonProps) {
+  return (
+    <button
+      type="button"
+      className="faham-sidebar-collapse-button"
+      onClick={onToggle}
+      aria-label={collapsed ? "Expand workspace navigation" : "Collapse workspace navigation"}
+      aria-expanded={!collapsed}
+      title={collapsed ? "Expand navigation" : "Collapse navigation"}
+    >
+      {collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronLeft size={14} aria-hidden="true" />}
+    </button>
+  );
+}
+
+function SidebarItems({ activeRoute, badgeValue, expandedGroup, items, onExpand, onNavigate, sidebarCollapsed }: SidebarItemsProps) {
   let lastSection = "";
   let firstButton = true;
   return (
@@ -333,14 +373,16 @@ function SidebarItems({ activeRoute, badgeValue, expandedGroup, items, onExpand,
               }}
               className={active ? "faham-sidenav-item-active" : "faham-sidenav-item"}
               aria-current={!item.children && active ? "page" : undefined}
-              aria-expanded={item.children ? expanded : undefined}
+              aria-expanded={item.children && !sidebarCollapsed ? expanded : undefined}
+              aria-label={item.label}
+              title={item.label}
             >
-              <Icon size={18} aria-hidden="true" />
+              <Icon size={16} aria-hidden="true" />
               <span className="faham-nav-label">{item.label}</span>
               <NavigationBadgeCount count={badgeValue(item.badge)} />
-              {item.children ? expanded ? <ChevronDown className="faham-nav-chevron" size={15} /> : <ChevronRight className="faham-nav-chevron" size={15} /> : null}
+              {item.children ? expanded ? <ChevronDown className="faham-nav-chevron" size={13} /> : <ChevronRight className="faham-nav-chevron" size={13} /> : null}
             </button>
-            {item.children && expanded ? (
+            {item.children && expanded && !sidebarCollapsed ? (
               <div className="faham-sidenav-children">
                 {item.children.map((child) => {
                   const count = badgeValue(child.badge);
@@ -384,8 +426,10 @@ type Props = {
   isLightMode: boolean;
   onLogout?: () => void;
   onNavigate: (route: RouteId) => void;
+  onSidebarCollapsedChange: (collapsed: boolean) => void;
   onSidebarWidthChange: (width: number) => void;
   onToggleTheme?: () => void;
+  sidebarCollapsed: boolean;
   sidebarWidth: number;
   user: AuthUser;
 };
@@ -397,6 +441,12 @@ type SidebarItemsProps = {
   items: WorkspaceNavigationItem[];
   onExpand: (group: string) => void;
   onNavigate: (route: RouteId) => void;
+  sidebarCollapsed: boolean;
+};
+
+type SidebarCollapseButtonProps = {
+  collapsed: boolean;
+  onToggle: () => void;
 };
 
 function clampSidebarWidth(width: number): number {

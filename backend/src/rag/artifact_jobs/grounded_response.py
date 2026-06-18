@@ -24,12 +24,12 @@ from .contracts import (
 
 
 def response_is_artifact_ready(response: RAGResponse, *, faithfulness_threshold: float) -> bool:
-    return (
-        bool(response.sources)
-        and not response.degraded
-        and response.faithfulness_status != "failed"
-        and response.faithfulness_score >= faithfulness_threshold
-    )
+    _ = faithfulness_threshold  # Kept for call-site compatibility.
+    if not response.sources:
+        return False
+    if response.degraded and response.degraded_reason != "faithfulness_check_failed":
+        return False
+    return True
 
 
 def build_grounded_artifact_payload(

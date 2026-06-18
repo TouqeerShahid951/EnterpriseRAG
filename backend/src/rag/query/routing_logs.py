@@ -176,10 +176,15 @@ def log_verifier_decision(ctx: QueryContext) -> None:
         "retrieved_hit_count": len(ctx["retrieved_hits"]),
         "evidence_quality": quality.quality if quality is not None else None,
         "evidence_quality_reasons": list(quality.reasons) if quality is not None else [],
+        "evidence_score": _round(quality.evidence_score) if quality is not None else None,
+        "evidence_outcome": quality.outcome if quality is not None else None,
         "query_token_coverage": _round(quality.query_token_coverage) if quality is not None else None,
         "max_retrieval_score": _round(quality.max_retrieval_score) if quality is not None else None,
         "max_rerank_score": _round(quality.max_rerank_score) if quality is not None and quality.max_rerank_score is not None else None,
         "distinct_doc_count": quality.distinct_doc_count if quality is not None else 0,
+        "structured_hit_count": quality.structured_hit_count if quality is not None else 0,
+        "metadata_hit_count": quality.metadata_hit_count if quality is not None else 0,
+        "document_class_match_count": quality.document_class_match_count if quality is not None else 0,
         "execution_mode": ctx["execution_modes"].get("verifier"),
         "detail": ctx["execution_details"].get("verifier"),
     }
@@ -308,10 +313,17 @@ def log_route_outcome(ctx: QueryContext) -> None:
         ),
         "evidence_quality": evidence_quality.quality if evidence_quality is not None else None,
         "evidence_quality_reasons": list(evidence_quality.reasons) if evidence_quality is not None else [],
+        "evidence_score": round(evidence_quality.evidence_score, 3) if evidence_quality is not None else None,
+        "evidence_outcome": evidence_quality.outcome if evidence_quality is not None else None,
         "query_token_coverage": (
             round(evidence_quality.query_token_coverage, 3) if evidence_quality is not None else None
         ),
         "distinct_doc_count": evidence_quality.distinct_doc_count if evidence_quality is not None else 0,
+        "structured_hit_count": evidence_quality.structured_hit_count if evidence_quality is not None else 0,
+        "metadata_hit_count": evidence_quality.metadata_hit_count if evidence_quality is not None else 0,
+        "document_class_match_count": (
+            evidence_quality.document_class_match_count if evidence_quality is not None else 0
+        ),
         "route_reroute_count": ctx["route_reroute_count"],
         "verifier_decision": ctx["verifier_decision"],
         "conflict_checker_used": ctx["conflict_checker_used"],

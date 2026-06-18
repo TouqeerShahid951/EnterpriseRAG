@@ -21,19 +21,29 @@ import {
 } from "lucide-react";
 
 import { adminApi, documentsApi } from "../api/contracts";
-import { canManageSpaces, canUploadToSpace, canViewSpaceMetadata, canWriteDocument, isGlobalAdmin, isGroupPathInUserScope } from "../authz";
+import {
+  canManageSpaces,
+  canUploadToSpace,
+  canViewSpaceMetadata,
+  canWriteDocument,
+  clearanceLevelDescription,
+  clearanceLevelLabel,
+  clearanceLevelsAssignableBy,
+  defaultClearanceLevel,
+  isGlobalAdmin,
+  isGroupPathInUserScope,
+} from "../authz";
 import { useToast } from "../components/feedback/ToastProvider";
 import { Fact, InlineMessage, Skeleton } from "../components/layout/Common";
 import { FahamWorkspace } from "../components/layout/FahamWorkspace";
 import { Modal } from "../components/layout/Modal";
 import type { RouteId } from "../routes";
 import { formatStageProgress, isUploadTerminalStatus } from "../state/uploadJobProgress";
-import type { Document, DocumentIngestStatus, User as AuthUser, VersionChainResponse } from "../types/api";
+import type { ClearanceLevel, Document, DocumentIngestStatus, User as AuthUser, VersionChainResponse } from "../types/api";
 import type { UploadBatchItemView } from "../types/chat";
 import { errorMessage, formatDate, formatDateTime } from "../utils/format";
 import {
   buildGroupPath,
-  collectDescendantPaths,
   flattenGroups,
   groupPathIssue,
   isDocumentInSpace,
@@ -63,8 +73,8 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
   const [spaceDraft, setSpaceDraft] = useState<SpaceDraft>(() => createSpaceDraft());
   const [deletingSpacePath, setDeletingSpacePath] = useState<string | null>(null);
 
-  const activeDocsQuery = useQuery({ queryKey: ["documents", "list", "active"], queryFn: () => documentsApi.list({ state: "active" }), enabled: view !== "trash", retry: false });
-  const deletedDocsQuery = useQuery({ queryKey: ["documents", "list", "deleted"], queryFn: () => documentsApi.list({ state: "deleted" }), enabled: view === "trash", retry: false });
+  const activeDocsQuery = useQuery({ queryKey: ["documents", "list", "active"], queryFn: () => documentsApi.list({ state: "active" }), enabled: view !== "trash", staleTime: 5000, retry: false });
+  const deletedDocsQuery = useQuery({ queryKey: ["documents", "list", "deleted"], queryFn: () => documentsApi.list({ state: "deleted" }), enabled: view === "trash", staleTime: 15000, retry: false });
   const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.listGroups, retry: false, enabled: view === "spaces" && canLoadSpaceDirectory });
 
   const activeDocuments = activeDocsQuery.data?.items ?? [];
@@ -129,7 +139,6 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
       adminApi.createGroup({
         path: draft.path.trim(),
         name: draft.name.trim(),
-        parent_path: draft.parentPath || null,
       }),
     onSuccess: (space) => {
       openSpace(space.path);
@@ -144,7 +153,6 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
       adminApi.updateGroup({
         path: draft.path.trim(),
         name: draft.name.trim(),
-        parent_path: draft.parentPath || null,
       }),
     onSuccess: (space) => {
       openSpace(space.path);
@@ -170,6 +178,35 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
       tone: "error",
     }),
     onSettled: () => setDeletingSpacePath(null),
+  });
+
+  const updateDocumentClearanceMutation = useMutation({
+    mutationFn: ({ clearanceLevel, document }: DocumentClearanceMutation) =>
+      documentsApi.updateClearance(document.id, { clearance_level: clearanceLevel }),
+    onMutate: ({ document }) => {
+      setPendingIds((current) => new Set([...current, document.id]));
+    },
+    onSuccess: (updated) => {
+      notify({
+        title: "Document clearance updated",
+        description: `${updated.title} is now ${clearanceLevelLabel(updated.clearance_level)}.`,
+        tone: "success",
+      });
+      void refreshDocuments();
+    },
+    onError: (error) => notify({
+      title: "Clearance update failed",
+      description: errorMessage(error, "Unable to update document clearance."),
+      tone: "error",
+    }),
+    onSettled: (_data, _error, variables) => {
+      if (!variables) return;
+      setPendingIds((current) => {
+        const next = new Set(current);
+        next.delete(variables.document.id);
+        return next;
+      });
+    },
   });
 
   function activateTab(tab: ExplorerTab) {
@@ -201,9 +238,9 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
     deleteSpaceMutation.reset();
   }
 
-  function openCreateSpace(parentPath = "") {
+  function openCreateSpace() {
     resetSpaceMutations();
-    setSpaceDraft(createSpaceDraft(parentPath));
+    setSpaceDraft(createSpaceDraft());
     setSpacePanel({ kind: "create-space" });
   }
 
@@ -211,7 +248,6 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
     resetSpaceMutations();
     setSpaceDraft({
       name: space.name,
-      parentPath: space.parentPath ?? "",
       path: space.path,
       pathTouched: true,
     });
@@ -227,15 +263,7 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
     setSpaceDraft((draft) => ({
       ...draft,
       name,
-      path: draft.pathTouched ? draft.path : buildGroupPath(draft.parentPath, name),
-    }));
-  }
-
-  function updateSpaceParent(parentPath: string) {
-    setSpaceDraft((draft) => ({
-      ...draft,
-      parentPath,
-      path: draft.pathTouched ? draft.path : buildGroupPath(parentPath, draft.name),
+      path: draft.pathTouched ? draft.path : buildGroupPath("", name),
     }));
   }
 
@@ -337,7 +365,7 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
             </div>
             <div className="flex flex-wrap gap-2">
               {view === "spaces" && isSpaceManager ? (
-                <button type="button" onClick={() => openCreateSpace(selectedSpace?.path ?? "")} className="sv-action-secondary">
+                <button type="button" onClick={() => openCreateSpace()} className="sv-action-secondary">
                   <FolderPlus size={16} />
                   New Space
                 </button>
@@ -382,7 +410,6 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
                   expandedPaths={expandedPaths}
                   isLoading={isLoadingDirectory}
                   isSpaceManager={isSpaceManager}
-                  onCreateChild={openCreateSpace}
                   onDeleteSpace={deleteSpace}
                   onEditSpace={openEditSpace}
                   onOpenSpace={openSpace}
@@ -444,6 +471,7 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
                 <DocumentInspector
                   document={selectedDocument}
                   onClose={() => setSelectedDocumentId(null)}
+                  onClearanceChange={(document, clearanceLevel) => updateDocumentClearanceMutation.mutate({ document, clearanceLevel })}
                   onDocumentAction={performDocumentAction}
                   pending={pendingIds.has(selectedDocument!.id)}
                   user={user}
@@ -501,6 +529,7 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
                 <DocumentInspector
                   document={selectedDocument}
                   onClose={() => setSelectedDocumentId(null)}
+                  onClearanceChange={(document, clearanceLevel) => updateDocumentClearanceMutation.mutate({ document, clearanceLevel })}
                   onDocumentAction={performDocumentAction}
                   pending={pendingIds.has(selectedDocument!.id)}
                   user={user}
@@ -511,7 +540,7 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
         </div>
 
         {view === "spaces" ? <Modal
-          description={spacePanel?.kind === "create-space" ? "Create a retrieval boundary and choose where it belongs." : "Update the name or parent for this Knowledge Space."}
+          description={spacePanel?.kind === "create-space" ? "Create a retrieval boundary for documents and answers." : "Update the display name for this Knowledge Space."}
           icon={<FolderPlus size={18} />}
           onClose={closeSpacePanel}
           open={Boolean(spacePanel)}
@@ -521,8 +550,6 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
           {spacePanel ? (
             <SpacePanel
               draft={spaceDraft}
-              excludedParentPaths={spacePanel.kind === "edit-space" ? collectDescendantPaths(groups, spacePanel.space.path) : []}
-              groupOptions={spaceOptions}
               isCreate={spacePanel.kind === "create-space"}
               isPending={createSpaceMutation.isPending || updateSpaceMutation.isPending}
               mutationError={
@@ -536,10 +563,8 @@ export function FahamDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user
               }
               onChange={setSpaceDraft}
               onNameChange={updateSpaceName}
-              onParentChange={updateSpaceParent}
               onSubmit={submitSpaceForm}
               pathExists={new Set(spaceOptions.map((space) => space.path)).has(spaceDraft.path.trim())}
-              selectedSpace={spacePanel.kind === "edit-space" ? spacePanel.space : null}
             />
           ) : null}
         </Modal> : null}
@@ -595,7 +620,6 @@ function KnowledgeFolderTree({
   expandedPaths,
   isLoading,
   isSpaceManager,
-  onCreateChild,
   onDeleteSpace,
   onEditSpace,
   onOpenSpace,
@@ -640,9 +664,6 @@ function KnowledgeFolderTree({
           </span>
           {isSpaceManager ? (
             <div className="knowledge-tree-actions">
-              <button type="button" onClick={() => onCreateChild(space.path)} aria-label={`Create child space under ${space.name}`}>
-                <Plus size={13} />
-              </button>
               <button type="button" onClick={() => onEditSpace(space)} aria-label={`Edit ${space.name}`}>
                 <Edit3 size={13} />
               </button>
@@ -969,7 +990,7 @@ function TrashTab({
 
 function JobsTab({ batchItems, canUploadDocuments, documents, isLoading, onNavigate }: JobsTabProps) {
   const processingBatchItems = batchItems.filter((item) => item.requestState !== "failed" && !isUploadTerminalStatus(item.job?.status));
-  const attentionBatchItems = batchItems.filter((item) => item.requestState === "failed" || item.job?.status === "failed" || item.job?.status === "human_review");
+  const attentionBatchItems = batchItems.filter((item) => item.requestState === "failed" || item.job?.status === "failed" || item.job?.status === "human_review" || item.job?.status === "cancelled");
   const activeDocuments = documents.filter((doc) => doc.ingest_status !== "complete");
   const processingCount = activeDocuments.filter((doc) => isProcessingIngestStatus(doc.ingest_status)).length + processingBatchItems.length;
   const failedCount = activeDocuments.filter((doc) => doc.ingest_status === "failed").length + attentionBatchItems.filter((item) => item.requestState === "failed" || item.job?.status === "failed").length;
@@ -1054,7 +1075,7 @@ function UploadJobCard({ item }: { item: UploadBatchItemView }) {
       <div className="knowledge-job-card-main">
         <div>
           <h4>{item.fileName}</h4>
-          <p>{item.groupPath} · {formatFileSizeForJob(item.fileSize)}</p>
+          <p>{item.groupPath} · {clearanceLevelLabel(item.clearanceLevel)} · {formatFileSizeForJob(item.fileSize)}</p>
         </div>
         <IngestStatusPill status={status} />
       </div>
@@ -1105,6 +1126,7 @@ function DocumentTable({
               ) : null}
               <th>Document</th>
               <th>Knowledge Space</th>
+              <th>Clearance</th>
               <th>Lifecycle</th>
               <th>Ingestion</th>
               <th>Effective</th>
@@ -1150,6 +1172,7 @@ function DocumentTable({
                     ) : null}
                   </td>
                   <td data-label="Knowledge Space" className="text-secondary">{doc.group_path}</td>
+                  <td data-label="Clearance"><span className="sv-pill">{clearanceLevelLabel(doc.clearance_level)}</span></td>
                   <td data-label="Lifecycle"><DocumentStatePill document={doc} /></td>
                   <td data-label="Ingestion"><IngestStatusPill status={doc.ingest_status} /></td>
                   <td data-label="Effective" className="text-secondary">{formatDate(doc.effective_date)}</td>
@@ -1174,7 +1197,7 @@ function DocumentTable({
 }
 
 function DocumentRowActions({ document, mode, onAction, pending, user }: DocumentRowActionsProps) {
-  const writable = canWriteDocument(user, document.group_path);
+  const writable = canWriteDocument(user, document.group_path, document.clearance_level);
   const canPermanent = canPermanentlyDeleteDocument(user, document.group_path);
   if (mode === "trash") {
     return (
@@ -1245,7 +1268,7 @@ function BulkToolbar({ count, mode, onAction, onClear, user }: BulkToolbarProps)
   );
 }
 
-function DocumentInspector({ document, onClose, onDocumentAction, pending, user }: DocumentInspectorProps) {
+function DocumentInspector({ document, onClearanceChange, onClose, onDocumentAction, pending, user }: DocumentInspectorProps) {
   const detailQuery = useQuery({
     queryKey: ["documents", "detail", document?.id],
     queryFn: () => documentsApi.get(document?.id ?? ""),
@@ -1259,10 +1282,17 @@ function DocumentInspector({ document, onClose, onDocumentAction, pending, user 
     retry: false,
   });
   const selected = detailQuery.data ?? document;
+  const [clearanceDraft, setClearanceDraft] = useState<ClearanceLevel>(document?.clearance_level ?? defaultClearanceLevel);
+  const clearanceOptions = useMemo(() => clearanceLevelsAssignableBy(user), [user]);
+  useEffect(() => {
+    if (selected) setClearanceDraft(selected.clearance_level);
+  }, [selected?.id, selected?.clearance_level]);
   if (!selected) return null;
-  const writable = canWriteDocument(user, selected.group_path);
+  const writable = canWriteDocument(user, selected.group_path, selected.clearance_level);
   const canPermanent = canPermanentlyDeleteDocument(user, selected.group_path);
   const isDeleted = Boolean(selected.deleted_at);
+  const canEditClearance = writable && !isDeleted;
+  const clearanceChanged = clearanceDraft !== selected.clearance_level;
   const flagEntries = Object.entries(selected.metadata_flags ?? {}).filter(([, value]) => Boolean(value));
 
   return (
@@ -1315,6 +1345,7 @@ function DocumentInspector({ document, onClose, onDocumentAction, pending, user 
       <dl className="knowledge-detail-grid">
         <Fact label="Document ID" value={selected.id} />
         <Fact label="Knowledge Space" value={selected.group_path} />
+        <Fact label="Clearance" value={clearanceLevelLabel(selected.clearance_level)} />
         <Fact label="Ingestion Status" value={labelize(selected.ingest_status)} />
         <Fact label="Lifecycle" value={isDeleted ? "In Trash" : selected.is_current ? "Current" : "Superseded"} />
         <Fact label="Uploaded by" value={selected.uploaded_by} />
@@ -1324,6 +1355,35 @@ function DocumentInspector({ document, onClose, onDocumentAction, pending, user 
         <Fact label="Expires" value={selected.expiry_date ? formatDate(selected.expiry_date) : "No expiry"} />
         <Fact label="Language" value={selected.language || "Unknown"} />
       </dl>
+      {canEditClearance ? (
+        <InspectorSection title="Access Control">
+          <label className="sv-field" htmlFor="document-clearance-level">
+            <span className="sv-label">Clearance Level</span>
+            <select
+              id="document-clearance-level"
+              className="sv-select"
+              disabled={pending}
+              onChange={(event) => setClearanceDraft(event.target.value as ClearanceLevel)}
+              value={clearanceDraft}
+            >
+              {clearanceOptions.map((level) => (
+                <option key={level} value={level}>
+                  {clearanceLevelLabel(level)}
+                </option>
+              ))}
+            </select>
+            <small className="text-secondary">{clearanceLevelDescription(clearanceDraft)}</small>
+          </label>
+          <button
+            type="button"
+            className="sv-action-primary"
+            disabled={!clearanceChanged || pending}
+            onClick={() => onClearanceChange(selected, clearanceDraft)}
+          >
+            <Edit3 size={15} /> Save Clearance
+          </button>
+        </InspectorSection>
+      ) : null}
       <InspectorSection title="Summary">
         <p>{selected.summary || selected.description || "No summary or description available."}</p>
       </InspectorSection>
@@ -1368,27 +1428,20 @@ function DocumentInspector({ document, onClose, onDocumentAction, pending, user 
 
 function SpacePanel({
   draft,
-  excludedParentPaths,
-  groupOptions,
   isCreate,
   isPending,
   mutationError,
   onChange,
   onNameChange,
-  onParentChange,
   onSubmit,
   pathExists,
-  selectedSpace,
 }: SpacePanelProps) {
   const pathIssue = isCreate ? groupPathIssue(draft.path, pathExists) : null;
-  const parentOptions = selectedSpace
-    ? groupOptions.filter((option) => option.path !== selectedSpace.path && !excludedParentPaths.includes(option.path))
-    : groupOptions;
   const canSubmit = draft.name.trim().length > 0 && (!isCreate || !pathIssue);
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <TextField autoComplete="off" disabled={isPending} label="Space name" onChange={onNameChange} required value={draft.name} />
+      <TextField autoComplete="off" disabled={isPending} helper="Shown in the folder tree and used to generate the default path." label="Space name" onChange={onNameChange} required value={draft.name} />
       {isCreate ? (
         <div className="sv-field">
           <label className="sv-label" htmlFor="space-path">
@@ -1403,7 +1456,7 @@ function SpacePanel({
             required
             value={draft.path}
           />
-          {pathIssue ? <small className="text-error-red">{pathIssue}</small> : <small className="text-secondary">Use lowercase slash paths like /finance/procurement.</small>}
+          {pathIssue ? <small className="text-error-red">{pathIssue}</small> : <small className="text-secondary">Use a lowercase slash path like /finance.</small>}
           <div className="knowledge-path-preview">
             <span>Path preview</span>
             <strong>{draft.path || "Generated from the space name"}</strong>
@@ -1412,18 +1465,7 @@ function SpacePanel({
       ) : (
         <ReadOnlyField label="Space path" value={draft.path} />
       )}
-      <label className="sv-field">
-        <span className="sv-label">Parent Knowledge Space</span>
-        <select className="sv-select" disabled={isPending} onChange={(event) => onParentChange(event.target.value)} value={draft.parentPath}>
-          <option value="">Top level</option>
-          {parentOptions.map((option) => (
-            <option key={option.path} value={option.path}>
-              {`${"  ".repeat(option.depth)}${option.name} - ${option.path}`}
-            </option>
-          ))}
-        </select>
-      </label>
-      {!isCreate ? <InlineMessage tone="warning">Space paths are immutable. Moving a space changes hierarchy only; existing document ACL paths keep using this path.</InlineMessage> : null}
+      {!isCreate ? <InlineMessage tone="warning">Space paths are immutable. Existing document ACL paths keep using this path.</InlineMessage> : null}
       {mutationError ? <InlineMessage tone="error">{errorMessage(mutationError, isCreate ? "Unable to create Knowledge Space." : "Unable to update Knowledge Space.")}</InlineMessage> : null}
       <div className="flex flex-wrap justify-end gap-2 border-t border-surface-border pt-4">
         <button type="submit" disabled={!canSubmit || isPending} className="sv-action-primary disabled:cursor-not-allowed disabled:opacity-60">
@@ -1453,6 +1495,7 @@ function Filters({ ingestFilter, search, setIngestFilter, setSearch, statusFilte
         <option value="active">Active Processing</option>
         <option value="processing">Processing</option>
         <option value="human_review">Needs Review</option>
+        <option value="cancelled">Cancelled</option>
         <option value="failed">Failed</option>
         <option value="unknown">Unknown</option>
       </select>
@@ -1480,7 +1523,8 @@ function DocumentStatePill({ document }: { document: Document }) {
 }
 
 function IngestStatusPill({ status }: { status: DocumentIngestStatus }) {
-  return <span className={`sv-pill knowledge-status-${status}`}>{ingestStatusLabel(status)}</span>;
+  const className = status === "cancelled" ? "sv-pill sv-pill-warning" : `sv-pill knowledge-status-${status}`;
+  return <span className={className}>{ingestStatusLabel(status)}</span>;
 }
 
 function InspectorSection({ children, title }: InspectorSectionProps) {
@@ -1550,12 +1594,13 @@ function DocumentSkeleton() {
   );
 }
 
-function TextField({ autoComplete, disabled, label, onChange, required, type = "text", value }: TextFieldProps) {
+function TextField({ autoComplete, disabled, helper, label, onChange, required, type = "text", value }: TextFieldProps) {
   const id = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return (
     <label className="sv-field" htmlFor={id}>
       <span className="sv-label">{label}</span>
       <input autoComplete={autoComplete} className="sv-input" disabled={disabled} id={id} onChange={(event) => onChange(event.target.value)} required={required} type={type} value={value} />
+      {helper ? <small className="text-secondary">{helper}</small> : null}
     </label>
   );
 }
@@ -1595,6 +1640,7 @@ function matchesDoc(doc: Document, search: string) {
     doc.title,
     doc.id,
     doc.group_path,
+    clearanceLevelLabel(doc.clearance_level),
     doc.summary ?? "",
     doc.description ?? "",
     ...doc.topics,
@@ -1695,6 +1741,7 @@ function ingestStatusLabel(status: DocumentIngestStatus) {
   if (status === "processing") return "Processing";
   if (status === "scheduled") return "Scheduled";
   if (status === "queued") return "Queued";
+  if (status === "cancelled") return "Cancelled";
   if (status === "failed") return "Failed";
   if (status === "unknown") return "Unknown";
   return "Indexed";
@@ -1789,13 +1836,12 @@ function isDocumentStateFilter(value: string): value is DocumentStateFilter {
 }
 
 function isDocumentIngestFilter(value: string): value is DocumentIngestFilter {
-  return value === "all" || value === "indexed" || value === "active" || value === "processing" || value === "human_review" || value === "failed" || value === "unknown";
+  return value === "all" || value === "indexed" || value === "active" || value === "processing" || value === "human_review" || value === "cancelled" || value === "failed" || value === "unknown";
 }
 
-function createSpaceDraft(parentPath = ""): SpaceDraft {
+function createSpaceDraft(): SpaceDraft {
   return {
     name: "",
-    parentPath,
     path: "",
     pathTouched: false,
   };
@@ -1807,8 +1853,8 @@ type ExplorerTab = { kind: "overview" } | { kind: "jobs" } | { kind: "trash" } |
 type DocumentAction = "reingest" | "trash" | "restore" | "permanent";
 type DocumentMode = "active" | "trash" | "readonly";
 type DocumentStateFilter = "all" | "current" | "superseded";
-type DocumentIngestFilter = "all" | "indexed" | "active" | "processing" | "human_review" | "failed" | "unknown";
-type SpaceDraft = { name: string; parentPath: string; path: string; pathTouched: boolean };
+type DocumentIngestFilter = "all" | "indexed" | "active" | "processing" | "human_review" | "cancelled" | "failed" | "unknown";
+type SpaceDraft = { name: string; path: string; pathTouched: boolean };
 type SpacePanelState = { kind: "create-space" } | { kind: "edit-space"; space: GroupOption } | null;
 type TreeRowStyle = CSSProperties & { "--space-depth": number };
 
@@ -1835,7 +1881,6 @@ type KnowledgeFolderTreeProps = {
   expandedPaths: Set<string>;
   isLoading: boolean;
   isSpaceManager: boolean;
-  onCreateChild: (parentPath: string) => void;
   onDeleteSpace: (space: GroupOption) => void;
   onEditSpace: (space: GroupOption) => void;
   onOpenSpace: (path: string) => void;
@@ -1938,10 +1983,16 @@ type BulkToolbarProps = {
 
 type DocumentInspectorProps = {
   document: Document | null;
+  onClearanceChange: (document: Document, clearanceLevel: ClearanceLevel) => void;
   onClose: () => void;
   onDocumentAction: (action: DocumentAction, document: Document) => void;
   pending: boolean;
   user: AuthUser;
+};
+
+type DocumentClearanceMutation = {
+  clearanceLevel: ClearanceLevel;
+  document: Document;
 };
 
 type InspectorSectionProps = { children: React.ReactNode; title: string };
@@ -1957,22 +2008,19 @@ type FilterProps = {
 
 type SpacePanelProps = {
   draft: SpaceDraft;
-  excludedParentPaths: string[];
-  groupOptions: GroupOption[];
   isCreate: boolean;
   isPending: boolean;
   mutationError: unknown;
   onChange: Dispatch<SetStateAction<SpaceDraft>>;
   onNameChange: (name: string) => void;
-  onParentChange: (parentPath: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   pathExists: boolean;
-  selectedSpace: GroupOption | null;
 };
 
 type TextFieldProps = {
   autoComplete?: string;
   disabled?: boolean;
+  helper?: string;
   label: string;
   onChange: (value: string) => void;
   required?: boolean;

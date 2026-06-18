@@ -69,6 +69,7 @@ function buildSource(overrides: Partial<SourceAnchor> = {}): SourceAnchor {
     page_start: 4,
     page_end: 4,
     excerpt: "Records must be retained for seven years.",
+    clearance_level: "NATO_RESTRICTED",
     group_path: "/legal",
     effective_date: "2026-01-01",
     highlight_ranges: [],

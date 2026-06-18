@@ -7,8 +7,8 @@ from ..shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
 from .common import ContractModel
 
 
-DocType = Literal["policy", "procedure", "report", "contract", "memo", "manual", "other"]
-UploadJobState = Literal["scheduled", "queued", "processing", "complete", "failed", "human_review"]
+DocType = str
+UploadJobState = Literal["scheduled", "queued", "processing", "complete", "failed", "human_review", "cancelled"]
 UploadJobStage = Literal[
     "scheduled",
     "queued",
@@ -23,9 +23,10 @@ UploadJobStage = Literal[
     "complete",
     "failed",
     "human_review",
+    "cancelled",
 ]
-UploadJobStepState = Literal["pending", "active", "complete", "failed", "needs_review"]
-UploadJobProgressUnit = Literal["pages", "chunks", "vectors", "files"]
+UploadJobStepState = Literal["pending", "active", "complete", "failed", "needs_review", "cancelled"]
+UploadJobProgressUnit = Literal["pages", "chunks", "vectors", "files", "metadata"]
 
 
 class UploadMetadata(ContractModel):
@@ -33,7 +34,7 @@ class UploadMetadata(ContractModel):
     clearance_level: ClearanceLevel = DEFAULT_CLEARANCE_LEVEL
     effective_date: date | None = None
     expiry_date: date | None = None
-    doc_type: DocType | None = None
+    doc_type: DocType | None = Field(default=None, max_length=80)
     supersedes: list[str] = Field(default_factory=list)
     description: str | None = Field(default=None, max_length=2000)
 
@@ -74,4 +75,5 @@ class JobStatusResponse(ContractModel):
     error_message: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    completed_at: datetime | None = None
     last_heartbeat_at: datetime | None = None

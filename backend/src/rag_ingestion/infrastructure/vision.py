@@ -1,4 +1,4 @@
-"""OpenAI-compatible vision adapter for image OCR and captions."""
+"""OpenAI-compatible vision adapter for image OCR and visual descriptions."""
 
 from __future__ import annotations
 
@@ -14,6 +14,32 @@ from .http import ServiceRequestError, request_json
 
 OPENAI_COMPATIBLE_PROVIDER = "openai_compatible"
 OLLAMA_PROVIDER = "ollama"
+VISION_SYSTEM_PROMPT = (
+    "You extract visible text and highly detailed visual descriptions for enterprise document ingestion. "
+    "Your output will be embedded for RAG retrieval, so preserve concrete, searchable details and "
+    "fine-grained visual identifiers."
+)
+VISION_USER_PROMPT = (
+    "Analyze this image for RAG indexing, not for a generic caption.\n"
+    "Return only valid JSON with keys extracted_text, caption, and confidence.\n"
+    "extracted_text: transcribe every readable word, number, label, title, table cell, chart axis/legend, "
+    "stamp, signature text, handwriting, watermark, logo text, and document identifier. Preserve reading "
+    "order and line breaks where useful. Use an empty string if no text is readable.\n"
+    "caption: write the most detailed useful visual description you can. Start with the main subject or "
+    "most important visible entity, then describe fine-grained attributes and identifiers: object category, "
+    "brand/make, model, variant or trim, body style, color, size, shape, material, logos, badges, labels, "
+    "serial numbers, license plates, uniforms, distinctive markings, damage, accessories, orientation, "
+    "position, background, surrounding objects, people, actions, relationships, layout, diagrams, "
+    "tables/charts, quantities, dates, locations, and anything else visible that could help retrieval. "
+    "For vehicles, be especially specific: identify the visible make, model, generation/body shape, trim "
+    "or variant, vehicle type, color, plate number, decals, cargo, damage, wheel/body features, and camera "
+    "angle when visible. If an exact model or identity is uncertain, write what it appears to be and name "
+    "the visible cues; do not present guesses as facts. For charts or tables, describe apparent trends, "
+    "categories, and notable values. For document scans, describe the form type, fields, stamps, "
+    "signatures, and image quality. Do not invent identities, locations, values, or events that are not "
+    "visible; say when a detail is unclear.\n"
+    "confidence: number from 0 to 1 for the combined OCR and visual description accuracy."
+)
 OLLAMA_VISION_FORMAT = {
     "type": "object",
     "properties": {
@@ -41,11 +67,13 @@ class VisionClient:
         model: str,
         timeout_seconds: float,
         provider: str = OPENAI_COMPATIBLE_PROVIDER,
+        num_ctx: int | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.provider = _vision_provider(provider)
+        self.num_ctx = num_ctx
 
     def analyze_image(self, *, content: bytes, content_type: str) -> ImageAnalysis:
         if not self.base_url:
@@ -61,17 +89,14 @@ class VisionClient:
             "messages": [
                 {
                     "role": "system",
-                    "content": no_thinking_system("You extract image text and captions for document ingestion."),
+                    "content": no_thinking_system(VISION_SYSTEM_PROMPT),
                 },
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": (
-                                "Extract all visible text from this image and write a concise caption. "
-                                "Return JSON with keys extracted_text, caption, and confidence between 0 and 1."
-                            ),
+                            "text": VISION_USER_PROMPT,
                         },
                         {
                             "type": "image_url",
@@ -107,18 +132,15 @@ class VisionClient:
             "think": False,
             "format": OLLAMA_VISION_FORMAT,
             "keep_alive": "5m",
-            "options": {"temperature": 0.0},
+            "options": _ollama_options(temperature=0.0, num_ctx=self.num_ctx),
             "messages": [
                 {
                     "role": "system",
-                    "content": no_thinking_system("You extract image text and captions for document ingestion."),
+                    "content": no_thinking_system(VISION_SYSTEM_PROMPT),
                 },
                 {
                     "role": "user",
-                    "content": (
-                        "Extract all visible text from this image and write a concise caption. "
-                        "Return JSON with keys extracted_text, caption, and confidence between 0 and 1."
-                    ),
+                    "content": VISION_USER_PROMPT,
                     "images": [base64.b64encode(content).decode("ascii")],
                 },
             ],
@@ -163,6 +185,13 @@ def _ollama_message_content(response: dict[str, Any]) -> str:
         return ""
     content = message.get("content")
     return strip_thinking_content(content) if isinstance(content, str) else ""
+
+
+def _ollama_options(*, temperature: float, num_ctx: int | None) -> dict[str, int | float]:
+    options: dict[str, int | float] = {"temperature": temperature}
+    if num_ctx is not None:
+        options["num_ctx"] = num_ctx
+    return options
 
 
 def _vision_provider(value: str) -> str:

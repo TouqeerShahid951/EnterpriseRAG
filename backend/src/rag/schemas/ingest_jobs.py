@@ -9,7 +9,7 @@ from pydantic import Field
 
 from .common import ContractModel
 from ..shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
-from .upload import JobStatusResponse
+from .upload import JobStatusResponse, UploadJobState
 
 
 IngestJobOrigin = Literal["upload", "reingest", "restore", "folder", "unknown"]
@@ -67,4 +67,10 @@ class IngestJobRecoveryResponse(ContractModel):
     job_id: str
     status: Literal["queued"] = "queued"
     next_attempt: int
+    message: str
+
+
+class IngestJobCancelResponse(ContractModel):
+    job_id: str
+    status: UploadJobState
     message: str

@@ -1,5 +1,5 @@
 export type ISODateString = string;
-export type DocType = "policy" | "procedure" | "report" | "contract" | "memo" | "manual" | "other";
+export type DocType = string;
 export type AccountType =
   | "platform_admin"
   | "system_admin"
@@ -9,7 +9,13 @@ export type AccountType =
   | "reviewer"
   | "auditor"
   | "member";
-export type UploadJobState = "scheduled" | "queued" | "processing" | "complete" | "failed" | "human_review";
+export type ClearanceLevel =
+  | "NATO_UNCLASSIFIED"
+  | "NATO_RESTRICTED"
+  | "NATO_CONFIDENTIAL"
+  | "NATO_SECRET"
+  | "COSMIC_TOP_SECRET";
+export type UploadJobState = "scheduled" | "queued" | "processing" | "complete" | "failed" | "human_review" | "cancelled";
 export type IngestJobOrigin = "upload" | "reingest" | "restore" | "folder" | "unknown";
 export type DocumentIngestStatus = UploadJobState | "unknown";
 export type UploadJobStage =
@@ -25,9 +31,10 @@ export type UploadJobStage =
   | "finalizing"
   | "complete"
   | "failed"
-  | "human_review";
-export type UploadJobStepState = "pending" | "active" | "complete" | "failed" | "needs_review";
-export type UploadJobProgressUnit = "pages" | "chunks" | "vectors" | "files";
+  | "human_review"
+  | "cancelled";
+export type UploadJobStepState = "pending" | "active" | "complete" | "failed" | "needs_review" | "cancelled";
+export type UploadJobProgressUnit = "pages" | "chunks" | "vectors" | "files" | "metadata";
 export type ReviewStatus = "pending" | "approved" | "rejected";
 export type FolderSourceType = "snapshot" | "minio_prefix";
 export type FolderScheduleType = "one_time" | "recurring";
@@ -72,6 +79,7 @@ export interface User {
   email: string;
   account_type: AccountType;
   group_paths: string[];
+  clearance_level: ClearanceLevel;
   permission_version: number;
   must_change_password?: boolean;
 }
@@ -82,6 +90,7 @@ export interface UserAdmin {
   name: string;
   account_type: AccountType;
   group_paths: string[];
+  clearance_level: ClearanceLevel;
   last_login_at: ISODateString | null;
   is_active: boolean;
   permission_version: number;
@@ -104,6 +113,7 @@ export interface IngestWorkerState {
 
 export interface IngestConfig {
   worker_concurrency: number;
+  ocr_review_confidence_threshold: number;
   recommended_concurrency: number;
   worker_online: boolean;
   active_jobs: number;
@@ -135,10 +145,33 @@ export interface AuditEvent {
   id: string;
   event_type: string;
   actor_id: string | null;
+  actor_email: string | null;
   target_type: string | null;
   target_id: string | null;
+  target_user_email: string | null;
+  target_user_name: string | null;
   payload: Record<string, unknown>;
   created_at: ISODateString | null;
+}
+
+export interface AuditSummary {
+  total: number;
+  document_events: number;
+  auth_events: number;
+  system_events: number;
+  actor_count: number;
+  event_type_count: number;
+  category_counts: Record<string, number>;
+  target_type_counts: Record<string, number>;
+  event_type_counts: Record<string, number>;
+}
+
+export interface AuditEventListResponse {
+  items: AuditEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+  summary: AuditSummary;
 }
 
 export interface RagConfig {
@@ -253,6 +286,7 @@ export interface JobStatus {
   parser_provenance: ParserProvenance | null;
   created_at: ISODateString | null;
   updated_at: ISODateString | null;
+  completed_at: ISODateString | null;
   last_heartbeat_at: ISODateString | null;
 }
 
@@ -297,6 +331,7 @@ export interface IngestJob extends JobStatus {
   document_id: string;
   document_title: string;
   group_path: string;
+  clearance_level: ClearanceLevel;
   origin: IngestJobOrigin;
   created_at: ISODateString | null;
   updated_at: ISODateString | null;
@@ -343,6 +378,12 @@ export interface IngestJobRecoveryResponse {
   job_id: string;
   status: "queued";
   next_attempt: number;
+  message: string;
+}
+
+export interface IngestJobCancelResponse {
+  job_id: string;
+  status: UploadJobState;
   message: string;
 }
 
@@ -408,7 +449,8 @@ export interface FolderSchedule {
   schedule_type: FolderScheduleType;
   status: FolderScheduleStatus;
   group_path: string;
-  doc_type: DocType;
+  clearance_level: ClearanceLevel;
+  doc_type: DocType | null;
   effective_date: ISODateString | null;
   expiry_date: ISODateString | null;
   description: string | null;
@@ -427,8 +469,9 @@ export interface FolderSchedule {
 export interface Document {
   id: string;
   title: string;
-  doc_type: DocType;
+  doc_type: DocType | null;
   group_path: string;
+  clearance_level: ClearanceLevel;
   effective_date: ISODateString | null;
   expiry_date: ISODateString | null;
   description: string | null;

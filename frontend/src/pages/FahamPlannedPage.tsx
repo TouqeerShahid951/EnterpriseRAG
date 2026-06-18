@@ -21,7 +21,7 @@ export function FahamOverviewPage({ documents, documentsLoading, onLogout, onNav
 
   const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.listGroups, enabled: isAdmin, retry: false });
   const usersQuery = useQuery({ queryKey: ["admin", "users"], queryFn: adminApi.listUsers, enabled: isAdmin, retry: false });
-  const reviewQuery = useQuery({ queryKey: ["review", "queue"], queryFn: reviewApi.list, enabled: canReview, retry: false });
+  const reviewQuery = useQuery({ queryKey: ["review-queue"], queryFn: reviewApi.list, enabled: canReview, staleTime: 4000, retry: false });
 
   const spaceCount = isAdmin ? (groupsQuery.data ? countGroups(groupsQuery.data.items) : null) : user.group_paths.length;
   const userCount = usersQuery.data?.total ?? usersQuery.data?.items.length ?? null;

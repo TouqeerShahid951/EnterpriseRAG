@@ -14,9 +14,9 @@ class IngestJobPayload:
     doc_id: str
     file_path: str
     group_path: str
-    doc_type: str
     effective_date: str | None
     supersedes: list[str]
+    doc_type: str | None = None
     clearance_level: str = DEFAULT_CLEARANCE_LEVEL
     expiry_date: str | None = None
     description: str | None = None
@@ -25,7 +25,7 @@ class IngestJobPayload:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "IngestJobPayload":
-        missing = [field for field in ("job_id", "doc_id", "file_path", "group_path", "doc_type") if not payload.get(field)]
+        missing = [field for field in ("job_id", "doc_id", "file_path", "group_path") if not payload.get(field)]
         if missing:
             raise ValueError(f"ingest payload missing required fields: {', '.join(missing)}")
         raw_supersedes = payload.get("supersedes", [])
@@ -37,9 +37,9 @@ class IngestJobPayload:
             file_path=str(payload["file_path"]),
             group_path=str(payload["group_path"]),
             clearance_level=normalize_clearance_level(payload.get("clearance_level", DEFAULT_CLEARANCE_LEVEL)),
-            doc_type=str(payload["doc_type"]),
             effective_date=str(payload["effective_date"]) if payload.get("effective_date") else None,
             supersedes=[str(item) for item in raw_supersedes],
+            doc_type=str(payload["doc_type"]) if payload.get("doc_type") else None,
             expiry_date=str(payload["expiry_date"]) if payload.get("expiry_date") else None,
             description=str(payload["description"]) if payload.get("description") else None,
             content_type=str(payload["content_type"]) if payload.get("content_type") else None,
@@ -53,9 +53,10 @@ class IngestJobPayload:
             "file_path": self.file_path,
             "group_path": self.group_path,
             "clearance_level": self.clearance_level,
-            "doc_type": self.doc_type,
             "supersedes": list(self.supersedes),
         }
+        if self.doc_type:
+            payload["doc_type"] = self.doc_type
         if self.effective_date:
             payload["effective_date"] = self.effective_date
         if self.expiry_date:

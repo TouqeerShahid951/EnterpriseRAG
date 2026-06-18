@@ -6,12 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from rag.api.routes import admin_routes, artifact_job_routes, audit_routes, auth_routes, document_routes, evaluation_routes, folder_ingest_routes, ingest_job_routes, query_routes, review_routes, upload_routes
+from rag.bootstrap.schema import ensure_postgres_schema
 from rag.core.config import settings
 from rag.internal import (
     abac_filter_routes,
     artifact_job_routes as internal_artifact_job_routes,
     claim_routes,
     document_supersession_routes,
+    ingest_config_routes,
     ingest_status_routes,
     rag_config_routes,
     review_batch_routes,
@@ -23,6 +25,7 @@ from rag.services.bootstrap_admin import ensure_initial_platform_admin
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    ensure_postgres_schema(settings)
     repository_provider = app.dependency_overrides.get(get_identity_repository, get_identity_repository)
     ensure_initial_platform_admin(
         repository_provider(),
@@ -92,6 +95,7 @@ def create_app() -> FastAPI:
         internal_artifact_job_routes.router,
         claim_routes.router,
         document_supersession_routes.router,
+        ingest_config_routes.router,
         ingest_status_routes.router,
         rag_config_routes.router,
         review_batch_routes.router,

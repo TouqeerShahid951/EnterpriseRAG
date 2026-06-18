@@ -112,6 +112,11 @@ _SIGNALS: dict[RouteIntent, dict[str, tuple[str, ...]]] = {
 }
 _DATE_RE = re.compile(r"\b(?:19|20)\d{2}(?:-\d{2}){0,2}\b")
 _SUPERLATIVE_RE = re.compile(r"\b(?:highest|lowest|maximum|minimum|max|min|largest|smallest|most|least)\b")
+_EXHAUSTIVE_SUMMARY_RE = re.compile(r"\b(?:summari[sz]e|summary|overview|recap)\b")
+_EXHAUSTIVE_SCOPE_RE = re.compile(r"\b(?:all|every)\b")
+_DOCUMENT_CLASS_RE = re.compile(
+    r"\b(?:firs?|documents?|docs?|files?|pdfs?|polic(?:y|ies)|contracts?|reports?|manuals?|forms?)\b"
+)
 _COMPATIBLE_COMBINATIONS: dict[frozenset[RouteIntent], RouteIntent] = {
     frozenset(("temporal", "comparison")): "temporal_comparison",
     frozenset(("procedural", "troubleshooting")): "troubleshooting_procedure",
@@ -154,6 +159,17 @@ def score_route_rules(signals: QuerySignals) -> RuleRouteResult:
     if superlative is not None:
         scores["aggregation"] = scores.get("aggregation", 0.0) + MEDIUM_WEIGHT
         hits.append(RuleHit("aggregation", "table_superlative", MEDIUM_WEIGHT, "medium", superlative.group(0)))
+    if _has_exhaustive_document_summary_signal(signals.normalized_query):
+        scores["aggregation"] = scores.get("aggregation", 0.0) + STRONG_WEIGHT
+        hits.append(
+            RuleHit(
+                "aggregation",
+                "exhaustive_summary_document_class",
+                STRONG_WEIGHT,
+                "strong",
+                "summarize all document class",
+            )
+        )
     if signals.use_conversation_memory:
         scores["conversational_followup"] = scores.get("conversational_followup", 0.0) + STRONG_WEIGHT + CLARITY_BONUS
         hits.append(RuleHit("conversational_followup", "session_followup", STRONG_WEIGHT, "strong", signals.followup_clues[0]))
@@ -246,6 +262,14 @@ def _phrase_matches(phrase: str, text: str) -> bool:
     if phrase.startswith(" ") or phrase.endswith(" "):
         return phrase in text
     return re.search(rf"\b{re.escape(phrase.strip())}\b", text) is not None
+
+
+def _has_exhaustive_document_summary_signal(text: str) -> bool:
+    return (
+        _EXHAUSTIVE_SUMMARY_RE.search(text) is not None
+        and _EXHAUSTIVE_SCOPE_RE.search(text) is not None
+        and _DOCUMENT_CLASS_RE.search(text) is not None
+    )
 
 
 def _select_intent(scores: dict[RouteIntent, float]) -> tuple[RouteIntent, tuple[RouteIntent, ...], float, float]:

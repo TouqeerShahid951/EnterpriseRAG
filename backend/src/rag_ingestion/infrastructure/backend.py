@@ -43,6 +43,20 @@ class IngestAttempt:
     job_status: str
 
 
+@dataclass(frozen=True)
+class IngestRuntimeConfig:
+    worker_concurrency: int
+    ocr_review_confidence_threshold: float
+    source: str = "workspace"
+
+
+@dataclass(frozen=True)
+class IngestJobSnapshot:
+    job_id: str
+    doc_id: str
+    status: str
+
+
 class BackendInternalClient:
     def __init__(self, *, base_url: str, service_token: str, timeout_seconds: float) -> None:
         if not service_token:
@@ -98,6 +112,20 @@ class BackendInternalClient:
             attempt_count=int(payload["attempt_count"]),
             max_attempts=int(payload["max_attempts"]),
             job_status=str(payload["job_status"]),
+        )
+
+    def get_job_status(self, *, job_id: str) -> IngestJobSnapshot:
+        payload = request_json(
+            self.base_url,
+            f"/internal/ingest/jobs/{job_id}/status",
+            service="backend",
+            headers={"X-Service-Token": self.service_token},
+            timeout_seconds=self.timeout_seconds,
+        )
+        return IngestJobSnapshot(
+            job_id=str(payload["job_id"]),
+            doc_id=str(payload["doc_id"]),
+            status=str(payload["status"]),
         )
 
     def heartbeat(self, *, job_id: str) -> None:
@@ -251,6 +279,20 @@ class BackendInternalClient:
         )
         return _runtime_config_from_payload(payload)
 
+    def get_ingest_config(self) -> IngestRuntimeConfig:
+        payload = request_json(
+            self.base_url,
+            "/internal/ingest-config",
+            service="backend",
+            headers={"X-Service-Token": self.service_token},
+            timeout_seconds=self.timeout_seconds,
+        )
+        return IngestRuntimeConfig(
+            worker_concurrency=int(payload.get("worker_concurrency", 1)),
+            ocr_review_confidence_threshold=float(payload["ocr_review_confidence_threshold"]),
+            source=str(payload.get("source") or "workspace"),
+        )
+
 
 def _runtime_config_from_payload(payload: dict[str, Any]) -> InferenceRuntimeConfig:
     return InferenceRuntimeConfig(
@@ -287,7 +329,7 @@ def _list(value: Any) -> list[Any]:
 def _derived_doc_type(metadata: dict[str, Any]) -> str | None:
     for key in ("doc_type", "auto_doc_type"):
         value = str(metadata.get(key) or "").strip().lower()
-        if value and value != "other":
+        if value:
             return value
     return None
 

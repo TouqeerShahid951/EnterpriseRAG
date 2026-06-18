@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..errors import UnsupportedPdfError
+from .docling_adapter import DoclingProgressCallback
 from .layered import parse_layered_pdf
 from .models import DocumentParseResult, ParsedPdfItem
 from .pymupdf import PageProgressCallback
@@ -20,6 +21,7 @@ def parse_pdf_document(
     layered_docling_max_pages: int = 40,
     layered_docling_batch_pages: int = 4,
     page_progress_callback: PageProgressCallback | None = None,
+    docling_progress_callback: DoclingProgressCallback | None = None,
 ) -> DocumentParseResult:
     result = parse_layered_pdf(
         file_bytes,
@@ -29,6 +31,7 @@ def parse_pdf_document(
         max_docling_pages=layered_docling_max_pages,
         docling_batch_pages=layered_docling_batch_pages,
         page_progress_callback=page_progress_callback,
+        docling_progress_callback=docling_progress_callback,
     )
     items = result.items
     page_count = int(result.provenance.get("page_count") or 0)

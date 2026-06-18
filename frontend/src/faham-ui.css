@@ -146,24 +146,18 @@
   #root::after {
     content: '';
     position: absolute;
-    width: 1000px;
-    height: 1000px;
+    width: 760px;
+    height: 760px;
     background: var(--app-blob-bg);
     border-radius: 50%;
-    filter: blur(120px);
-    opacity: var(--app-blob-opacity);
+    filter: blur(150px);
+    opacity: 0.34;
     top: -20%;
     right: -10%;
     pointer-events: none;
     z-index: 0;
-    animation: blob-float 20s infinite alternate ease-in-out;
   }
 
-  @keyframes blob-float {
-    0% { transform: translate(0, 0) scale(1); }
-    50% { transform: translate(-10%, 15%) scale(1.1); }
-    100% { transform: translate(-20%, -5%) scale(0.95); }
-  }
 }
 
 @layer utilities {

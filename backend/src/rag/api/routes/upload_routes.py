@@ -15,7 +15,7 @@ from ...auth.permissions import can_upload_to_group
 from ...repositories.documents import DocumentRepository, get_document_repository
 from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
 from ...schemas.common import StubResponse
-from ...schemas.upload import DocType, JobStatusResponse, UploadResponse
+from ...schemas.upload import JobStatusResponse, UploadResponse
 from ...shared.contracts.clearance import DEFAULT_CLEARANCE_LEVEL, clearance_rank, normalize_clearance_level
 from ...services.document_uploads import (
     default_filename,
@@ -50,7 +50,7 @@ async def create_upload(
     clearance_level: str = Form(default=DEFAULT_CLEARANCE_LEVEL),
     effective_date: date | None = Form(default=None),
     expiry_date: date | None = Form(default=None),
-    doc_type: DocType | None = Form(default=None),
+    doc_type: str | None = Form(default=None),
     description: str | None = Form(default=None),
     supersedes: list[str] = Form(default_factory=list),
     user: UserRecord = Depends(require_current_user),
@@ -66,7 +66,7 @@ async def create_upload(
     validate_declared_dates(effective_date, expiry_date)
     normalized_description = validated_description(description)
     supersedes_ids = _validate_supersedes(list(supersedes), user, document_repo)
-    initial_doc_type = doc_type or "other"
+    initial_doc_type = _normalize_declared_doc_type(doc_type)
     content = await file.read()
     validate_upload_size(content)
     content_type = validated_document_type(content, file.filename, file.content_type)
@@ -156,6 +156,11 @@ def _upload_source_id(content_hash: str) -> str:
     return f"upload:{content_hash}:{uuid4()}"
 
 
+def _normalize_declared_doc_type(value: str | None) -> str | None:
+    normalized = " ".join((value or "").strip().lower().split())
+    return normalized[:80] or None
+
+
 def _validate_supersedes(doc_ids: list[str], user: UserRecord, repo: DocumentRepository) -> list[str]:
     validated: list[str] = []
     for doc_id in doc_ids:
@@ -192,7 +197,7 @@ def _enqueue_upload(
     file_path: str,
     group_path: str,
     clearance_level: str,
-    doc_type: str,
+    doc_type: str | None,
     effective_date: date | None,
     expiry_date: date | None,
     description: str | None,

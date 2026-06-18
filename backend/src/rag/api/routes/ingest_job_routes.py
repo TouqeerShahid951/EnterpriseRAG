@@ -5,16 +5,22 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from ...auth.abac import normalize_group_path
-from ...auth.dependencies import require_admin_user, require_current_user
-from ...auth.document_access import can_read_document
+from ...auth.dependencies import require_admin_user, require_csrf, require_current_user
+from ...auth.document_access import can_read_document, can_write_document
+from ...auth.permissions import can_read_document_metadata, is_global_admin
 from ...core.config import settings
+from ...query.http import ServiceRequestError
+from ...query.qdrant import QdrantClient as RetrievalQdrantClient
+from ...shared.contracts.clearance import can_access_clearance
 from ...repositories.documents import DocumentRepository, get_document_repository
+from ...repositories.document_postgres import PostgresDocumentRepository
 from ...repositories.identity import UserRecord
 from ...repositories.ingest_config import IngestConfigRepository, effective_ingest_config, get_ingest_config_repository
 from ...schemas.ingest_jobs import (
+    IngestJobCancelResponse,
     IngestJobItem,
     IngestJobListResponse,
     IngestJobOrigin,
@@ -31,14 +37,15 @@ from ...services.ingest_recovery import (
     requeue_stale_ingest_job,
 )
 from ...services.ingest_worker_control import IngestWorkerControl, WorkerControlResult, get_ingest_worker_control
-from ...services.upload_status import build_job_status_response
+from ...services.upload_status import build_job_status_response, stage_for_job_status
 
 
 router = APIRouter(prefix="/ingest-jobs", tags=["ingest-jobs"])
 
-JOB_STATUSES = {"scheduled", "queued", "processing", "complete", "failed", "human_review"}
+JOB_STATUSES = {"scheduled", "queued", "processing", "complete", "failed", "human_review", "cancelled"}
 JOB_ORIGINS = {"upload", "reingest", "restore", "folder", "unknown"}
 ACTIVE_JOB_STATUSES = {"scheduled", "queued", "processing", "human_review"}
+CANCELLABLE_JOB_STATUSES = {"scheduled", "queued", "processing", "human_review"}
 
 
 @router.get("", response_model=IngestJobListResponse, summary="List visible ingestion jobs")
@@ -79,6 +86,16 @@ async def summarize_ingest_jobs(
     repo: DocumentRepository = Depends(get_document_repository),
 ) -> IngestJobSummaryResponse:
     normalized_group = normalize_group_path(group_path) if group_path else None
+    fast_summary = _postgres_ingest_job_summary(
+        user,
+        repo,
+        group_path=normalized_group,
+        created_from=created_from,
+        created_to=created_to,
+    )
+    if fast_summary is not None:
+        return fast_summary
+
     items = _visible_job_items(
         user,
         repo,
@@ -94,6 +111,78 @@ async def summarize_ingest_jobs(
         stage_counts=_count_by(items, "stage"),
         origin_counts=_count_by(items, "origin"),
     )
+
+
+@router.post(
+    "/{job_id}/cancel",
+    response_model=IngestJobCancelResponse,
+    summary="Cancel an active ingestion job",
+)
+async def cancel_ingest_job(
+    job_id: str,
+    request: Request,
+    user: UserRecord = Depends(require_current_user),
+    repo: DocumentRepository = Depends(get_document_repository),
+    queue: IngestQueue = Depends(get_ingest_queue),
+) -> IngestJobCancelResponse:
+    require_csrf(request)
+    job = repo.get_ingest_job(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "job_not_found", "message": "Ingestion job was not found."},
+        )
+    document = repo.get_document(job.doc_id, include_deleted=True)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "document_not_found", "message": "Ingested document was not found."},
+        )
+    if not can_write_document(user, document):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "ingest_cancel_forbidden", "message": "User cannot cancel this ingestion job."},
+        )
+    if job.status not in CANCELLABLE_JOB_STATUSES:
+        return IngestJobCancelResponse(
+            job_id=job.id,
+            status=job.status,  # type: ignore[arg-type]
+            message=f"Job is already {job.status}.",
+        )
+
+    review_items_closed = repo.cancel_review_batch_for_job(job.id)
+    updated = repo.update_ingest_job(
+        job.id,
+        status="cancelled",
+        progress_pct=job.progress_pct,
+        stage_progress=None,
+        warnings=list(job.warnings),
+        error_code=None,
+        error_message_safe=None,
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "job_not_found", "message": "Ingestion job was not found."},
+        )
+
+    revoke_error = _revoke_queued_ingest_task(queue, job.id)
+    vector_cleanup_error = _delete_document_vectors(document.id)
+    repo.append_audit_event(
+        event_type="ingest.cancelled",
+        actor_id=user.id,
+        target_type="ingest_job",
+        target_id=job.id,
+        payload={
+            "doc_id": document.id,
+            "status_before": job.status,
+            "progress_pct": job.progress_pct,
+            "review_items_closed": review_items_closed,
+            "revoke_error": revoke_error,
+            "vector_cleanup_error": vector_cleanup_error,
+        },
+    )
+    return IngestJobCancelResponse(job_id=updated.id, status="cancelled", message="Ingestion job cancelled.")
 
 
 @router.get(
@@ -178,6 +267,70 @@ async def requeue_stale_job(
     )
 
 
+def _postgres_ingest_job_summary(
+    user: UserRecord,
+    repo: DocumentRepository,
+    *,
+    group_path: str | None,
+    created_from: datetime | None,
+    created_to: datetime | None,
+) -> IngestJobSummaryResponse | None:
+    if not isinstance(repo, PostgresDocumentRepository):
+        return None
+    if not can_read_document_metadata(user):
+        return IngestJobSummaryResponse()
+
+    clauses = ["1 = 1"]
+    params: list[object] = []
+    if group_path:
+        clauses.append("document.group_path = %s")
+        params.append(group_path)
+    if not is_global_admin(user):
+        visible_groups = sorted({normalize_group_path(path) for path in user.group_paths})
+        if not visible_groups:
+            return IngestJobSummaryResponse()
+        clauses.append("document.group_path = ANY(%s::text[])")
+        params.append(visible_groups)
+    if created_from:
+        clauses.append("job.created_at >= %s")
+        params.append(created_from)
+    if created_to:
+        clauses.append("job.created_at <= %s")
+        params.append(created_to)
+
+    rows = repo._execute_all(
+        f"""
+        SELECT job.status, job.progress_pct, COALESCE(job.origin, 'unknown') AS origin, document.clearance_level
+        FROM ingest_jobs job
+        JOIN documents document ON document.id = job.doc_id
+        WHERE {' AND '.join(clauses)}
+        """,
+        tuple(params),
+    )
+    status_counts: dict[str, int] = {}
+    stage_counts: dict[str, int] = {}
+    origin_counts: dict[str, int] = {}
+    total = 0
+    for row in rows:
+        if not can_access_clearance(user.clearance_level, str(row["clearance_level"])):
+            continue
+        status_value = str(row["status"])
+        origin_value = str(row["origin"] if row["origin"] in JOB_ORIGINS else "unknown")
+        stage_value = stage_for_job_status(status_value, int(row["progress_pct"]))
+        total += 1
+        status_counts[status_value] = status_counts.get(status_value, 0) + 1
+        stage_counts[stage_value] = stage_counts.get(stage_value, 0) + 1
+        origin_counts[origin_value] = origin_counts.get(origin_value, 0) + 1
+
+    return IngestJobSummaryResponse(
+        total=total,
+        active=sum(status_counts.get(value, 0) for value in ACTIVE_JOB_STATUSES),
+        status_counts=status_counts,
+        stage_counts=stage_counts,
+        origin_counts=origin_counts,
+    )
+
+
 def _visible_job_items(
     user: UserRecord,
     repo: DocumentRepository,
@@ -216,7 +369,6 @@ def _visible_job_items(
                 group_path=document.group_path,
                 clearance_level=document.clearance_level,
                 origin=cast(IngestJobOrigin, job.origin if job.origin in JOB_ORIGINS else "unknown"),
-                completed_at=job.completed_at,
             )
         )
     return items
@@ -268,3 +420,27 @@ def _worker_snapshot(control: IngestWorkerControl, desired_concurrency: int) -> 
                 "message": "Worker activity could not be verified, so stale-job recovery is temporarily disabled.",
             },
         ) from exc
+
+
+def _revoke_queued_ingest_task(queue: IngestQueue, job_id: str) -> str | None:
+    cancel = getattr(queue, "cancel", None)
+    if not callable(cancel):
+        return "queue_cancel_unavailable"
+    try:
+        cancel(job_id)
+    except RuntimeError as exc:
+        return str(exc)[:300]
+    return None
+
+
+def _delete_document_vectors(doc_id: str) -> str | None:
+    qdrant = RetrievalQdrantClient(
+        base_url=settings.qdrant_url,
+        collection=settings.qdrant_collection,
+        timeout_seconds=settings.rag_http_timeout_seconds,
+    )
+    try:
+        qdrant.delete_document_points(doc_id)
+    except ServiceRequestError as exc:
+        return exc.message[:300]
+    return None

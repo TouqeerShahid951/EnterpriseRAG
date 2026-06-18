@@ -1,18 +1,10 @@
-"""Deterministic topic and document-type classification."""
+"""Deterministic topic classification."""
 
 from __future__ import annotations
 
 import re
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
-_DOC_TYPE_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "policy": ("policy", "rules", "governance", "shall", "compliance"),
-    "procedure": ("procedure", "process", "step", "workflow", "sop"),
-    "report": ("report", "findings", "analysis", "summary", "metrics"),
-    "contract": ("contract", "agreement", "party", "vendor", "terms"),
-    "memo": ("memo", "memorandum", "note", "subject"),
-    "manual": ("manual", "guide", "instructions", "operation", "troubleshooting"),
-}
 _TOPIC_HINTS: dict[str, tuple[str, ...]] = {
     "hr_policy": ("hr", "human", "employee", "staff", "personnel"),
     "it_policy": ("it", "system", "server", "software", "network", "security"),
@@ -36,19 +28,5 @@ def classify_topics(text: str, taxonomy: tuple[str, ...], *, max_topics: int = 5
     return [topic for topic, _ in selected], {topic: score for topic, score in selected}
 
 
-def classify_doc_type(text: str) -> tuple[str, float]:
-    tokens = _tokens(text)
-    scored: list[tuple[str, float]] = []
-    for doc_type, keywords in _DOC_TYPE_KEYWORDS.items():
-        overlap = tokens & set(keywords)
-        if overlap:
-            scored.append((doc_type, min(0.99, 0.55 + (0.12 * len(overlap)))))
-    if not scored:
-        return "other", 0.0
-    scored.sort(key=lambda item: (-item[1], item[0]))
-    return scored[0]
-
-
 def _tokens(text: str) -> set[str]:
     return {token for token in _TOKEN_RE.findall(text.lower()) if len(token) > 1}
-

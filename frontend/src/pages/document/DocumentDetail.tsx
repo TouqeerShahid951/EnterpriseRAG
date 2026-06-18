@@ -2,6 +2,7 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { AlertTriangle, Trash2 } from "lucide-react";
 
+import { clearanceLevelLabel } from "../../authz";
 import { EmptyPanel, Fact, InlineMessage } from "../../components/layout/Common";
 import type { DeleteDocumentResponse, Document, VersionChainResponse } from "../../types/api";
 import { errorMessage, formatDate, formatDateTime } from "../../utils/format";
@@ -19,6 +20,7 @@ export function DocumentDetail({ canDelete, deleteMutation, detailError, detailL
             <Fact label="Title" value={selected.title} />
             <Fact label="Document ID" value={selected.id} />
             <Fact label="Knowledge Space" value={selected.group_path} />
+            <Fact label="Clearance" value={clearanceLevelLabel(selected.clearance_level ?? "NATO_RESTRICTED")} />
             <Fact label="Ingestion Status" value={labelize(selected.ingest_status)} />
             <Fact label="Uploaded by" value={selected.uploaded_by} />
             <Fact label="Created" value={formatDateTime(selected.created_at)} />

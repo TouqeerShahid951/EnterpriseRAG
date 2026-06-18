@@ -35,13 +35,14 @@ TERMINAL_LABELS: dict[str, tuple[str, str]] = {
     "complete": ("Document indexed", "The document is available for retrieval."),
     "failed": ("Upload failed", "Ingestion stopped before the document was indexed."),
     "human_review": ("Needs review", "The document needs manual review before ingestion can continue."),
+    "cancelled": ("Cancelled", "Ingestion was cancelled before the document was indexed."),
 }
 MAX_INGEST_ATTEMPTS = 3
 
 
 def build_job_status_response(job: IngestJobRecord) -> JobStatusResponse:
     progress_pct = _normalize_progress(job.progress_pct)
-    stage = _stage_for_job(job.status, progress_pct)
+    stage = stage_for_job_status(job.status, progress_pct)
     stage_label, stage_detail = _stage_copy(job.status, stage, job.error_message_safe, job.warnings)
     return JobStatusResponse(
         job_id=job.id,
@@ -60,6 +61,7 @@ def build_job_status_response(job: IngestJobRecord) -> JobStatusResponse:
         error_message=job.error_message_safe,
         created_at=job.created_at,
         updated_at=job.updated_at,
+        completed_at=job.completed_at,
         last_heartbeat_at=job.last_heartbeat_at,
     )
 
@@ -71,8 +73,8 @@ def progress_for_status_update(current: IngestJobRecord, *, next_status: str, ne
     return progress_pct
 
 
-def _stage_for_job(status: str, progress_pct: int) -> UploadJobStage:
-    if status in {"complete", "failed", "human_review"}:
+def stage_for_job_status(status: str, progress_pct: int) -> UploadJobStage:
+    if status in {"complete", "failed", "human_review", "cancelled"}:
         return status  # type: ignore[return-value]
     if status == "queued":
         return "queued"
@@ -96,13 +98,21 @@ def _stage_copy(status: str, stage: UploadJobStage, error_message: str | None, w
 def _build_steps(status: str, progress_pct: int) -> list[UploadJobStep]:
     failed_step = _active_processing_step(progress_pct).id if status == "failed" else None
     review_step = _active_processing_step(progress_pct).id if status == "human_review" else None
+    cancelled_step = _active_processing_step(progress_pct).id if status == "cancelled" else None
     steps = STEPS if status == "scheduled" else PROCESSING_STEPS
     return [
         UploadJobStep(
             id=step.id,
             label=step.label,
             detail=step.detail,
-            state=_step_state(step, status=status, progress_pct=progress_pct, failed_step=failed_step, review_step=review_step),
+            state=_step_state(
+                step,
+                status=status,
+                progress_pct=progress_pct,
+                failed_step=failed_step,
+                review_step=review_step,
+                cancelled_step=cancelled_step,
+            ),
         )
         for step in steps
     ]
@@ -115,6 +125,7 @@ def _step_state(
     progress_pct: int,
     failed_step: UploadJobStage | None,
     review_step: UploadJobStage | None,
+    cancelled_step: UploadJobStage | None,
 ) -> UploadJobStepState:
     if status == "complete":
         return "complete"
@@ -122,6 +133,8 @@ def _step_state(
         return "failed"
     if review_step == step.id:
         return "needs_review"
+    if cancelled_step == step.id:
+        return "cancelled"
     if status == "queued":
         return "active" if step.id == "queued" else "pending"
     if status == "scheduled":

@@ -33,6 +33,7 @@ def generate_artifact_job(self: Any, job_id: str) -> dict[str, object]:
             "status": "cancelled",
             "stage": "cancelled",
             "progress_pct": 100,
+            "stage_progress": None,
         })
         return {"job_id": job_id, "status": job.status if job else "cancelled"}
     except ArtifactPermissionChanged:
@@ -41,6 +42,7 @@ def generate_artifact_job(self: Any, job_id: str) -> dict[str, object]:
             "status": "failed",
             "stage": "failed",
             "progress_pct": 100,
+            "stage_progress": None,
             "error_code": "artifact_authorization_changed",
             "error_message_safe": "Authorization changed while the document was being generated.",
         })
@@ -51,6 +53,7 @@ def generate_artifact_job(self: Any, job_id: str) -> dict[str, object]:
             "status": "failed",
             "stage": "failed",
             "progress_pct": 100,
+            "stage_progress": None,
             "error_code": "artifact_no_evidence",
             "error_message_safe": exc.safe_message,
         })
@@ -73,6 +76,7 @@ def _retry_or_fail(task: Any, job_id: str, exc: Exception, code: str) -> dict[st
             "status": "failed",
             "stage": "failed",
             "progress_pct": 100,
+            "stage_progress": None,
             "error_code": code,
             "error_message_safe": str(exc)[:400],
         })
@@ -82,6 +86,7 @@ def _retry_or_fail(task: Any, job_id: str, exc: Exception, code: str) -> dict[st
         "status": "queued",
         "stage": "queued",
         "progress_pct": 0,
+        "stage_progress": None,
         "error_code": code,
         "error_message_safe": str(exc)[:400],
     })

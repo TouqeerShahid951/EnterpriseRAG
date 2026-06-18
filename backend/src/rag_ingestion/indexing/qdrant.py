@@ -75,6 +75,9 @@ class QdrantClient:
         self._set_points_current(current_point_ids)
         return len(points)
 
+    def delete_document_points(self, doc_id: str) -> None:
+        self._delete_document_points(doc_id)
+
     def mark_documents_not_current(self, doc_ids: list[str]) -> None:
         for doc_id in doc_ids:
             for point in self._document_points(doc_id):

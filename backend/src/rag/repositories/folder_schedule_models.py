@@ -16,7 +16,7 @@ class FolderScheduleRecord:
     status: str
     group_path: str
     clearance_level: str
-    doc_type: str
+    doc_type: str | None
     effective_date: date | None
     expiry_date: date | None
     description: str | None

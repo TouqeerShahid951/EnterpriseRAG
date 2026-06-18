@@ -32,7 +32,7 @@ class DocumentClaim(ContractModel):
 class Document(ContractModel):
     id: str
     title: str
-    doc_type: DocType
+    doc_type: DocType | None = None
     group_path: str
     clearance_level: ClearanceLevel = DEFAULT_CLEARANCE_LEVEL
     effective_date: str | None = None
@@ -61,6 +61,10 @@ class Document(ContractModel):
 class DocumentListResponse(ContractModel):
     items: list[Document] = Field(default_factory=list)
     total: int = Field(..., ge=0)
+
+
+class DocumentClearanceUpdateRequest(ContractModel):
+    clearance_level: ClearanceLevel
 
 
 class SupersedeRequest(ContractModel):

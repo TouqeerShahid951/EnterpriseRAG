@@ -22,7 +22,7 @@ export function validateDocumentFiles(files: File[]): DocumentFileValidation {
 
   for (const file of files) {
     if (!isSupportedDocumentFile(file)) {
-      rejectedMessages.push(`${file.name} is not a PDF, DOCX, JPG, or PNG file.`);
+      rejectedMessages.push(`${file.name} is not a PDF, DOCX, JPG, PNG, or JSON file.`);
       continue;
     }
     if (file.size === 0) {
@@ -50,9 +50,9 @@ export function toUploadRequests(draft: PdfUploadDraft): UploadDocumentRequest[]
   return draft.files.map((file) => ({
     file,
     group_path: draft.groupPath.trim(),
+    clearance_level: draft.clearanceLevel,
     effective_date: draft.effectiveDate || null,
     expiry_date: draft.expiryDate || null,
-    doc_type: draft.docType,
     description: draft.description.trim() || null,
     supersedes,
   }));
@@ -72,11 +72,13 @@ function isSupportedDocumentFile(file: File): boolean {
     || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     || file.type === "image/jpeg"
     || file.type === "image/png"
+    || file.type === "application/json"
     || name.endsWith(".pdf")
     || name.endsWith(".docx")
     || name.endsWith(".jpg")
     || name.endsWith(".jpeg")
     || name.endsWith(".png")
+    || name.endsWith(".json")
   );
 }
 

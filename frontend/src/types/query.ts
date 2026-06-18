@@ -1,4 +1,4 @@
-import type { ISODateString } from "./api";
+import type { ClearanceLevel, ISODateString } from "./api";
 
 export type QueryIntent =
   | "factual_simple"
@@ -9,6 +9,7 @@ export type QueryIntent =
   | "conversational";
 
 export type ArtifactFormat = "docx" | "pptx" | "pdf";
+export type ArtifactJobProgressUnit = "sections" | "batches" | "slides" | "formats" | "files";
 export type ArtifactJobStatus =
   | "queued"
   | "planning"
@@ -80,6 +81,7 @@ export interface SourceAnchor {
   page_end: number | null;
   excerpt: string;
   group_path: string;
+  clearance_level: ClearanceLevel;
   effective_date: ISODateString | null;
   highlight_ranges: HighlightRange[];
   source_regions?: SourceRegion[];
@@ -145,6 +147,9 @@ export interface ArtifactJobSummary {
   status: ArtifactJobStatus;
   stage: string;
   progress_pct: number;
+  stage_label?: string;
+  stage_detail?: string;
+  stage_progress?: ArtifactJobStageProgress | null;
   requested_formats: ArtifactFormat[];
   clarification_questions: string[];
   artifacts: GeneratedArtifact[];
@@ -153,6 +158,13 @@ export interface ArtifactJobSummary {
   created_at: ISODateString | null;
   updated_at: ISODateString | null;
   expires_at: ISODateString | null;
+}
+
+export interface ArtifactJobStageProgress {
+  unit: ArtifactJobProgressUnit;
+  current: number;
+  total: number;
+  label?: string | null;
 }
 
 export interface ArtifactStageTiming {

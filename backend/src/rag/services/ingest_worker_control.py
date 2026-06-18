@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+from time import monotonic
 from typing import Any
 
 from ..core.config import settings
+
+SNAPSHOT_CACHE_SECONDS = 3.0
 
 
 @dataclass(frozen=True)
@@ -43,8 +46,14 @@ class IngestWorkerControl:
 
             app = Celery("agenticrag-ingest-control", broker=broker_url)
         self._app = app
+        self._snapshot_cache: dict[int, tuple[float, WorkerControlResult]] = {}
 
     def snapshot(self, desired_concurrency: int) -> WorkerControlResult:
+        now = monotonic()
+        cached = self._snapshot_cache.get(desired_concurrency)
+        if cached and now - cached[0] < SNAPSHOT_CACHE_SECONDS:
+            return cached[1]
+
         inspector = self._app.control.inspect(timeout=2)
         stats = inspector.stats() or {}
         active = inspector.active() or {}
@@ -65,9 +74,12 @@ class IngestWorkerControl:
         status = "pending" if not workers else (
             "applied" if all(worker.pool_size == desired_concurrency for worker in workers) else "draining"
         )
-        return WorkerControlResult(desired_concurrency, tuple(workers), status, frozenset(active_job_ids))
+        result = WorkerControlResult(desired_concurrency, tuple(workers), status, frozenset(active_job_ids))
+        self._snapshot_cache[desired_concurrency] = (now, result)
+        return result
 
     def apply(self, desired_concurrency: int) -> WorkerControlResult:
+        self._snapshot_cache.clear()
         current = self.snapshot(desired_concurrency)
         if not current.worker_online:
             return current
@@ -77,6 +89,7 @@ class IngestWorkerControl:
                 self._app.control.pool_grow(difference, reply=True, destination=[worker.name])
             elif difference < 0:
                 self._app.control.pool_shrink(abs(difference), reply=True, destination=[worker.name])
+        self._snapshot_cache.clear()
         return self.snapshot(desired_concurrency)
 
 

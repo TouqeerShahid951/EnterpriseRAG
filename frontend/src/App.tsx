@@ -126,6 +126,8 @@ function App() {
             hasPendingTurn={chat.hasPendingTurn}
             latestResponse={chat.latestResponse}
             loadChatSession={chat.loadChatSession}
+            loadMoreSavedSessions={chat.loadMoreSavedSessions}
+            loadingSessionId={chat.loadingSessionId}
             onActiveSpaceChange={chat.changeActiveSpacePath}
             onCancelArtifactJob={chat.cancelArtifactJob}
             onClarifyArtifactJob={chat.clarifyArtifactJob}
@@ -140,7 +142,11 @@ function App() {
             removeScopedDocument={chat.removeScopedDocument}
             savedSessions={chat.savedSessions}
             savedSessionsError={chat.savedSessionsError}
+            savedSessionLoadError={chat.savedSessionLoadError}
+            savedSessionsFetchingMore={chat.savedSessionsFetchingMore}
+            savedSessionsHasMore={chat.savedSessionsHasMore}
             savedSessionsLoading={chat.savedSessionsLoading}
+            savedSessionsTotal={chat.savedSessionsTotal}
             scopedDocumentIds={chat.scopedDocumentIds}
             selectedSource={chat.selectedSource}
             user={user}
@@ -150,7 +156,7 @@ function App() {
         {activeRoute === "document-overview" ? <FahamDocumentOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} /> : null}
         {activeRoute === "documents" ? <FahamDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="documents" /> : null}
         {activeRoute === "document-trash" ? <FahamDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="trash" /> : null}
-        {activeRoute === "upload" ? <FahamUploadPage batchItems={pdfUpload.batchItems} currentDocuments={inventory.documents} currentUser={user} onLogout={handleLogout} onNavigate={navigate} onPdfDraftChange={pdfUpload.updatePdfDraft} onPdfSubmit={pdfUpload.onPdfSubmit} pdfDraft={pdfUpload.pdfDraft} selectionError={pdfUpload.selectionError} uploadPending={pdfUpload.uploadMutation.isPending} /> : null}
+        {activeRoute === "upload" ? <FahamUploadPage batchItems={pdfUpload.batchItems} cancelingJobId={pdfUpload.cancelingJobId} currentDocuments={inventory.documents} currentUser={user} onCancelIngestJob={pdfUpload.cancelJob} onLogout={handleLogout} onNavigate={navigate} onPdfDraftChange={pdfUpload.updatePdfDraft} onPdfSubmit={pdfUpload.onPdfSubmit} pdfDraft={pdfUpload.pdfDraft} selectionError={pdfUpload.selectionError} uploadPending={pdfUpload.uploadMutation.isPending} /> : null}
         {activeRoute === "document-extraction" ? <FahamFolderSourcesPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
         {activeRoute === "ingestion-jobs" ? <FahamIngestionJobsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
         {activeRoute === "ingestion-health" ? <FahamIngestionHealthPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}

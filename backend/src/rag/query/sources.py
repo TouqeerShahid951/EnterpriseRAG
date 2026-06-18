@@ -164,6 +164,9 @@ def build_evidence_hits(
     broader_table_context: bool = False,
 ) -> list[SearchHit]:
     candidates = _prioritize_substantive_hits(dedupe_hits(_promote_parent_text(dedupe_hits(hits))))
+    scoped_order = _exhaustive_scope_order(candidates)
+    if scoped_order:
+        return _hits_within_budget(scoped_order, token_budget=token_budget, limit=limit)
     direct_structured = [hit for hit in candidates if _is_direct_structured_hit(hit)]
     structured_group_order = _round_robin_hits(_grouped_hits(direct_structured))
     context_hits = _structured_context_hits(candidates, direct_structured)
@@ -350,6 +353,30 @@ def _round_robin_hits(groups: list[list[SearchHit]]) -> list[SearchHit]:
         if not added:
             return ordered
         index += 1
+
+
+def _exhaustive_scope_order(candidates: list[SearchHit]) -> list[SearchHit]:
+    scoped = [hit for hit in candidates if _is_exhaustive_scope_hit(hit)]
+    if not scoped:
+        return []
+    remaining = [hit for hit in candidates if not _is_exhaustive_scope_hit(hit)]
+    return dedupe_hits([*_round_robin_hits(_grouped_hits_by_doc(scoped)), *remaining])
+
+
+def _is_exhaustive_scope_hit(hit: SearchHit) -> bool:
+    return str(hit.payload.get("exhaustive_scope_origin", "")) == "document_class_scope"
+
+
+def _grouped_hits_by_doc(hits: list[SearchHit]) -> list[list[SearchHit]]:
+    groups: dict[str, list[SearchHit]] = {}
+    order: list[str] = []
+    for hit in hits:
+        doc_id = str(hit.payload.get("doc_id", hit.point_id))
+        if doc_id not in groups:
+            groups[doc_id] = []
+            order.append(doc_id)
+        groups[doc_id].append(hit)
+    return [groups[doc_id] for doc_id in order]
 
 
 def _structured_context_hits(candidates: list[SearchHit], direct_hits: list[SearchHit]) -> list[SearchHit]:

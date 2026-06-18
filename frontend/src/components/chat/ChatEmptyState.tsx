@@ -1,4 +1,4 @@
-import { FileText, MessageSquare, ShieldCheck } from "lucide-react";
+import { FileText, MessageSquare, Search, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { Document } from "../../types/api";
@@ -7,35 +7,41 @@ export function ChatEmptyState({ documents, hasCorpus, onQuestionChange }: Props
   const prompts = promptsForDocuments(documents);
 
   return (
-    <section className="sv-card p-5 text-on-surface">
-      <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-        <div className="max-w-2xl">
-          <p className="sv-eyebrow">Start with a source-grounded question</p>
-          <h2 className="mt-2 text-headline-sm">{hasCorpus ? "Ask against indexed evidence" : "Index a document to start"}</h2>
-          <p className="mt-2 text-body-md text-secondary">
+    <section className="rag-empty-state" aria-labelledby="rag-empty-title">
+      <div className="rag-empty-copy">
+        <span className="rag-empty-icon" aria-hidden="true">
+          <Search size={15} strokeWidth={2.4} />
+        </span>
+        <div>
+          <p className="rag-empty-eyebrow">Source-grounded question</p>
+          <h2 id="rag-empty-title">{hasCorpus ? "Ask indexed evidence" : "Index a document to start"}</h2>
+          <p>
             {hasCorpus
-              ? "Ask across accessible documents, or type @ in the composer to scope the search to a specific document."
-              : "The chat stays disabled until there is at least one current indexed document in your accessible Knowledge Spaces."}
+              ? "Ask across accessible documents, or use @ to scope the answer to a document."
+              : "Chat unlocks after at least one accessible document is indexed."}
           </p>
         </div>
       </div>
-      <div className="mt-5 grid gap-3 md:grid-cols-3">
-        {hasCorpus ? (
-          prompts.map((prompt) => (
+
+      {hasCorpus ? (
+        <div className="rag-empty-actions">
+          {prompts.map((prompt) => (
             <button
               key={prompt}
               type="button"
               onClick={() => onQuestionChange(prompt)}
-              className="min-h-11 rounded border border-surface-border bg-surface px-3 py-2 text-left text-body-md text-on-surface hover:bg-surface-container-high"
+              className="rag-empty-prompt"
             >
               {prompt}
             </button>
-          ))
-        ) : (
-          <Capability icon={<FileText size={16} />} label="PDF, DOCX, JPG, and PNG ingestion is active" />
-        )}
-        <Capability icon={<MessageSquare size={16} />} label="Answers stay tied to retrieved chunks" />
-        <Capability icon={<ShieldCheck size={16} />} label="Access follows your Knowledge Spaces" />
+          ))}
+        </div>
+      ) : null}
+
+      <div className="rag-empty-capabilities" aria-label="Answer safeguards">
+        {hasCorpus ? null : <Capability icon={<FileText size={14} />} label="PDF, DOCX, JPG, PNG, and JSON ingestion is active" />}
+        <Capability icon={<MessageSquare size={14} />} label="Answers stay tied to retrieved chunks" />
+        <Capability icon={<ShieldCheck size={14} />} label="Access follows Knowledge Spaces" />
       </div>
     </section>
   );
@@ -43,8 +49,8 @@ export function ChatEmptyState({ documents, hasCorpus, onQuestionChange }: Props
 
 function Capability({ icon, label }: { icon: ReactNode; label: string }) {
   return (
-    <div className="flex min-h-11 items-center gap-2 rounded border border-surface-border bg-surface px-3 py-2 text-body-md text-secondary">
-      <span className="text-primary">{icon}</span>
+    <div className="rag-empty-capability">
+      <span aria-hidden="true">{icon}</span>
       {label}
     </div>
   );

@@ -16,21 +16,23 @@ export function FahamIngestionHealthPage({ onLogout, onNavigate, user }: Props) 
   const canViewConfigHealth = isPlatformAdmin(user);
   const canRecoverStaleJobs = isGlobalAdmin(user);
   const canViewSchedules = canManageSpaces(user);
-  const summaryQuery = useQuery({ queryKey: ["ingest-jobs", "summary", "health"], queryFn: () => ingestJobsApi.summary(), refetchInterval: 5000, retry: false });
+  const summaryQuery = useQuery({ queryKey: ["ingest-jobs", "summary"], queryFn: () => ingestJobsApi.summary(), refetchInterval: 5000, staleTime: 4000, retry: false });
   const failuresQuery = useQuery({
     queryKey: ["ingest-jobs", "list", "health-failures"],
     queryFn: () => ingestJobsApi.list({ status: "failed", limit: 5 }),
     refetchInterval: 5000,
+    staleTime: 4000,
     retry: false,
   });
-  const schedulesQuery = useQuery({ queryKey: ["folder-ingest", "schedules"], queryFn: folderIngestApi.listSchedules, enabled: canViewSchedules, retry: false });
-  const ragConfigQuery = useQuery({ queryKey: ["admin", "rag-config"], queryFn: adminApi.getRagConfig, enabled: canViewConfigHealth, retry: false });
-  const ingestConfigQuery = useQuery({ queryKey: ["admin", "ingest-config"], queryFn: adminApi.getIngestConfig, enabled: canViewConfigHealth, refetchInterval: 5000, retry: false });
+  const schedulesQuery = useQuery({ queryKey: ["folder-ingest", "schedules"], queryFn: folderIngestApi.listSchedules, enabled: canViewSchedules, staleTime: 15000, retry: false });
+  const ragConfigQuery = useQuery({ queryKey: ["admin", "rag-config"], queryFn: adminApi.getRagConfig, enabled: canViewConfigHealth, staleTime: 30000, retry: false });
+  const ingestConfigQuery = useQuery({ queryKey: ["admin", "ingest-config"], queryFn: adminApi.getIngestConfig, enabled: canViewConfigHealth, refetchInterval: 5000, staleTime: 3000, retry: false });
   const staleJobsQuery = useQuery({
     queryKey: ["ingest-jobs", "stale"],
     queryFn: ingestJobsApi.listStale,
     enabled: canRecoverStaleJobs,
     refetchInterval: 5000,
+    staleTime: 3000,
     retry: false,
   });
   const requeueMutation = useMutation({

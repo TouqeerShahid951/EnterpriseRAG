@@ -27,7 +27,7 @@ class FolderScheduleBase(ContractModel):
     clearance_level: ClearanceLevel = DEFAULT_CLEARANCE_LEVEL
     effective_date: date | None = None
     expiry_date: date | None = None
-    doc_type: DocType
+    doc_type: DocType | None = Field(default=None, max_length=80)
     description: str | None = Field(default=None, max_length=2000)
     schedule_type: FolderScheduleType
     timezone: str = "Asia/Karachi"
@@ -95,7 +95,7 @@ class FolderSchedule(ContractModel):
     status: FolderScheduleStatus
     group_path: str
     clearance_level: ClearanceLevel = DEFAULT_CLEARANCE_LEVEL
-    doc_type: DocType
+    doc_type: DocType | None = None
     effective_date: date | None = None
     expiry_date: date | None = None
     description: str | None = None

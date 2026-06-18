@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, AtSign, CheckCircle2, Circle, FileText, Loader2, Paperclip, Send, Square, X, XCircle } from "lucide-react";
 
@@ -12,14 +12,16 @@ import { EvidenceInspector, MobileEvidencePanel } from "../components/chat/Evide
 import { FahamWorkspace } from "../components/layout/FahamWorkspace";
 import type { RouteId } from "../routes";
 import type { Document, SourceAnchor, User as AuthUser } from "../types/api";
-import type { ChatTurn, SavedChatSession, UploadJobView } from "../types/chat";
+import type { ChatTurn, SavedChatSessionSummary, UploadJobView } from "../types/chat";
 import { buildChatUploadRequest } from "../state/chatUpload";
 import { formatStageProgress, isUploadTerminalStatus, toUploadJobView, uploadFallbackSteps } from "../state/uploadJobProgress";
+import { readStoredBoolean, writeStoredBoolean } from "../state/uiPreferences";
 import { errorMessage } from "../utils/format";
 import { isDocumentInSpace } from "../utils/groups";
 import { withSourceDocumentTitle } from "../utils/sourceDocument";
 
 const CHAT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+const CHAT_HISTORY_COLLAPSED_STORAGE_KEY = "faham-chat-history-collapsed";
 
 export function FahamChatPage(props: Props) {
   const activeSpaceDocuments = useMemo(
@@ -36,6 +38,7 @@ export function FahamChatPage(props: Props) {
   const sourceNumber = selectedSourceNumber(props.latestResponse?.sources ?? [], props.selectedSource);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const streamPositionKey = useMemo(() => chatStreamPositionKey(props.chatTurns), [props.chatTurns]);
+  const [historyCollapsed, setHistoryCollapsed] = useState(() => readStoredBoolean(CHAT_HISTORY_COLLAPSED_STORAGE_KEY, false));
 
   useEffect(() => {
     const scrollNode = scrollRef.current;
@@ -43,20 +46,38 @@ export function FahamChatPage(props: Props) {
     scrollNode.scrollTo({ top: scrollNode.scrollHeight, behavior: "smooth" });
   }, [streamPositionKey, source?.chunk_id]);
 
+  useEffect(() => {
+    writeStoredBoolean(CHAT_HISTORY_COLLAPSED_STORAGE_KEY, historyCollapsed);
+  }, [historyCollapsed]);
+
+  const chatBodyClassName = [
+    "rag-chat-body",
+    source ? "rag-chat-body-with-evidence" : "",
+    historyCollapsed ? "rag-chat-body-history-collapsed" : "",
+  ].filter(Boolean).join(" ");
+
   return (
     <FahamWorkspace activeRoute="chat" onLogout={props.onLogout} onNavigate={props.onNavigate} user={props.user}>
       <main className="rag-chat-page" id="main-content">
         <ChatWorkspaceHeader />
-        <div className={source ? "rag-chat-body rag-chat-body-with-evidence" : "rag-chat-body"}>
+        <div className={chatBodyClassName}>
           <CorpusRail
             activeSessionId={props.activeSessionId}
+            collapsed={historyCollapsed}
             hasPendingTurn={props.hasPendingTurn}
+            onCollapsedChange={setHistoryCollapsed}
             onDeleteSession={props.deleteChatSession}
             onLoadSession={props.loadChatSession}
+            onLoadMoreSessions={props.loadMoreSavedSessions}
             onReset={props.onReset}
             loading={props.savedSessionsLoading}
+            loadingSessionId={props.loadingSessionId}
             errorMessage={props.savedSessionsError}
+            loadErrorMessage={props.savedSessionLoadError}
             savedSessions={props.savedSessions}
+            savedSessionsFetchingMore={props.savedSessionsFetchingMore}
+            savedSessionsHasMore={props.savedSessionsHasMore}
+            savedSessionsTotal={props.savedSessionsTotal}
           />
           <section className="rag-chat-thread" aria-label="Document chat">
             <div className="rag-chat-scroll" ref={scrollRef}>
@@ -161,6 +182,7 @@ function ChatComposer({
     () => mentionSuggestionsForDocuments(activeDocuments, scopedDocumentIds, mentionQuery),
     [activeDocuments, scopedDocumentIds, mentionQuery],
   );
+  const canSubmitQuestion = hasCorpus && question.trim().length > 0 && !hasPendingTurn;
   const uploadMutation = useMutation({
     mutationFn: ({ file, groupPath }: ChatUploadVariables) =>
       uploadApi.document(buildChatUploadRequest(file, groupPath)),
@@ -211,7 +233,7 @@ function ChatComposer({
     uploadMutation.reset();
     if (!file) return;
     if (!isSupportedDocumentFile(file)) {
-      setUploadJob({ fileName: file.name, jobId: null, space: uploadSpace, errorMessage: "Only PDF, DOCX, JPG, and PNG files can be uploaded from chat." });
+      setUploadJob({ fileName: file.name, jobId: null, space: uploadSpace, errorMessage: "Only PDF, DOCX, JPG, PNG, and JSON files can be uploaded from chat." });
       return;
     }
     if (file.size > CHAT_UPLOAD_MAX_BYTES) {
@@ -229,9 +251,17 @@ function ChatComposer({
     uploadMutation.mutate({ file, groupPath: uploadSpace });
   }
 
+  function handleQuestionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    if (canSubmitQuestion) {
+      event.currentTarget.form?.requestSubmit();
+    }
+  }
+
   return (
-    <form onSubmit={onQuestionSubmit} className="border-t border-surface-border bg-surface-card p-5">
-      <div className="mx-auto max-w-4xl">
+    <form onSubmit={onQuestionSubmit} className="rag-composer-shell">
+      <div className="rag-composer-inner">
         {scopedDocuments.length > 0 ? (
           <div className="rag-composer-scope" aria-label="Scoped documents">
             <span className="rag-composer-scope-label">Search scoped to</span>
@@ -247,17 +277,17 @@ function ChatComposer({
           </div>
         ) : null}
         <div className="relative rounded-lg border border-surface-border bg-surface focus-within:border-primary focus-within:ring-2 focus-within:ring-primary">
-          <textarea ref={inputRef} value={question} onChange={(event) => onQuestionChange(event.target.value)} className={`min-h-[56px] max-h-32 w-full resize-none rounded-lg border-none bg-transparent p-4 text-body-lg text-on-surface focus:outline-none ${canUploadActiveSpace ? "pr-28" : "pr-16"}`} placeholder={hasCorpus ? "Ask a question, or type @ to scope to a document..." : "Index a document before querying."} rows={1} />
+          <textarea ref={inputRef} value={question} onChange={(event) => onQuestionChange(event.target.value)} onKeyDown={handleQuestionKeyDown} className={`rag-composer-input ${canUploadActiveSpace ? "rag-composer-input-with-upload" : "rag-composer-input-with-send"}`} placeholder={hasCorpus ? "Ask a question, or type @ to scope to a document..." : "Index a document before querying."} rows={1} />
           {canUploadActiveSpace ? (
             <>
-              <input ref={fileInputRef} className="hidden" type="file" accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png" onChange={handleFileChange} tabIndex={-1} aria-hidden="true" />
+              <input ref={fileInputRef} className="hidden" type="file" accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png,application/json,.json" onChange={handleFileChange} tabIndex={-1} aria-hidden="true" />
               <button
                 type="button"
                 disabled={uploadMutation.isPending}
                 onClick={() => fileInputRef.current?.click()}
                 className="rag-composer-icon-action absolute bottom-2 right-14"
-                aria-label="Upload PDF, DOCX, JPG, or PNG, maximum 50 MB"
-                title="Upload PDF, DOCX, JPG, or PNG, maximum 50 MB"
+                aria-label="Upload PDF, DOCX, JPG, PNG, or JSON, maximum 50 MB"
+                title="Upload PDF, DOCX, JPG, PNG, or JSON, maximum 50 MB"
               >
                 {uploadMutation.isPending ? <Loader2 className="animate-spin" size={18} /> : <Paperclip size={18} />}
               </button>
@@ -265,9 +295,9 @@ function ChatComposer({
           ) : null}
           <button
             type={hasPendingTurn ? "button" : "submit"}
-            disabled={!hasPendingTurn && (!hasCorpus || !question.trim())}
+            disabled={!hasPendingTurn && !canSubmitQuestion}
             onClick={hasPendingTurn ? cancelPendingTurn : undefined}
-            className={`absolute bottom-2 right-2 flex h-10 w-10 items-center justify-center rounded-lg ${hasPendingTurn ? "rag-composer-stop-action" : "bg-primary text-on-primary"}`}
+            className={`rag-composer-send-action absolute bottom-2 right-2 ${hasPendingTurn ? "rag-composer-stop-action" : "bg-primary text-on-primary"}`}
             aria-label={hasPendingTurn ? "Stop response generation" : "Send question"}
             title={hasPendingTurn ? "Stop response generation" : "Send question"}
           >
@@ -303,7 +333,7 @@ function ChatComposer({
           />
         ) : null}
         <p className="mt-2 text-center text-[10px] font-semibold uppercase text-secondary">
-          {canUploadActiveSpace ? "Paperclip uploads PDF, DOCX, JPG, or PNG files up to 50 MB into the active Knowledge Space. " : ""}@ tags narrow the retrieval scope.
+          {canUploadActiveSpace ? "Paperclip uploads PDF, DOCX, JPG, PNG, or JSON files up to 50 MB into the active Knowledge Space. " : ""}@ tags narrow the retrieval scope.
         </p>
       </div>
     </form>
@@ -357,7 +387,7 @@ const localComposerUploadJob: UploadJobView = {
   status: "queued",
   progressPct: 8,
   stage: "queued",
-  stageLabel: "Uploading PDF",
+  stageLabel: "Uploading document",
   stageDetail: "Validating, scanning, storing, and creating the indexing job.",
   stageProgress: null,
   steps: uploadFallbackSteps.map((step, index) =>
@@ -373,6 +403,7 @@ const localComposerUploadJob: UploadJobView = {
   maxAttempts: 3,
   createdAt: null,
   updatedAt: null,
+  completedAt: null,
   lastHeartbeatAt: null,
 };
 
@@ -383,7 +414,7 @@ function failedComposerUploadJob(message: string): UploadJobView {
     progressPct: 0,
     stage: "failed",
     stageLabel: "Upload failed",
-    stageDetail: "The PDF did not reach the indexing queue.",
+    stageDetail: "The document did not reach the indexing queue.",
     stageProgress: null,
     steps: uploadFallbackSteps.map((step, index) =>
       index === 0
@@ -398,6 +429,7 @@ function failedComposerUploadJob(message: string): UploadJobView {
     maxAttempts: 3,
     createdAt: null,
     updatedAt: null,
+    completedAt: null,
     lastHeartbeatAt: null,
   };
 }
@@ -405,6 +437,7 @@ function failedComposerUploadJob(message: string): UploadJobView {
 function composerUploadIcon(job: UploadJobView) {
   if (job.status === "complete") return CheckCircle2;
   if (job.status === "failed") return XCircle;
+  if (job.status === "cancelled") return XCircle;
   if (job.status === "human_review") return AlertTriangle;
   return Loader2;
 }
@@ -412,6 +445,7 @@ function composerUploadIcon(job: UploadJobView) {
 function composerStepIcon(state: UploadJobView["steps"][number]["state"]) {
   if (state === "complete") return <CheckCircle2 aria-hidden="true" size={12} />;
   if (state === "failed") return <XCircle aria-hidden="true" size={12} />;
+  if (state === "cancelled") return <XCircle aria-hidden="true" size={12} />;
   if (state === "needs_review") return <AlertTriangle aria-hidden="true" size={12} />;
   if (state === "active") return <Loader2 aria-hidden="true" className="animate-spin" size={12} />;
   return <Circle aria-hidden="true" size={12} />;
@@ -420,6 +454,7 @@ function composerStepIcon(state: UploadJobView["steps"][number]["state"]) {
 function composerUploadTone(status: UploadJobView["status"]) {
   if (status === "complete") return "success";
   if (status === "failed") return "error";
+  if (status === "cancelled") return "warning";
   if (status === "human_review") return "warning";
   return "pending";
 }
@@ -427,6 +462,7 @@ function composerUploadTone(status: UploadJobView["status"]) {
 function uploadStateLabel(status: UploadJobView["status"]) {
   if (status === "complete") return "Completed";
   if (status === "failed") return "Failed";
+  if (status === "cancelled") return "Cancelled";
   if (status === "human_review") return "Needs review";
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
@@ -438,11 +474,13 @@ function isSupportedDocumentFile(file: File): boolean {
     || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     || file.type === "image/jpeg"
     || file.type === "image/png"
+    || file.type === "application/json"
     || name.endsWith(".pdf")
     || name.endsWith(".docx")
     || name.endsWith(".jpg")
     || name.endsWith(".jpeg")
     || name.endsWith(".png")
+    || name.endsWith(".json")
   );
 }
 
@@ -485,6 +523,8 @@ type Props = {
   hasPendingTurn: boolean;
   latestResponse: { sources: SourceAnchor[] } | null;
   loadChatSession: (sessionId: string) => void;
+  loadMoreSavedSessions: () => void;
+  loadingSessionId: string | null;
   onLogout: () => void;
   onActiveSpaceChange: (groupPath: string | null) => void;
   onCancelArtifactJob: (jobId: string) => Promise<void>;
@@ -497,9 +537,13 @@ type Props = {
   onSelectSource: (source: SourceAnchor | null) => void;
   question: string;
   removeScopedDocument: (documentId: string) => void;
-  savedSessions: SavedChatSession[];
+  savedSessions: SavedChatSessionSummary[];
   savedSessionsError: string | null;
+  savedSessionLoadError: string | null;
+  savedSessionsFetchingMore: boolean;
+  savedSessionsHasMore: boolean;
   savedSessionsLoading: boolean;
+  savedSessionsTotal: number;
   scopedDocumentIds: string[];
   selectedSource: SourceAnchor | null;
   user: AuthUser;

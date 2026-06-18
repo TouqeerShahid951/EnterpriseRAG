@@ -28,7 +28,7 @@ class InMemoryFolderScheduleRepository:
             status=str(kwargs["status"]),
             group_path=normalize_group_path(kwargs["group_path"]),
             clearance_level=normalize_clearance_level(kwargs.get("clearance_level")),
-            doc_type=str(kwargs["doc_type"]),
+            doc_type=str(kwargs["doc_type"]) if kwargs.get("doc_type") else None,
             effective_date=kwargs["effective_date"],
             expiry_date=kwargs.get("expiry_date"),
             description=kwargs.get("description"),

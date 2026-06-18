@@ -38,6 +38,22 @@ async def approve_review_item(
     if decision is None:
         raise HTTPException(status_code=404, detail={"code": "review_item_not_found", "message": "Review item was not found."})
     if decision.batch_complete:
+        job = document_repo.get_ingest_job(decision.batch.job_id)
+        if job is not None and job.status == "cancelled":
+            document_repo.append_audit_event(
+                event_type="review.resume_skipped",
+                actor_id=user.id,
+                target_type="review_item",
+                target_id=decision.item.id,
+                payload={"batch_id": decision.batch.id, "doc_id": decision.batch.doc_id, "reason": "ingest_cancelled"},
+            )
+            return ReviewDecisionResponse(
+                id=decision.item.id,
+                status="approved",
+                batch_id=decision.batch.id,
+                batch_status="approved",
+                batch_complete=decision.batch_complete,
+            )
         resume_payload = dict(decision.batch.resume_payload)
         resume_payload["review_batch_id"] = decision.batch.id
         try:

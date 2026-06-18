@@ -22,6 +22,7 @@ from ...schemas.docs import (
     DeleteDocumentResponse,
     Document,
     DocumentClaim,
+    DocumentClearanceUpdateRequest,
     DocumentCrossReference,
     DocumentEntity,
     DocumentListResponse,
@@ -34,6 +35,7 @@ from ...schemas.query import SourceAnchor
 from ...services.ingest_queue import IngestQueue, IngestQueueMessage, get_ingest_queue
 from ...services.document_image_asset_storage import DocumentImageAssetStorage, get_document_image_asset_storage
 from ...services.upload_storage import UploadStorage, get_upload_storage
+from ...shared.contracts.clearance import clearance_rank, normalize_clearance_level
 
 router = APIRouter(prefix="/docs", tags=["documents"])
 
@@ -92,8 +94,8 @@ async def get_document(
 @router.get(
     "/{document_id}/content",
     responses={
-        status.HTTP_200_OK: {"content": {"application/pdf": {}, "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {}, "image/jpeg": {}, "image/png": {}}},
-        status.HTTP_206_PARTIAL_CONTENT: {"content": {"application/pdf": {}, "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {}, "image/jpeg": {}, "image/png": {}}},
+        status.HTTP_200_OK: {"content": {"application/pdf": {}, "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {}, "image/jpeg": {}, "image/png": {}, "application/json": {}}},
+        status.HTTP_206_PARTIAL_CONTENT: {"content": {"application/pdf": {}, "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {}, "image/jpeg": {}, "image/png": {}, "application/json": {}}},
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
     },
     summary="Stream original document content",
@@ -221,6 +223,102 @@ async def get_document_versions(
     require_visible_document(user, document)
     chain = [node for node in repo.list_version_chain(document_id) if can_read_document(user, node)]
     return VersionChainResponse(document_id=document_id, chain=[version_node(node) for node in chain])
+
+
+@router.patch(
+    "/{document_id}/clearance",
+    response_model=Document,
+    responses={
+        status.HTTP_200_OK: {"model": Document},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+    },
+    summary="Update document clearance",
+)
+async def update_document_clearance(
+    document_id: str,
+    payload: DocumentClearanceUpdateRequest,
+    request: Request,
+    user: UserRecord = Depends(require_current_user),
+    repo: DocumentRepository = Depends(get_document_repository),
+    qdrant: QdrantClient = Depends(get_document_qdrant_client),
+) -> Document:
+    require_csrf(request)
+    document = require_writable_document(user, repo.get_document(document_id))
+    try:
+        target_clearance = normalize_clearance_level(payload.clearance_level)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "invalid_clearance_level", "message": str(exc)},
+        ) from exc
+
+    if clearance_rank(target_clearance) > clearance_rank(user.clearance_level):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "clearance_forbidden",
+                "message": "User cannot assign a clearance level above their own.",
+            },
+        )
+    if target_clearance == document.clearance_level:
+        return document_to_schema(document)
+
+    current_rank = clearance_rank(document.clearance_level)
+    target_rank = clearance_rank(target_clearance)
+    indexed_first = target_rank > current_rank
+    updated: DocumentRecord | None = None
+
+    try:
+        if indexed_first:
+            _set_qdrant_document_clearance(qdrant, document.id, target_clearance)
+        updated = repo.update_document_clearance(document.id, target_clearance)
+        if updated is None:
+            if indexed_first:
+                _try_set_qdrant_document_clearance(qdrant, document.id, document.clearance_level)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "document_not_found", "message": "Document was not found."},
+            )
+        if not indexed_first:
+            _set_qdrant_document_clearance(qdrant, document.id, target_clearance)
+    except ServiceRequestError as exc:
+        repo.append_audit_event(
+            event_type="documents.clearance_update",
+            actor_id=user.id,
+            target_type="document",
+            target_id=document.id,
+            payload={
+                "group_path": document.group_path,
+                "old_clearance_level": document.clearance_level,
+                "new_clearance_level": target_clearance,
+                "action_result": "failed",
+                "error_code": "document_clearance_index_update_failed",
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "document_clearance_index_update_failed",
+                "message": f"Unable to update indexed document clearance: {exc}",
+            },
+        ) from exc
+
+    repo.append_audit_event(
+        event_type="documents.clearance_update",
+        actor_id=user.id,
+        target_type="document",
+        target_id=document.id,
+        payload={
+            "group_path": document.group_path,
+            "old_clearance_level": document.clearance_level,
+            "new_clearance_level": target_clearance,
+            "qdrant_collection": settings.qdrant_collection,
+            "action_result": "success",
+        },
+    )
+    return document_to_schema(updated)
 
 
 @router.post(
@@ -459,6 +557,21 @@ def _matches_group_filter(document_group_path: str, group_path: str | None) -> b
     return normalized_document_group == group_path
 
 
+def _set_qdrant_document_clearance(qdrant: QdrantClient, document_id: str, clearance_level: str) -> None:
+    qdrant.set_document_clearance(
+        document_id,
+        clearance_level=clearance_level,
+        clearance_rank=clearance_rank(clearance_level),
+    )
+
+
+def _try_set_qdrant_document_clearance(qdrant: QdrantClient, document_id: str, clearance_level: str) -> None:
+    try:
+        _set_qdrant_document_clearance(qdrant, document_id, clearance_level)
+    except ServiceRequestError:
+        return
+
+
 def _queue_document_reingest(
     document: DocumentRecord,
     *,
@@ -528,7 +641,7 @@ def _ingest_message_for_document(document: DocumentRecord, job_id: str, stored: 
         file_path=str(document.file_path),
         group_path=document.group_path,
         clearance_level=document.clearance_level,
-        doc_type=document.doc_type or "other",
+        doc_type=document.doc_type,
         effective_date=document.effective_date.isoformat() if document.effective_date else None,
         supersedes=supersedes,
         expiry_date=document.expiry_date.isoformat() if document.expiry_date else None,
@@ -547,7 +660,7 @@ def document_to_schema(
     return Document(
         id=document.id,
         title=document.title or document.source_id,
-        doc_type=document.doc_type or "other",
+        doc_type=document.doc_type,
         group_path=document.group_path,
         clearance_level=document.clearance_level,
         effective_date=document.effective_date.isoformat() if document.effective_date else None,
@@ -685,4 +798,6 @@ def _content_type_for_filename(filename: str) -> str:
         return "image/jpeg"
     if lowered.endswith(".png"):
         return "image/png"
+    if lowered.endswith(".json"):
+        return "application/json"
     return "application/octet-stream"

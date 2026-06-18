@@ -9,6 +9,7 @@ from typing import Any
 METADATA_VERSION = 2
 METADATA_EXTRACTION_WARNING = "metadata_extraction_unavailable"
 METADATA_CONSOLIDATION_WARNING = "metadata_consolidation_unavailable"
+METADATA_EXCEPTION_WARNING = "metadata_extraction_exception"
 
 
 def generate_metadata_v2(
@@ -20,17 +21,20 @@ def generate_metadata_v2(
 ) -> dict[str, Any]:
     windows = _metadata_windows(parsed_items, max_windows=max_windows, max_window_chars=max_window_chars)
     warnings: list[str] = []
+    metadata_errors: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
     for window in windows:
         candidate = _safe_generate(generate_metadata, window)
         warnings.extend(_pop_warnings(candidate))
+        metadata_errors.extend(_pop_metadata_errors(candidate))
         if _has_metadata_signal(candidate):
             candidates.append(candidate)
     if not candidates:
-        return _fallback(warnings, window_count=len(windows))
+        return _fallback(warnings, window_count=len(windows), metadata_errors=metadata_errors)
 
     final = _safe_generate(generate_metadata, _consolidation_prompt(candidates, windows))
     warnings.extend(_pop_warnings(final))
+    metadata_errors.extend(_pop_metadata_errors(final))
     if _has_metadata_signal(final):
         metadata = _fill_missing(final, _merge_candidates(candidates))
         mode = "llm_consolidated"
@@ -39,6 +43,8 @@ def generate_metadata_v2(
         warnings.append(METADATA_CONSOLIDATION_WARNING)
         mode = "candidate_merge"
     metadata["_warnings"] = _unique(warnings)
+    if metadata_errors:
+        metadata["_metadata_errors"] = metadata_errors[:5]
     metadata["_metadata_extraction"] = {
         "version": METADATA_VERSION,
         "mode": mode,
@@ -75,7 +81,16 @@ def _safe_generate(generate_metadata: Callable[[str], dict[str, Any]], text: str
     try:
         metadata = generate_metadata(text)
     except Exception:
-        return {"_warnings": [METADATA_EXTRACTION_WARNING]}
+        return {
+            "_warnings": [METADATA_EXCEPTION_WARNING],
+            "_metadata_errors": [
+                {
+                    "warning": METADATA_EXCEPTION_WARNING,
+                    "service": "metadata",
+                    "message": "metadata extraction raised an unexpected exception",
+                }
+            ],
+        }
     return dict(metadata) if isinstance(metadata, dict) else {"_warnings": [METADATA_EXTRACTION_WARNING]}
 
 
@@ -84,12 +99,19 @@ def _pop_warnings(metadata: dict[str, Any]) -> list[str]:
     return [str(item) for item in raw] if isinstance(raw, list) else []
 
 
+def _pop_metadata_errors(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = metadata.pop("_metadata_errors", [])
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
+
+
 def _has_metadata_signal(metadata: dict[str, Any]) -> bool:
     return bool(
         str(metadata.get("summary", "")).strip()
         or _strings(metadata.get("llm_topics"))
         or _strings(metadata.get("topics"))
-        or str(metadata.get("doc_type", "other")).strip().lower() not in {"", "other"}
+        or bool(str(metadata.get("doc_type", "")).strip())
         or _claims(metadata.get("claims"))
     )
 
@@ -98,7 +120,7 @@ def _consolidation_prompt(candidates: list[dict[str, Any]], windows: list[str]) 
     return (
         "Consolidate these section-level metadata candidates into one document-level metadata object. "
         "Prefer repeated facts, remove duplicates, keep the summary to exactly two factual sentences, "
-        "and return summary, llm_topics, doc_type, and claims.\n\n"
+        "infer a concise freeform doc_type from the content, and return summary, llm_topics, doc_type, and claims.\n\n"
         f"Candidates:\n{json.dumps(candidates, ensure_ascii=True)[:4200]}\n\n"
         f"Representative text:\n{chr(10).join(windows[:2])[:1600]}"
     )
@@ -120,7 +142,7 @@ def _fill_missing(final: dict[str, Any], merged: dict[str, Any]) -> dict[str, An
         result["summary"] = merged["summary"]
     if not _strings(result.get("llm_topics") or result.get("topics")):
         result["llm_topics"] = merged["llm_topics"]
-    if str(result.get("doc_type", "other")).strip().lower() in {"", "other"}:
+    if not str(result.get("doc_type", "")).strip():
         result["doc_type"] = merged["doc_type"]
     if not _claims(result.get("claims")):
         result["claims"] = merged["claims"]
@@ -130,20 +152,26 @@ def _fill_missing(final: dict[str, Any], merged: dict[str, Any]) -> dict[str, An
 def _best_doc_type(candidates: list[dict[str, Any]]) -> str:
     counts: dict[str, int] = {}
     for item in candidates:
-        value = str(item.get("doc_type", "other")).strip().lower()
-        if value and value != "other":
+        value = str(item.get("doc_type", "")).strip().lower()
+        if value:
             counts[value] = counts.get(value, 0) + 1
-    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0] if counts else "other"
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0] if counts else ""
 
 
-def _fallback(warnings: list[str], *, window_count: int) -> dict[str, Any]:
+def _fallback(
+    warnings: list[str],
+    *,
+    window_count: int,
+    metadata_errors: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return {
         "summary": "",
         "topics": [],
         "llm_topics": [],
-        "doc_type": "other",
+        "doc_type": "",
         "claims": [],
         "_warnings": _unique([*warnings, METADATA_EXTRACTION_WARNING]),
+        "_metadata_errors": list(metadata_errors or [])[:5],
         "_metadata_extraction": {
             "version": METADATA_VERSION,
             "mode": "deterministic_fallback",

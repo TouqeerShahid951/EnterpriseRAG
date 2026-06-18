@@ -11,6 +11,7 @@ const source: SourceAnchor = {
   doc_title: "FIR_02_kidnapping.pdf",
   effective_date: "2026-06-04",
   excerpt: "FIR number 512/24",
+  clearance_level: "NATO_RESTRICTED",
   group_path: "/admin",
   highlight_ranges: [],
   page: 1,

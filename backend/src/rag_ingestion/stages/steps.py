@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+import threading
+import time
+
 from ..chunking import chunk_items
-from ..errors import HumanReviewRequired
+from ..errors import HumanReviewRequired, IngestJobCancelled
 from ..indexing.claims import build_claim_records
 from ..indexing.metadata_text import build_embedding_texts
 from ..indexing.payloads import build_qdrant_points
@@ -11,6 +16,10 @@ from ..metadata import build_metadata_bundle, generate_metadata_v2
 from ..parsers import parse_document
 from ..parsers.models import ParsedPdfItem, parsed_image_asset_to_dict, parsed_item_from_dict, parsed_item_to_dict
 from .state import IngestDependencies, IngestState
+
+METADATA_PROGRESS_INTERVAL_SECONDS = 15.0
+METADATA_PROGRESS_START = 36
+METADATA_PROGRESS_END = 49
 
 
 def mark_processing(state: IngestState, deps: IngestDependencies) -> IngestState:
@@ -41,6 +50,7 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
                 layered_docling_max_pages=deps.layered_docling_max_pages,
                 layered_docling_batch_pages=deps.layered_docling_batch_pages,
                 page_progress_callback=_page_progress_reporter(deps, payload.job_id),
+                docling_progress_callback=_docling_progress_reporter(deps, payload.job_id),
                 doc_id=payload.doc_id,
                 image_asset_store=deps.image_asset_writer,
                 image_analyzer=deps.vision,
@@ -88,10 +98,28 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
 
 
 def generate_metadata(state: IngestState, deps: IngestDependencies) -> IngestState:
+    job_id = state["payload"].job_id
+    model_label = _metadata_model_label(deps)
+    deps.backend.update_job(
+        job_id=job_id,
+        status="processing",
+        progress_pct=METADATA_PROGRESS_START,
+        stage_progress=_items_progress("metadata", 0, 1, f"Requesting metadata from {model_label}"),
+    )
     text = "\n\n".join(item.text for item in state["parsed_items"])
-    llm_metadata = generate_metadata_v2(state["parsed_items"], deps.ollama.generate_metadata)
+    with _metadata_progress_reporter(deps, job_id=job_id, model_label=model_label):
+        llm_metadata = generate_metadata_v2(state["parsed_items"], deps.ollama.generate_metadata)
     warnings = [str(item) for item in llm_metadata.pop("_warnings", [])]
+    metadata_errors = _metadata_errors(llm_metadata.pop("_metadata_errors", []))
     state["warnings"] = list(dict.fromkeys([*state.get("warnings", []), *warnings]))
+    if warnings:
+        deps.backend.update_job(
+            job_id=job_id,
+            status="processing",
+            progress_pct=METADATA_PROGRESS_END,
+            stage_progress=_items_progress("metadata", 1, 1, "Using deterministic metadata fallback"),
+            warnings=state.get("warnings", []),
+        )
     state["metadata"] = build_metadata_bundle(
         text=text,
         job=state["payload"],
@@ -103,12 +131,15 @@ def generate_metadata(state: IngestState, deps: IngestDependencies) -> IngestSta
         metadata_flags = state["metadata"].setdefault("metadata_flags", {})
         metadata_flags["metadata_generation_degraded"] = True
         metadata_flags["metadata_warnings"] = warnings
-        if "ollama_metadata_unavailable" in warnings:
+        if metadata_errors:
+            metadata_flags["metadata_error"] = metadata_errors[0]
+            metadata_flags["metadata_errors"] = metadata_errors
+        if "ollama_metadata_unavailable" in warnings or any(warning.startswith("ollama_metadata_") for warning in warnings):
             metadata_flags["ollama_metadata_unavailable"] = True
         deps.backend.record_event(
             job_id=state["payload"].job_id,
             event_type="degraded",
-            payload={"warnings": warnings, "component": "metadata_generation"},
+            payload={"warnings": warnings, "component": "metadata_generation", "metadata_errors": metadata_errors},
         )
     deps.backend.update_job(
         job_id=state["payload"].job_id,
@@ -166,6 +197,7 @@ def embed_chunks(state: IngestState, deps: IngestDependencies) -> IngestState:
         metadata=state["metadata"],
     )
     def report(index: int, total: int) -> None:
+        _raise_if_job_cancelled(deps, state["payload"].job_id)
         if _should_report_progress(index, len(chunks)):
             deps.backend.update_job(
                 job_id=state["payload"].job_id,
@@ -203,6 +235,7 @@ def embed_chunks(state: IngestState, deps: IngestDependencies) -> IngestState:
 
 def upsert_qdrant(state: IngestState, deps: IngestDependencies) -> IngestState:
     deps.qdrant.ensure_collection(len(state["vectors"][0]))
+    _raise_if_job_cancelled(deps, state["payload"].job_id)
     deps.backend.update_job(
         job_id=state["payload"].job_id,
         status="processing",
@@ -241,6 +274,7 @@ def _page_progress_reporter(deps: IngestDependencies, job_id: str):
 
     def report(page_no: int, page_count: int) -> None:
         nonlocal last_reported
+        _raise_if_job_cancelled(deps, job_id)
         if not _should_report_progress(page_no, page_count, last_reported=last_reported):
             return
         last_reported = page_no
@@ -254,8 +288,103 @@ def _page_progress_reporter(deps: IngestDependencies, job_id: str):
     return report
 
 
+def _docling_progress_reporter(deps: IngestDependencies, job_id: str):
+    def report(event: dict[str, object]) -> None:
+        _raise_if_job_cancelled(deps, job_id)
+        current = _int_value(event.get("current"))
+        total = max(1, _int_value(event.get("total")))
+        deps.backend.update_job(
+            job_id=job_id,
+            status="processing",
+            progress_pct=34,
+            stage_progress=_items_progress("pages", current, total, _docling_progress_label(event)),
+        )
+
+    return report
+
+
 def _items_progress(unit: str, current: int, total: int, label: str) -> dict[str, object]:
     return {"unit": unit, "current": max(0, current), "total": max(0, total), "label": label}
+
+
+@contextmanager
+def _metadata_progress_reporter(
+    deps: IngestDependencies,
+    *,
+    job_id: str,
+    model_label: str,
+) -> Iterator[None]:
+    stopped = threading.Event()
+    started = time.monotonic()
+    tick_count = 0
+
+    def report() -> None:
+        nonlocal tick_count
+        while not stopped.wait(METADATA_PROGRESS_INTERVAL_SECONDS):
+            try:
+                _raise_if_job_cancelled(deps, job_id)
+            except IngestJobCancelled:
+                return
+            except Exception:
+                pass
+            tick_count += 1
+            elapsed = max(1, int(time.monotonic() - started))
+            try:
+                deps.backend.update_job(
+                    job_id=job_id,
+                    status="processing",
+                    progress_pct=min(METADATA_PROGRESS_END, METADATA_PROGRESS_START + tick_count),
+                    stage_progress=_items_progress(
+                        "metadata",
+                        min(tick_count, METADATA_PROGRESS_END - METADATA_PROGRESS_START),
+                        METADATA_PROGRESS_END - METADATA_PROGRESS_START,
+                        f"Waiting on {model_label} for {_duration_label(elapsed)}",
+                    ),
+                )
+            except Exception:
+                continue
+
+    thread = threading.Thread(target=report, name=f"metadata-progress-{job_id}", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+    thread.join(timeout=1)
+
+
+def _raise_if_job_cancelled(deps: IngestDependencies, job_id: str) -> None:
+    get_status = getattr(deps.backend, "get_job_status", None)
+    if not callable(get_status):
+        return
+    if get_status(job_id=job_id).status == "cancelled":
+        raise IngestJobCancelled(job_id=job_id)
+
+
+def _metadata_model_label(deps: IngestDependencies) -> str:
+    model = str(getattr(deps.ollama, "chat_model", "") or "").strip()
+    class_name = type(deps.ollama).__name__.lower()
+    if "ollama" in class_name:
+        prefix = "Ollama metadata model"
+    elif "openai" in class_name:
+        prefix = "OpenAI-compatible metadata model"
+    else:
+        prefix = "metadata model"
+    return f"{prefix} {model}" if model else prefix
+
+
+def _metadata_errors(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)][:5]
+
+
+def _duration_label(total_seconds: int) -> str:
+    if total_seconds < 60:
+        return f"{total_seconds}s"
+    minutes = total_seconds // 60
+    seconds = total_seconds % 60
+    return f"{minutes}m {seconds}s" if seconds else f"{minutes}m"
 
 
 def _should_report_progress(current: int, total: int, *, last_reported: int = 0) -> bool:
@@ -279,21 +408,90 @@ def _page_count(items: list[ParsedPdfItem]) -> int:
     return max(pages) if pages else 0
 
 
+def _docling_progress_label(event: dict[str, object]) -> str:
+    phase = str(event.get("phase") or "docling")
+    status = str(event.get("status") or "running")
+    current = _int_value(event.get("current"))
+    total = max(1, _int_value(event.get("total")))
+    pages = _int_tuple(event.get("pages"))
+    page_count = len(pages) if pages else 1
+    if status == "complete":
+        selected_end = max(1, min(total, current))
+        selected_start = max(1, selected_end - page_count + 1)
+    else:
+        selected_start = max(1, min(total, current + 1))
+        selected_end = max(selected_start, min(total, current + page_count))
+    selected_label = (
+        f"selected page {selected_start}"
+        if selected_start == selected_end
+        else f"selected pages {selected_start}-{selected_end}"
+    )
+    page_label = _pdf_page_label(pages)
+    action = _docling_action(phase=phase, status=status)
+    return f"{action} {selected_label} of {total} ({page_label})"
+
+
+def _docling_action(*, phase: str, status: str) -> str:
+    complete = status == "complete"
+    if phase == "ocr_repair":
+        return "Docling OCR repaired" if complete else "Docling OCR repairing"
+    if phase == "page_repair":
+        return "Docling repaired" if complete else "Docling repairing"
+    if phase == "ocr_fallback":
+        return "Docling OCR fallback parsed" if complete else "Docling OCR fallback parsing"
+    if phase == "layout":
+        return "Docling analyzed" if complete else "Docling analyzing"
+    return "Docling processed" if complete else "Docling processing"
+
+
+def _pdf_page_label(pages: tuple[int, ...]) -> str:
+    if not pages:
+        return "whole document"
+    ranges: list[str] = []
+    start = pages[0]
+    previous = pages[0]
+    for page_no in pages[1:]:
+        if page_no == previous + 1:
+            previous = page_no
+            continue
+        ranges.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = page_no
+    ranges.append(str(start) if start == previous else f"{start}-{previous}")
+    prefix = "PDF page" if len(pages) == 1 else "PDF pages"
+    return f"{prefix} {', '.join(ranges)}"
+
+
+def _int_tuple(value: object) -> tuple[int, ...]:
+    if not isinstance(value, (list, tuple, set)):
+        return ()
+    values: list[int] = []
+    for item in value:
+        if isinstance(item, int):
+            values.append(item)
+    return tuple(sorted(values))
+
+
+def _int_value(value: object) -> int:
+    return value if isinstance(value, int) else 0
+
+
 def _parser_failure_provenance(deps: IngestDependencies, content_type: str | None, file_path: str, exc: Exception) -> dict[str, object]:
+    document_kind = "json" if getattr(exc, "code", None) == "json_parse_failed" else _document_kind(content_type, file_path)
+    parser_config: dict[str, object] = {} if document_kind == "json" else {
+        "min_chars_per_page": deps.min_chars_per_page,
+        "weak_page_threshold": deps.weak_page_threshold,
+        "full_doc_weak_page_ratio": deps.full_doc_weak_page_ratio,
+        "layered_docling_max_pages": deps.layered_docling_max_pages,
+        "layered_docling_batch_pages": deps.layered_docling_batch_pages,
+    }
     return {
         "version": 1,
-        "document_kind": _document_kind(content_type, file_path),
+        "document_kind": document_kind,
         "page_count": None,
-        "primary_parser": "layered",
-        "secondary_parser": "docling",
+        "primary_parser": "json" if document_kind == "json" else "layered",
+        "secondary_parser": None if document_kind == "json" else "docling",
         "routing_mode": "parse_failed",
-        "config": {
-            "min_chars_per_page": deps.min_chars_per_page,
-            "weak_page_threshold": deps.weak_page_threshold,
-            "full_doc_weak_page_ratio": deps.full_doc_weak_page_ratio,
-            "layered_docling_max_pages": deps.layered_docling_max_pages,
-            "layered_docling_batch_pages": deps.layered_docling_batch_pages,
-        },
+        "config": parser_config,
         "docling_selection": None,
         "parser_item_counts": {},
         "parser_page_counts": {},
@@ -309,6 +507,8 @@ def _document_kind(content_type: str | None, file_path: str) -> str:
         return "docx"
     if normalized in {"image/jpeg", "image/png"} or file_path.lower().endswith((".jpg", ".jpeg", ".png")):
         return "image"
+    if normalized == "application/json" or file_path.lower().endswith(".json"):
+        return "json"
     if normalized and normalized != "application/pdf" and not file_path.lower().endswith(".pdf"):
         return "unsupported"
     return "pdf"
@@ -319,7 +519,9 @@ def _low_confidence_ocr_items(items: list[ParsedPdfItem], threshold: float) -> l
     for item in items:
         if "source:ocr" not in item.quality_flags:
             continue
-        if item.confidence is not None and item.confidence >= threshold:
+        if item.confidence is None:
+            continue
+        if item.confidence >= threshold:
             continue
         if not item.text.strip():
             continue

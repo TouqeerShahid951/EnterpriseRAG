@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     ollama_embed_model: str = "nomic-embed-text:latest"
     ollama_vision_model: str | None = None
     ollama_thinking_enabled: bool = False
+    ollama_num_ctx: int = Field(default=16384, ge=1024, le=262144)
+    ollama_vision_num_ctx: int = Field(default=8192, ge=1024, le=262144)
     rag_http_timeout_seconds: float = 45.0
     rag_ollama_chat_timeout_seconds: float = 180.0
     rag_ollama_embed_timeout_seconds: float = 45.0
@@ -87,7 +89,7 @@ class Settings(BaseSettings):
     vllm_vision_max_num_batched_tokens: int = Field(default=2048, ge=256, le=262144)
     embeddings_base_url: str = "http://host.docker.internal:8001"
     embedding_model_id: str = "default"
-    rag_top_k: int = 4
+    rag_top_k: int = 10
     rag_sparse_model: str = "Qdrant/bm25"
     rag_sparse_cache_dir: str | None = "/models/fastembed"
     rag_reranker_model: str = DEFAULT_RERANKER_MODEL
@@ -140,6 +142,7 @@ class Settings(BaseSettings):
     ingest_queue_name: str = "ingest:jobs"
     ingest_task_name: str = "apps.ingestion.tasks.ingest_document"
     ingest_worker_boot_concurrency: int = Field(default=1, ge=1, le=10)
+    ocr_review_confidence_threshold: float = Field(default=0.9, ge=0.0, le=1.0)
     ingest_maintenance_interval_seconds: int = Field(default=30, ge=5)
     ingest_stale_after_seconds: int = Field(default=120, ge=60)
     minio_endpoint: str = "minio:9000"

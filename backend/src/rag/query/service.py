@@ -5,7 +5,6 @@ from __future__ import annotations
 from time import perf_counter
 from uuid import uuid4
 
-from ..artifact_jobs.grounded_response import build_grounded_artifact_payload, response_is_artifact_ready
 from ..artifact_jobs.service import ArtifactJobService, default_artifact_job_service
 from ..auth.context import UserContext
 from ..core.config import Settings, settings
@@ -13,7 +12,7 @@ from ..repositories.claims import claim_repository_from_settings
 from ..repositories.rag_config import RagConfigRepository, effective_rag_config, env_rag_config
 from ..schemas.query import QueryRequest, QueryStreamEvent, RAGResponse
 from .artifact_service import GeneratedArtifactService
-from .artifact_intent import ArtifactRequest, parse_artifact_request
+from .artifact_intent import parse_artifact_request
 from .cancellation import QueryCancellationToken
 from .conflicts import ConflictChecker
 from .inference import InferenceClient, build_inference_client
@@ -81,7 +80,7 @@ class LocalRagService:
         trace_id = str(uuid4())
         session_id = request.session_id or str(uuid4())
         async_request = self._async_artifact_request(request)
-        if async_request is not None and async_request.needs_clarification:
+        if async_request is not None:
             return self._enqueue_artifact_job(
                 request=request,
                 user=user,
@@ -89,26 +88,6 @@ class LocalRagService:
                 session_id=session_id,
                 formats=async_request.formats,
                 started=started,
-            )
-        if async_request is not None:
-            content_request = self._content_request(request, async_request)
-            response = self._run_graph(
-                request=content_request,
-                user=user,
-                trace_id=trace_id,
-                session_id=session_id,
-                started=started,
-                cancellation_token=cancellation_token,
-                stream=False,
-            )
-            return self._queue_artifact_from_response(
-                original_request=request,
-                content_query=content_request.query,
-                user=user,
-                trace_id=trace_id,
-                session_id=session_id,
-                formats=async_request.formats,
-                response=response,
             )
         ctx = initial_state(
             trace_id=trace_id,
@@ -139,17 +118,6 @@ class LocalRagService:
         trace_id = str(uuid4())
         session_id = request.session_id or str(uuid4())
         async_request = self._async_artifact_request(request)
-        if async_request is not None and not async_request.needs_clarification:
-            yield from self._stream_grounded_artifact_request(
-                original_request=request,
-                artifact_request=async_request,
-                user=user,
-                trace_id=trace_id,
-                session_id=session_id,
-                started=started,
-                cancellation_token=cancellation_token,
-            )
-            return
         ctx = initial_state(
             trace_id=trace_id,
             session_id=session_id,
@@ -194,9 +162,6 @@ class LocalRagService:
             return None
         return parse_artifact_request(request.query)
 
-    def _content_request(self, request: QueryRequest, artifact_request: ArtifactRequest) -> QueryRequest:
-        return request.model_copy(update={"query": artifact_request.content_query})
-
     def _run_graph(
         self,
         *,
@@ -225,88 +190,6 @@ class LocalRagService:
             raise
         log_query_complete(result, stream=stream)
         return result["response"]
-
-    def _stream_grounded_artifact_request(
-        self,
-        *,
-        original_request: QueryRequest,
-        artifact_request: ArtifactRequest,
-        user: UserContext,
-        trace_id: str,
-        session_id: str,
-        started: float,
-        cancellation_token: QueryCancellationToken | None,
-    ):
-        content_request = self._content_request(original_request, artifact_request)
-        ctx = initial_state(
-            trace_id=trace_id,
-            session_id=session_id,
-            request=content_request,
-            user=user,
-            started=started,
-            token_budget=self.rag_config.retrieval_token_budget,
-            cancellation_token=cancellation_token,
-        )
-        log_query_start(ctx, stream=True)
-        terminal_event = "done"
-        final_response: RAGResponse | None = None
-        try:
-            for event in stream_graph(ctx, self.nodes):
-                if event.event in {"done", "verified"}:
-                    terminal_event = event.event
-                    final_response = RAGResponse.model_validate(event.data)
-                    continue
-                yield event
-        except Exception as exc:
-            log_query_error(ctx, stream=True, exc=exc)
-            raise
-        if final_response is None:
-            raise RuntimeError("query stream ended before returning a final answer")
-        final_response = self._queue_artifact_from_response(
-            original_request=original_request,
-            content_query=content_request.query,
-            user=user,
-            trace_id=trace_id,
-            session_id=session_id,
-            formats=artifact_request.formats,
-            response=final_response,
-        )
-        if final_response.artifact_job is not None:
-            yield QueryStreamEvent(event="artifact_job", data=final_response.artifact_job.model_dump())
-        yield QueryStreamEvent(event=terminal_event, data=final_response.model_dump())
-        log_query_complete(ctx, stream=True)
-
-    def _queue_artifact_from_response(
-        self,
-        *,
-        original_request: QueryRequest,
-        content_query: str,
-        user: UserContext,
-        trace_id: str,
-        session_id: str,
-        formats,
-        response: RAGResponse,
-    ) -> RAGResponse:
-        if not response_is_artifact_ready(response, faithfulness_threshold=self.config.rag_faithfulness_threshold):
-            return response
-        plan, evidence, bundle = build_grounded_artifact_payload(
-            original_request=original_request.query,
-            content_query=content_query,
-            response=response,
-        )
-        turns = self.nodes.session_store.load(user=user, session_id=session_id)
-        job = self.artifact_job_service.submit(
-            request=original_request,
-            user=user,
-            trace_id=trace_id,
-            session_id=session_id,
-            formats=formats,
-            conversation_context=turns,
-            seeded_plan=plan,
-            seeded_evidence=evidence,
-            seeded_bundle=bundle,
-        )
-        return response.model_copy(update={"artifacts": job.artifacts, "artifact_job": job})
 
     def _enqueue_artifact_job(
         self,

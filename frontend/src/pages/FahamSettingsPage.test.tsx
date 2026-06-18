@@ -8,6 +8,8 @@ import {
   requestFromForm,
   rerankerOptionsFromCatalog,
   SUPPORTED_RERANKER_MODELS,
+  thresholdFromPercent,
+  thresholdPercentFromConfig,
   type RagConfigFormState,
 } from "./FahamSettingsPage";
 
@@ -200,5 +202,11 @@ describe("inference settings helpers", () => {
     expect(options).toContain("custom/local-reranker");
     expect(options).toContain("BAAI/bge-reranker-base");
     expect(options).toContain("Xenova/ms-marco-MiniLM-L-12-v2");
+  });
+
+  it("converts OCR review threshold between config fraction and UI percent", () => {
+    expect(thresholdPercentFromConfig(0.9)).toBe(90);
+    expect(thresholdFromPercent(90)).toBe(0.9);
+    expect(thresholdFromPercent(89)).toBe(0.89);
   });
 });

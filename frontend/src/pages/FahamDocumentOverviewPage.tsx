@@ -1,11 +1,11 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Archive, CalendarClock, CheckCircle2, FileCheck2, FileClock, FileSearch, FolderOpen, History, Hourglass, RefreshCw, Trash2, Upload, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Archive, CalendarClock, CheckCircle2, FileCheck2, FileClock, FileSearch, FolderOpen, History, Hourglass, Trash2, Upload, XCircle } from "lucide-react";
 
 import { documentsApi, ingestJobsApi } from "../api/contracts";
 import { InlineMessage, Skeleton } from "../components/layout/Common";
 import { FahamWorkspace } from "../components/layout/FahamWorkspace";
-import { ActionGroup, AttentionList, Empty, LifecycleStrip, OverviewStatus, PanelHeader, PanelSkeleton, RecentActivityList, SpaceList, StatusShortcutGrid, type LifecycleItem, type NextStep, type OverviewAction, type SpaceRow, type StatusShortcut } from "./document/DocumentOverviewPanels";
+import { AttentionList, Empty, LifecycleStrip, OverviewStatus, PanelHeader, PanelSkeleton, RecentActivityList, SpaceList, StatusShortcutGrid, type LifecycleItem, type NextStep, type SpaceRow, type StatusShortcut } from "./document/DocumentOverviewPanels";
 import { canAccessRoute, type NavigateOptions, type RouteId } from "../routes";
 import { isUploadTerminalStatus } from "../state/uploadJobProgress";
 import type { Document, DocumentIngestStatus, User as AuthUser } from "../types/api";
@@ -18,16 +18,18 @@ export function FahamDocumentOverviewPage({ documents, documentsLoading, onLogou
   const canViewJobs = canAccessRoute(user, "ingestion-jobs");
   const canViewDocuments = canAccessRoute(user, "documents");
   const trashQuery = useQuery({
-    queryKey: ["documents", "list", "deleted", "overview"],
+    queryKey: ["documents", "list", "deleted"],
     queryFn: () => documentsApi.list({ state: "deleted" }),
     enabled: canAccessRoute(user, "document-trash"),
+    staleTime: 15000,
     retry: false,
   });
   const jobsSummaryQuery = useQuery({
-    queryKey: ["ingest-jobs", "summary", "overview"],
+    queryKey: ["ingest-jobs", "summary"],
     queryFn: () => ingestJobsApi.summary(),
     enabled: canViewJobs,
     refetchInterval: 5000,
+    staleTime: 4000,
     retry: false,
   });
   const recentActivityQuery = useQuery({
@@ -35,6 +37,7 @@ export function FahamDocumentOverviewPage({ documents, documentsLoading, onLogou
     queryFn: () => ingestJobsApi.list({ limit: 5, offset: 0 }),
     enabled: canViewJobs,
     refetchInterval: (query) => query.state.data?.items.some((job) => isActiveJobStatus(job.status)) ? 2500 : false,
+    staleTime: 4000,
     retry: false,
   });
   const spaceRows = useMemo(() => summarizeSpaces(documents), [documents]);
@@ -64,17 +67,6 @@ export function FahamDocumentOverviewPage({ documents, documentsLoading, onLogou
   });
   const statusShortcuts = buildStatusShortcuts({ canViewJobs, canViewDocuments, failedCount, indexedCurrentCount, processingCount, reviewCount, user });
   const lifecycleItems = buildLifecycleItems({ currentCount, expiringSoonCount, supersededCount, trashCount, user });
-  const intakeActions = [
-    action(user, "upload", Upload, "Add Files", "Queue documents with space, version, and date metadata."),
-    action(user, "document-extraction", RefreshCw, "Folder Sources", "Operate scheduled snapshots and folder imports."),
-    action(user, "ingestion-jobs", FileClock, "Activity", "Track processing progress, history, and failed ingestion runs."),
-  ].filter(Boolean) as OverviewAction[];
-  const libraryActions = [
-    action(user, "documents", FileSearch, "Documents", "Search, inspect, reingest, or retire indexed files."),
-    action(user, "knowledge-spaces", FolderOpen, "Knowledge Spaces", "Browse folder boundaries and direct document placement."),
-    action(user, "document-trash", Trash2, "Trash", "Restore or permanently remove deleted documents."),
-  ].filter(Boolean) as OverviewAction[];
-
   return (
     <FahamWorkspace activeRoute="document-overview" onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page" id="main-content">
@@ -112,8 +104,6 @@ export function FahamDocumentOverviewPage({ documents, documentsLoading, onLogou
             />
             <StatusShortcutGrid loading={documentsLoading || (canViewJobs && jobsSummaryQuery.isLoading)} onNavigate={onNavigate} shortcuts={statusShortcuts} />
             <LifecycleStrip loading={documentsLoading || trashQuery.isLoading} onNavigate={onNavigate} items={lifecycleItems} />
-            <ActionGroup actions={intakeActions} description="Add sources and follow them until processing finishes." onNavigate={onNavigate} title="Document Intake" />
-            <ActionGroup actions={libraryActions} description="Manage searchable content, spaces, versions, and cleanup." onNavigate={onNavigate} title="Document Library" />
           </section>
 
           <div className={canViewJobs ? "mt-6 grid gap-6 xl:grid-cols-3" : "mt-6 grid gap-6 lg:grid-cols-2"}>
@@ -141,10 +131,6 @@ export function FahamDocumentOverviewPage({ documents, documentsLoading, onLogou
 function Metric({ label, loading, tone, value }: { label: string; loading: boolean; tone?: "success" | "warning"; value: number }) {
   const className = tone === "success" ? "knowledge-context-metric knowledge-context-metric-success" : "knowledge-context-metric";
   return <div className={className} data-tone={tone}><span>{label}</span>{loading ? <Skeleton className="mt-1 h-6 w-12" /> : <strong>{value}</strong>}</div>;
-}
-
-function action(user: AuthUser, route: RouteId, icon: LucideIcon, label: string, description: string): OverviewAction | null {
-  return canAccessRoute(user, route) ? { description, icon, label, route } : null;
 }
 
 function buildNextStep({ activeJobs, canOpenFolderSources, canUpload, canViewJobs, documentsCount, indexedCurrentCount, needsAttention }: NextStepInput): NextStep {
@@ -190,7 +176,7 @@ function isActiveJobStatus(status: DocumentIngestStatus) {
 }
 
 function isAttentionStatus(status: DocumentIngestStatus) {
-  return status === "failed" || status === "human_review" || status === "unknown";
+  return status === "failed" || status === "human_review" || status === "cancelled" || status === "unknown";
 }
 
 function isExpiringSoon(value: string | null) {

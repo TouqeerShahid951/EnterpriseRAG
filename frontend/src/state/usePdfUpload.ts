@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
-import { uploadApi, type UploadDocumentRequest } from "../api/contracts";
+import { ingestJobsApi, uploadApi, type UploadDocumentRequest } from "../api/contracts";
 import type { PdfUploadDraft, UploadBatchItemView } from "../types/chat";
 import { defaultPdfUploadDraft } from "./defaults";
 import { createId } from "./ids";
@@ -29,6 +29,15 @@ export function usePdfUpload() {
           }
         }),
       );
+      void queryClient.invalidateQueries({ queryKey: ["documents"] });
+    },
+  });
+
+  const cancelJobMutation = useMutation({
+    mutationFn: (jobId: string) => ingestJobsApi.cancel(jobId),
+    onSettled: (_data, _error, jobId) => {
+      void queryClient.invalidateQueries({ queryKey: ["upload", "status", jobId] });
+      void queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["documents"] });
     },
   });
@@ -82,6 +91,7 @@ export function usePdfUpload() {
         id,
         file: request.file,
         groupPath: request.group_path,
+        clearanceLevel: request.clearance_level ?? pdfDraft.clearanceLevel,
         jobId: null,
         uploadError: null,
       })),
@@ -100,6 +110,7 @@ export function usePdfUpload() {
       fileName: submission.file.name,
       fileSize: submission.file.size,
       groupPath: submission.groupPath,
+      clearanceLevel: submission.clearanceLevel,
       requestState: submission.uploadError ? "failed" : submission.jobId ? "accepted" : "uploading",
       job: submission.jobId ? toUploadJobView(submission.jobId, query?.data) : null,
       uploadError: submission.uploadError,
@@ -109,6 +120,8 @@ export function usePdfUpload() {
 
   return {
     batchItems,
+    cancelingJobId: cancelJobMutation.isPending ? cancelJobMutation.variables ?? null : null,
+    cancelJob: (jobId: string) => cancelJobMutation.mutate(jobId),
     onPdfSubmit: handlePdfSubmit,
     pdfDraft,
     selectionError,
@@ -126,9 +139,12 @@ interface UploadSubmission {
   id: string;
   file: File;
   groupPath: string;
+  clearanceLevel: UploadSubmissionClearanceLevel;
   jobId: string | null;
   uploadError: Error | null;
 }
+
+type UploadSubmissionClearanceLevel = PdfUploadDraft["clearanceLevel"];
 
 function normalizeError(error: unknown): Error {
   return error instanceof Error ? error : new Error("Document upload failed.");

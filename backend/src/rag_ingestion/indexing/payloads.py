@@ -41,7 +41,7 @@ def build_qdrant_points(
     normalized_topics = _unique([*normalized_topics, *([str(item) for item in llm_topics] if isinstance(llm_topics, list) else [])])
     conflicted = set(conflicted_claim_ids or [])
     is_expired = _is_expired(job.expiry_date)
-    indexed_doc_type = _derived_doc_type(metadata) or job.doc_type or "other"
+    indexed_doc_type = _derived_doc_type(metadata) or job.doc_type
     doc_summary = compact_summary(metadata.get("summary"))
     metadata_confidence = metadata.get("metadata_confidence")
     normalized_confidence = metadata_confidence if isinstance(metadata_confidence, dict) else {}
@@ -106,8 +106,8 @@ def build_qdrant_points(
                     "metadata_terms": metadata_terms_for_chunk(title=title, chunk=chunk, metadata=metadata),
                     "metadata_version": metadata_version(metadata),
                     "metadata_confidence": normalized_confidence,
-                    "generated_doc_type": str(metadata.get("doc_type", "other")),
-                    "auto_doc_type": str(metadata.get("auto_doc_type", "other")),
+                    "generated_doc_type": str(metadata.get("doc_type") or ""),
+                    "auto_doc_type": str(metadata.get("auto_doc_type") or ""),
                     "claim_ids": chunk_claim_ids,
                     "has_conflict": any(claim_id in conflicted for claim_id in chunk_claim_ids),
                     "is_expired": is_expired,
@@ -133,7 +133,7 @@ def _is_expired(expiry_date: str | None) -> bool:
 def _derived_doc_type(metadata: dict[str, object]) -> str | None:
     for key in ("doc_type", "auto_doc_type"):
         value = str(metadata.get(key) or "").strip().lower()
-        if value and value != "other":
+        if value:
             return value
     return None
 

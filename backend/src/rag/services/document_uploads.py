@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from io import BytesIO
+import json
 import zipfile
 
 from fastapi import HTTPException, status
@@ -15,7 +16,8 @@ PDF_CONTENT_TYPE = "application/pdf"
 DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 JPEG_CONTENT_TYPE = "image/jpeg"
 PNG_CONTENT_TYPE = "image/png"
-SUPPORTED_CONTENT_TYPES = {PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, JPEG_CONTENT_TYPE, PNG_CONTENT_TYPE}
+JSON_CONTENT_TYPE = "application/json"
+SUPPORTED_CONTENT_TYPES = {PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, JPEG_CONTENT_TYPE, PNG_CONTENT_TYPE, JSON_CONTENT_TYPE}
 
 
 def validate_upload_size(content: bytes, *, max_bytes: int | None = None) -> None:
@@ -64,6 +66,9 @@ def validated_description(description: str | None) -> str | None:
 def validated_document_type(content: bytes, filename: str | None, declared_content_type: str | None) -> str:
     declared = (declared_content_type or "").split(";", 1)[0].strip().lower()
     lowered_name = (filename or "").strip().lower()
+    if _looks_like_json_upload(declared, lowered_name):
+        validate_json_content(content)
+        return JSON_CONTENT_TYPE
     if content.startswith(b"%PDF-") and (declared in {"", PDF_CONTENT_TYPE, "application/octet-stream"} or lowered_name.endswith(".pdf")):
         return PDF_CONTENT_TYPE
     if is_docx(content) and (declared in {"", DOCX_CONTENT_TYPE, "application/octet-stream"} or lowered_name.endswith(".docx")):
@@ -74,13 +79,29 @@ def validated_document_type(content: bytes, filename: str | None, declared_conte
         return PNG_CONTENT_TYPE
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail={"code": "unsupported_file_type", "message": "Only PDF, DOCX, JPG, and PNG uploads are accepted by this endpoint."},
+        detail={"code": "unsupported_file_type", "message": "Only PDF, DOCX, JPG, PNG, and JSON uploads are accepted by this endpoint."},
     )
 
 
 def is_supported_document_name(filename: str | None) -> bool:
     lowered = (filename or "").strip().lower()
-    return lowered.endswith((".pdf", ".docx", ".jpg", ".jpeg", ".png"))
+    return lowered.endswith((".pdf", ".docx", ".jpg", ".jpeg", ".png", ".json"))
+
+
+def validate_json_content(content: bytes) -> None:
+    try:
+        text = content.decode("utf-8-sig")
+        json.loads(text)
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "invalid_json", "message": "JSON uploads must be valid UTF-8."},
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "invalid_json", "message": "Uploaded JSON could not be parsed."},
+        ) from exc
 
 
 def is_docx(content: bytes) -> bool:
@@ -118,6 +139,8 @@ def default_filename(content_type: str) -> str:
         return "upload.jpg"
     if content_type == PNG_CONTENT_TYPE:
         return "upload.png"
+    if content_type == JSON_CONTENT_TYPE:
+        return "upload.json"
     return "upload.pdf"
 
 
@@ -128,4 +151,10 @@ def default_title(content_type: str) -> str:
         return "Uploaded JPG"
     if content_type == PNG_CONTENT_TYPE:
         return "Uploaded PNG"
+    if content_type == JSON_CONTENT_TYPE:
+        return "Uploaded JSON"
     return "Uploaded PDF"
+
+
+def _looks_like_json_upload(declared: str, lowered_name: str) -> bool:
+    return declared == JSON_CONTENT_TYPE or lowered_name.endswith(".json")

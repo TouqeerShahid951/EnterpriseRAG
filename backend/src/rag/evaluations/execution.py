@@ -10,7 +10,9 @@ from typing import Any
 from ..auth.abac import build_abac_filter
 from ..auth.context import UserContext
 from ..core.config import Settings, settings
+from ..query.qdrant import SearchHit
 from ..query.query_retrieval import add_document_scope, add_expiry_scope
+from ..query.reranker import rerank_hits
 from ..query.service import LocalRagService
 from ..query.sparse import embed_sparse_text
 from ..repositories.documents import get_document_repository
@@ -160,19 +162,19 @@ class EvaluationRunExecutor:
                 limit=self.config.evaluation_diagnostic_top_k,
                 qdrant_filter=qdrant_filter,
             )
-            rows = [
-                {
-                    "rank": index + 1,
-                    "score": hit.score,
-                    "doc_title": hit.payload.get("doc_title"),
-                    "doc_id": hit.payload.get("doc_id"),
-                    "chunk_id": hit.payload.get("chunk_id"),
-                    "page": hit.payload.get("page"),
-                    "group_path": hit.payload.get("group_path"),
-                }
-                for index, hit in enumerate(hits)
-            ]
+            rows = _candidate_rows(hits)
+            rerank_top_k = min(self.config.rag_top_k, self.config.evaluation_diagnostic_top_k)
+            reranked_hits = rerank_hits(
+                case.question,
+                hits,
+                top_k=rerank_top_k,
+                max_candidates=self.config.rag_reranker_max_candidates,
+                model_name=service.rag_config.reranker_model,
+                cache_dir=self.config.rag_reranker_cache_dir,
+            )
+            reranked_rows = _candidate_rows(reranked_hits)
             retrieved_titles = [str(row.get("doc_title") or "") for row in rows]
+            reranked_titles = [str(row.get("doc_title") or "") for row in reranked_rows]
             retrieved_pages = sorted(
                 {
                     int(row["page"])
@@ -184,8 +186,14 @@ class EvaluationRunExecutor:
                 {
                     "status": "ok",
                     "retrieved_source_docs": retrieved_titles,
+                    "reranked_source_docs": reranked_titles,
                     "retrieved_pages": retrieved_pages,
+                    "retrieval_candidates": rows,
                     "hits": rows,
+                    "reranked_candidates": reranked_rows,
+                    "reranker_model": service.rag_config.reranker_model,
+                    "reranker_top_k": rerank_top_k,
+                    "reranker_max_candidates": self.config.rag_reranker_max_candidates,
                     "expected_docs_retrieved": _expected_docs_retrieved(case.expected_source_docs, retrieved_titles),
                     "expected_pages_retrieved": _expected_pages_retrieved(case.acceptable_source_pages, retrieved_pages),
                 }
@@ -196,8 +204,11 @@ class EvaluationRunExecutor:
                     "status": "error",
                     "error": f"{type(exc).__name__}: {exc}",
                     "retrieved_source_docs": [],
+                    "reranked_source_docs": [],
                     "retrieved_pages": [],
+                    "retrieval_candidates": [],
                     "hits": [],
+                    "reranked_candidates": [],
                     "expected_docs_retrieved": not case.expected_source_docs,
                     "expected_pages_retrieved": not case.acceptable_source_pages,
                 }
@@ -254,6 +265,32 @@ def _diagnostic_user_context(user: UserContext, group_path: str | None) -> UserC
     )
 
 
+def _candidate_rows(hits: list[SearchHit]) -> list[dict[str, Any]]:
+    return [_candidate_row(hit, rank=index + 1) for index, hit in enumerate(hits)]
+
+
+def _candidate_row(hit: SearchHit, *, rank: int) -> dict[str, Any]:
+    payload = hit.payload
+    row = {
+        "rank": rank,
+        "score": hit.score,
+        "retrieval_score": hit.score,
+        "doc_title": _optional_str(payload.get("doc_title")),
+        "doc_id": _optional_str(payload.get("doc_id")),
+        "chunk_id": _optional_str(payload.get("chunk_id")) or hit.point_id,
+        "page": _optional_int(payload.get("page")),
+        "page_start": _optional_int(payload.get("page_start")),
+        "page_end": _optional_int(payload.get("page_end")),
+        "group_path": _optional_str(payload.get("group_path")),
+        "chunk_type": _optional_str(payload.get("chunk_type")),
+        "structured_origin": _optional_str(payload.get("structured_origin")),
+        "rerank_score": _optional_float(payload.get("_rerank_score")),
+        "rerank_status": _optional_str(payload.get("_rerank_status")),
+        "rerank_error": _optional_str(payload.get("_rerank_error")),
+    }
+    return {key: value for key, value in row.items() if value is not None}
+
+
 def _indexed_expected_docs(
     case: EvaluationCase,
     *,
@@ -290,6 +327,31 @@ def _expected_pages_retrieved(expected_pages: list[int], actual_pages: list[int]
 
 def _normalize_title(value: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", value.lower()).split())
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdecimal():
+        return int(value)
+    return None
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
 
 
 def default_evaluation_run_executor(config: Settings | None = None) -> EvaluationRunExecutor:

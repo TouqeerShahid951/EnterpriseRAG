@@ -4,6 +4,5 @@ export function buildChatUploadRequest(file: File, groupPath: string): UploadDoc
   return {
     file,
     group_path: groupPath,
-    doc_type: "other",
   };
 }

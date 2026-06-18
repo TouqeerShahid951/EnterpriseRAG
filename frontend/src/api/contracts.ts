@@ -5,8 +5,7 @@ import type {
   DeleteDocumentResponse,
   DocumentIngestStatus,
   DocumentReingestResponse,
-  DocType,
-  AuditEvent,
+  AuditEventListResponse,
   Group,
   FolderRun,
   FolderRunItem,
@@ -15,6 +14,7 @@ import type {
   JobStatus,
   IngestJobListResponse,
   IngestJobOrigin,
+  IngestJobCancelResponse,
   IngestJobRecoveryResponse,
   IngestJobSummary,
   StaleIngestJobListResponse,
@@ -27,6 +27,7 @@ import type {
   GeneratedArtifact,
   LoginResponse,
   AccountType,
+  ClearanceLevel,
   QueryRequest,
   RagConfig,
   IngestConfig,
@@ -46,7 +47,7 @@ import type {
   VllmDeploymentConfig,
   VllmServiceDeploymentLimits,
 } from "../types/api";
-import type { ChatTurn, SavedChatSession } from "../types/chat";
+import type { ChatTurn, SavedChatSession, SavedChatSessionPage, SavedChatSessionSummary } from "../types/chat";
 
 export interface LoginRequest {
   email: string;
@@ -61,9 +62,10 @@ export interface ChangePasswordRequest {
 export interface UploadDocumentRequest {
   file: File;
   group_path: string;
+  clearance_level?: ClearanceLevel | null;
   effective_date?: string | null;
   expiry_date?: string | null;
-  doc_type: DocType;
+  doc_type?: string | null;
   description?: string | null;
   supersedes?: string[];
 }
@@ -80,14 +82,29 @@ export interface IngestJobListRequest {
   offset?: number;
 }
 
+export interface AuditEventListRequest {
+  search?: string;
+  category?: string;
+  event_type?: string;
+  actor_id?: string;
+  target_type?: string;
+  target_id?: string;
+  group_path?: string;
+  created_from?: string;
+  created_to?: string;
+  limit?: number;
+  offset?: number;
+}
+
 export interface CreateSnapshotScheduleRequest {
   files: File[];
   relative_paths: string[];
   name: string;
   group_path: string;
+  clearance_level?: ClearanceLevel | null;
   effective_date?: string | null;
   expiry_date?: string | null;
-  doc_type: DocType;
+  doc_type?: string | null;
   description?: string | null;
   schedule_type: FolderScheduleType;
   timezone: string;
@@ -100,9 +117,10 @@ export interface CreateMinioPrefixScheduleRequest {
   bucket: string;
   prefix: string;
   group_path: string;
+  clearance_level?: ClearanceLevel | null;
   effective_date?: string | null;
   expiry_date?: string | null;
-  doc_type: DocType;
+  doc_type?: string | null;
   description?: string | null;
   schedule_type: FolderScheduleType;
   timezone: string;
@@ -120,13 +138,11 @@ export interface UpdateFolderScheduleRequest {
 export interface CreateGroupRequest {
   path: string;
   name: string;
-  parent_path?: string | null;
 }
 
 export interface UpdateGroupRequest {
   path: string;
   name: string;
-  parent_path?: string | null;
 }
 
 export interface DeleteGroupRequest {
@@ -139,12 +155,17 @@ export interface DocumentListRequest {
   include_descendants?: boolean;
 }
 
+export interface UpdateDocumentClearanceRequest {
+  clearance_level: ClearanceLevel;
+}
+
 export interface CreateUserRequest {
   email: string;
   name: string;
   account_type: AccountType;
   initial_password: string;
   group_paths: string[];
+  clearance_level?: ClearanceLevel | null;
   is_active?: boolean;
 }
 
@@ -152,6 +173,7 @@ export interface UpdateUserRequest {
   name?: string | null;
   account_type?: AccountType | null;
   group_paths?: string[] | null;
+  clearance_level?: ClearanceLevel | null;
   is_active?: boolean | null;
 }
 
@@ -190,6 +212,7 @@ export interface RagConfigRequest {
 
 export interface IngestConfigRequest {
   worker_concurrency: number;
+  ocr_review_confidence_threshold: number;
 }
 
 export interface VllmDeploymentConfigRequest {
@@ -237,6 +260,27 @@ interface ChatSessionResponse {
   turns: unknown[];
 }
 
+interface ChatSessionSummaryResponse {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  question_count?: number;
+  turns?: unknown[];
+}
+
+interface ChatSessionListResponse {
+  items: ChatSessionSummaryResponse[];
+  total: number;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ChatSessionListRequest {
+  limit?: number;
+  offset?: number;
+}
+
 export const apiClient = new ApiClient();
 
 export const authApi = {
@@ -252,9 +296,10 @@ export const uploadApi = {
     const formData = new FormData();
     formData.set("file", request.file);
     formData.set("group_path", request.group_path);
+    if (request.clearance_level) formData.set("clearance_level", request.clearance_level);
     if (request.effective_date) formData.set("effective_date", request.effective_date);
     if (request.expiry_date) formData.set("expiry_date", request.expiry_date);
-    formData.set("doc_type", request.doc_type);
+    if (request.doc_type) formData.set("doc_type", request.doc_type);
     if (request.description) formData.set("description", request.description);
 
     for (const docId of request.supersedes ?? []) {
@@ -272,6 +317,8 @@ export const ingestJobsApi = {
   summary: (request: Pick<IngestJobListRequest, "created_from" | "created_to" | "group_path"> = {}) =>
     apiClient.get<IngestJobSummary>(ingestJobListPath("/api/v1/ingest-jobs/summary", request)),
   listStale: () => apiClient.get<StaleIngestJobListResponse>("/api/v1/ingest-jobs/stale"),
+  cancel: (jobId: string) =>
+    apiClient.postJson<IngestJobCancelResponse>(`/api/v1/ingest-jobs/${encodeURIComponent(jobId)}/cancel`, null),
   requeueStale: (jobId: string) =>
     apiClient.postJson<IngestJobRecoveryResponse>(`/api/v1/ingest-jobs/${encodeURIComponent(jobId)}/requeue`, null),
 };
@@ -284,9 +331,10 @@ export const folderIngestApi = {
     request.relative_paths.forEach((relativePath) => formData.append("relative_paths", relativePath));
     formData.set("name", request.name);
     formData.set("group_path", request.group_path);
+    if (request.clearance_level) formData.set("clearance_level", request.clearance_level);
     if (request.effective_date) formData.set("effective_date", request.effective_date);
     if (request.expiry_date) formData.set("expiry_date", request.expiry_date);
-    formData.set("doc_type", request.doc_type);
+    if (request.doc_type) formData.set("doc_type", request.doc_type);
     if (request.description) formData.set("description", request.description);
     formData.set("schedule_type", request.schedule_type);
     formData.set("timezone", request.timezone);
@@ -325,9 +373,14 @@ export const queryApi = {
     apiClient.postJson<{ job: ArtifactJobSummary }>(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/cancel`, null),
   retryArtifactJob: (jobId: string) =>
     apiClient.postJson<{ job: ArtifactJobSummary }>(`/api/v1/artifact-jobs/${encodeURIComponent(jobId)}/retry`, null),
-  listSessions: async () => {
-    const response = await apiClient.get<{ items: ChatSessionResponse[]; total: number }>("/api/v1/query/sessions");
-    return { ...response, items: response.items.map(normalizeChatSession) };
+  listSessions: async (request: ChatSessionListRequest = {}): Promise<SavedChatSessionPage> => {
+    const response = await apiClient.get<ChatSessionListResponse>(chatSessionListPath(request));
+    return {
+      ...response,
+      limit: response.limit ?? request.limit ?? response.items.length,
+      offset: response.offset ?? request.offset ?? 0,
+      items: response.items.map(normalizeChatSessionSummary),
+    };
   },
   getSession: async (sessionId: string) =>
     normalizeChatSession(await apiClient.get<ChatSessionResponse>(`/api/v1/query/sessions/${encodeURIComponent(sessionId)}`)),
@@ -365,6 +418,12 @@ export const documentsApi = {
     apiClient.postJson<DocumentReingestResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/reingest`, null),
   restore: (documentId: string) =>
     apiClient.postJson<DocumentReingestResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/restore`, null),
+  updateClearance: async (documentId: string, request: UpdateDocumentClearanceRequest) =>
+    normalizeDocument(await apiClient.request<Document>(`/api/v1/docs/${encodeURIComponent(documentId)}/clearance`, {
+      method: "PATCH",
+      body: JSON.stringify(request),
+      headers: { "Content-Type": "application/json" },
+    })),
   supersede: (documentId: string, supersedes: string[]) =>
     apiClient.postJson<VersionChainResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/supersede`, { supersedes }),
 };
@@ -387,13 +446,34 @@ function documentImageAssetContentPath(documentId: string, assetId: string) {
 }
 
 function normalizeChatSession(session: ChatSessionResponse): SavedChatSession {
+  const turns = session.turns.filter(isChatTurn);
   return {
     id: session.id,
     title: session.title,
     createdAt: session.created_at,
     updatedAt: session.updated_at,
-    turns: session.turns.filter(isChatTurn),
+    questionCount: turns.filter((turn) => turn.role === "user").length,
+    turns,
   };
+}
+
+function normalizeChatSessionSummary(session: ChatSessionSummaryResponse): SavedChatSessionSummary {
+  const fallbackTurns = session.turns?.filter(isChatTurn) ?? [];
+  return {
+    id: session.id,
+    title: session.title,
+    createdAt: session.created_at,
+    updatedAt: session.updated_at,
+    questionCount: session.question_count ?? fallbackTurns.filter((turn) => turn.role === "user").length,
+  };
+}
+
+function chatSessionListPath(request: ChatSessionListRequest): string {
+  const params = new URLSearchParams();
+  if (request.limit !== undefined) params.set("limit", String(request.limit));
+  if (request.offset !== undefined) params.set("offset", String(request.offset));
+  const query = params.toString();
+  return query ? `/api/v1/query/sessions?${query}` : "/api/v1/query/sessions";
 }
 
 function isChatTurn(value: unknown): value is ChatTurn {
@@ -408,7 +488,7 @@ function isChatTurn(value: unknown): value is ChatTurn {
   return false;
 }
 
-const DOCUMENT_INGEST_STATUSES: DocumentIngestStatus[] = ["scheduled", "queued", "processing", "complete", "failed", "human_review", "unknown"];
+const DOCUMENT_INGEST_STATUSES: DocumentIngestStatus[] = ["scheduled", "queued", "processing", "complete", "failed", "human_review", "cancelled", "unknown"];
 
 function ingestJobListPath(basePath: string, request: IngestJobListRequest): string {
   const params = new URLSearchParams();
@@ -429,6 +509,7 @@ function normalizeDocument(document: Document): Document {
   const status = DOCUMENT_INGEST_STATUSES.includes(document.ingest_status) ? document.ingest_status : "unknown";
   return {
     ...document,
+    clearance_level: document.clearance_level ?? "NATO_RESTRICTED",
     topics: Array.isArray(document.topics) ? document.topics : [],
     llm_topics: Array.isArray(document.llm_topics) ? document.llm_topics : [],
     entities: Array.isArray(document.entities) ? document.entities : [],
@@ -440,8 +521,30 @@ function normalizeDocument(document: Document): Document {
 }
 
 export const auditApi = {
-  list: () => apiClient.get<{ items: AuditEvent[]; total: number }>("/api/v1/audit-log"),
+  list: (request: AuditEventListRequest = {}) => apiClient.get<AuditEventListResponse>(auditListPath(request)),
 };
+
+function auditListPath(request: AuditEventListRequest): string {
+  const params = new URLSearchParams();
+  setTrimmedParam(params, "search", request.search);
+  setTrimmedParam(params, "category", request.category);
+  setTrimmedParam(params, "event_type", request.event_type);
+  setTrimmedParam(params, "actor_id", request.actor_id);
+  setTrimmedParam(params, "target_type", request.target_type);
+  setTrimmedParam(params, "target_id", request.target_id);
+  setTrimmedParam(params, "group_path", request.group_path);
+  if (request.created_from) params.set("created_from", request.created_from);
+  if (request.created_to) params.set("created_to", request.created_to);
+  if (request.limit !== undefined) params.set("limit", String(request.limit));
+  if (request.offset !== undefined) params.set("offset", String(request.offset));
+  const query = params.toString();
+  return query ? `/api/v1/audit-log?${query}` : "/api/v1/audit-log";
+}
+
+function setTrimmedParam(params: URLSearchParams, key: string, value: string | undefined) {
+  const trimmed = value?.trim();
+  if (trimmed) params.set(key, trimmed);
+}
 
 export const adminApi = {
   listGroups: () => apiClient.get<{ items: Group[] }>("/api/v1/admin/groups"),

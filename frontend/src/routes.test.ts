@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { canAssignAccountType, canUploadToSpace, canWriteDocument } from "./authz";
 import { canAccessRoute, defaultRouteForUser, navigationGroupForRoute, routeFromLocation, visibleNavigation, type RouteId } from "./routes";
-import type { AccountType, User } from "./types/api";
+import type { AccountType, ClearanceLevel, User } from "./types/api";
 
 describe("account type route access", () => {
   it("allows platform admins to reach global surfaces", () => {
@@ -63,6 +63,7 @@ describe("account type route access", () => {
     expect(canUploadToSpace(makeUser("system_admin"), "/engineering")).toBe(true);
     expect(canUploadToSpace(makeUser("space_admin"), "/finance/procurement")).toBe(true);
     expect(canWriteDocument(makeUser("space_admin"), "/finance/procurement")).toBe(true);
+    expect(canWriteDocument(makeUser("space_admin", "NATO_RESTRICTED"), "/finance/procurement", "NATO_SECRET")).toBe(false);
     expect(canUploadToSpace(makeUser("contributor"), "/finance")).toBe(true);
     expect(canWriteDocument(makeUser("contributor"), "/finance/procurement")).toBe(false);
     expect(canUploadToSpace(makeUser("member"), "/finance")).toBe(false);
@@ -120,12 +121,13 @@ describe("account type route access", () => {
   });
 });
 
-function makeUser(accountType: AccountType): User {
+function makeUser(accountType: AccountType, clearanceLevel: ClearanceLevel = "COSMIC_TOP_SECRET"): User {
   return {
     user_id: `user-${accountType}`,
     email: `${accountType}@example.com`,
     account_type: accountType,
     group_paths: ["/finance"],
+    clearance_level: clearanceLevel,
     permission_version: 1,
     must_change_password: false,
   };

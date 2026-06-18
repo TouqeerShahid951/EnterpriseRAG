@@ -9,7 +9,7 @@ from ..auth.context import UserContext
 from ..repositories.artifact_jobs import ArtifactJobRecord, ArtifactJobRepository
 from ..repositories.generated_artifact_models import GeneratedArtifactRepository
 from ..schemas.artifact_jobs import ArtifactJobDetail
-from ..schemas.query import ArtifactFormat, ArtifactJobSummary, GeneratedArtifact, QueryRequest
+from ..schemas.query import ArtifactFormat, ArtifactJobStageProgress, ArtifactJobSummary, GeneratedArtifact, QueryRequest
 from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
 from .queue import ArtifactJobQueue
 
@@ -119,6 +119,7 @@ class ArtifactJobService:
             "status": "queued",
             "stage": "queued",
             "progress_pct": 0,
+            "stage_progress": None,
             "error_code": None,
             "error_message_safe": None,
         })
@@ -136,6 +137,7 @@ class ArtifactJobService:
             "status": "cancelled",
             "stage": "cancelled",
             "progress_pct": 100,
+            "stage_progress": None,
             "completed_at": datetime.now(UTC),
         })
         return self.summary(updated or job)
@@ -150,6 +152,7 @@ class ArtifactJobService:
             "status": "queued",
             "stage": "queued",
             "progress_pct": 0,
+            "stage_progress": None,
             "cancellation_requested": False,
             "error_code": None,
             "error_message_safe": None,
@@ -174,11 +177,16 @@ class ArtifactJobService:
             for record in self.artifact_repo_factory().list_artifacts_for_job(job.id)
         ]
         plan = DocumentPlan.model_validate(job.plan_json) if job.plan_json else None
+        stage_progress = _artifact_stage_progress(job.stage_progress)
+        stage_label, stage_detail = _artifact_stage_copy(job, stage_progress)
         return ArtifactJobSummary(
             id=job.id,
             status=job.status,
             stage=job.stage,
             progress_pct=job.progress_pct,
+            stage_label=stage_label,
+            stage_detail=stage_detail,
+            stage_progress=stage_progress,
             requested_formats=list(job.requested_formats),  # type: ignore[arg-type]
             clarification_questions=plan.clarification_questions if plan else [],
             artifacts=artifacts,
@@ -203,6 +211,7 @@ class ArtifactJobService:
                 "status": "failed",
                 "stage": "failed",
                 "progress_pct": 100,
+                "stage_progress": None,
                 "error_code": "artifact_enqueue_failed",
                 "error_message_safe": str(exc)[:300],
                 "completed_at": datetime.now(UTC),
@@ -226,6 +235,62 @@ def default_artifact_job_service() -> ArtifactJobService:
 
 def get_artifact_job_service() -> ArtifactJobService:
     return default_artifact_job_service()
+
+
+def _artifact_stage_progress(payload: dict[str, object] | None) -> ArtifactJobStageProgress | None:
+    if not payload:
+        return None
+    try:
+        return ArtifactJobStageProgress.model_validate(payload)
+    except Exception:
+        return None
+
+
+def _artifact_stage_copy(
+    job: ArtifactJobRecord,
+    progress: ArtifactJobStageProgress | None,
+) -> tuple[str, str]:
+    formats = ", ".join(format_name(item) for item in job.requested_formats)
+    if job.status == "queued":
+        return "Queued", "Waiting for the document generation worker"
+    if job.status == "needs_input":
+        return "Needs input", "Answer the clarification questions to continue"
+    if job.status == "complete":
+        return "Complete", f"Generated {formats or 'requested files'}"
+    if job.status == "partial":
+        return "Partially complete", job.error_message_safe or f"Some {formats or 'files'} could not be generated"
+    if job.status == "failed":
+        return "Failed", job.error_message_safe or "Document generation failed"
+    if job.status == "cancelled":
+        return "Cancelled", "Document generation was cancelled"
+
+    if job.stage == "planning":
+        return "Planning document", "Planning document structure"
+    if job.stage == "retrieving":
+        return "Retrieving evidence", "Collecting evidence from permitted documents"
+    if job.stage == "formatting_outputs":
+        return "Formatting output", "Choosing title, sections, and slide layout"
+    if job.stage == "validating":
+        return "Validating grounding", "Checking evidence grounding"
+    if job.stage == "storing":
+        return "Saving file", "Saving generated file"
+    if job.stage.startswith("composing_") and progress:
+        return "Composing content", progress.label or f"Composing content batch {progress.current} of {progress.total}"
+    if job.stage.startswith("rendering_") and progress:
+        return "Rendering files", progress.label or f"Rendering {formats or 'requested files'}"
+    if job.stage == "rendering":
+        return "Rendering files", f"Rendering {formats or 'requested files'}"
+    if job.stage == "composing":
+        return "Composing content", "Composing evidence-backed content"
+    return _humanize(job.status), _humanize(job.stage)
+
+
+def format_name(value: str) -> str:
+    return value.upper()
+
+
+def _humanize(value: str) -> str:
+    return " ".join(part.capitalize() for part in value.split("_") if part)
 
 
 def _public_stage_timings(payload: dict[str, object] | None) -> dict[str, dict[str, object]]:

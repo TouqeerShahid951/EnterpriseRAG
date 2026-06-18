@@ -49,7 +49,7 @@ class IngestDependencies:
     full_doc_weak_page_ratio: float = 0.25
     layered_docling_max_pages: int = 40
     layered_docling_batch_pages: int = 4
-    ocr_review_confidence_threshold: float = 0.8
+    ocr_review_confidence_threshold: float = 0.9
 
     @property
     def inference(self) -> IngestionInferenceClient:

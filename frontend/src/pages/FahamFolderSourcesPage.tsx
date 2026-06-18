@@ -8,12 +8,11 @@ import { InlineMessage } from "../components/layout/Common";
 import { FahamWorkspace } from "../components/layout/FahamWorkspace";
 import { FolderIngestPanel } from "../components/upload/FolderIngestPanel";
 import type { RouteId } from "../routes";
-import type { DocType, User as AuthUser } from "../types/api";
+import type { User as AuthUser } from "../types/api";
 import { errorMessage } from "../utils/format";
 import { flattenGroups } from "../utils/groups";
 
 export function FahamFolderSourcesPage({ onLogout, onNavigate, user }: Props) {
-  const docTypes: DocType[] = ["policy", "procedure", "report", "contract", "memo", "manual", "other"];
   const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.listGroups, retry: false, enabled: canManageSpaces(user) });
   const writableSpacePaths = useMemo(
     () => flattenGroups(groupsQuery.data?.items ?? []).filter((space) => canUploadToSpace(user, space.path)).map((space) => space.path),
@@ -35,7 +34,7 @@ export function FahamFolderSourcesPage({ onLogout, onNavigate, user }: Props) {
             </button>
           </header>
           {groupsQuery.isError ? <InlineMessage tone="error">{errorMessage(groupsQuery.error, "Unable to load writable Knowledge Spaces.")}</InlineMessage> : null}
-          <FolderIngestPanel docTypes={docTypes} groupsLoading={groupsQuery.isLoading} writableSpacePaths={writableSpacePaths} />
+          <FolderIngestPanel currentUser={user} groupsLoading={groupsQuery.isLoading} writableSpacePaths={writableSpacePaths} />
         </div>
       </main>
     </FahamWorkspace>

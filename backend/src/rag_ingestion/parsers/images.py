@@ -239,7 +239,7 @@ def image_sources_to_items(
                 image_asset_id=asset_id,
                 image_source_kind=source.source_kind,
                 image_content_type=source.content_type,
-                extraction_method="vision_ocr_caption",
+                extraction_method="vision_ocr_description",
             )
         )
     return items, assets
@@ -394,7 +394,7 @@ def _image_item_text(extracted_text: str, caption: str) -> str:
     if extracted_text:
         parts.append(f"Visible image text:\n{extracted_text}")
     if caption:
-        parts.append(f"Image caption:\n{caption}")
+        parts.append(f"Image description:\n{caption}")
     return "\n\n".join(parts).strip()
 
 

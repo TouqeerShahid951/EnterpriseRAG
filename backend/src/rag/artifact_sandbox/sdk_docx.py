@@ -65,8 +65,11 @@ class DocxArtifact:
         run.bold = True
 
     def add_table(self, headers: list[str], rows: list[Any], *, evidence_ids: list[str] | None = None) -> None:
+        if len(headers) > 5:
+            self._set_landscape()
         table = self._document.add_table(rows=1, cols=len(headers) + 1)
         table.style = "Table Grid"
+        table.autofit = True
         for index, header in enumerate(headers):
             table.rows[0].cells[index].text = str(header)
         table.rows[0].cells[-1].text = "Source"
@@ -88,3 +91,12 @@ class DocxArtifact:
 
     def finalize(self) -> None:
         self._document.save(str(self._path))
+
+    def _set_landscape(self) -> None:
+        from docx.enum.section import WD_ORIENT
+
+        section = self._document.sections[0]
+        if section.orientation == WD_ORIENT.LANDSCAPE:
+            return
+        section.orientation = WD_ORIENT.LANDSCAPE
+        section.page_width, section.page_height = section.page_height, section.page_width

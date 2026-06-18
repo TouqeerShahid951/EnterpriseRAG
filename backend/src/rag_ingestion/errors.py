@@ -26,6 +26,12 @@ class HumanReviewRequired(RuntimeError):
         self.review_batch_id = review_batch_id
 
 
+class IngestJobCancelled(RuntimeError):
+    def __init__(self, *, job_id: str) -> None:
+        super().__init__("ingestion job was cancelled")
+        self.job_id = job_id
+
+
 class OllamaEmbeddingUnavailable(WorkerStepError):
     def __init__(self, message: str = "The embedding model is temporarily unavailable.") -> None:
         super().__init__("ollama_embedding_unavailable", message)

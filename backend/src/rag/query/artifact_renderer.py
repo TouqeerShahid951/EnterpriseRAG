@@ -25,6 +25,15 @@ CONTENT_TYPES: dict[ArtifactFormat, str] = {
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "pdf": "application/pdf",
 }
+PPTX_TITLE_BACKGROUND = (23, 59, 63)
+PPTX_CONTENT_BACKGROUNDS = (
+    (220, 235, 232),
+    (246, 231, 203),
+    (226, 232, 245),
+    (241, 224, 220),
+    (229, 235, 213),
+)
+PPTX_CONTENT_BACKGROUND = PPTX_CONTENT_BACKGROUNDS[0]
 
 
 @dataclass(frozen=True)
@@ -188,10 +197,11 @@ def _render_pptx(*, content: ArtifactContent, projection: FormatProjection, gene
     presentation.slide_width = Inches(13.333)
     presentation.slide_height = Inches(7.5)
     citation_map = {citation.evidence_id: citation for citation in content.citations}
+    content_slide_index = 0
     for unit in projection.units:
         slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-        _slide_background(slide, RGBColor, dark=unit.kind == "title")
         if unit.kind == "title":
+            _slide_background(slide, RGBColor, dark=True)
             _add_pptx_text(slide, unit.title, 0.8, 1.4, 11.7, 1.0, 30, bold=True, color="FFFFFF")
             _add_pptx_text(
                 slide,
@@ -214,6 +224,8 @@ def _render_pptx(*, content: ArtifactContent, projection: FormatProjection, gene
                 color="AFC7C9",
             )
             continue
+        _slide_background(slide, RGBColor, dark=False, content_slide_index=content_slide_index)
+        content_slide_index += 1
         _add_pptx_text(slide, unit.title, 0.65, 0.35, 12.0, 0.55, 23, bold=True, color="173B3F")
         if unit.kind == "table_slide" and unit.table is not None:
             _add_pptx_table(slide, unit.table)
@@ -222,16 +234,23 @@ def _render_pptx(*, content: ArtifactContent, projection: FormatProjection, gene
         citations = _citation_summary(unit.citation_ids, citation_map)
         if citations:
             _add_pptx_text(slide, citations, 0.7, 6.85, 11.8, 0.25, 8, color="53676A")
-    _add_pptx_sources_slide(presentation, content.citations)
+    if content.citations:
+        _add_pptx_sources_slide(presentation, content.citations, content_slide_index=content_slide_index)
     buffer = BytesIO()
     presentation.save(buffer)
     return buffer.getvalue()
 
 
-def _slide_background(slide, rgb_color, *, dark: bool) -> None:
+def _slide_background(slide, rgb_color, *, dark: bool, content_slide_index: int = 0) -> None:
     background = slide.background.fill
     background.solid()
-    background.fore_color.rgb = rgb_color(23, 59, 63) if dark else rgb_color(247, 249, 248)
+    background.fore_color.rgb = rgb_color(*(
+        PPTX_TITLE_BACKGROUND if dark else _content_background(content_slide_index)
+    ))
+
+
+def _content_background(index: int) -> tuple[int, int, int]:
+    return PPTX_CONTENT_BACKGROUNDS[index % len(PPTX_CONTENT_BACKGROUNDS)]
 
 
 def _add_pptx_text(
@@ -302,8 +321,11 @@ def _add_pptx_table(slide, table: ArtifactTable) -> None:
                 paragraph.font.size = Pt(10)
 
 
-def _add_pptx_sources_slide(presentation, citations: tuple[ArtifactCitation, ...]) -> None:
+def _add_pptx_sources_slide(presentation, citations: tuple[ArtifactCitation, ...], *, content_slide_index: int) -> None:
+    from pptx.dml.color import RGBColor
+
     slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    _slide_background(slide, RGBColor, dark=False, content_slide_index=content_slide_index)
     _add_pptx_text(slide, "References", 0.65, 0.35, 12.0, 0.55, 23, bold=True, color="173B3F")
     lines = tuple(_reference_line(index, citation) for index, citation in enumerate(citations[:14], start=1))
     _add_pptx_bullets(slide, lines)

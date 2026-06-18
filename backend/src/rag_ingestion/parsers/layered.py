@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .docling_adapter import parse_docling_pdf
+from .docling_adapter import DoclingProgressCallback, parse_docling_pdf
 from .docling_repairs import merge_docling_repairs
 from .hierarchy import apply_hierarchy
 from .models import DocumentParseResult, ParsedPdfItem
@@ -30,6 +30,7 @@ def parse_layered_pdf(
     max_docling_pages: int,
     docling_batch_pages: int,
     page_progress_callback: PageProgressCallback | None = None,
+    docling_progress_callback: DoclingProgressCallback | None = None,
 ) -> DocumentParseResult:
     baseline = parse_pymupdf_pdf_with_metadata(file_bytes, page_progress_callback=page_progress_callback)
     config = {
@@ -67,6 +68,8 @@ def parse_layered_pdf(
             pages=selected_pages,
             allow_page_repair=False,
             page_batch_size=docling_batch_pages,
+            progress_callback=docling_progress_callback,
+            progress_phase="layout",
         )
     except ImportError:
         items = _with_flags(_ambiguous_native_pages(baseline_items, baseline), {"docling_unavailable"})
@@ -108,6 +111,7 @@ def parse_layered_pdf(
             full_doc_weak_page_ratio=full_doc_weak_page_ratio,
             candidate_pages=selected_pages,
             docling_batch_pages=docling_batch_pages,
+            docling_progress_callback=docling_progress_callback,
         )
 
     fused = _fuse_pages(
@@ -166,6 +170,7 @@ def _add_page_repairs(
     full_doc_weak_page_ratio: float,
     candidate_pages: set[int] | None,
     docling_batch_pages: int,
+    docling_progress_callback: DoclingProgressCallback | None,
 ) -> tuple[list[ParsedPdfItem], set[int], set[str]]:
     repair_pages = _docling_repair_pages(
         weak_pages,
@@ -183,6 +188,7 @@ def _add_page_repairs(
             repair_pages=repair_pages,
             weak_pages=weak_pages,
             docling_batch_pages=docling_batch_pages,
+            docling_progress_callback=docling_progress_callback,
         )
     except Exception as exc:
         return docling_items, repair_pages, {
@@ -216,6 +222,7 @@ def _parse_docling_repairs(
     repair_pages: set[int],
     weak_pages: list[WeakPage],
     docling_batch_pages: int,
+    docling_progress_callback: DoclingProgressCallback | None,
 ) -> list[ParsedPdfItem]:
     ocr_pages = repair_pages & ocr_candidate_pages(weak_pages)
     layout_pages = repair_pages - ocr_pages
@@ -227,6 +234,8 @@ def _parse_docling_repairs(
                 pages=layout_pages,
                 allow_page_repair=True,
                 page_batch_size=docling_batch_pages,
+                progress_callback=docling_progress_callback,
+                progress_phase="page_repair",
             )
         )
     if ocr_pages:
@@ -237,6 +246,8 @@ def _parse_docling_repairs(
                 allow_page_repair=True,
                 mark_ocr=True,
                 page_batch_size=docling_batch_pages,
+                progress_callback=docling_progress_callback,
+                progress_phase="ocr_repair",
             )
         )
     return _renumber_items(sorted(repairs, key=lambda item: (item.page_start or 0, item.index)))

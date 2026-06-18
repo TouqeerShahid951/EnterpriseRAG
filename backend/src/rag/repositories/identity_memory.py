@@ -14,12 +14,7 @@ from .identity_models import GroupRecord, UserRecord
 
 class InMemoryIdentityRepository:
     def __init__(self) -> None:
-        self._groups: dict[str, GroupRecord] = {
-            "/admin": GroupRecord(path="/admin", name="Administrators"),
-            "/review": GroupRecord(path="/review", name="Human Review"),
-            "/finance": GroupRecord(path="/finance", name="Finance"),
-            "/engineering": GroupRecord(path="/engineering", name="Engineering"),
-        }
+        self._groups: dict[str, GroupRecord] = {}
         self._users: dict[str, UserRecord] = {}
         self._lock = RLock()
 

@@ -9,7 +9,7 @@ from .cancellation import QueryCancellationToken
 from .http import ServiceRequestError, request_json, stream_json_lines
 
 
-ANSWER_NUM_PREDICT = 768
+ANSWER_NUM_PREDICT = 2048
 FAITHFULNESS_NUM_PREDICT = 1024
 ROUTE_VERIFIER_NUM_PREDICT = 512
 REASONING_NUM_PREDICT = 512
@@ -28,6 +28,7 @@ class OllamaClient:
         embed_timeout_seconds: float | None = None,
         thinking_enabled: bool = False,
         json_num_predict: int = JSON_NUM_PREDICT,
+        num_ctx: int | None = None,
     ) -> None:
         self.base_url = base_url
         self.chat_model = chat_model
@@ -37,6 +38,7 @@ class OllamaClient:
         self.embed_timeout_seconds = embed_timeout_seconds or timeout_seconds
         self.thinking_enabled = thinking_enabled
         self.json_num_predict = json_num_predict
+        self.num_ctx = num_ctx
 
     def embed(self, text: str, *, cancellation_token: QueryCancellationToken | None = None) -> list[float]:
         try:
@@ -80,7 +82,13 @@ class OllamaClient:
             "/api/chat",
             service="ollama",
             method="POST",
-            payload=_answer_payload(model=self.chat_model, prompt=prompt, stream=False, thinking_enabled=self.thinking_enabled),
+            payload=_answer_payload(
+                model=self.chat_model,
+                prompt=prompt,
+                stream=False,
+                thinking_enabled=self.thinking_enabled,
+                num_ctx=self.num_ctx,
+            ),
             timeout_seconds=self.chat_timeout_seconds,
             cancellation_token=cancellation_token,
         )
@@ -99,7 +107,13 @@ class OllamaClient:
             "/api/chat",
             service="ollama",
             method="POST",
-            payload=_answer_payload(model=self.chat_model, prompt=prompt, stream=True, thinking_enabled=self.thinking_enabled),
+            payload=_answer_payload(
+                model=self.chat_model,
+                prompt=prompt,
+                stream=True,
+                thinking_enabled=self.thinking_enabled,
+                num_ctx=self.num_ctx,
+            ),
             timeout_seconds=self.chat_timeout_seconds,
             cancellation_token=cancellation_token,
         )
@@ -122,7 +136,11 @@ class OllamaClient:
                 "stream": False,
                 "format": "json",
                 "think": self.thinking_enabled,
-                "options": {"temperature": 0.0, "num_predict": FAITHFULNESS_NUM_PREDICT},
+                "options": _ollama_options(
+                    temperature=0.0,
+                    num_predict=min(self.json_num_predict, FAITHFULNESS_NUM_PREDICT),
+                    num_ctx=self.num_ctx,
+                ),
                 "messages": [
                     {"role": "system", "content": "You are a strict RAG faithfulness judge."},
                     {"role": "user", "content": prompt},
@@ -150,7 +168,11 @@ class OllamaClient:
                 "stream": False,
                 "format": "json",
                 "think": self.thinking_enabled,
-                "options": {"temperature": 0.0, "num_predict": ROUTE_VERIFIER_NUM_PREDICT},
+                "options": _ollama_options(
+                    temperature=0.0,
+                    num_predict=ROUTE_VERIFIER_NUM_PREDICT,
+                    num_ctx=self.num_ctx,
+                ),
                 "messages": [
                     {"role": "system", "content": "You are a strict RAG intent routing verifier."},
                     {"role": "user", "content": prompt},
@@ -243,7 +265,7 @@ class OllamaClient:
                 "stream": False,
                 "format": "json",
                 "think": self.thinking_enabled,
-                "options": {"temperature": 0.0, "num_predict": num_predict},
+                "options": _ollama_options(temperature=0.0, num_predict=num_predict, num_ctx=self.num_ctx),
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": prompt},
@@ -277,17 +299,31 @@ def build_answer_prompt(*, question: str, contexts: list[str]) -> str:
     )
 
 
-def _answer_payload(*, model: str, prompt: str, stream: bool, thinking_enabled: bool) -> dict[str, Any]:
+def _answer_payload(
+    *,
+    model: str,
+    prompt: str,
+    stream: bool,
+    thinking_enabled: bool,
+    num_ctx: int | None,
+) -> dict[str, Any]:
     return {
         "model": model,
         "stream": stream,
         "think": thinking_enabled,
-        "options": {"temperature": 0.1, "num_predict": ANSWER_NUM_PREDICT},
+        "options": _ollama_options(temperature=0.1, num_predict=ANSWER_NUM_PREDICT, num_ctx=num_ctx),
         "messages": [
             {"role": "system", "content": "You are a concise enterprise RAG assistant."},
             {"role": "user", "content": prompt},
         ],
     }
+
+
+def _ollama_options(*, temperature: float, num_predict: int, num_ctx: int | None) -> dict[str, int | float]:
+    options: dict[str, int | float] = {"temperature": temperature, "num_predict": num_predict}
+    if num_ctx is not None:
+        options["num_ctx"] = num_ctx
+    return options
 
 
 def _coerce_vector(value: Any) -> list[float]:

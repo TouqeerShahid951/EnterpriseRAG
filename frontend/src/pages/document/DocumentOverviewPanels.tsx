@@ -1,5 +1,6 @@
 import { Activity, AlertTriangle, CheckCircle2, Clock3, FilePlus2, FolderOpen, History, type LucideIcon } from "lucide-react";
 
+import { clearanceLevelLabel } from "../../authz";
 import type { NavigateOptions, RouteId } from "../../routes";
 import type { Document, DocumentIngestStatus, IngestJob, UploadJobState } from "../../types/api";
 import { formatDateTime } from "../../utils/format";
@@ -133,7 +134,7 @@ export function RecentActivityList({ isLoading, jobs, onNavigate }: RecentActivi
         <button type="button" key={job.job_id} onClick={() => onNavigate("ingestion-jobs", { search: `?job_q=${encodeURIComponent(job.job_id)}` })}>
           <span className="knowledge-activity-main">
             <strong>{job.document_title}</strong>
-            <small>{job.group_path} - {labelize(job.origin)} - {formatDateTime(job.created_at)}</small>
+            <small>{job.group_path} - {clearanceLevelLabel(job.clearance_level)} - {labelize(job.origin)} - {formatDateTime(job.created_at)}</small>
           </span>
           <span className="knowledge-activity-meta">
             <IngestStatusBadge status={job.status} warnings={job.warnings} />
@@ -221,6 +222,8 @@ export function IngestStatusBadge({ status, warnings = [] }: { status: DocumentI
       ? "sv-pill sv-pill-success"
       : status === "failed"
         ? "sv-pill knowledge-status-failed"
+        : status === "cancelled"
+          ? "sv-pill sv-pill-warning"
         : status === "human_review"
           ? "sv-pill knowledge-status-human_review"
           : status === "unknown"
@@ -241,6 +244,7 @@ function ingestStatusLabel(status: DocumentIngestStatus | UploadJobState) {
   if (status === "processing") return "Processing";
   if (status === "scheduled") return "Scheduled";
   if (status === "queued") return "Queued";
+  if (status === "cancelled") return "Cancelled";
   if (status === "failed") return "Failed";
   if (status === "unknown") return "Unknown";
   return "Indexed";

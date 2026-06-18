@@ -4,5 +4,6 @@
 @import "./styles/chat-layout.css";
 @import "./styles/chat-components.css";
 @import "./styles/source-viewer.css";
+/* Keep review queue styles in the main bundle for Vite's CSS import graph. */
 @import "./styles/review-queue.css";
 @import "./styles/rag-evaluations.css";

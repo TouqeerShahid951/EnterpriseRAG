@@ -47,6 +47,8 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     && rm /tmp/worker-requirements.txt
 
 ENV DOCLING_ARTIFACTS_PATH=/models/docling
+ENV DOCLING_OCR_BACKEND=onnxruntime
+ENV DOCLING_OCR_LANGS=english
 ENV HF_HUB_DISABLE_XET=1
 
 COPY src/rag_ingestion /app/src/rag_ingestion

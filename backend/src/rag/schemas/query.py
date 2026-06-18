@@ -7,6 +7,7 @@ from .common import ContractModel
 
 
 ArtifactFormat = Literal["docx", "pptx", "pdf"]
+ArtifactJobProgressUnit = Literal["sections", "batches", "slides", "formats", "files"]
 ArtifactJobStatus = Literal[
     "queued",
     "planning",
@@ -148,11 +149,21 @@ class GeneratedArtifact(ContractModel):
     created_at: str | None = None
 
 
+class ArtifactJobStageProgress(ContractModel):
+    unit: ArtifactJobProgressUnit
+    current: int = Field(..., ge=0)
+    total: int = Field(..., ge=0)
+    label: str | None = None
+
+
 class ArtifactJobSummary(ContractModel):
     id: str
     status: ArtifactJobStatus
     stage: str
     progress_pct: int = Field(..., ge=0, le=100)
+    stage_label: str
+    stage_detail: str
+    stage_progress: ArtifactJobStageProgress | None = None
     requested_formats: list[ArtifactFormat]
     clarification_questions: list[str] = Field(default_factory=list)
     artifacts: list[GeneratedArtifact] = Field(default_factory=list)
@@ -197,9 +208,19 @@ class ChatSession(ContractModel):
     turns: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ChatSessionSummary(ContractModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    question_count: int = Field(default=0, ge=0)
+
+
 class ChatSessionListResponse(ContractModel):
-    items: list[ChatSession]
+    items: list[ChatSessionSummary]
     total: int
+    limit: int
+    offset: int
 
 
 SseEventType = Literal["trace", "intent", "token", "source", "artifact", "artifact_job", "warning", "done", "verified", "error"]

@@ -1,6 +1,6 @@
 import type { SourceAnchor, SourceRegion } from "../types/api";
 
-export type SourceDocumentKind = "docx" | "image" | "pdf" | "unsupported";
+export type SourceDocumentKind = "docx" | "image" | "json" | "pdf" | "unsupported";
 
 interface PdfPageFit {
   containerHeight: number;
@@ -129,6 +129,7 @@ export function sourceDocumentKind(contentType: string, title: string): SourceDo
   const normalizedType = contentType.split(";", 1)[0].trim().toLowerCase();
   const normalizedTitle = title.trim().toLowerCase();
   if (normalizedType === "application/pdf" || normalizedTitle.endsWith(".pdf")) return "pdf";
+  if (normalizedType === "application/json" || normalizedTitle.endsWith(".json")) return "json";
   if (
     normalizedType === "image/jpeg"
     || normalizedType === "image/png"
@@ -166,4 +167,42 @@ export function sourceTextCandidates(source: SourceAnchor): string[] {
 
 export function normalizeSourceText(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+}
+
+export function jsonDocumentText(buffer: ArrayBuffer): { prettyText: string; rawText: string } {
+  const rawText = new TextDecoder("utf-8").decode(buffer.slice(0));
+  try {
+    return { prettyText: JSON.stringify(JSON.parse(rawText), null, 2), rawText };
+  } catch {
+    return { prettyText: rawText, rawText };
+  }
+}
+
+export function jsonHighlightRange(text: string, candidates: string[]): { start: number; end: number } | null {
+  const variants = candidates.flatMap(jsonMatchingVariants);
+  const lowerText = text.toLocaleLowerCase();
+  for (const variant of variants) {
+    const index = lowerText.indexOf(variant.toLocaleLowerCase());
+    if (index >= 0) return { start: index, end: index + variant.length };
+  }
+  return null;
+}
+
+function jsonMatchingVariants(candidate: string): string[] {
+  const variants = [candidate.trim()];
+  for (const line of candidate.split(/\r?\n/)) {
+    const [label, ...valueParts] = line.split(":");
+    const value = valueParts.join(":").trim();
+    if (value && label.trim().toLocaleLowerCase() !== "json path") {
+      variants.push(value);
+    }
+  }
+  const pathMatch = /JSON path:\s*([^\n]+)/i.exec(candidate);
+  if (pathMatch) {
+    const keyMatch = /(?:\.|\[")([A-Za-z0-9_ -]+)(?:"\])?$/.exec(pathMatch[1]);
+    if (keyMatch) variants.push(keyMatch[1]);
+  }
+  return variants
+    .map((value) => value.trim())
+    .filter((value, index, values) => value.length >= 2 && values.indexOf(value) === index);
 }

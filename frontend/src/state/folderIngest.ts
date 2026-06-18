@@ -1,5 +1,6 @@
 import type { CreateMinioPrefixScheduleRequest, CreateSnapshotScheduleRequest } from "../api/contracts";
-import type { DocType, FolderScheduleType, RecurrenceWindow } from "../types/api";
+import { defaultClearanceLevel } from "../authz";
+import type { ClearanceLevel, FolderScheduleType, RecurrenceWindow } from "../types/api";
 
 export const WORKSPACE_TIMEZONE = "Asia/Karachi";
 export const FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES = 100;
@@ -25,9 +26,9 @@ export interface FolderScheduleDraft {
   sourceMode: FolderSourceMode;
   name: string;
   groupPath: string;
+  clearanceLevel: ClearanceLevel;
   effectiveDate: string;
   expiryDate: string;
-  docType: DocType;
   description: string;
   scheduleType: FolderScheduleType;
   scheduledAt: string;
@@ -44,9 +45,9 @@ export function defaultFolderScheduleDraft(effectiveDate: string): FolderSchedul
     sourceMode: "snapshot",
     name: "",
     groupPath: "",
+    clearanceLevel: defaultClearanceLevel,
     effectiveDate,
     expiryDate: "",
-    docType: "policy",
     description: "",
     scheduleType: "one_time",
     scheduledAt: "",
@@ -73,7 +74,7 @@ export function summarizeFolderFiles(files: File[]): FolderSelectionSummary {
   const supportedBytes = supportedEntries.reduce((total, entry) => total + entry.file.size, 0);
   const validationMessages: string[] = [];
   if (supportedEntries.length === 0 && entries.length > 0) {
-    validationMessages.push("The selected folder does not contain any PDF, DOCX, JPG, or PNG files.");
+    validationMessages.push("The selected folder does not contain any PDF, DOCX, JPG, PNG, or JSON files.");
   }
   if (supportedEntries.length > FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES) {
     validationMessages.push(`Folder snapshots cannot exceed ${FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES} supported files.`);
@@ -104,9 +105,9 @@ export function buildSnapshotScheduleRequest(draft: FolderScheduleDraft, entries
     relative_paths: entries.map((entry) => entry.relativePath),
     name: draft.name.trim(),
     group_path: draft.groupPath.trim(),
+    clearance_level: draft.clearanceLevel,
     effective_date: draft.effectiveDate || null,
     expiry_date: draft.expiryDate || null,
-    doc_type: draft.docType,
     description: draft.description.trim() || null,
     schedule_type: draft.scheduleType,
     timezone: draft.timezone,
@@ -121,9 +122,9 @@ export function buildMinioPrefixScheduleRequest(draft: FolderScheduleDraft): Cre
     bucket: draft.bucket.trim(),
     prefix: draft.prefix.trim().replace(/^\/+/, ""),
     group_path: draft.groupPath.trim(),
+    clearance_level: draft.clearanceLevel,
     effective_date: draft.effectiveDate || null,
     expiry_date: draft.expiryDate || null,
-    doc_type: draft.docType,
     description: draft.description.trim() || null,
     schedule_type: draft.scheduleType,
     timezone: draft.timezone,
@@ -136,6 +137,13 @@ export function formatFolderCount(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
+export function folderSnapshotLabel(entries: FolderFileEntry[]): string {
+  const roots = [...new Set(entries.map((entry) => entry.relativePath.split("/")[0]).filter(Boolean))].sort();
+  if (roots.length === 0) return "No folder selected";
+  if (roots.length === 1) return roots[0];
+  return `${roots.length} folders selected`;
+}
+
 function isSupportedFolderDocument(file: File, relativePath: string): boolean {
   const name = (relativePath || file.name).toLowerCase();
   return (
@@ -143,11 +151,13 @@ function isSupportedFolderDocument(file: File, relativePath: string): boolean {
     || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     || file.type === "image/jpeg"
     || file.type === "image/png"
+    || file.type === "application/json"
     || name.endsWith(".pdf")
     || name.endsWith(".docx")
     || name.endsWith(".jpg")
     || name.endsWith(".jpeg")
     || name.endsWith(".png")
+    || name.endsWith(".json")
   );
 }
 

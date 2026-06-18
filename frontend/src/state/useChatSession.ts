@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { queryApi } from "../api/contracts";
 import { isGlobalAdmin } from "../authz";
 import type { ArtifactJobSummary, RagSseEvent, RAGResponse, SourceAnchor, User } from "../types/api";
-import type { AssistantTurn, ChatTurn, QueryProgressItem, QueryRunVariables, SavedChatSession } from "../types/chat";
+import type { AssistantTurn, ChatTurn, QueryProgressItem, QueryRunVariables, SavedChatSession, SavedChatSessionPage } from "../types/chat";
 import { errorMessage, formatIntent } from "../utils/format";
 import { createId } from "./ids";
+
+const CHAT_HISTORY_PAGE_SIZE = 30;
+
+type ChatHistoryQueryData = InfiniteData<SavedChatSessionPage, number>;
 
 export function useChatSession(currentUser: User | null) {
   const queryClient = useQueryClient();
@@ -25,15 +29,21 @@ export function useChatSession(currentUser: User | null) {
   );
   const defaultActiveSpacePath = useMemo(() => defaultSpacePath(currentUser), [currentUser?.permission_version, currentUser?.user_id]);
 
-  const savedSessionsQuery = useQuery({
+  const savedSessionsQuery = useInfiniteQuery({
     queryKey: chatHistoryQueryKey,
-    queryFn: async () => {
-      const response = await queryApi.listSessions();
-      return response.items;
+    queryFn: ({ pageParam }) => queryApi.listSessions({ limit: CHAT_HISTORY_PAGE_SIZE, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loadedCount = allPages.reduce((count, page) => count + page.items.length, 0);
+      return loadedCount < lastPage.total ? loadedCount : undefined;
     },
     enabled: Boolean(currentUser),
   });
-  const savedSessions = savedSessionsQuery.data ?? [];
+  const savedSessions = useMemo(
+    () => savedSessionsQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [savedSessionsQuery.data],
+  );
+  const savedSessionsTotal = savedSessionsQuery.data?.pages[0]?.total ?? savedSessions.length;
 
   const queryMutation = useMutation<RAGResponse, Error, QueryRunVariables>({
     mutationFn: (variables) =>
@@ -65,14 +75,24 @@ export function useChatSession(currentUser: User | null) {
     },
   });
 
-  const deleteSessionMutation = useMutation<void, Error, string, { previous?: SavedChatSession[] }>({
+  const loadSessionMutation = useMutation<SavedChatSession, Error, string>({
+    mutationFn: queryApi.getSession,
+    onSuccess: (session) => {
+      sessionIdRef.current = session.id;
+      setActiveSessionId(session.id);
+      setChatTurns(session.turns);
+      setScopedDocumentIds([]);
+      setSelectedSource(null);
+      setQuestion("");
+    },
+  });
+
+  const deleteSessionMutation = useMutation<void, Error, string, { previous?: ChatHistoryQueryData }>({
     mutationFn: queryApi.deleteSession,
     onMutate: async (sessionId) => {
       await queryClient.cancelQueries({ queryKey: chatHistoryQueryKey });
-      const previous = queryClient.getQueryData<SavedChatSession[]>(chatHistoryQueryKey);
-      queryClient.setQueryData<SavedChatSession[]>(chatHistoryQueryKey, (current = []) =>
-        current.filter((session) => session.id !== sessionId),
-      );
+      const previous = queryClient.getQueryData<ChatHistoryQueryData>(chatHistoryQueryKey);
+      queryClient.setQueryData<ChatHistoryQueryData>(chatHistoryQueryKey, (current) => removeSessionFromPages(current, sessionId));
       return { previous };
     },
     onError: (_error, _sessionId, context) => {
@@ -91,6 +111,7 @@ export function useChatSession(currentUser: User | null) {
 
   useEffect(() => {
     abortActiveQuery();
+    loadSessionMutation.reset();
     sessionIdRef.current = null;
     setActiveSessionId(null);
     setChatTurns([]);
@@ -132,6 +153,7 @@ export function useChatSession(currentUser: User | null) {
 
   function resetChat() {
     abortActiveQuery();
+    loadSessionMutation.reset();
     sessionIdRef.current = null;
     setActiveSessionId(null);
     setChatTurns([]);
@@ -203,15 +225,8 @@ export function useChatSession(currentUser: User | null) {
   }
 
   function loadChatSession(sessionId: string) {
-    if (hasPendingTurn) return;
-    const session = savedSessions.find((candidate) => candidate.id === sessionId);
-    if (!session) return;
-    sessionIdRef.current = session.id;
-    setActiveSessionId(session.id);
-    setChatTurns(session.turns);
-    setScopedDocumentIds([]);
-    setSelectedSource(null);
-    setQuestion("");
+    if (hasPendingTurn || loadSessionMutation.isPending) return;
+    loadSessionMutation.mutate(sessionId);
   }
 
   function deleteChatSession(sessionId: string) {
@@ -303,7 +318,17 @@ export function useChatSession(currentUser: User | null) {
     scopedDocumentIds,
     savedSessions,
     savedSessionsError: savedSessionsQuery.isError ? errorMessage(savedSessionsQuery.error, "Chat history could not be loaded.") : null,
+    savedSessionLoadError: loadSessionMutation.isError ? errorMessage(loadSessionMutation.error, "Chat session could not be loaded.") : null,
+    savedSessionsFetchingMore: savedSessionsQuery.isFetchingNextPage,
+    savedSessionsHasMore: Boolean(savedSessionsQuery.hasNextPage),
     savedSessionsLoading: savedSessionsQuery.isLoading,
+    savedSessionsTotal,
+    loadMoreSavedSessions: () => {
+      if (savedSessionsQuery.hasNextPage && !savedSessionsQuery.isFetchingNextPage) {
+        void savedSessionsQuery.fetchNextPage();
+      }
+    },
+    loadingSessionId: loadSessionMutation.isPending ? loadSessionMutation.variables ?? null : null,
     selectedSource,
     setQuestion,
     setSelectedSource,
@@ -312,6 +337,20 @@ export function useChatSession(currentUser: User | null) {
 
 function createUserTurn(content: string): ChatTurn {
   return { id: createId("user"), role: "user", content, createdAt: new Date().toISOString() };
+}
+
+function removeSessionFromPages(current: ChatHistoryQueryData | undefined, sessionId: string): ChatHistoryQueryData | undefined {
+  if (!current) return current;
+  const containedSession = current.pages.some((page) => page.items.some((session) => session.id === sessionId));
+  if (!containedSession) return current;
+  return {
+    ...current,
+    pages: current.pages.map((page) => ({
+      ...page,
+      total: Math.max(0, page.total - 1),
+      items: page.items.filter((session) => session.id !== sessionId),
+    })),
+  };
 }
 
 function createAssistantTurn(question: string, documentIds: string[] = [], groupPath: string | null = null): AssistantTurn {
@@ -547,7 +586,8 @@ function progressFromEvent(event: RagSseEvent): QueryProgressItem | null {
 
 function artifactJobProgressDetail(job: ArtifactJobSummary): string {
   const formats = job.requested_formats.map((format) => format.toUpperCase()).join(", ");
-  return `${humanizeNode(job.status)}${formats ? ` · ${formats}` : ""}`;
+  const detail = job.stage_detail?.trim() || job.stage_label?.trim() || humanizeNode(job.status);
+  return `${detail}${formats ? ` · ${formats}` : ""}`;
 }
 
 function executionDetail(mode?: string, detail?: string | null): string | null {

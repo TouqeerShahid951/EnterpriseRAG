@@ -148,7 +148,7 @@ def ingest_queue_message(document: DocumentRecord, job: IngestJobRecord) -> Inge
         doc_id=document.id,
         file_path=document.file_path or "",
         group_path=document.group_path,
-        doc_type=document.doc_type or "other",
+        doc_type=document.doc_type,
         effective_date=document.effective_date.isoformat() if document.effective_date else None,
         supersedes=list(document.pending_supersedes),
         expiry_date=document.expiry_date.isoformat() if document.expiry_date else None,

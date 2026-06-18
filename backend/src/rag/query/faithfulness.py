@@ -158,28 +158,22 @@ def evidence_sources(response: RAGResponse) -> list[SourceAnchor]:
 
 
 def build_faithfulness_prompt(*, answer: str, sources: list[SourceAnchor]) -> str:
-    evidence = "\n\n".join(format_source(source) for source in sources)
     claims = cited_claims(answer)
     claim_block = "\n".join(
-        f"{claim.claim_id}: {claim.text} | cited sources: {', '.join(claim.source_labels)}"
+        f"{claim.claim_id}\nClaim: {claim.text}\nCited sources: {', '.join(claim.source_labels)}"
         for claim in claims
     ) or "No cited factual claims were detected."
+    evidence = "\n\n".join(format_source(source) for source in sources)
     return (
-        "Judge whether the answer is supported by the evidence. "
+        "Judge whether the cited answer claims are supported by their cited evidence. "
         "Use only the evidence below. Do not use outside knowledge. "
-        "Each factual answer claim must have a nearby citation label, and that cited source must directly support the claim. "
-        "Treat missing, unknown, or unrelated citations as unfounded claims. "
-        "For every supported cited claim, return the shortest exact quote from the cited source that directly supports it. "
-        "Prefer quotes under 320 characters and preserve the source wording exactly. "
-        "Do not return character offsets. "
-        "Return only valid JSON with keys score, unfounded_claims, and attributions. "
+        "A cited source must directly support every material fact in its claim. "
+        "Treat missing, unknown, or unrelated citations as unfounded. "
+        "Return only valid compact JSON with keys score and unfounded_claims. "
         "score must be a number from 0 to 1. "
-        "unfounded_claims must list answer claims that are not supported by the evidence. "
-        "attributions must be a list of objects with claim_id, claim, source_label, quote, and support_score. "
-        "source_label must exactly match one of the cited labels for that claim. "
-        "support_score must be a number from 0 to 1. "
-        "A fully supported answer scores 1.0. An answer with invented facts scores below 0.8.\n\n"
-        f"Claims:\n{claim_block}\n\nEvidence:\n{evidence}\n\nAnswer:\n{answer}"
+        "unfounded_claims must contain only exact Claim text values copied from Claims, not claim IDs, citations, or explanations. "
+        "A fully supported answer scores 1.0; invented or unsupported facts score below 0.8.\n\n"
+        f"Claims:\n{claim_block}\n\nEvidence:\n{evidence}"
     )
 
 
@@ -634,10 +628,17 @@ def _claim_terms(text: str) -> set[str]:
 
 def _claim_text(value: object) -> str:
     if isinstance(value, str):
-        return value.strip()
+        return _clean_unfounded_claim(value)
     if isinstance(value, dict):
         for key in ("claim", "text", "statement"):
             item = value.get(key)
             if isinstance(item, str) and item.strip():
-                return item.strip()
+                return _clean_unfounded_claim(item)
     raise ValueError("unfounded_claims must contain claim strings")
+
+
+def _clean_unfounded_claim(value: str) -> str:
+    claim = value.strip()
+    claim = re.sub(r"^claim-\d+\s*:\s*", "", claim, flags=re.IGNORECASE)
+    claim = re.sub(r"\s*\|\s*cited sources?:.*$", "", claim, flags=re.IGNORECASE)
+    return claim.strip()

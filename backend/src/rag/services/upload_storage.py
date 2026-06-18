@@ -184,6 +184,8 @@ def _content_type_for(filename: str) -> str:
         return "image/jpeg"
     if lowered.endswith(".png"):
         return "image/png"
+    if lowered.endswith(".json"):
+        return "application/json"
     return mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
 

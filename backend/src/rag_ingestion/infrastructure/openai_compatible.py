@@ -19,6 +19,8 @@ from ..errors import OllamaEmbeddingUnavailable
 from .http import ServiceRequestError, request_json
 from .ollama import METADATA_NUM_PREDICT, _coerce_metadata, _metadata_fallback, is_transient_service_error
 
+METADATA_EXCEPTION_WARNING = "metadata_extraction_exception"
+
 
 class OpenAICompatibleClient:
     def __init__(
@@ -47,12 +49,20 @@ class OpenAICompatibleClient:
 
     def generate_metadata(self, text: str) -> dict[str, Any]:
         prompt = (
-            "Extract compact factual metadata from the document. "
-            "The summary must be exactly two factual sentences. "
-            "Return JSON with summary, llm_topics, doc_type, and claims.\n\n"
+            "Return ONLY a valid JSON object. "
+            "Do not return markdown, prose, YAML, labels, or numbered lists. "
+            "Use exactly these keys: summary, llm_topics, doc_type, claims. "
+            "summary must contain exactly two factual sentences. "
+            "llm_topics must be an array of 3 to 8 short strings. "
+            "doc_type must be a concise freeform string. "
+            "claims must be an array of objects, not strings; each claim object must have string keys "
+            "entity, attribute, and value. If there are no explicit claims, use an empty array.\n\n"
             f"Document text:\n{text[:6000]}"
         )
+        last_error: ServiceRequestError | None = None
+        last_attempt = 0
         for attempt in range(3):
+            last_attempt = attempt + 1
             try:
                 payload = request_json(
                     self.base_url,
@@ -67,7 +77,12 @@ class OpenAICompatibleClient:
                         "response_format": {"type": "json_object"},
                         **no_thinking_payload_fields(),
                         "messages": [
-                            {"role": "system", "content": no_thinking_system("You extract compact document metadata.")},
+                            {
+                                "role": "system",
+                                "content": no_thinking_system(
+                                    "You are a strict JSON metadata extraction API. Return only valid JSON."
+                                ),
+                            },
                             {"role": "user", "content": no_thinking_prompt(prompt, self.chat_model)},
                         ],
                     },
@@ -79,10 +94,14 @@ class OpenAICompatibleClient:
                 return _coerce_metadata(parsed)
             except (ServiceRequestError, json.JSONDecodeError) as exc:
                 service_error = exc if isinstance(exc, ServiceRequestError) else ServiceRequestError("vllm", str(exc), 502)
+                last_error = service_error
                 if attempt >= 2 or not is_transient_service_error(service_error):
                     break
                 self._backoff(attempt)
-        return _metadata_fallback()
+        return _metadata_fallback(
+            warning=METADATA_EXCEPTION_WARNING,
+            error=_metadata_error_payload(last_error, attempts=last_attempt) if last_error else None,
+        )
 
     def embed(self, text: str) -> list[float]:
         return self.embed_many([text])[0]
@@ -170,3 +189,26 @@ def _coerce_vector(value: Any) -> list[float]:
 
 def _openai_path(base_url: str, path: str) -> str:
     return path.removeprefix("/v1") if base_url.rstrip("/").endswith("/v1") else path
+
+
+def _metadata_error_payload(exc: ServiceRequestError, *, attempts: int) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "warning": METADATA_EXCEPTION_WARNING,
+        "service": exc.service,
+        "attempts": max(1, attempts),
+        "message": _safe_metadata_error_message(exc),
+    }
+    if exc.status_code is not None:
+        payload["status_code"] = exc.status_code
+    return payload
+
+
+def _safe_metadata_error_message(exc: ServiceRequestError) -> str:
+    message = exc.message.lower()
+    if "timed out" in message or "timeout" in message:
+        return "request timed out"
+    if "json" in message:
+        return "metadata response was not valid JSON"
+    if exc.status_code is not None:
+        return f"metadata service returned HTTP {exc.status_code}"
+    return "metadata request failed"

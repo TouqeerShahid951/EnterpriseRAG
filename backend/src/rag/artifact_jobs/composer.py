@@ -6,6 +6,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 import json
 import logging
+import re
 import signal
 import threading
 
@@ -33,12 +34,14 @@ from .llm_json import generate_contract
 
 
 COMPOSER_PROMPT_VERSION = "document-composer-v2.1"
-FORMATTER_PROMPT_VERSION = "document-formatter-deterministic-v2.2"
+FORMATTER_PROMPT_VERSION = "document-formatter-llm-v3.0"
 MAX_RECORDS_PER_COMPOSITION_CALL = 40
 COMPOSITION_RECORD_TEXT_LIMIT = 900
 MAX_BLOCKS_PER_SLIDE = 4
 MAX_PRESENTATION_SLIDES = 80
 FALLBACK_MAX_LIST_ITEMS = 12
+FALLBACK_MAX_TABLE_COLUMNS = 6
+REFERENCE_SLIDE_TITLES = {"reference", "references", "source", "sources", "citation", "citations", "bibliography"}
 
 logger = logging.getLogger("rag.artifact_jobs")
 
@@ -119,12 +122,19 @@ def compose_document_bundle(
         citations=citations,
         warnings=list(dict.fromkeys(warnings)),
     )
-    formats = _adapt_formats(job, plan, content)
-    return ArtifactContentBundle(
+    formats = _adapt_formats(
+        job,
+        plan,
+        content,
+        inference=inference,
+        model=model,
+        timeout_seconds=section_timeout_seconds,
+    )
+    return normalize_bundle_evidence_ids(ArtifactContentBundle(
         content=content,
         paginated=formats.paginated,
         presentation=formats.presentation,
-    )
+    ), evidence)
 
 
 def repair_document_bundle(
@@ -153,6 +163,200 @@ def repair_document_bundle(
         prompt=prompt,
         contract=ArtifactContentBundle,
     )
+
+
+def fallback_repair_document_bundle(
+    bundle: ArtifactContentBundle,
+    *,
+    errors: list[str],
+    evidence: EvidenceManifest,
+) -> ArtifactContentBundle:
+    content_sections = [
+        _repair_section(section, errors, f"content section {section.title}", empty_text=section.title)
+        for section in bundle.content.sections
+    ]
+    paginated_sections = [
+        _repair_section(section, errors, f"paginated section {section.title}", empty_text=section.title)
+        for section in bundle.paginated.sections
+    ]
+    slides = []
+    for index, slide in enumerate(bundle.presentation.slides, start=1):
+        repaired = _repair_blocks(slide.blocks, errors, f"slide {index} ({slide.title})")
+        slides.append(slide.model_copy(update={"blocks": repaired or [ContentBlock(kind="heading", text=slide.title)]}))
+    repaired_bundle = bundle.model_copy(update={
+        "content": bundle.content.model_copy(update={"sections": content_sections}),
+        "paginated": bundle.paginated.model_copy(update={"sections": paginated_sections}),
+        "presentation": bundle.presentation.model_copy(update={"slides": slides}),
+    })
+    return normalize_bundle_evidence_ids(repaired_bundle, evidence)
+
+
+def normalize_bundle_evidence_ids(
+    bundle: ArtifactContentBundle,
+    evidence: EvidenceManifest,
+) -> ArtifactContentBundle:
+    """Map recoverable evidence-id variants back to manifest IDs and refresh citations."""
+    records_by_id = {record.evidence_id: record for record in evidence.records}
+    aliases: dict[str, str] = {}
+    for evidence_id in records_by_id:
+        aliases[evidence_id] = evidence_id
+        if evidence_id.startswith("ev_"):
+            aliases[evidence_id.removeprefix("ev_")] = evidence_id
+        else:
+            aliases[f"ev_{evidence_id}"] = evidence_id
+
+    def normalize_ids(evidence_ids: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for evidence_id in evidence_ids:
+            mapped = aliases.get(evidence_id)
+            if mapped and mapped not in normalized:
+                normalized.append(mapped)
+        return normalized
+
+    def normalize_block(block: ContentBlock) -> ContentBlock:
+        table = None
+        if block.table is not None:
+            table = block.table.model_copy(update={
+                "rows": [
+                    row.model_copy(update={"evidence_ids": normalize_ids(row.evidence_ids)})
+                    for row in block.table.rows
+                ]
+            })
+        return block.model_copy(update={
+            "evidence_ids": normalize_ids(block.evidence_ids),
+            "list_items": [
+                item.model_copy(update={"evidence_ids": normalize_ids(item.evidence_ids)})
+                for item in block.list_items
+            ],
+            "entries": [
+                entry.model_copy(update={"evidence_ids": normalize_ids(entry.evidence_ids)})
+                for entry in block.entries
+            ],
+            "table": table,
+        })
+
+    def normalize_section(section: ContentSection) -> ContentSection:
+        return section.model_copy(update={"blocks": [normalize_block(block) for block in section.blocks]})
+
+    content_sections = [normalize_section(section) for section in bundle.content.sections]
+    paginated_sections = [normalize_section(section) for section in bundle.paginated.sections]
+    slides = [
+        slide.model_copy(update={"blocks": [normalize_block(block) for block in slide.blocks]})
+        for slide in bundle.presentation.slides
+        if not _is_generated_references_slide(slide)
+    ]
+    if not slides:
+        slides = _presentation_slides(content_sections)
+    used_ids = _used_bundle_evidence_ids(content_sections, paginated_sections, slides)
+    citation_ids = list(dict.fromkeys([citation.evidence_id for citation in bundle.content.citations] + used_ids))
+    citations = [
+        EvidenceCitation(
+            evidence_id=evidence_id,
+            doc_id=records_by_id[evidence_id].doc_id,
+            doc_title=records_by_id[evidence_id].doc_title,
+            chunk_id=records_by_id[evidence_id].chunk_id,
+            page_start=records_by_id[evidence_id].page_start,
+            page_end=records_by_id[evidence_id].page_end,
+        )
+        for evidence_id in citation_ids
+        if evidence_id in records_by_id
+    ]
+    return bundle.model_copy(update={
+        "content": bundle.content.model_copy(update={
+            "sections": content_sections,
+            "citations": citations,
+        }),
+        "paginated": bundle.paginated.model_copy(update={"sections": paginated_sections}),
+        "presentation": bundle.presentation.model_copy(update={"slides": slides}),
+    })
+
+
+def _used_bundle_evidence_ids(
+    content_sections: list[ContentSection],
+    paginated_sections: list[ContentSection],
+    slides: list[PresentationSlide],
+) -> list[str]:
+    used: list[str] = []
+
+    def add(evidence_ids: list[str]) -> None:
+        for evidence_id in evidence_ids:
+            if evidence_id and evidence_id not in used:
+                used.append(evidence_id)
+
+    for section in [*content_sections, *paginated_sections]:
+        for block in section.blocks:
+            _collect_block_evidence_ids(block, add)
+    for slide in slides:
+        for block in slide.blocks:
+            _collect_block_evidence_ids(block, add)
+    return used
+
+
+def _collect_block_evidence_ids(block: ContentBlock, add: Callable[[list[str]], None]) -> None:
+    add(block.evidence_ids)
+    for item in block.list_items:
+        add(item.evidence_ids)
+    for entry in block.entries:
+        add(entry.evidence_ids)
+    if block.table is not None:
+        for row in block.table.rows:
+            add(row.evidence_ids)
+
+
+def _repair_section(
+    section: ContentSection,
+    errors: list[str],
+    location: str,
+    *,
+    empty_text: str,
+) -> ContentSection:
+    blocks = _repair_blocks(section.blocks, errors, location)
+    return section.model_copy(update={"blocks": blocks or [ContentBlock(kind="heading", text=empty_text)]})
+
+
+def _repair_blocks(blocks: list[ContentBlock], errors: list[str], location: str) -> list[ContentBlock]:
+    repaired = list(blocks)
+    for index in range(len(blocks), 0, -1):
+        label = f"{location} block {index}"
+        block = repaired[index - 1]
+        if any(error.startswith(label) and " list item " not in error and " key-value entry " not in error and " table row " not in error for error in errors):
+            repaired.pop(index - 1)
+            continue
+        if block.kind in {"bullet_list", "numbered_list"}:
+            repaired[index - 1] = _repair_list_block(block, errors, label)
+        elif block.kind == "key_value":
+            repaired[index - 1] = _repair_key_value_block(block, errors, label)
+        elif block.kind == "table" and block.table is not None:
+            repaired[index - 1] = _repair_table_block(block, errors, label)
+    return [block for block in repaired if _block_has_payload(block)]
+
+
+def _repair_list_block(block: ContentBlock, errors: list[str], label: str) -> ContentBlock:
+    if block.list_items:
+        items = [item for idx, item in enumerate(block.list_items, start=1) if not any(error.startswith(f"{label} list item {idx} ") for error in errors)]
+        return block.model_copy(update={"list_items": items})
+    items = [item for idx, item in enumerate(block.items, start=1) if not any(error.startswith(f"{label} list item {idx} ") for error in errors)]
+    return block.model_copy(update={"items": items})
+
+
+def _repair_key_value_block(block: ContentBlock, errors: list[str], label: str) -> ContentBlock:
+    entries = [entry for idx, entry in enumerate(block.entries, start=1) if not any(error.startswith(f"{label} key-value entry {idx} ") for error in errors)]
+    return block.model_copy(update={"entries": entries})
+
+
+def _repair_table_block(block: ContentBlock, errors: list[str], label: str) -> ContentBlock:
+    rows = [row for idx, row in enumerate(block.table.rows, start=1) if not any(error.startswith(f"{label} table row {idx} ") for error in errors)]
+    return block.model_copy(update={"table": block.table.model_copy(update={"rows": rows})})
+
+
+def _block_has_payload(block: ContentBlock) -> bool:
+    if block.kind in {"bullet_list", "numbered_list"}:
+        return bool(block.list_items or block.items)
+    if block.kind == "key_value":
+        return bool(block.entries)
+    if block.kind == "table":
+        return bool(block.table and block.table.rows)
+    return True
 
 
 def _compose_section(
@@ -261,9 +465,13 @@ def _section_deadline(seconds: float | None):
 
 
 def _fallback_section(title: str, records: list[EvidenceRecord]) -> ContentSection:
+    if _should_use_compact_record_table(records):
+        return _fallback_compact_record_table(title, records)
     structured_records = [record for record in records if record.structured_fields]
     if structured_records:
         headers = _fallback_headers(structured_records)
+        if len(headers) > FALLBACK_MAX_TABLE_COLUMNS:
+            return _fallback_bullet_section(title, records)
         rows = [
             ContentTableRow(
                 values=[record.structured_fields.get(header, "") for header in headers],
@@ -275,6 +483,10 @@ def _fallback_section(title: str, records: list[EvidenceRecord]) -> ContentSecti
             title=title,
             blocks=[ContentBlock(kind="table", table=ContentTable(headers=headers, rows=rows))],
         )
+    return _fallback_bullet_section(title, records)
+
+
+def _fallback_bullet_section(title: str, records: list[EvidenceRecord]) -> ContentSection:
     return ContentSection(
         title=title,
         blocks=[
@@ -287,6 +499,186 @@ def _fallback_section(title: str, records: list[EvidenceRecord]) -> ContentSecti
             )
         ],
     )
+
+
+def _should_use_compact_record_table(records: list[EvidenceRecord]) -> bool:
+    structured_records = [record for record in records if record.structured_fields]
+    if not structured_records:
+        return False
+    unique_docs = {record.doc_title for record in records}
+    return len(_fallback_headers(structured_records)) > FALLBACK_MAX_TABLE_COLUMNS or len(unique_docs) > 1
+
+
+def _fallback_compact_record_table(title: str, records: list[EvidenceRecord]) -> ContentSection:
+    grouped: dict[str, list[EvidenceRecord]] = {}
+    for record in records:
+        grouped.setdefault(record.doc_title, []).append(record)
+    rows = [
+        ContentTableRow(
+            values=[
+                doc_title,
+                _topic_value(doc_title, doc_records),
+                _key_detail_summary(doc_records),
+                _evidence_or_status_summary(doc_records),
+            ],
+            evidence_ids=_record_ids(doc_records),
+        )
+        for doc_title, doc_records in sorted(grouped.items())
+    ]
+    if not rows:
+        return _fallback_bullet_section(title, records)
+    return ContentSection(
+        title=title,
+        blocks=[
+            ContentBlock(
+                kind="table",
+                table=ContentTable(
+                    headers=["Document", _fallback_topic_header(records), "Key details", "Evidence / status"],
+                    rows=rows,
+                ),
+            )
+        ],
+    )
+
+
+def _fallback_topic_header(records: list[EvidenceRecord]) -> str:
+    text = " ".join(record.query for record in records).lower()
+    rules = (
+        (("crime", "criminal", "offence", "offense"), "Crime / offense"),
+        (("risk", "issue"), "Risk / issue"),
+        (("requirement", "shall", "must"), "Requirement"),
+        (("control", "compliance"), "Control / compliance"),
+        (("standard", "specification"), "Standard / specification"),
+        (("event", "timeline", "date"), "Event"),
+        (("finding", "observation"), "Finding"),
+    )
+    for needles, label in rules:
+        if any(needle in text for needle in needles):
+            return label
+    return "Topic"
+
+
+def _topic_value(doc_title: str, records: list[EvidenceRecord]) -> str:
+    field_value = _first_field_value(records, (
+        "subject",
+        "title",
+        "category",
+        "classification",
+        "type",
+        "topic",
+        "offense",
+        "offence",
+        "crime",
+        "risk",
+        "requirement",
+        "standard",
+        "control",
+        "finding",
+        "issue",
+    ))
+    if field_value:
+        return _clip(field_value, 130)
+    subject = _subject_from_title(doc_title)
+    if subject.lower() not in {"document", "report", "fictitious", "untitled"}:
+        return subject
+    sentence = _first_matching_sentence(_records_text(records), ("registered", "section", "finding", "requirement", "risk", "status"))
+    return _clip(sentence or subject, 130)
+
+
+def _key_detail_summary(records: list[EvidenceRecord]) -> str:
+    text = _field_summary(records, (
+        "summary",
+        "description",
+        "detail",
+        "legal",
+        "requirement",
+        "scope",
+        "objective",
+        "finding",
+        "issue",
+        "risk",
+        "standard",
+        "control",
+        "date",
+        "status",
+    ))
+    return _clip(text or _records_text(records), 260)
+
+
+def _evidence_or_status_summary(records: list[EvidenceRecord]) -> str:
+    text = _field_summary(records, (
+        "evidence",
+        "status",
+        "action",
+        "outcome",
+        "result",
+        "analysis",
+        "finding",
+        "note",
+    ))
+    if not text:
+        text = _first_matching_sentence(_records_text(records), ("evidence", "status", "action", "result", "analysis", "finding"))
+    return _clip(text or _records_text(records), 260)
+
+
+def _first_field_value(records: list[EvidenceRecord], labels: tuple[str, ...]) -> str:
+    for record in records:
+        for key, value in record.structured_fields.items():
+            if _is_useful_field(key) and any(label in key.lower() for label in labels):
+                return value
+    return ""
+
+
+def _field_summary(records: list[EvidenceRecord], labels: tuple[str, ...], *, max_fields: int = 2) -> str:
+    parts: list[str] = []
+    for record in records:
+        for key, value in record.structured_fields.items():
+            if not _is_useful_field(key) or not any(label in key.lower() for label in labels):
+                continue
+            parts.append(f"{key}: {value}")
+            if len(parts) >= max_fields:
+                return " ".join(parts)
+    return " ".join(parts)
+
+
+def _is_useful_field(label: str) -> bool:
+    lowered = label.lower()
+    low_value = ("contact", "phone", "address", "signature", "cnic", "imei")
+    return not any(term in lowered for term in low_value)
+
+
+def _subject_from_title(doc_title: str) -> str:
+    stem = re.sub(r"\.[A-Za-z0-9]{2,5}$", "", doc_title.rsplit("/", 1)[-1])
+    words = [word for word in re.split(r"[^A-Za-z0-9]+", stem) if word and not word.isdigit()]
+    if len(words) > 1 and words[0].isupper() and len(words[0]) <= 6:
+        words = words[1:]
+    subject = " ".join(words[:5]) or "Document"
+    return " ".join(word.upper() if word.isupper() else word.capitalize() for word in subject.split())
+
+
+def _records_text(records: list[EvidenceRecord]) -> str:
+    parts: list[str] = []
+    for record in records:
+        parts.extend(record.structured_fields.values())
+        parts.append(record.text)
+    return " ".join(" ".join(part.split()) for part in parts if part)
+
+
+def _first_matching_sentence(text: str, needles: tuple[str, ...]) -> str:
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        lowered = sentence.lower()
+        if any(needle in lowered for needle in needles):
+            return sentence.strip()
+    return ""
+
+
+def _record_ids(records: list[EvidenceRecord]) -> list[str]:
+    return list(dict.fromkeys(record.evidence_id for record in records))[:8]
+
+
+def _clip(text: str, limit: int) -> str:
+    compact = " ".join(text.split())
+    return compact[: limit - 1].rstrip() + "..." if len(compact) > limit else compact
 
 
 def _fallback_headers(records: list[EvidenceRecord]) -> list[str]:
@@ -307,6 +699,76 @@ def _fallback_item_text(record: EvidenceRecord) -> str:
 
 def _adapt_formats(
     job: ArtifactJobRecord,
+    plan: DocumentPlan,
+    content: EvidenceBackedContent,
+    *,
+    inference: object,
+    model: str | None,
+    timeout_seconds: float | None,
+) -> FormatSpecifications:
+    try:
+        with _section_deadline(timeout_seconds):
+            return _adapt_formats_with_llm(job, plan, content, inference=inference, model=model)
+    except Exception as exc:
+        logger.warning(
+            "artifact format adaptation fallback job_id=%s error_type=%s",
+            job.id,
+            type(exc).__name__,
+        )
+        return _adapt_formats_deterministic(plan, content)
+
+
+def _adapt_formats_with_llm(
+    job: ArtifactJobRecord,
+    plan: DocumentPlan,
+    content: EvidenceBackedContent,
+    *,
+    inference: object,
+    model: str | None,
+) -> FormatSpecifications:
+    prompt = (
+        "Create final DOCX/PDF and presentation formatting specifications from the composed evidence-backed content. "
+        "You decide the artifact title, subtitle, number of presentation slides, slide titles, and which content blocks "
+        "belong on each slide. You may choose paragraphs, bullets, key-value blocks, or tables when the existing content "
+        "supports them. Preserve citations and use only the existing evidence IDs. Do not invent facts. Keep slides "
+        "usable: prefer 1-3 blocks per slide, concise titles, and split dense content across multiple slides. The renderer "
+        "may still add continuation slides if physical layout requires it. Do not include a slide titled References, "
+        "Sources, Citations, or Bibliography; the renderer appends that slide from citations. Return only JSON matching "
+        "the schema.\n\n"
+        f"Original request:\n{job.original_request}\n\n"
+        f"Plan:\n{plan.model_dump_json()}\n\n"
+        f"Composed content:\n{content.model_dump_json()}\n\n"
+        f"Schema:\n{json.dumps(FormatSpecifications.model_json_schema(), separators=(',', ':'))}"
+    )
+    formats = generate_contract(
+        inference=inference,
+        model=model,
+        system="You are a presentation and document formatter for evidence-backed enterprise artifacts.",
+        prompt=prompt,
+        contract=FormatSpecifications,
+    )
+    return _normalized_formats(formats, content)
+
+
+def _normalized_formats(formats: FormatSpecifications, content: EvidenceBackedContent) -> FormatSpecifications:
+    paginated = formats.paginated.model_copy(update={
+        "title": formats.paginated.title or content.title,
+        "sections": formats.paginated.sections or content.sections,
+        "include_references": True,
+        "include_coverage_notes": True,
+    })
+    slides = _without_generated_references_slides(formats.presentation.slides or _presentation_slides(content.sections))
+    if not slides:
+        slides = _presentation_slides(content.sections)
+    presentation = formats.presentation.model_copy(update={
+        "title": formats.presentation.title or content.title,
+        "slides": slides[:MAX_PRESENTATION_SLIDES],
+        "include_references_slide": True,
+    })
+    return FormatSpecifications(paginated=paginated, presentation=presentation)
+
+
+def _adapt_formats_deterministic(
     plan: DocumentPlan,
     content: EvidenceBackedContent,
 ) -> FormatSpecifications:
@@ -352,6 +814,18 @@ def _presentation_slides(sections: list[ContentSection]) -> list[PresentationSli
             if len(slides) >= MAX_PRESENTATION_SLIDES:
                 return slides
     return slides
+
+
+def _without_generated_references_slides(slides: list[PresentationSlide]) -> list[PresentationSlide]:
+    return [slide for slide in slides if not _is_generated_references_slide(slide)]
+
+
+def _is_generated_references_slide(slide: PresentationSlide) -> bool:
+    return _normalized_reference_title(slide.title) in REFERENCE_SLIDE_TITLES
+
+
+def _normalized_reference_title(value: str) -> str:
+    return re.sub(r"[^a-z]+", " ", value.lower()).strip()
 
 
 def _chunks(blocks: list, size: int) -> list[list]:

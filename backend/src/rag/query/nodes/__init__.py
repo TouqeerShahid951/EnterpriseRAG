@@ -248,7 +248,7 @@ class QueryNodes:
         active_query = ctx["query_rewritten"][-1] if ctx["query_rewritten"] else (
             plan.resolved_query if plan else ctx["request"].query
         )
-        quality = assess_evidence_quality(active_query, ctx["retrieved_hits"])
+        quality = assess_evidence_quality(active_query, ctx["retrieved_hits"], route_plan=plan)
         ctx["evidence_quality"] = quality
         if ctx["retrieved_hits"] and not quality.is_weak:
             ctx["verifier_decision"] = "pass"
@@ -300,6 +300,9 @@ class QueryNodes:
             max_rerank_score=max(rerank_scores) if rerank_scores else None,
             query_token_coverage=assessment.relevance_coverage,
             distinct_doc_count=len({unit.doc_id for unit in assessment.units}),
+            evidence_score=assessment.relevance_coverage,
+            outcome="degrade" if assessment.is_weak else "pass",
+            hit_count=len(ctx["retrieved_hits"]),
         )
         ctx["evidence_quality"] = quality
         if not assessment.is_weak:

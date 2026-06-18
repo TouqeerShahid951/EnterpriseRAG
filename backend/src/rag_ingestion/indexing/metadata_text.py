@@ -31,7 +31,7 @@ def metadata_prefix(*, title: str, chunk: TextChunk, metadata: dict[str, Any]) -
     section = " / ".join([*chunk.section_path, chunk.section_title or ""]).strip(" /")
     if title:
         lines.append(f"Document title: {title}")
-    if doc_type != "other":
+    if doc_type:
         lines.append(f"Document type: {doc_type}")
     if topics:
         lines.append(f"Topics: {', '.join(_unique(topics)[:8])}")
@@ -87,7 +87,7 @@ def _doc_type(metadata: dict[str, Any]) -> str:
         value = str(metadata.get(key) or "").strip().lower()
         if value:
             return value
-    return "other"
+    return ""
 
 
 def _entity_texts(value: Any) -> list[str]:

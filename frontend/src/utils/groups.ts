@@ -1,6 +1,6 @@
 import type { Group } from "../types/api";
 
-export const GROUP_PATH_PATTERN = /^\/[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
+export const GROUP_PATH_PATTERN = /^\/[a-z0-9][a-z0-9-]*$/;
 
 export type GroupOption = {
   depth: number;
@@ -45,7 +45,7 @@ export function buildGroupPath(parentPath: string, name: string): string {
 export function groupPathIssue(path: string, pathExists: boolean): string | null {
   const trimmed = path.trim();
   if (!trimmed) return "Knowledge space path is required.";
-  if (!GROUP_PATH_PATTERN.test(trimmed)) return "Path must start with / and use lowercase letters, numbers, and hyphens.";
+  if (!GROUP_PATH_PATTERN.test(trimmed)) return "Path must be one top-level segment using lowercase letters, numbers, and hyphens.";
   if (pathExists) return "A knowledge space with this path already exists.";
   return null;
 }

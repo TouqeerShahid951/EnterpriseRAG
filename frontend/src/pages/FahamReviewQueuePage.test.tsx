@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ReviewItem } from "../types/api";
-import { groupReviewItemsByDocument, reviewRegionFromItem } from "./FahamReviewQueuePage";
+import { confidencePercent, groupReviewItemsByDocument, reviewRegionFromItem } from "./FahamReviewQueuePage";
 
 const baseItem: ReviewItem = {
   id: "review-1",
@@ -50,5 +50,11 @@ describe("review queue helpers", () => {
     expect(groups[0].docTitle).toBe("Scanned policy.pdf");
     expect(groups[0].items.map((item) => item.id)).toEqual(["review-1", "review-2"]);
     expect(groups[1].docTitle).toBe("Scanned manual.pdf");
+  });
+
+  it("normalizes confidence for meter display", () => {
+    expect(confidencePercent(baseItem)).toBe(42);
+    expect(confidencePercent({ ...baseItem, confidence: null })).toBe(0);
+    expect(confidencePercent({ ...baseItem, confidence: 1.4 })).toBe(100);
   });
 });

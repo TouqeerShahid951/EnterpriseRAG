@@ -16,9 +16,9 @@ class IngestQueueMessage:
     doc_id: str
     file_path: str
     group_path: str
-    doc_type: str
     effective_date: str | None
     supersedes: list[str]
+    doc_type: str | None = None
     clearance_level: str = DEFAULT_CLEARANCE_LEVEL
     expiry_date: str | None = None
     description: str | None = None
@@ -35,9 +35,9 @@ class IngestQueueMessage:
             file_path=str(payload["file_path"]),
             group_path=str(payload["group_path"]),
             clearance_level=normalize_clearance_level(payload.get("clearance_level")),
-            doc_type=str(payload["doc_type"]),
             effective_date=str(payload["effective_date"]) if payload.get("effective_date") else None,
             supersedes=supersedes,
+            doc_type=str(payload["doc_type"]) if payload.get("doc_type") else None,
             expiry_date=str(payload["expiry_date"]) if payload.get("expiry_date") else None,
             description=str(payload["description"]) if payload.get("description") else None,
             content_type=str(payload["content_type"]) if payload.get("content_type") else None,
@@ -47,6 +47,7 @@ class IngestQueueMessage:
 
 class IngestQueue(Protocol):
     def enqueue(self, message: IngestQueueMessage) -> None: ...
+    def cancel(self, job_id: str) -> None: ...
 
 
 class InMemoryIngestQueue:
@@ -55,6 +56,9 @@ class InMemoryIngestQueue:
 
     def enqueue(self, message: IngestQueueMessage) -> None:
         self.messages.append(message)
+
+    def cancel(self, job_id: str) -> None:
+        self.messages = [message for message in self.messages if message.job_id != job_id]
 
 
 class CeleryIngestQueue:
@@ -83,9 +87,16 @@ class CeleryIngestQueue:
                 self._task_name,
                 args=[_message_payload(message)],
                 queue=self._queue_name,
+                task_id=message.job_id,
             )
         except Exception as exc:
             raise RuntimeError(f"celery enqueue failed: {exc}") from exc
+
+    def cancel(self, job_id: str) -> None:
+        try:
+            self._app.control.revoke(job_id, terminate=False)
+        except Exception as exc:
+            raise RuntimeError(f"celery cancel failed: {exc}") from exc
 
 
 @lru_cache
@@ -112,9 +123,10 @@ def _message_payload(message: IngestQueueMessage) -> dict[str, Any]:
         "file_path": message.file_path,
         "group_path": message.group_path,
         "clearance_level": message.clearance_level,
-        "doc_type": message.doc_type,
         "supersedes": message.supersedes,
     }
+    if message.doc_type:
+        payload["doc_type"] = message.doc_type
     if message.effective_date:
         payload["effective_date"] = message.effective_date
     if message.expiry_date:

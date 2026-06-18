@@ -32,6 +32,95 @@
   color: var(--color-on-surface-variant);
 }
 
+.rag-eval-format-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.rag-eval-format-help {
+  position: relative;
+  display: inline-flex;
+}
+
+.rag-eval-tooltip-trigger {
+  display: inline-flex;
+  width: 1.55rem;
+  height: 1.55rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 999px;
+  background: var(--color-surface-container-low);
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.rag-eval-tooltip-trigger:hover,
+.rag-eval-tooltip-trigger:focus-visible {
+  border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-surface-border));
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+}
+
+.rag-eval-format-tooltip {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  width: min(25rem, calc(100vw - 2rem));
+  gap: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, var(--color-surface-border));
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-high);
+  box-shadow: 0 1rem 2.25rem color-mix(in srgb, black 34%, transparent);
+  color: var(--color-on-surface);
+  opacity: 0;
+  padding: 0.75rem;
+  pointer-events: none;
+  transform: translateY(-0.25rem);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+  visibility: hidden;
+}
+
+.rag-eval-format-help:hover .rag-eval-format-tooltip,
+.rag-eval-format-help:focus-within .rag-eval-format-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.rag-eval-format-tooltip strong {
+  color: var(--color-on-surface);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.rag-eval-format-tooltip p,
+.rag-eval-format-tooltip small {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.rag-eval-format-tooltip code {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.4rem;
+  background: var(--color-surface);
+  padding: 0.55rem;
+  color: var(--color-on-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
 .rag-eval-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9.75rem, 1fr));

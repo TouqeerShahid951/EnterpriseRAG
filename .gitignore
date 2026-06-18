@@ -16,6 +16,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 .vite/
+model-cache/
 frontend/vite.config.js
 frontend/vite.config.d.ts
 out/

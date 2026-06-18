@@ -75,7 +75,7 @@ async def create_snapshot_schedule(
     clearance_level: str,
     effective_date: date | None,
     expiry_date: date | None,
-    doc_type: str,
+    doc_type: str | None,
     description: str | None,
     schedule_type: str,
     timezone_name: str,
@@ -125,7 +125,7 @@ async def create_snapshot_schedule(
                     "filename": filename,
                     "status": "skipped",
                     "skip_code": "unsupported_file_type",
-                    "skip_message": "Only PDF, DOCX, JPG, and PNG files are accepted.",
+                    "skip_message": "Only PDF, DOCX, JPG, PNG, and JSON files are accepted.",
                 }
             )
             continue
@@ -182,7 +182,7 @@ async def create_snapshot_schedule(
         staged_accepts.append((upload, source_path, filename, len(content), content_type, content_hash))
 
     if not staged_accepts:
-        raise HTTPException(status_code=400, detail={"code": "empty_folder", "message": "Selected folder does not contain any accepted PDF, DOCX, JPG, or PNG files."})
+        raise HTTPException(status_code=400, detail={"code": "empty_folder", "message": "Selected folder does not contain any accepted PDF, DOCX, JPG, PNG, or JSON files."})
 
     schedule = schedule_repo.create_schedule(
         name=name,
@@ -273,7 +273,7 @@ def create_minio_prefix_schedule(
     clearance_level: str,
     effective_date: date | None,
     expiry_date: date | None,
-    doc_type: str,
+    doc_type: str | None,
     description: str | None,
     schedule_type: str,
     timezone_name: str,
@@ -412,7 +412,7 @@ def _dispatch_minio_prefix(
                 size_bytes=source_object.size_bytes,
                 status="skipped",
                 skip_code="unsupported_file_type",
-                skip_message="Only PDF, DOCX, JPG, and PNG files are accepted.",
+                skip_message="Only PDF, DOCX, JPG, PNG, and JSON files are accepted.",
             )
             continue
         if source_object.size_bytes > settings.upload_max_bytes:

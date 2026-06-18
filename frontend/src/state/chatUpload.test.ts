@@ -11,7 +11,6 @@ describe("chat document uploads", () => {
     expect(request).toEqual({
       file,
       group_path: "/finance",
-      doc_type: "other",
     });
     expect(request.effective_date).toBeUndefined();
   });

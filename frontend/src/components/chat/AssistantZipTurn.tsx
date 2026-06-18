@@ -22,7 +22,7 @@ export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArti
   const headerBadge = artifactJob ? artifactJobBadgeFor(artifactJob) : faithfulnessBadgeFor(response.faithfulness_status, response.faithfulness_score);
   const artifacts = artifactJob?.artifacts.length ? artifactJob.artifacts : response.artifacts ?? [];
   return (
-    <div className="max-w-[92%] space-y-4 md:max-w-[85%]">
+    <div className="rag-assistant-turn">
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex items-center gap-1 text-label-md text-on-surface">
           <Bot size={18} className="text-primary" />
@@ -46,7 +46,7 @@ export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArti
         faithfulnessStatus={response.faithfulness_status}
         unfoundedClaims={response.unfounded_claims}
       />
-      <div className="max-w-[72ch] space-y-3 text-body-md text-on-surface">
+      <div className="rag-assistant-prose space-y-3 text-body-md text-on-surface">
         <CitedAnswer answer={response.answer} documents={documents} onSelectSource={onSelectSource} sources={response.sources} />
       </div>
       {artifactJob ? (
@@ -84,7 +84,7 @@ export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArti
 function NodeTimingsPanel({ timings }: { timings: QueryNodeTiming[] }) {
   const slowest = [...timings].sort((left, right) => right.duration_ms - left.duration_ms).slice(0, 3);
   return (
-    <details className="max-w-[44rem] rounded border border-surface-border bg-surface-container-low px-3 py-2 text-label-md text-secondary">
+    <details className="rag-node-timings rounded border border-surface-border bg-surface-container-low px-3 py-2 text-label-md text-secondary">
       <summary className="cursor-pointer font-bold text-on-surface">Node timings · {formatNodeDurationMs(totalNodeDuration(timings))}</summary>
       <div className="mt-2 grid gap-2">
         <div className="flex flex-wrap gap-2">
@@ -166,6 +166,9 @@ function ArtifactJobPanel({ job, onCancel, onClarify, onRetry }: ArtifactJobPane
   const canRetry = (job.status === "failed" || job.status === "partial" || job.status === "cancelled") && Boolean(onRetry);
   const questions = job.clarification_questions ?? [];
   const formats = job.requested_formats.map((format) => format.toUpperCase()).join(", ");
+  const stageLabel = job.stage_label?.trim() || artifactJobStatusLabel(job.status);
+  const stageDetail = job.stage_detail?.trim() || artifactJobStageLabel(job);
+  const stageProgressLabel = job.stage_progress?.label?.trim() || formatArtifactStageProgress(job);
 
   useEffect(() => {
     setAnswers({});
@@ -204,8 +207,8 @@ function ArtifactJobPanel({ job, onCancel, onClarify, onRetry }: ArtifactJobPane
       <div className="rag-artifact-job-header">
         <div>
           <p className="rag-live-eyebrow">Document generation</p>
-          <h3>{artifactJobStatusLabel(job.status)}</h3>
-          <p>{artifactJobStageLabel(job)}{formats ? ` · ${formats}` : ""}</p>
+          <h3>{stageLabel}</h3>
+          <p>{stageDetail}{formats ? ` · ${formats}` : ""}</p>
         </div>
         <span className="sv-pill">
           {artifactJobIcon(job.status)}
@@ -216,6 +219,7 @@ function ArtifactJobPanel({ job, onCancel, onClarify, onRetry }: ArtifactJobPane
       <div className="rag-artifact-job-progress" role="progressbar" aria-label="Document generation progress" aria-valuemax={100} aria-valuemin={0} aria-valuenow={progressPct}>
         <span style={{ width: `${progressPct}%` }} />
       </div>
+      {stageProgressLabel ? <p className="rag-artifact-job-stage-progress">{stageProgressLabel}</p> : null}
 
       {job.error_message ? <p className="rag-artifact-job-message is-error">{job.error_message}</p> : null}
       {actionError ? <p className="rag-artifact-job-message is-error">{actionError}</p> : null}
@@ -312,6 +316,13 @@ function artifactJobStageLabel(job: ArtifactJobSummary): string {
     .join(" ");
 }
 
+function formatArtifactStageProgress(job: ArtifactJobSummary): string | null {
+  const progress = job.stage_progress;
+  if (!progress || progress.total <= 0) return null;
+  const unit = progress.unit === "batches" ? "Batch" : progress.unit.slice(0, -1).replace(/^\w/, (char) => char.toUpperCase());
+  return `${unit} ${progress.current} of ${progress.total}`;
+}
+
 function artifactJobTone(status: ArtifactJobSummary["status"]): "pending" | "success" | "warning" | "error" {
   if (status === "complete") return "success";
   if (status === "failed" || status === "cancelled") return "error";
@@ -389,7 +400,7 @@ function PendingAssistant({ documents, onSelectSource, selectedSource, turn }: P
   const activeProgress = turn.progress.at(-1);
 
   return (
-    <div className="max-w-[92%] space-y-3 md:max-w-[85%]">
+    <div className="rag-assistant-turn rag-assistant-turn-pending">
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex items-center gap-1 text-label-md text-on-surface">
           <Bot size={18} className="text-primary" />
@@ -462,7 +473,7 @@ function PendingAssistant({ documents, onSelectSource, selectedSource, turn }: P
 
 function StoppedAssistant({ turn }: { turn: Extract<ChatTurn, { role: "assistant" }> }) {
   return (
-    <div className="max-w-[92%] space-y-3 md:max-w-[85%]">
+    <div className="rag-assistant-turn rag-assistant-turn-stopped">
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex items-center gap-1 text-label-md text-on-surface">
           <Bot size={18} className="text-primary" />
@@ -608,7 +619,7 @@ function formatLatencyMs(latencyMs: number): string {
 }
 
 function hasLowFaithfulness(status: FaithfulnessStatus, score: number): boolean {
-  return (status === "checked" || status === "failed") && score < 0.8;
+  return status === "checked" && score < 0.8;
 }
 
 function faithfulnessBadgeFor(status: FaithfulnessStatus, score: number): { className: string; icon: ReactNode; label: string } {
@@ -629,16 +640,20 @@ function faithfulnessBadgeFor(status: FaithfulnessStatus, score: number): { clas
 
 function ResponseNotices({ conflictFlag, degraded, degradedReason, faithfulnessScore, faithfulnessStatus, unfoundedClaims }: NoticeProps) {
   const lowFaithfulness = hasLowFaithfulness(faithfulnessStatus, faithfulnessScore);
-  if (!conflictFlag && !degraded && !lowFaithfulness) return null;
+  const faithfulnessFailed = faithfulnessStatus === "failed";
+  if (!conflictFlag && !degraded && !lowFaithfulness && !faithfulnessFailed) return null;
   return (
     <div className="grid gap-2">
       {conflictFlag ? (
         <Notice icon={<ShieldAlert size={16} />} tone="error" text="The indexed sources conflict. Inspect the cited evidence before using this answer." />
       ) : null}
+      {faithfulnessFailed ? (
+        <Notice icon={<AlertTriangle size={16} />} tone="warning" text="Grounding check failed before it could score this answer. Inspect the cited evidence before using it." />
+      ) : null}
       {lowFaithfulness ? (
         <Notice icon={<AlertTriangle size={16} />} tone="warning" text={faithfulnessNoticeText(faithfulnessScore, unfoundedClaims)} />
       ) : null}
-      {degraded ? (
+      {degraded && !faithfulnessFailed ? (
         <Notice icon={<AlertTriangle size={16} />} tone="warning" text={`Response is degraded${degradedReason ? `: ${degradedReason}` : "."}`} />
       ) : null}
     </div>
@@ -657,7 +672,7 @@ function Notice({ icon, text, tone }: { icon: ReactNode; text: string; tone: "er
 }
 
 function ErrorAssistant({ message }: { message?: string }) {
-  return <div className="max-w-[85%] rounded-lg border border-error-red/20 bg-error-container p-4 text-body-md text-error-red">{message ?? "Query failed."}</div>;
+  return <div className="rag-assistant-error rounded-lg border border-error-red/20 bg-error-container p-4 text-body-md text-error-red">{message ?? "Query failed."}</div>;
 }
 
 type Props = {

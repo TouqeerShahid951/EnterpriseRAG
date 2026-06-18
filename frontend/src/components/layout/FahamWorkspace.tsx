@@ -9,15 +9,18 @@ import {
 } from "react";
 
 import {
+  FAHAM_SIDEBAR_COLLAPSED_WIDTH,
   FAHAM_SIDEBAR_DEFAULT_WIDTH,
   FAHAM_SIDEBAR_MAX_WIDTH,
   FAHAM_SIDEBAR_MIN_WIDTH,
   FahamSidebar,
 } from "../navigation/FahamSidebar";
 import type { RouteId } from "../../routes";
+import { readStoredBoolean, readStoredNumber, writeStoredBoolean, writeStoredNumber } from "../../state/uiPreferences";
 import type { User as AuthUser } from "../../types/api";
 
-const SIDEBAR_WIDTH_STORAGE_KEY = "faham-sidebar-width";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "faham-sidebar-collapsed";
+const SIDEBAR_WIDTH_STORAGE_KEY = "faham-sidebar-width-compact-v2";
 
 const SidebarHeaderContext = createContext<SidebarChromeContext>({
   headerContent: null,
@@ -35,21 +38,23 @@ export function FahamSidebarHeaderProvider({ children, isLightMode, onToggleThem
 export function FahamWorkspace({ activeRoute, children, onLogout, onNavigate, sidebarHeaderContent, user }: Props) {
   const sidebarChrome = useContext(SidebarHeaderContext);
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSidebarWidth);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readStoredBoolean(SIDEBAR_COLLAPSED_STORAGE_KEY, false));
   const headerContent = sidebarHeaderContent !== undefined ? sidebarHeaderContent : sidebarChrome.headerContent;
+  const visibleSidebarWidth = sidebarCollapsed ? FAHAM_SIDEBAR_COLLAPSED_WIDTH : sidebarWidth;
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-    } catch {
-      // Sidebar resizing still works for the current session when storage is unavailable.
-    }
+    writeStoredNumber(SIDEBAR_WIDTH_STORAGE_KEY, sidebarWidth);
   }, [sidebarWidth]);
+
+  useEffect(() => {
+    writeStoredBoolean(SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed);
+  }, [sidebarCollapsed]);
 
   return (
     <div
-      className="faham-shell"
+      className={sidebarCollapsed ? "faham-shell faham-shell-sidebar-collapsed" : "faham-shell"}
       onPointerMove={updateCursorGlow}
-      style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+      style={{ "--sidebar-width": `${visibleSidebarWidth}px` } as CSSProperties}
     >
       <FahamSidebar
         activeRoute={activeRoute}
@@ -57,8 +62,10 @@ export function FahamWorkspace({ activeRoute, children, onLogout, onNavigate, si
         isLightMode={sidebarChrome.isLightMode}
         onLogout={onLogout}
         onNavigate={onNavigate}
+        onSidebarCollapsedChange={setSidebarCollapsed}
         onSidebarWidthChange={setSidebarWidth}
         onToggleTheme={sidebarChrome.onToggleTheme}
+        sidebarCollapsed={sidebarCollapsed}
         sidebarWidth={sidebarWidth}
         user={user}
       />
@@ -114,13 +121,11 @@ type BasicProps = Props & {
 };
 
 function readStoredSidebarWidth(): number {
-  try {
-    const storedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
-    if (!Number.isFinite(storedWidth)) return FAHAM_SIDEBAR_DEFAULT_WIDTH;
-    return Math.min(FAHAM_SIDEBAR_MAX_WIDTH, Math.max(FAHAM_SIDEBAR_MIN_WIDTH, storedWidth));
-  } catch {
-    return FAHAM_SIDEBAR_DEFAULT_WIDTH;
-  }
+  return readStoredNumber(SIDEBAR_WIDTH_STORAGE_KEY, {
+    fallback: FAHAM_SIDEBAR_DEFAULT_WIDTH,
+    max: FAHAM_SIDEBAR_MAX_WIDTH,
+    min: FAHAM_SIDEBAR_MIN_WIDTH,
+  });
 }
 
 function updateCursorGlow(event: ReactPointerEvent<HTMLDivElement>) {

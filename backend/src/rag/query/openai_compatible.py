@@ -130,7 +130,7 @@ class OpenAICompatibleClient:
             model=model or self.chat_model,
             base_url=self.faithfulness_base_url,
             system="You are a strict RAG faithfulness judge.",
-            max_tokens=FAITHFULNESS_NUM_PREDICT,
+            max_tokens=min(self.json_num_predict, FAITHFULNESS_NUM_PREDICT),
             temperature=0,
             json_response=True,
             cancellation_token=cancellation_token,

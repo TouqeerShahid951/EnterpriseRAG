@@ -151,9 +151,16 @@ def prepare_synthesis_input(ctx: QueryContext, sources: list[SourceAnchor]) -> P
     plan = ctx.get("route_plan")
     base_question = plan.resolved_query if plan is not None else ctx["request"].query
     profile = synthesis_profile_for_plan(plan)
+    exhaustive_scope = _has_exhaustive_document_scope(ctx)
     return PreparedSynthesis(
-        question=_profiled_question(base_question, plan=plan, profile=profile),
-        contexts=route_source_contexts(sources, profile=profile),
+        question=_profiled_question(
+            base_question,
+            plan=plan,
+            profile=profile,
+            exhaustive_document_scope=exhaustive_scope,
+            scoped_document_titles=_scoped_document_titles(ctx) if exhaustive_scope else (),
+        ),
+        contexts=route_source_contexts(sources, profile=profile, include_location=exhaustive_scope),
         profile=profile,
         sources=sources,
     )
@@ -175,10 +182,15 @@ def source_contexts(sources: list[SourceAnchor]) -> list[str]:
     return [f"{source_citation(source)}\n{_synthesis_excerpt(source)}" for source in sources]
 
 
-def route_source_contexts(sources: list[SourceAnchor], *, profile: str) -> list[str]:
+def route_source_contexts(
+    sources: list[SourceAnchor],
+    *,
+    profile: str,
+    include_location: bool = False,
+) -> list[str]:
     if profile in {"legacy", "factual_simple", "general_rag", "conversational_followup"}:
         return source_contexts(sources)
-    return [_route_source_context(source, profile=profile) for source in sources]
+    return [_route_source_context(source, profile=profile, include_location=include_location) for source in sources]
 
 
 def ensure_answer_has_citation(answer: str, sources: list[SourceAnchor]) -> str:
@@ -207,7 +219,14 @@ def ensure_answer_has_citation(answer: str, sources: list[SourceAnchor]) -> str:
     return result.strip()
 
 
-def _profiled_question(question: str, *, plan: RoutePlan | None, profile: str) -> str:
+def _profiled_question(
+    question: str,
+    *,
+    plan: RoutePlan | None,
+    profile: str,
+    exhaustive_document_scope: bool = False,
+    scoped_document_titles: tuple[str, ...] = (),
+) -> str:
     instructions = _PROFILE_INSTRUCTIONS.get(profile)
     if plan is None or not instructions:
         return question
@@ -218,6 +237,15 @@ def _profiled_question(question: str, *, plan: RoutePlan | None, profile: str) -
     ]
     if plan.filters:
         details.append(f"Route filters: {_format_filters(plan.filters)}.")
+    if exhaustive_document_scope:
+        details.append("Evidence scope: exhaustive document-class scan.")
+        if scoped_document_titles:
+            details.append(f"Scoped documents represented in evidence: {', '.join(scoped_document_titles)}.")
+        instructions = (
+            *instructions,
+            "Cover every scoped document represented in the evidence; do not answer only from the highest-scoring documents.",
+            "For each scoped document, include the requested items and details found there, or state that no matching item was found in that document.",
+        )
     guidance = "\n".join(f"- {line}" for line in (*details, *instructions))
     return (
         f"{question}\n\n"
@@ -227,8 +255,8 @@ def _profiled_question(question: str, *, plan: RoutePlan | None, profile: str) -
     )
 
 
-def _route_source_context(source: SourceAnchor, *, profile: str) -> str:
-    metadata = _context_metadata(source, profile=profile)
+def _route_source_context(source: SourceAnchor, *, profile: str, include_location: bool = False) -> str:
+    metadata = _context_metadata(source, profile=profile, include_location=include_location)
     lines = [source_citation(source), *metadata, _synthesis_excerpt(source)]
     return "\n".join(line for line in lines if line)
 
@@ -271,9 +299,9 @@ def _slash_pair_interpretations(pairs: list[tuple[str, str]]) -> list[str]:
     return interpreted
 
 
-def _context_metadata(source: SourceAnchor, *, profile: str) -> list[str]:
+def _context_metadata(source: SourceAnchor, *, profile: str, include_location: bool = False) -> list[str]:
     metadata: list[str] = []
-    if profile in {
+    if include_location or profile in {
         "document_navigation",
         "procedural",
         "troubleshooting",
@@ -302,6 +330,27 @@ def _location_metadata(source: SourceAnchor) -> str:
 
 def _format_filters(filters: dict[str, object]) -> str:
     return ", ".join(f"{key}={value}" for key, value in sorted(filters.items()))
+
+
+def _has_exhaustive_document_scope(ctx: QueryContext) -> bool:
+    return any(
+        str(hit.payload.get("exhaustive_scope_origin", "")) == "document_class_scope"
+        for hit in ctx["retrieved_hits"]
+    )
+
+
+def _scoped_document_titles(ctx: QueryContext) -> tuple[str, ...]:
+    titles: list[str] = []
+    seen: set[str] = set()
+    for hit in ctx["retrieved_hits"]:
+        if str(hit.payload.get("exhaustive_scope_origin", "")) != "document_class_scope":
+            continue
+        doc_id = str(hit.payload.get("doc_id", hit.point_id))
+        if doc_id in seen:
+            continue
+        seen.add(doc_id)
+        titles.append(str(hit.payload.get("doc_title") or doc_id))
+    return tuple(titles[:20])
 
 
 def cited_sources(answer: str, sources: list[SourceAnchor]) -> list[SourceAnchor]:

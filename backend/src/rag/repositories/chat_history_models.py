@@ -16,10 +16,12 @@ class ChatSessionRecord:
     turns: tuple[dict[str, Any], ...]
     created_at: datetime | None
     updated_at: datetime | None
+    question_count: int | None = None
 
 
 class ChatHistoryRepository(Protocol):
-    def list_sessions(self, *, user_id: str, permission_version: int, limit: int = 30) -> list[ChatSessionRecord]: ...
+    def list_sessions(self, *, user_id: str, permission_version: int, limit: int = 30, offset: int = 0) -> list[ChatSessionRecord]: ...
+    def count_sessions(self, *, user_id: str, permission_version: int) -> int: ...
     def get_session(self, *, session_id: str, user_id: str, permission_version: int) -> ChatSessionRecord | None: ...
     def append_completed_turn(
         self,

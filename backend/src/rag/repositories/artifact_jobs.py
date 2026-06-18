@@ -37,6 +37,7 @@ class ArtifactJobRecord:
     status: ArtifactJobStatus
     stage: str
     progress_pct: int
+    stage_progress: dict[str, object] | None
     plan_json: dict[str, object] | None
     evidence_manifest_json: dict[str, object] | None
     content_spec_json: dict[str, object] | None
@@ -92,6 +93,7 @@ _UPDATABLE_FIELDS = {
     "status",
     "stage",
     "progress_pct",
+    "stage_progress",
     "clarifications",
     "plan_json",
     "evidence_manifest_json",
@@ -114,6 +116,7 @@ _JSON_FIELDS = {
     "content_spec_json",
     "validation_results_json",
     "stage_timings_json",
+    "stage_progress",
     "model_versions",
     "prompt_versions",
     "errors_json",
@@ -155,6 +158,7 @@ class InMemoryArtifactJobRepository:
                 status="queued",
                 stage="queued",
                 progress_pct=0,
+                stage_progress=None,
                 plan_json=None,
                 evidence_manifest_json=None,
                 content_spec_json=None,
@@ -220,6 +224,7 @@ class InMemoryArtifactJobRepository:
                 status="planning",
                 stage="planning",
                 progress_pct=5,
+                stage_progress=None,
                 attempt_count=job.attempt_count + 1,
                 started_at=job.started_at or now,
                 last_heartbeat_at=now,
@@ -319,6 +324,7 @@ class PostgresArtifactJobRepository(PostgresConnectionMixin):
             """
             UPDATE artifact_generation_jobs
             SET status = 'planning', stage = 'planning', progress_pct = 5,
+                stage_progress = NULL,
                 attempt_count = attempt_count + 1,
                 started_at = COALESCE(started_at, NOW()),
                 last_heartbeat_at = NOW(), updated_at = NOW()
@@ -368,6 +374,7 @@ def artifact_job_from_row(row: dict[str, Any]) -> ArtifactJobRecord:
         status=str(row["status"]),  # type: ignore[arg-type]
         stage=str(row["stage"]),
         progress_pct=int(row["progress_pct"]),
+        stage_progress=_optional_json_object(row.get("stage_progress")),
         plan_json=_optional_json_object(row.get("plan_json")),
         evidence_manifest_json=_optional_json_object(row.get("evidence_manifest_json")),
         content_spec_json=_optional_json_object(row.get("content_spec_json")),
@@ -438,6 +445,7 @@ CREATE TABLE IF NOT EXISTS artifact_generation_jobs (
     status TEXT NOT NULL DEFAULT 'queued',
     stage TEXT NOT NULL DEFAULT 'queued',
     progress_pct INTEGER NOT NULL DEFAULT 0,
+    stage_progress JSONB NULL,
     plan_json JSONB NULL,
     evidence_manifest_json JSONB NULL,
     content_spec_json JSONB NULL,
@@ -484,6 +492,8 @@ ALTER TABLE artifact_generation_jobs
     ADD COLUMN IF NOT EXISTS validation_results_json JSONB NULL;
 ALTER TABLE artifact_generation_jobs
     ADD COLUMN IF NOT EXISTS stage_timings_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE artifact_generation_jobs
+    ADD COLUMN IF NOT EXISTS stage_progress JSONB NULL;
 ALTER TABLE artifact_generation_jobs
     ADD COLUMN IF NOT EXISTS errors_json JSONB NOT NULL DEFAULT '[]'::jsonb;
 """

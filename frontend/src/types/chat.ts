@@ -1,11 +1,11 @@
-import type { DocType, ParserProvenance, QueryRequest, QueryIntent, RAGResponse, SourceAnchor, UploadJobStage, UploadJobStageProgress, UploadJobState, UploadJobStep } from "./api";
+import type { ClearanceLevel, ParserProvenance, QueryRequest, QueryIntent, RAGResponse, SourceAnchor, UploadJobStage, UploadJobStageProgress, UploadJobState, UploadJobStep } from "./api";
 
 export interface PdfUploadDraft {
   files: File[];
   groupPath: string;
+  clearanceLevel: ClearanceLevel;
   effectiveDate: string;
   expiryDate: string;
-  docType: DocType;
   description: string;
   supersedesText: string;
 }
@@ -27,6 +27,7 @@ export interface UploadJobView {
   maxAttempts: number;
   createdAt: string | null;
   updatedAt: string | null;
+  completedAt: string | null;
   lastHeartbeatAt: string | null;
 }
 
@@ -35,6 +36,7 @@ export interface UploadBatchItemView {
   fileName: string;
   fileSize: number;
   groupPath: string;
+  clearanceLevel: ClearanceLevel;
   requestState: "uploading" | "accepted" | "failed";
   job: UploadJobView | null;
   uploadError: Error | null;
@@ -64,12 +66,23 @@ export interface AssistantTurn {
 
 export type ChatTurn = UserTurn | AssistantTurn;
 
-export interface SavedChatSession {
+export interface SavedChatSessionSummary {
   id: string;
   title: string;
   createdAt: string;
   updatedAt: string;
+  questionCount: number;
+}
+
+export interface SavedChatSession extends SavedChatSessionSummary {
   turns: ChatTurn[];
+}
+
+export interface SavedChatSessionPage {
+  items: SavedChatSessionSummary[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface QueryRunVariables {

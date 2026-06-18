@@ -87,6 +87,7 @@ class VisionConfig:
     base_url: str
     model: str
     ollama_model: str
+    ollama_num_ctx: int
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,7 @@ class WorkerConfig:
     http_timeout_seconds: float
     heartbeat_interval_seconds: float
     ollama_retry_base_seconds: float
+    ollama_num_ctx: int
     embedding_batch_size: int
     worker_boot_concurrency: int
     weak_page_threshold: int
@@ -131,13 +133,14 @@ class WorkerConfig:
             http_timeout_seconds=http_timeout,
             heartbeat_interval_seconds=float(os.getenv("INGEST_HEARTBEAT_INTERVAL_SECONDS", "30")),
             ollama_retry_base_seconds=float(os.getenv("OLLAMA_RETRY_BASE_SECONDS", "2")),
+            ollama_num_ctx=_bounded_int("OLLAMA_NUM_CTX", 16384, minimum=1024, maximum=262144),
             embedding_batch_size=max(1, int(os.getenv("OLLAMA_EMBED_BATCH_SIZE", "16"))),
             worker_boot_concurrency=max(1, min(10, int(os.getenv("INGEST_WORKER_BOOT_CONCURRENCY", "1")))),
             weak_page_threshold=int(os.getenv("PDF_WEAK_PAGE_THRESHOLD", "5")),
             full_doc_weak_page_ratio=float(os.getenv("PDF_FULL_DOC_WEAK_PAGE_RATIO", "0.25")),
             layered_docling_max_pages=max(1, int(os.getenv("LAYERED_DOCLING_MAX_PAGES", "40"))),
             layered_docling_batch_pages=max(1, int(os.getenv("LAYERED_DOCLING_BATCH_PAGES", "4"))),
-            ocr_review_confidence_threshold=float(os.getenv("OCR_REVIEW_CONFIDENCE_THRESHOLD", "0.8")),
+            ocr_review_confidence_threshold=float(os.getenv("OCR_REVIEW_CONFIDENCE_THRESHOLD", "0.9")),
             native_text_min_chars_per_page=int(os.getenv("NATIVE_TEXT_MIN_CHARS_PER_PAGE", "10")),
             chunk_target_tokens=_token_setting("RAG_CHUNK_TARGET_TOKENS", "RAG_CHUNK_MAX_CHARS", 512),
             chunk_overlap_tokens=_token_setting("RAG_CHUNK_OVERLAP_TOKENS", "RAG_CHUNK_OVERLAP_CHARS", 64),
@@ -180,6 +183,7 @@ class WorkerConfig:
                 base_url=os.getenv("VLLM_VISION_BASE_URL", "").strip(),
                 model=os.getenv("VLLM_VISION_MODEL_ID", os.getenv("VLLM_VISION_MODEL", "vision")).strip(),
                 ollama_model=os.getenv("OLLAMA_VISION_MODEL", "").strip(),
+                ollama_num_ctx=_bounded_int("OLLAMA_VISION_NUM_CTX", 8192, minimum=1024, maximum=262144),
             ),
         )
 
@@ -198,6 +202,11 @@ def _token_setting(name: str, legacy_name: str, default: int) -> int:
         return int(value)
     legacy = os.getenv(legacy_name)
     return max(1, int(legacy) // 4) if legacy else default
+
+
+def _bounded_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    value = int(os.getenv(name, str(default)))
+    return max(minimum, min(maximum, value))
 
 
 def _topic_taxonomy(value: str | None) -> tuple[str, ...]:

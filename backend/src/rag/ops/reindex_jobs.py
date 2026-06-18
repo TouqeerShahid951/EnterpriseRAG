@@ -16,7 +16,7 @@ class ReindexDocument:
     file_path: str
     group_path: str
     clearance_level: str
-    doc_type: str
+    doc_type: str | None
     effective_date: str | None
     expiry_date: str | None
     description: str | None
@@ -44,7 +44,7 @@ def reindex_documents_query(
             d.file_path,
             d.group_path,
             d.clearance_level,
-            COALESCE(d.doc_type, 'other') AS doc_type,
+            d.doc_type AS doc_type,
             d.effective_date,
             d.expiry_date,
             d.description,
@@ -81,7 +81,7 @@ def reindex_document_from_row(row: dict[str, Any]) -> ReindexDocument:
         file_path=str(row["file_path"]),
         group_path=str(row["group_path"]),
         clearance_level=normalize_clearance_level(row.get("clearance_level")),
-        doc_type=str(row["doc_type"] or "other"),
+        doc_type=str(row["doc_type"]) if row.get("doc_type") else None,
         effective_date=_optional_date_string(row.get("effective_date")),
         expiry_date=_optional_date_string(row.get("expiry_date")),
         description=str(row["description"]) if row.get("description") else None,

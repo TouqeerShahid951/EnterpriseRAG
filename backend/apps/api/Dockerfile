@@ -17,7 +17,7 @@ WORKDIR /app
 
 COPY pyproject.toml /app/pyproject.toml
 
-ARG PREWARM_FASTEMBED=true
+ARG PREWARM_FASTEMBED=false
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
@@ -43,7 +43,7 @@ COPY apps/api /app/apps/api
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     python -m pip install --no-deps /app \
     && if [ "$PREWARM_FASTEMBED" = "true" ]; then \
-        python -c "from fastembed import SparseTextEmbedding; from fastembed.rerank.cross_encoder import TextCrossEncoder; SparseTextEmbedding('Qdrant/bm25', cache_dir='/models/fastembed'); TextCrossEncoder('jinaai/jina-reranker-v1-turbo-en', cache_dir='/models/fastembed')"; \
+        python -m rag.ops.prewarm_fastembed; \
     fi \
     && chown -R appuser:appuser /models /work
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, FileJson, Loader2, Play, RotateCcw, StopCircle, XCircle } from "lucide-react";
+import { CheckCircle2, FileJson, Info, Loader2, Play, RotateCcw, StopCircle, XCircle } from "lucide-react";
 
 import { ragEvaluationsApi, type EvaluationDatasetImportRequest, type EvaluationRunCreateRequest } from "../api/contracts";
 import { useToast } from "../components/feedback/ToastProvider";
@@ -185,12 +185,31 @@ function DatasetImportPanel() {
     <section className="sv-panel p-5">
       <div className="rag-eval-panel-header">
         <span><FileJson size={18} /> Dataset Import</span>
-        <small>JSON or JSONL</small>
+        <div className="rag-eval-format-meta">
+          <small>JSON or JSONL</small>
+          <div className="rag-eval-format-help">
+            <button
+              type="button"
+              className="rag-eval-tooltip-trigger"
+              aria-label="Expected JSON format"
+              aria-describedby="rag-eval-json-format-tooltip"
+            >
+              <Info size={14} aria-hidden="true" />
+            </button>
+            <div className="rag-eval-format-tooltip" id="rag-eval-json-format-tooltip" role="tooltip">
+              <strong>Expected JSON format</strong>
+              <p>Import a JSON array of cases, one JSON object per JSONL line, or a fixture object with generation_cases.</p>
+              <code>{`[{"id":"case_1","question":"What does the policy require?","expected_source_docs":["Policy.pdf"],"must_include":["approval"],"must_cite_source":true}]`}</code>
+              <small>Required: question or query. Recommended: stable id or case_id. Optional: expected_answer, must_include, must_not_include, expected_source_docs, acceptable_source_pages, min_sources, min_faithfulness_score, latency_threshold_ms.</small>
+            </div>
+          </div>
+        </div>
       </div>
-      <div className="rag-eval-form-grid">
+      <div className="rag-eval-form-grid items-start">
         <label className="sv-field">
           <span className="sv-label">Dataset name</span>
           <input value={name} onChange={(event) => setName(event.target.value)} className="sv-input" placeholder="Dell R630 smoke set" />
+          <small className="text-secondary">Optional; file name is used when left blank.</small>
         </label>
         <label className="sv-field">
           <span className="sv-label">Format</span>
@@ -199,15 +218,18 @@ function DatasetImportPanel() {
             <option value="json">JSON</option>
             <option value="jsonl">JSONL</option>
           </select>
+          <small className="text-secondary">Auto detects JSON arrays, JSONL, or fixture objects.</small>
         </label>
       </div>
       <label className="sv-field mt-3">
         <span className="sv-label">Upload file</span>
         <input type="file" accept=".json,.jsonl,application/json,text/plain" onChange={(event) => void handleFile(event.target.files?.[0])} className="sv-input" />
+        <small className="text-secondary">Loads JSON or JSONL into the content field for review.</small>
       </label>
       <label className="sv-field mt-3">
         <span className="sv-label">Dataset content</span>
-        <textarea value={content} onChange={(event) => setContent(event.target.value)} rows={6} className="sv-textarea rag-eval-textarea" placeholder='{"id":"smoke","generation_cases":[...]}' />
+        <textarea value={content} onChange={(event) => setContent(event.target.value)} rows={6} className="sv-textarea rag-eval-textarea" placeholder='[{"id":"smoke_1","question":"What does the policy require?","expected_source_docs":["Policy.pdf"]}]' />
+        <small className="text-secondary">Paste cases with question or query plus optional expectations.</small>
       </label>
       <button
         type="button"
@@ -270,28 +292,33 @@ function RunLauncherPanel({ datasets, datasetsLoading, onRunCreated }: { dataset
       {datasetsLoading ? <Skeleton className="mt-4 h-10 w-full" /> : null}
       {!datasetsLoading && datasets.length === 0 ? <EmptyPanel>Import a JSON or JSONL evaluation dataset before launching a run.</EmptyPanel> : null}
       {datasets.length > 0 ? (
-        <div className="rag-eval-form-grid">
+        <div className="rag-eval-form-grid items-start">
           <label className="sv-field">
             <span className="sv-label">Dataset</span>
             <select value={selectedDataset?.id ?? ""} onChange={(event) => setDatasetId(event.target.value)} className="sv-input">
               {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
             </select>
+            <small className="text-secondary">Choose the imported case set for this run.</small>
           </label>
           <label className="sv-field">
             <span className="sv-label">Knowledge Space</span>
             <input value={groupPath} onChange={(event) => setGroupPath(event.target.value)} className="sv-input" placeholder="/manuals" />
+            <small className="text-secondary">Optional retrieval scope; leave blank to use all visible spaces.</small>
           </label>
           <label className="sv-field">
             <span className="sv-label">Document IDs</span>
             <input value={documentIds} onChange={(event) => setDocumentIds(event.target.value)} className="sv-input" placeholder="Optional, comma-separated" />
+            <small className="text-secondary">Optional comma-separated document IDs to force scope.</small>
           </label>
           <label className="sv-field">
             <span className="sv-label">Case IDs</span>
             <input value={caseIds} onChange={(event) => setCaseIds(event.target.value)} className="sv-input" placeholder="Optional, comma-separated" />
+            <small className="text-secondary">Optional comma-separated case IDs; cannot be combined with a limit.</small>
           </label>
           <label className="sv-field">
             <span className="sv-label">Limit</span>
             <input value={limit} onChange={(event) => setLimit(event.target.value)} min={1} type="number" className="sv-input" placeholder="Optional" />
+            <small className="text-secondary">Optional number of cases to sample from the selected dataset.</small>
           </label>
         </div>
       ) : null}

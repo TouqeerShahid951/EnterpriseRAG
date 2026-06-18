@@ -15,9 +15,9 @@ describe("PDF upload batches", () => {
     const draft: PdfUploadDraft = {
       files,
       groupPath: "/finance",
+      clearanceLevel: "NATO_SECRET",
       effectiveDate: "2026-06-09",
       expiryDate: "2026-12-31",
-      docType: "policy",
       description: "Shared batch context",
       supersedesText: "old-document-id",
     };
@@ -27,7 +27,9 @@ describe("PDF upload batches", () => {
     expect(requests).toHaveLength(2);
     expect(requests.map((request) => request.file)).toEqual(files);
     expect(requests.every((request) => request.group_path === "/finance")).toBe(true);
+    expect(requests.every((request) => request.clearance_level === "NATO_SECRET")).toBe(true);
     expect(requests.every((request) => request.description === "Shared batch context")).toBe(true);
+    expect(requests.every((request) => !("doc_type" in request))).toBe(true);
     expect(requests.every((request) => request.supersedes?.length === 0)).toBe(true);
   });
 
@@ -36,9 +38,9 @@ describe("PDF upload batches", () => {
     const requests = toUploadRequests({
       files: [file],
       groupPath: "/legal",
+      clearanceLevel: "NATO_RESTRICTED",
       effectiveDate: "2026-06-09",
       expiryDate: "",
-      docType: "contract",
       description: "",
       supersedesText: "first-id, second-id",
     });
@@ -50,9 +52,9 @@ describe("PDF upload batches", () => {
     const requests = toUploadRequests({
       files: [new File(["pdf"], "report.pdf", { type: "application/pdf" })],
       groupPath: "/finance",
+      clearanceLevel: "NATO_RESTRICTED",
       effectiveDate: "",
       expiryDate: "",
-      docType: "report",
       description: "",
       supersedesText: "",
     });
@@ -64,15 +66,16 @@ describe("PDF upload batches", () => {
     const pdf = new File(["%PDF-1.7"], "manual.pdf", { type: "application/pdf", lastModified: 1 });
     const jpg = new File(["jpeg"], "receipt.jpg", { type: "image/jpeg", lastModified: 3 });
     const png = new File(["png"], "diagram.png", { type: "image/png", lastModified: 4 });
+    const json = new File(['{"case_id":"FIR-001"}'], "records.json", { type: "application/json", lastModified: 5 });
     const text = new File(["notes"], "notes.txt", { type: "text/plain", lastModified: 2 });
     const oversized = { name: "large.pdf", type: "application/pdf", size: 50 * 1024 * 1024 + 1 } as File;
 
     expect(mergeDocumentFiles([pdf], [pdf])).toEqual([pdf]);
 
-    const validation = validateDocumentFiles([pdf, jpg, png, text, oversized]);
-    expect(validation.accepted).toEqual([pdf, jpg, png]);
+    const validation = validateDocumentFiles([pdf, jpg, png, json, text, oversized]);
+    expect(validation.accepted).toEqual([pdf, jpg, png, json]);
     expect(validation.rejectedMessages).toEqual([
-      "notes.txt is not a PDF, DOCX, JPG, or PNG file.",
+      "notes.txt is not a PDF, DOCX, JPG, PNG, or JSON file.",
       "large.pdf exceeds the 50 MB upload limit.",
     ]);
   });

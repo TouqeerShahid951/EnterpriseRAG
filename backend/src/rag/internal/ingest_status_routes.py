@@ -9,6 +9,7 @@ from ..repositories.documents import DocumentRepository, get_document_repository
 from ..schemas.internal import (
     InternalJobAttemptResponse,
     InternalJobEventRequest,
+    InternalJobStatusResponse,
     InternalJobStatusRequest,
     InternalParserProvenanceRequest,
     InternalMutationResponse,
@@ -18,8 +19,28 @@ from ..services.upload_status import progress_for_status_update
 from .service_token_auth import require_service_token
 
 router = APIRouter(tags=["internal-ingest"])
-TERMINAL_STATUSES = {"complete", "failed", "human_review"}
+TERMINAL_STATUSES = {"complete", "failed", "human_review", "cancelled"}
 MAX_INGEST_ATTEMPTS = 3
+
+
+@router.get(
+    "/ingest/jobs/{job_id}/status",
+    response_model=InternalJobStatusResponse,
+    summary="Read ingestion job status from the worker",
+)
+async def get_ingest_job_status(
+    job_id: str,
+    document_repo: DocumentRepository = Depends(get_document_repository),
+    service: ServiceTokenContext = Depends(require_service_token),
+) -> InternalJobStatusResponse:
+    _ = service
+    job = document_repo.get_ingest_job(job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "job_not_found", "message": "Ingestion job was not found."},
+        )
+    return InternalJobStatusResponse(job_id=job.id, doc_id=job.doc_id, status=job.status)  # type: ignore[arg-type]
 
 
 @router.post(
@@ -40,6 +61,8 @@ async def update_ingest_job_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "job_not_found", "message": "Ingestion job was not found."},
         )
+    if current_job.status == "cancelled" and payload.status != "cancelled":
+        return InternalMutationResponse()
     progress_pct = progress_for_status_update(
         current_job,
         next_status=payload.status,
@@ -124,6 +147,11 @@ async def heartbeat_ingest_job(
     service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalMutationResponse:
     _ = service
+    current = document_repo.get_ingest_job(job_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Ingestion job was not found."})
+    if current.status == "cancelled":
+        return InternalMutationResponse()
     if document_repo.heartbeat_ingest_job(job_id) is None:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Ingestion job was not found."})
     return InternalMutationResponse()

@@ -13,6 +13,7 @@ from rag_ingestion.config import (
 )
 from rag_ingestion.infrastructure import vision as vision_module
 from rag_ingestion.infrastructure.vision import OLLAMA_PROVIDER, VisionClient
+from rag_ingestion.parsers.images import _image_item_text
 from rag_ingestion.service import _build_vision_client
 
 
@@ -32,6 +33,7 @@ def test_ollama_runtime_config_routes_vision_to_ollama() -> None:
     assert client.provider == OLLAMA_PROVIDER
     assert client.base_url == "http://ollama-ingest:11434"
     assert client.model == "llava:latest"
+    assert client.num_ctx == 8192
 
 
 def test_ollama_runtime_config_prefers_saved_vision_model() -> None:
@@ -98,6 +100,7 @@ def test_ollama_vision_client_uses_api_chat_images_payload(monkeypatch) -> None:
         base_url="http://ollama:11434",
         model="llava:latest",
         timeout_seconds=10,
+        num_ctx=8192,
     ).analyze_image(content=b"image-bytes", content_type="image/png")
 
     assert result.extracted_text == "visible text"
@@ -108,7 +111,64 @@ def test_ollama_vision_client_uses_api_chat_images_payload(monkeypatch) -> None:
     assert payload["model"] == "llava:latest"
     assert payload["stream"] is False
     assert payload["think"] is False
+    assert payload["options"]["num_ctx"] == 8192
     assert payload["messages"][1]["images"] == ["aW1hZ2UtYnl0ZXM="]
+    assert "detailed visual descriptions" in payload["messages"][0]["content"]
+    assert "RAG indexing" in payload["messages"][1]["content"]
+    assert "not for a generic caption" in payload["messages"][1]["content"]
+    assert "main subject" in payload["messages"][1]["content"]
+    assert "For vehicles, be especially specific" in payload["messages"][1]["content"]
+    assert "make, model" in payload["messages"][1]["content"]
+    assert "visible cues" in payload["messages"][1]["content"]
+    assert "concise caption" not in payload["messages"][1]["content"]
+
+
+def test_openai_compatible_vision_client_uses_rag_description_prompt(monkeypatch) -> None:
+    calls = []
+
+    def fake_request_json(base_url, path, **kwargs):
+        calls.append((base_url, path, kwargs))
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"extracted_text":"visible text","caption":"detailed description","confidence":0.8}'
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(vision_module, "request_json", fake_request_json)
+    result = VisionClient(
+        provider="openai_compatible",
+        base_url="http://vllm-vision:8000",
+        model="vision-model",
+        timeout_seconds=10,
+    ).analyze_image(content=b"image-bytes", content_type="image/png")
+
+    assert result.caption == "detailed description"
+    assert calls[0][0] == "http://vllm-vision:8000/v1"
+    assert calls[0][1] == "/chat/completions"
+    payload = calls[0][2]["payload"]
+    assert payload["messages"][0]["role"] == "system"
+    assert "detailed visual descriptions" in payload["messages"][0]["content"]
+    text_part = payload["messages"][1]["content"][0]
+    assert text_part["type"] == "text"
+    assert "RAG indexing" in text_part["text"]
+    assert "not for a generic caption" in text_part["text"]
+    assert "main subject" in text_part["text"]
+    assert "For vehicles, be especially specific" in text_part["text"]
+    assert "make, model" in text_part["text"]
+    assert "visible cues" in text_part["text"]
+    assert "concise caption" not in text_part["text"]
+
+
+def test_image_item_text_indexes_visual_description_not_caption() -> None:
+    text = _image_item_text("Serial No. 123", "A detailed description of the photographed form.")
+
+    assert "Visible image text:\nSerial No. 123" in text
+    assert "Image description:\nA detailed description of the photographed form." in text
+    assert "Image caption:" not in text
 
 
 def _worker_config(*, ollama_vision_model: str = "") -> WorkerConfig:
@@ -118,13 +178,14 @@ def _worker_config(*, ollama_vision_model: str = "") -> WorkerConfig:
         http_timeout_seconds=45,
         heartbeat_interval_seconds=30,
         ollama_retry_base_seconds=2,
+        ollama_num_ctx=16384,
         embedding_batch_size=16,
         worker_boot_concurrency=1,
         weak_page_threshold=5,
         full_doc_weak_page_ratio=0.25,
         layered_docling_max_pages=40,
         layered_docling_batch_pages=4,
-        ocr_review_confidence_threshold=0.8,
+        ocr_review_confidence_threshold=0.9,
         native_text_min_chars_per_page=10,
         chunk_target_tokens=512,
         chunk_overlap_tokens=64,
@@ -155,5 +216,6 @@ def _worker_config(*, ollama_vision_model: str = "") -> WorkerConfig:
             base_url="http://vllm-vision:8000/v1",
             model="Qwen/Qwen2.5-VL-7B-Instruct-AWQ",
             ollama_model=ollama_vision_model,
+            ollama_num_ctx=8192,
         ),
     )

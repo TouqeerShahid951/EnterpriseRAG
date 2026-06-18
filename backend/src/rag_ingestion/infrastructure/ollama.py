@@ -14,6 +14,10 @@ from .http import ServiceRequestError, request_json
 
 METADATA_NUM_PREDICT = 1012
 METADATA_WARNING = "ollama_metadata_unavailable"
+METADATA_TIMEOUT_WARNING = "ollama_metadata_timeout"
+METADATA_TRANSPORT_WARNING = "ollama_metadata_transport_error"
+METADATA_HTTP_WARNING = "ollama_metadata_http_error"
+METADATA_INVALID_JSON_WARNING = "ollama_metadata_invalid_json"
 METADATA_FORMAT = {
     "type": "object",
     "properties": {
@@ -21,7 +25,7 @@ METADATA_FORMAT = {
         "llm_topics": {"type": "array", "items": {"type": "string"}},
         "doc_type": {
             "type": "string",
-            "enum": ["policy", "procedure", "report", "contract", "memo", "manual", "other"],
+            "maxLength": 80,
         },
         "claims": {
             "type": "array",
@@ -53,6 +57,7 @@ class OllamaClient:
         thinking_enabled: bool = False,
         retry_base_seconds: float = 0,
         embedding_batch_size: int = 16,
+        num_ctx: int | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.base_url = base_url
@@ -63,13 +68,19 @@ class OllamaClient:
         self.thinking_enabled = thinking_enabled
         self.retry_base_seconds = max(0, retry_base_seconds)
         self.embedding_batch_size = max(1, embedding_batch_size)
+        self.num_ctx = num_ctx
         self._sleep = sleep
 
     def generate_metadata(self, text: str) -> dict[str, Any]:
         prompt = (
-            "Extract compact factual metadata from the document. "
-            "The summary must be exactly two factual sentences. "
-            "Return 3 to 8 short semantic tags and up to 20 explicit claims.\n\n"
+            "Return ONLY a valid JSON object matching the provided schema. "
+            "Do not return markdown, prose, YAML, labels, or numbered lists. "
+            "Use exactly these keys: summary, llm_topics, doc_type, claims. "
+            "summary must contain exactly two factual sentences. "
+            "llm_topics must be an array of 3 to 8 short strings. "
+            "doc_type must be a concise freeform string. "
+            "claims must be an array of objects, not strings; each claim object must have string keys "
+            "entity, attribute, and value. If there are no explicit claims, use an empty array.\n\n"
             f"Document text:\n{text[:6000]}"
         )
         request_payload = {
@@ -78,13 +89,20 @@ class OllamaClient:
             "think": self.thinking_enabled,
             "format": METADATA_FORMAT,
             "keep_alive": "5m",
-            "options": {"temperature": 0.0, "num_predict": METADATA_NUM_PREDICT},
+            "options": _ollama_options(
+                temperature=0.0,
+                num_predict=METADATA_NUM_PREDICT,
+                num_ctx=self.num_ctx,
+            ),
             "messages": [
-                {"role": "system", "content": "You extract compact document metadata."},
+                {"role": "system", "content": "You are a strict JSON metadata extraction API. Return only valid JSON."},
                 {"role": "user", "content": prompt},
             ],
         }
+        last_error: ServiceRequestError | None = None
+        last_attempt = 0
         for attempt in range(3):
+            last_attempt = attempt + 1
             try:
                 payload = request_json(
                     self.base_url,
@@ -99,10 +117,15 @@ class OllamaClient:
                     raise ServiceRequestError("ollama", "metadata response was not a JSON object", 502)
                 return _coerce_metadata(parsed)
             except ServiceRequestError as exc:
+                last_error = exc
                 if attempt >= 2 or not is_transient_service_error(exc):
                     break
                 self._backoff(attempt)
-        return _metadata_fallback()
+        warning = _metadata_warning_for_error(last_error)
+        return _metadata_fallback(
+            warning=warning,
+            error=_metadata_error_payload(last_error, warning=warning, attempts=last_attempt) if last_error else None,
+        )
 
     def embed(self, text: str) -> list[float]:
         return self.embed_many([text])[0]
@@ -168,6 +191,13 @@ def is_transient_service_error(exc: ServiceRequestError) -> bool:
     )
 
 
+def _ollama_options(*, temperature: float, num_predict: int, num_ctx: int | None) -> dict[str, int | float]:
+    options: dict[str, int | float] = {"temperature": temperature, "num_predict": num_predict}
+    if num_ctx is not None:
+        options["num_ctx"] = num_ctx
+    return options
+
+
 def _message_content(payload: dict[str, Any]) -> str:
     message = payload.get("message")
     if isinstance(message, dict) and isinstance(message.get("content"), str):
@@ -194,9 +224,7 @@ def _parse_json_object(raw: str) -> Any:
 def _coerce_metadata(value: dict[str, Any]) -> dict[str, Any]:
     topics = value.get("topics")
     normalized_topics = [str(item).strip() for item in topics if str(item).strip()] if isinstance(topics, list) else []
-    doc_type = str(value.get("doc_type", "other")).strip().lower()
-    if doc_type not in {"policy", "procedure", "report", "contract", "memo", "manual", "other"}:
-        doc_type = "other"
+    doc_type = " ".join(str(value.get("doc_type", "")).strip().lower().split())[:80]
     return {
         "summary": str(value.get("summary", "")).strip(),
         "topics": normalized_topics[:5],
@@ -206,15 +234,64 @@ def _coerce_metadata(value: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _metadata_fallback() -> dict[str, Any]:
-    return {
+def _metadata_fallback(
+    *,
+    warning: str = METADATA_WARNING,
+    error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    fallback = {
         "summary": "",
         "topics": [],
         "llm_topics": [],
-        "doc_type": "other",
+        "doc_type": "",
         "claims": [],
-        "_warnings": [METADATA_WARNING],
+        "_warnings": [warning],
     }
+    if error:
+        fallback["_metadata_errors"] = [error]
+    return fallback
+
+
+def _metadata_warning_for_error(exc: ServiceRequestError | None) -> str:
+    if exc is None:
+        return METADATA_WARNING
+    message = exc.message.lower()
+    if "timed out" in message or "timeout" in message:
+        return METADATA_TIMEOUT_WARNING
+    if "json" in message or "did not include content" in message:
+        return METADATA_INVALID_JSON_WARNING
+    if exc.status_code is not None:
+        return METADATA_HTTP_WARNING
+    return METADATA_TRANSPORT_WARNING
+
+
+def _metadata_error_payload(
+    exc: ServiceRequestError,
+    *,
+    warning: str,
+    attempts: int,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "warning": warning,
+        "service": exc.service,
+        "attempts": max(1, attempts),
+        "message": _safe_metadata_error_message(exc, warning),
+    }
+    if exc.status_code is not None:
+        payload["status_code"] = exc.status_code
+    return payload
+
+
+def _safe_metadata_error_message(exc: ServiceRequestError, warning: str) -> str:
+    if warning == METADATA_TIMEOUT_WARNING:
+        return "request timed out"
+    if warning == METADATA_INVALID_JSON_WARNING:
+        return "metadata response was not valid JSON"
+    if warning == METADATA_HTTP_WARNING and exc.status_code is not None:
+        return f"metadata service returned HTTP {exc.status_code}"
+    if warning == METADATA_TRANSPORT_WARNING:
+        return "metadata transport error"
+    return "metadata request failed"
 
 
 def _coerce_topics(value: Any) -> list[str]:

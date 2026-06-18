@@ -37,15 +37,22 @@ def update_ingest_config(
     control: IngestWorkerControl = Depends(get_ingest_worker_control),
     document_repo: DocumentRepository = Depends(get_document_repository),
 ) -> IngestConfigResponse:
-    saved = repo.save_active(IngestConfigRecord(worker_concurrency=payload.worker_concurrency, updated_by=user.id))
+    saved = repo.save_active(
+        IngestConfigRecord(
+            worker_concurrency=payload.worker_concurrency,
+            ocr_review_confidence_threshold=payload.ocr_review_confidence_threshold,
+            updated_by=user.id,
+        )
+    )
     result = control.apply(saved.worker_concurrency)
     document_repo.append_audit_event(
-        event_type="admin.ingest.concurrency",
+        event_type="admin.ingest.config",
         actor_id=user.id,
         target_type="workspace_ingest_config",
         target_id=None,
         payload={
             "worker_concurrency": saved.worker_concurrency,
+            "ocr_review_confidence_threshold": saved.ocr_review_confidence_threshold,
             "apply_status": result.apply_status,
             "worker_online": result.worker_online,
         },
@@ -56,6 +63,7 @@ def update_ingest_config(
 def _response(config: IngestConfigRecord, result: WorkerControlResult) -> IngestConfigResponse:
     return IngestConfigResponse(
         worker_concurrency=config.worker_concurrency,
+        ocr_review_confidence_threshold=config.ocr_review_confidence_threshold,
         worker_online=result.worker_online,
         active_jobs=result.active_jobs,
         observed_pool_size=result.observed_pool_size,

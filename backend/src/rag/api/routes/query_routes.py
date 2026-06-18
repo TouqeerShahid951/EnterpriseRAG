@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from urllib.parse import quote
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from ...auth.abac import normalize_group_path
@@ -21,7 +21,7 @@ from ...query.cancellation import QueryCancellationToken, QueryCancelled, call_w
 from ...query.http import ServiceRequestError
 from ...query.service import LocalRagService, get_local_rag_service
 from ...query.query_stream import format_sse
-from ...schemas.query import ChatSession, ChatSessionListResponse, QueryRequest, QueryStreamEvent, RAGResponse
+from ...schemas.query import ChatSession, ChatSessionListResponse, ChatSessionSummary, QueryRequest, QueryStreamEvent, RAGResponse
 from ...services.generated_artifact_storage import GeneratedArtifactStorage, get_generated_artifact_storage
 
 router = APIRouter(prefix="/query", tags=["query"])
@@ -80,12 +80,20 @@ async def get_generated_artifact_content(
     summary="List saved chat sessions for the current permission version",
 )
 async def list_chat_sessions(
+    limit: int = Query(30, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     user: UserRecord = Depends(require_current_user),
     repo: ChatHistoryRepository = Depends(get_chat_history_repository),
 ) -> ChatSessionListResponse:
     _require_query_user(user)
-    sessions = repo.list_sessions(user_id=user.id, permission_version=user.permission_version)
-    return ChatSessionListResponse(items=[_chat_session_response(session) for session in sessions], total=len(sessions))
+    sessions = repo.list_sessions(user_id=user.id, permission_version=user.permission_version, limit=limit, offset=offset)
+    total = repo.count_sessions(user_id=user.id, permission_version=user.permission_version)
+    return ChatSessionListResponse(
+        items=[_chat_session_summary_response(session) for session in sessions],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get(
@@ -344,9 +352,23 @@ def _chat_session_response(session: ChatSessionRecord) -> ChatSession:
     )
 
 
+def _chat_session_summary_response(session: ChatSessionRecord) -> ChatSessionSummary:
+    return ChatSessionSummary(
+        id=session.id,
+        title=session.title,
+        created_at=_isoformat(session.created_at),
+        updated_at=_isoformat(session.updated_at),
+        question_count=session.question_count if session.question_count is not None else _question_count(session.turns),
+    )
+
+
 def _isoformat(value: datetime | None) -> str:
     return (value or datetime.now(UTC)).isoformat()
 
 
 def _compact_session_title(value: str) -> str:
     return f"{value[:49].rstrip()}..." if len(value) > 52 else value
+
+
+def _question_count(turns: tuple[dict[str, object], ...]) -> int:
+    return sum(1 for turn in turns if turn.get("role") == "user")

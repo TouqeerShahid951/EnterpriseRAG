@@ -3,13 +3,22 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, Copy, Edit3, Eye, EyeOff, KeyRound, Plus, RefreshCw, Search, Trash2, UserCog, Users } from "lucide-react";
 
 import { adminApi } from "../api/contracts";
-import { accountTypeLabel, accountTypeOptions, canAssignAccountType, roleDescription } from "../authz";
+import {
+  accountTypeLabel,
+  accountTypeOptions,
+  canAssignAccountType,
+  clearanceLevelDescription,
+  clearanceLevelLabel,
+  clearanceLevelsAssignableBy,
+  defaultClearanceLevel,
+  roleDescription,
+} from "../authz";
 import { useToast } from "../components/feedback/ToastProvider";
 import { EmptyPanel, InlineMessage, Skeleton } from "../components/layout/Common";
 import { FahamBasicPage } from "../components/layout/FahamWorkspace";
 import { Modal } from "../components/layout/Modal";
 import type { RouteId } from "../routes";
-import type { AccountType, User as AuthUser, UserAdmin } from "../types/api";
+import type { AccountType, ClearanceLevel, User as AuthUser, UserAdmin } from "../types/api";
 import { errorMessage } from "../utils/format";
 import { flattenGroups, nextSelectedGroups, userSpacesFromPaths, type GroupOption } from "../utils/groups";
 
@@ -18,8 +27,8 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
   const { notify } = useToast();
   const [panel, setPanel] = useState<UserPanelState>(null);
   const [search, setSearch] = useState("");
-  const [userDraft, setUserDraft] = useState<UserDraft>(() => createUserDraft());
-  const [showGeneratedPassword, setShowGeneratedPassword] = useState(false);
+  const [userDraft, setUserDraft] = useState<UserDraft>(() => createUserDraft(defaultAssignableClearance(currentUser)));
+  const [showInitialPassword, setShowInitialPassword] = useState(false);
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const [createdUserEmail, setCreatedUserEmail] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserAdmin | null>(null);
@@ -37,6 +46,7 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
     () => accountTypeOptions.filter((accountType) => canAssignAccountType(currentUser, accountType)),
     [currentUser],
   );
+  const assignableClearanceLevels = useMemo(() => clearanceLevelsAssignableBy(currentUser), [currentUser]);
   const filteredUsers = users.filter((user) => matchesUser(user, search));
 
   const createUserMutation = useMutation({
@@ -47,6 +57,7 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
         account_type: draft.accountType,
         initial_password: draft.initialPassword,
         group_paths: draft.groupPaths,
+        clearance_level: draft.clearanceLevel,
         is_active: draft.isActive,
       }),
     onSuccess: (created) => {
@@ -62,6 +73,7 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
         name: draft.name.trim(),
         account_type: draft.accountType,
         group_paths: draft.groupPaths,
+        clearance_level: draft.clearanceLevel,
         is_active: draft.isActive,
       }),
     onSuccess: (updated) => {
@@ -100,8 +112,8 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
 
   function openCreateUser() {
     resetMutationState();
-    setUserDraft(createUserDraft());
-    setShowGeneratedPassword(false);
+    setUserDraft(createUserDraft(defaultAssignableClearance(currentUser)));
+    setShowInitialPassword(false);
     setCopyState("idle");
     setCreatedUserEmail(null);
     setPanel({ kind: "create-user" });
@@ -112,6 +124,7 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
     setUserDraft({
       email: user.email,
       accountType: user.account_type,
+      clearanceLevel: user.clearance_level,
       groupPaths: user.group_paths,
       initialPassword: "",
       isActive: user.is_active,
@@ -150,7 +163,12 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
 
   function regeneratePassword() {
     setUserDraft((draft) => ({ ...draft, initialPassword: generateInitialPassword() }));
-    setShowGeneratedPassword(false);
+    setShowInitialPassword(false);
+    setCopyState("idle");
+  }
+
+  function updateInitialPassword(initialPassword: string) {
+    setUserDraft((draft) => ({ ...draft, initialPassword }));
     setCopyState("idle");
   }
 
@@ -214,6 +232,7 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
               <tr>
                 <th>User</th>
                 <th>Role</th>
+                <th>Clearance</th>
                 <th>Status</th>
                 <th>Knowledge Spaces</th>
                 <th>Permission</th>
@@ -231,6 +250,9 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
                   <td>
                     <strong className="block text-on-surface">{accountTypeLabel(user.account_type)}</strong>
                     <small className="text-secondary">{roleDescription(user.account_type)}</small>
+                  </td>
+                  <td>
+                    <span className="sv-pill">{clearanceLevelLabel(user.clearance_level)}</span>
                   </td>
                   <td>{user.is_active ? <span className="sv-pill sv-pill-success">Active</span> : <span className="sv-pill">Inactive</span>}</td>
                   <td>
@@ -278,6 +300,7 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
             createdUserEmail={createdUserEmail}
             draft={userDraft}
             accountTypes={assignableAccountTypes}
+            clearanceLevels={assignableClearanceLevels}
             groupOptions={groupOptions}
             isCreate={panel.kind === "create-user"}
             isPending={createUserMutation.isPending || updateUserMutation.isPending}
@@ -294,11 +317,12 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
             onClose={closePanel}
             onCopyPassword={() => void copyInitialPassword()}
             onCreateAnother={openCreateUser}
+            onInitialPasswordChange={updateInitialPassword}
             onRegeneratePassword={regeneratePassword}
             onSpaceToggle={updateUserSpaces}
             onSubmit={submitUserForm}
-            onTogglePassword={() => setShowGeneratedPassword((value) => !value)}
-            showGeneratedPassword={showGeneratedPassword}
+            onTogglePassword={() => setShowInitialPassword((value) => !value)}
+            showInitialPassword={showInitialPassword}
           />
         ) : null}
       </Modal>
@@ -351,6 +375,7 @@ export function FahamAccessPage({ currentUser, onAuthChanged, onLogout, onNaviga
 }
 
 function UserPanel({
+  clearanceLevels,
   copyState,
   createdUserEmail,
   draft,
@@ -363,11 +388,12 @@ function UserPanel({
   onClose,
   onCopyPassword,
   onCreateAnother,
+  onInitialPasswordChange,
   onRegeneratePassword,
   onSpaceToggle,
   onSubmit,
   onTogglePassword,
-  showGeneratedPassword,
+  showInitialPassword,
 }: UserPanelProps) {
   const createComplete = isCreate && Boolean(createdUserEmail);
   const canSubmit = draft.name.trim().length > 0 && (!isCreate || (draft.email.trim().length > 0 && draft.initialPassword.length >= 8));
@@ -378,6 +404,7 @@ function UserPanel({
         <TextField
           autoComplete="off"
           disabled={createComplete || isPending}
+          helper="Used for sign-in and audit attribution."
           label="Email"
           onChange={(value) => onChange((current) => ({ ...current, email: value }))}
           required
@@ -391,6 +418,7 @@ function UserPanel({
       <TextField
         autoComplete="off"
         disabled={createComplete || isPending}
+        helper="Shown in admin lists and account dialogs."
         label="Name"
         onChange={(value) => onChange((current) => ({ ...current, name: value }))}
         required
@@ -401,7 +429,19 @@ function UserPanel({
         accountTypes={accountTypes}
         disabled={createComplete || isPending}
         value={draft.accountType}
-        onChange={(accountType) => onChange((current) => ({ ...current, accountType }))}
+        onChange={(accountType) => onChange((current) => ({
+          ...current,
+          accountType,
+          clearanceLevel: isGlobalAccountType(accountType) ? "COSMIC_TOP_SECRET" : current.clearanceLevel,
+        }))}
+      />
+
+      <ClearanceLevelPicker
+        clearanceLevels={clearanceLevels}
+        disabled={createComplete || isPending || isGlobalAccountType(draft.accountType)}
+        lockedByGlobalRole={isGlobalAccountType(draft.accountType)}
+        value={draft.clearanceLevel}
+        onChange={(clearanceLevel) => onChange((current) => ({ ...current, clearanceLevel }))}
       />
 
       {isCreate ? (
@@ -410,10 +450,19 @@ function UserPanel({
           <div className="flex gap-2">
             <div className="relative min-w-0 flex-1">
               <KeyRound size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
-              <input className="sv-input sv-input-with-leading-icon text-code-sm" readOnly type={showGeneratedPassword ? "text" : "password"} value={draft.initialPassword} />
+              <input
+                autoComplete="new-password"
+                className="sv-input sv-input-with-leading-icon text-code-sm"
+                disabled={createComplete || isPending}
+                minLength={8}
+                onChange={(event) => onInitialPasswordChange(event.target.value)}
+                required
+                type={showInitialPassword ? "text" : "password"}
+                value={draft.initialPassword}
+              />
             </div>
-            <button type="button" onClick={onTogglePassword} className="sv-action-secondary min-h-11 px-3" aria-label={showGeneratedPassword ? "Hide generated password" : "Show generated password"}>
-              {showGeneratedPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            <button type="button" onClick={onTogglePassword} className="sv-action-secondary min-h-11 px-3" aria-label={showInitialPassword ? "Hide initial password" : "Show initial password"}>
+              {showInitialPassword ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -425,6 +474,7 @@ function UserPanel({
             </button>
           </div>
           {copyState === "failed" ? <small className="text-error-red">Clipboard access is unavailable. Reveal and copy the password manually.</small> : null}
+          <small className="text-secondary">Share once with the new user; they can change it after sign-in.</small>
         </div>
       ) : null}
 
@@ -437,11 +487,12 @@ function UserPanel({
         />
         Active account
       </label>
+      <small className="block text-secondary">Disable to block sign-in without removing memberships.</small>
 
       <SpacePicker disabled={createComplete || isPending} groupOptions={groupOptions} onToggle={onSpaceToggle} selectedPaths={draft.groupPaths} />
 
       {mutationError ? <InlineMessage tone="error">{errorMessage(mutationError, isCreate ? "Unable to create user." : "Unable to update user.")}</InlineMessage> : null}
-      {createdUserEmail ? <InlineMessage tone="success">User {createdUserEmail} was created. Copy the generated password before leaving this dialog.</InlineMessage> : null}
+      {createdUserEmail ? <InlineMessage tone="success">User {createdUserEmail} was created. Copy the initial password before leaving this dialog.</InlineMessage> : null}
 
       <div className="flex flex-wrap justify-end gap-2 border-t border-surface-border pt-4">
         {createdUserEmail ? (
@@ -474,6 +525,7 @@ function SpacePicker({ disabled, groupOptions, onToggle, selectedPaths }: SpaceP
   return (
     <fieldset className="space-y-2">
       <legend className="sv-label">Knowledge Space memberships</legend>
+      <p className="text-body-md text-secondary">Selected spaces control retrieval scope and upload access.</p>
       <div className="max-h-72 overflow-auto rounded-lg border border-surface-border bg-surface-container-low p-2">
         {groupOptions.map((group) => (
           <label key={group.path} className="flex items-start gap-3 rounded-md p-2 text-body-md text-on-surface hover:bg-surface-container-high" style={{ paddingLeft: `${0.5 + group.depth * 1}rem` }}>
@@ -507,6 +559,32 @@ function AccountTypePicker({ accountTypes, disabled, onChange, value }: AccountT
         ))}
       </select>
       <small className="text-secondary">{roleDescription(value)}</small>
+    </label>
+  );
+}
+
+function ClearanceLevelPicker({ clearanceLevels, disabled, lockedByGlobalRole, onChange, value }: ClearanceLevelPickerProps) {
+  return (
+    <label className="sv-field" htmlFor="clearance-level">
+      <span className="sv-label">Clearance level</span>
+      <select
+        className="sv-select"
+        disabled={disabled}
+        id="clearance-level"
+        onChange={(event) => onChange(event.target.value as ClearanceLevel)}
+        value={value}
+      >
+        {clearanceLevels.map((clearanceLevel) => (
+          <option key={clearanceLevel} value={clearanceLevel}>
+            {clearanceLevelLabel(clearanceLevel)}
+          </option>
+        ))}
+      </select>
+      <small className="text-secondary">
+        {lockedByGlobalRole
+          ? "Global administrator accounts are always Top Secret."
+          : clearanceLevelDescription(value)}
+      </small>
     </label>
   );
 }
@@ -550,7 +628,7 @@ function UserTableSkeleton() {
     <>
       {Array.from({ length: 4 }, (_, index) => (
         <tr key={index}>
-          <td colSpan={6}>
+          <td colSpan={7}>
             <div className="grid gap-2 py-1">
               <Skeleton className="h-4 w-40" />
               <Skeleton className="h-3 w-64 max-w-full" />
@@ -562,12 +640,13 @@ function UserTableSkeleton() {
   );
 }
 
-function TextField({ autoComplete, disabled, label, onChange, required, type = "text", value }: TextFieldProps) {
+function TextField({ autoComplete, disabled, helper, label, onChange, required, type = "text", value }: TextFieldProps) {
   const id = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return (
     <label className="sv-field" htmlFor={id}>
       <span className="sv-label">{label}</span>
       <input autoComplete={autoComplete} className="sv-input" disabled={disabled} id={id} onChange={(event) => onChange(event.target.value)} required={required} type={type} value={value} />
+      {helper ? <small className="text-secondary">{helper}</small> : null}
     </label>
   );
 }
@@ -588,19 +667,31 @@ function matchesUser(user: UserAdmin, search: string): boolean {
     user.name.toLowerCase().includes(query) ||
     user.email.toLowerCase().includes(query) ||
     accountTypeLabel(user.account_type).toLowerCase().includes(query) ||
+    clearanceLevelLabel(user.clearance_level).toLowerCase().includes(query) ||
     user.group_paths.some((path) => path.toLowerCase().includes(query))
   );
 }
 
-function createUserDraft(): UserDraft {
+function createUserDraft(clearanceLevel: ClearanceLevel): UserDraft {
   return {
     accountType: "member",
+    clearanceLevel,
     email: "",
     groupPaths: [],
     initialPassword: generateInitialPassword(),
     isActive: true,
     name: "",
   };
+}
+
+function defaultAssignableClearance(user: AuthUser): ClearanceLevel {
+  const assignable = clearanceLevelsAssignableBy(user);
+  if (assignable.includes(defaultClearanceLevel)) return defaultClearanceLevel;
+  return assignable.at(-1) ?? defaultClearanceLevel;
+}
+
+function isGlobalAccountType(accountType: AccountType): boolean {
+  return accountType === "platform_admin" || accountType === "system_admin";
 }
 
 function generateInitialPassword(length = 16): string {
@@ -644,6 +735,7 @@ type UserPanelState = { kind: "create-user" } | { kind: "edit-user"; user: UserA
 
 type UserDraft = {
   accountType: AccountType;
+  clearanceLevel: ClearanceLevel;
   email: string;
   groupPaths: string[];
   initialPassword: string;
@@ -653,6 +745,7 @@ type UserDraft = {
 
 type UserPanelProps = {
   accountTypes: AccountType[];
+  clearanceLevels: ClearanceLevel[];
   copyState: CopyState;
   createdUserEmail: string | null;
   draft: UserDraft;
@@ -664,16 +757,18 @@ type UserPanelProps = {
   onClose: () => void;
   onCopyPassword: () => void;
   onCreateAnother: () => void;
+  onInitialPasswordChange: (initialPassword: string) => void;
   onRegeneratePassword: () => void;
   onSpaceToggle: (groupPath: string, checked: boolean) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onTogglePassword: () => void;
-  showGeneratedPassword: boolean;
+  showInitialPassword: boolean;
 };
 
 type TextFieldProps = {
   autoComplete?: string;
   disabled?: boolean;
+  helper?: string;
   label: string;
   onChange: (value: string) => void;
   required?: boolean;
@@ -693,4 +788,12 @@ type AccountTypePickerProps = {
   disabled?: boolean;
   onChange: (accountType: AccountType) => void;
   value: AccountType;
+};
+
+type ClearanceLevelPickerProps = {
+  clearanceLevels: ClearanceLevel[];
+  disabled?: boolean;
+  lockedByGlobalRole: boolean;
+  onChange: (clearanceLevel: ClearanceLevel) => void;
+  value: ClearanceLevel;
 };

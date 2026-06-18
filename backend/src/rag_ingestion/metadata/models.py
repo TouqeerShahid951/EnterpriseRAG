@@ -34,8 +34,8 @@ class DocumentMetadataBundle:
     topics: list[str] = field(default_factory=list)
     topic_scores: dict[str, float] = field(default_factory=dict)
     llm_topics: list[str] = field(default_factory=list)
-    doc_type: str = "other"
-    auto_doc_type: str = "other"
+    doc_type: str = ""
+    auto_doc_type: str = ""
     auto_doc_type_confidence: float = 0.0
     metadata_confidence: dict[str, float] = field(default_factory=dict)
     metadata_provenance: dict[str, str] = field(default_factory=dict)

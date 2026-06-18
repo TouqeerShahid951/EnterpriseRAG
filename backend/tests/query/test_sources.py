@@ -67,6 +67,19 @@ class EvidenceBuilderTests(unittest.TestCase):
         self.assertIn("Name(s): Sajjad Hussain", evidence[0].payload["text"])
         self.assertIn("Contact Numbers: 03009876543", evidence[0].payload["text"])
 
+    def test_exhaustive_scope_evidence_round_robins_across_documents(self) -> None:
+        hits = [
+            hit("doc-a:1", 0.90, "A first", doc_id="doc-a", exhaustive_scope_origin="document_class_scope"),
+            hit("doc-a:2", 0.89, "A second", doc_id="doc-a", exhaustive_scope_origin="document_class_scope"),
+            hit("doc-a:3", 0.88, "A third", doc_id="doc-a", exhaustive_scope_origin="document_class_scope"),
+            hit("doc-b:1", 0.50, "B first", doc_id="doc-b", exhaustive_scope_origin="document_class_scope"),
+            hit("doc-c:1", 0.40, "C first", doc_id="doc-c", exhaustive_scope_origin="document_class_scope"),
+        ]
+
+        evidence = build_evidence_hits(hits, token_budget=4000, limit=3)
+
+        self.assertEqual([item.payload["doc_id"] for item in evidence], ["doc-a", "doc-b", "doc-c"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,13 +9,15 @@ from rag.repositories.postgres import PostgresConnectionMixin
 MIGRATION_SQL = """
 ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_ingest_status_known;
 ALTER TABLE documents ADD CONSTRAINT documents_ingest_status_known CHECK (
-    ingest_status IN ('scheduled', 'queued', 'processing', 'complete', 'failed', 'human_review')
+    ingest_status IN ('scheduled', 'queued', 'processing', 'complete', 'failed', 'human_review', 'cancelled')
 );
 
 ALTER TABLE ingest_jobs DROP CONSTRAINT IF EXISTS ingest_jobs_status_known;
 ALTER TABLE ingest_jobs ADD CONSTRAINT ingest_jobs_status_known CHECK (
-    status IN ('scheduled', 'queued', 'processing', 'complete', 'failed', 'human_review')
+    status IN ('scheduled', 'queued', 'processing', 'complete', 'failed', 'human_review', 'cancelled')
 );
+
+ALTER TABLE documents ALTER COLUMN doc_type DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS folder_ingest_schedules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -24,7 +26,7 @@ CREATE TABLE IF NOT EXISTS folder_ingest_schedules (
     schedule_type TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'scheduled',
     group_path TEXT NOT NULL REFERENCES groups(path) ON UPDATE CASCADE ON DELETE RESTRICT,
-    doc_type TEXT NOT NULL,
+    doc_type TEXT NULL,
     effective_date DATE NULL,
     expiry_date DATE NULL,
     description TEXT NULL,
@@ -99,6 +101,7 @@ CREATE INDEX IF NOT EXISTS folder_ingest_run_items_source_idx ON folder_ingest_r
 CREATE INDEX IF NOT EXISTS folder_ingest_run_items_document_idx ON folder_ingest_run_items (document_id) WHERE document_id IS NOT NULL;
 
 ALTER TABLE folder_ingest_schedules ALTER COLUMN effective_date DROP NOT NULL;
+ALTER TABLE folder_ingest_schedules ALTER COLUMN doc_type DROP NOT NULL;
 """
 
 

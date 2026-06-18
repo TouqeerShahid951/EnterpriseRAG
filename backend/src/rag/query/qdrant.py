@@ -353,6 +353,35 @@ class QdrantClient:
                 return
             raise
 
+    def set_document_clearance(
+        self,
+        doc_id: str,
+        *,
+        clearance_level: str,
+        clearance_rank: int,
+        cancellation_token: QueryCancellationToken | None = None,
+    ) -> None:
+        try:
+            request_json(
+                self.base_url,
+                f"{self._collection_path}/points/payload?wait=true",
+                service="qdrant",
+                method="POST",
+                payload={
+                    "payload": {
+                        "clearance_level": clearance_level,
+                        "clearance_rank": clearance_rank,
+                    },
+                    "filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]},
+                },
+                timeout_seconds=self.timeout_seconds,
+                cancellation_token=cancellation_token,
+            )
+        except ServiceRequestError as exc:
+            if exc.status_code == 404:
+                return
+            raise
+
 
 def _validated_mode(payload: dict[str, Any], vector_size: int) -> str:
     mode = collection_mode(payload, vector_size)

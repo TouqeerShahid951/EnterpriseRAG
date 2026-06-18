@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from ..errors import IngestJobCancelled
 from ..messages import IngestJobPayload
 from .state import IngestDependencies, IngestState
 from .steps import (
@@ -33,17 +36,17 @@ def run_ingest_graph(payload: IngestJobPayload, deps: IngestDependencies) -> Ing
 
 
 def _add_nodes(graph, deps: IngestDependencies) -> None:
-    graph.add_node("mark_processing", lambda state: mark_processing(state, deps))
-    graph.add_node("download_file", lambda state: download_file(state, deps))
-    graph.add_node("extract_text", lambda state: extract_text(state, deps))
-    graph.add_node("generate_metadata", lambda state: generate_metadata(state, deps))
-    graph.add_node("persist_document_metadata", lambda state: persist_document_metadata(state, deps))
-    graph.add_node("chunk_text", lambda state: chunk_text(state, deps))
-    graph.add_node("embed_chunks", lambda state: embed_chunks(state, deps))
-    graph.add_node("upsert_qdrant", lambda state: upsert_qdrant(state, deps))
-    graph.add_node("persist_claims", lambda state: persist_claims(state, deps))
-    graph.add_node("commit_supersession", lambda state: commit_supersession(state, deps))
-    graph.add_node("mark_complete", lambda state: mark_complete(state, deps))
+    graph.add_node("mark_processing", _cancellable(mark_processing, deps))
+    graph.add_node("download_file", _cancellable(download_file, deps))
+    graph.add_node("extract_text", _cancellable(extract_text, deps))
+    graph.add_node("generate_metadata", _cancellable(generate_metadata, deps))
+    graph.add_node("persist_document_metadata", _cancellable(persist_document_metadata, deps))
+    graph.add_node("chunk_text", _cancellable(chunk_text, deps))
+    graph.add_node("embed_chunks", _cancellable(embed_chunks, deps))
+    graph.add_node("upsert_qdrant", _cancellable(upsert_qdrant, deps))
+    graph.add_node("persist_claims", _cancellable(persist_claims, deps))
+    graph.add_node("commit_supersession", _cancellable(commit_supersession, deps))
+    graph.add_node("mark_complete", _cancellable(mark_complete, deps))
 
 
 def _add_edges(graph, *, end_node: str) -> None:
@@ -58,3 +61,25 @@ def _add_edges(graph, *, end_node: str) -> None:
     graph.add_edge("upsert_qdrant", "commit_supersession")
     graph.add_edge("commit_supersession", "mark_complete")
     graph.add_edge("mark_complete", end_node)
+
+
+def _cancellable(
+    step: Callable[[IngestState, IngestDependencies], IngestState],
+    deps: IngestDependencies,
+) -> Callable[[IngestState], IngestState]:
+    def run(state: IngestState) -> IngestState:
+        _raise_if_cancelled(state, deps)
+        next_state = step(state, deps)
+        _raise_if_cancelled(next_state, deps)
+        return next_state
+
+    return run
+
+
+def _raise_if_cancelled(state: IngestState, deps: IngestDependencies) -> None:
+    job_id = state["payload"].job_id
+    get_status = getattr(deps.backend, "get_job_status", None)
+    if not callable(get_status):
+        return
+    if get_status(job_id=job_id).status == "cancelled":
+        raise IngestJobCancelled(job_id=job_id)

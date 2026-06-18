@@ -66,7 +66,7 @@ async def create_snapshot_folder_schedule(
     clearance_level: str = Form(default="NATO_RESTRICTED"),
     effective_date: date | None = Form(default=None),
     expiry_date: date | None = Form(default=None),
-    doc_type: str = Form(...),
+    doc_type: str | None = Form(default=None),
     description: str | None = Form(default=None),
     schedule_type: str = Form(...),
     timezone: str = Form(default="Asia/Karachi"),
@@ -89,7 +89,7 @@ async def create_snapshot_folder_schedule(
         clearance_level=clearance_level,
         effective_date=effective_date,
         expiry_date=expiry_date,
-        doc_type=doc_type,
+        doc_type=_normalize_declared_doc_type(doc_type),
         description=description,
         schedule_type=schedule_type,
         timezone_name=timezone,
@@ -123,7 +123,7 @@ async def create_minio_folder_schedule(
         clearance_level=payload.clearance_level,
         effective_date=payload.effective_date,
         expiry_date=payload.expiry_date,
-        doc_type=payload.doc_type,
+        doc_type=_normalize_declared_doc_type(payload.doc_type),
         description=payload.description,
         schedule_type=payload.schedule_type,
         timezone_name=payload.timezone,
@@ -276,6 +276,11 @@ def _parse_recurrence(value: str, schedule_type: str) -> dict[str, Any]:
     except (json.JSONDecodeError, ValidationError) as exc:
         raise HTTPException(status_code=400, detail={"code": "invalid_recurrence", "message": "Recurring schedule details are invalid."}) from exc
     return recurrence.model_dump()
+
+
+def _normalize_declared_doc_type(value: str | None) -> str | None:
+    normalized = " ".join((value or "").strip().lower().split())
+    return normalized[:80] or None
 
 
 def _schedule_to_schema(schedule: FolderScheduleRecord, *, schedule_repo: FolderScheduleRepository) -> FolderSchedule:

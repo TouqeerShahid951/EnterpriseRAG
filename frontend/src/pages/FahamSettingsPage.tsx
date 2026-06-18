@@ -29,6 +29,7 @@ export function FahamSettingsPage({ currentUser, onLogout, onNavigate }: Props) 
   const [vllmDraft, setVllmDraft] = useState<VllmDeploymentFormState>(DEFAULT_VLLM_DEPLOYMENT_FORM);
   const [vllmRestartConfirmed, setVllmRestartConfirmed] = useState(false);
   const [workerConcurrency, setWorkerConcurrency] = useState(1);
+  const [ocrReviewThresholdPercent, setOcrReviewThresholdPercent] = useState(90);
   const [highConcurrencyConfirmed, setHighConcurrencyConfirmed] = useState(false);
   const ragEndpoints = endpointsFromForm(ragDraft);
   const canFetchRagModels = isAdmin && Object.values(ragEndpoints).every(canFetchModelsForEndpoint);
@@ -116,13 +117,14 @@ export function FahamSettingsPage({ currentUser, onLogout, onNavigate }: Props) 
     mutationFn: adminApi.updateIngestConfig,
     onSuccess: (config) => {
       setWorkerConcurrency(safeWorkerConcurrency(config.worker_concurrency));
+      setOcrReviewThresholdPercent(thresholdPercentFromConfig(config.ocr_review_confidence_threshold));
       setHighConcurrencyConfirmed(false);
       queryClient.setQueryData(["admin", "ingest-config"], config);
       notify({
-        title: config.apply_status === "applied" ? "Worker capacity applied" : "Worker capacity saved",
+        title: config.apply_status === "applied" ? "Ingestion config applied" : "Ingestion config saved",
         description: config.apply_status === "applied"
-          ? "The online worker picked up the new concurrency."
-          : "The value will apply when a worker is online.",
+          ? "The online worker picked up the saved capacity. New jobs will use the OCR review threshold."
+          : "The capacity value will apply when a worker is online. New jobs will use the OCR review threshold.",
         tone: config.apply_status === "applied" ? "success" : "warning",
       });
     },
@@ -176,6 +178,7 @@ export function FahamSettingsPage({ currentUser, onLogout, onNavigate }: Props) 
   useEffect(() => {
     if (ingestConfigQuery.data) {
       setWorkerConcurrency(safeWorkerConcurrency(ingestConfigQuery.data.worker_concurrency));
+      setOcrReviewThresholdPercent(thresholdPercentFromConfig(ingestConfigQuery.data.ocr_review_confidence_threshold));
     }
   }, [ingestConfigQuery.data]);
   useEffect(() => {
@@ -225,6 +228,7 @@ export function FahamSettingsPage({ currentUser, onLogout, onNavigate }: Props) 
   const activeVllmRequest = vllmDeploymentQuery.data ? requestFromVllmForm(vllmFormFromConfig(vllmDeploymentQuery.data)) : null;
   const vllmDraftIsDirty = activeVllmRequest !== null && JSON.stringify(activeVllmRequest) !== JSON.stringify(vllmRequest);
   const vllmFormIsValid = canSubmitVllmDeploymentConfig(vllmDraft);
+  const ingestConfigIsValid = isValidWorkerConcurrency(workerConcurrency) && isValidThresholdPercent(ocrReviewThresholdPercent);
 
   return (
     <FahamBasicPage
@@ -491,6 +495,7 @@ export function FahamSettingsPage({ currentUser, onLogout, onNavigate }: Props) 
                     onChange={(event) => setRagDraft({ ...ragDraft, chat_timeout_seconds: event.target.value })}
                     className="sv-input"
                   />
+                  <span className="text-body-md text-secondary">Maximum seconds to wait for answer synthesis.</span>
                 </label>
                 <label className="sv-field">
                   <span className="sv-label">Embed timeout</span>
@@ -501,6 +506,7 @@ export function FahamSettingsPage({ currentUser, onLogout, onNavigate }: Props) 
                     onChange={(event) => setRagDraft({ ...ragDraft, embed_timeout_seconds: event.target.value })}
                     className="sv-input"
                   />
+                  <span className="text-body-md text-secondary">Maximum seconds to wait for embedding requests.</span>
                 </label>
               </div>
             </div>
@@ -666,15 +672,36 @@ export function FahamSettingsPage({ currentUser, onLogout, onNavigate }: Props) 
                 />
                 <span className="text-body-md text-secondary">Allowed range: 1-10. Recommended: 1.</span>
               </label>
+              <label className="sv-field">
+                <span className="sv-label">OCR review threshold</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={ocrReviewThresholdPercent}
+                  onChange={(event) => setOcrReviewThresholdPercent(Number(event.target.value))}
+                  className="sv-input"
+                />
+                <span className="text-body-md text-secondary">
+                  OCR blocks below this confidence percentage pause for review. Current target: below {ocrReviewThresholdPercent || 0}%.
+                </span>
+              </label>
               {ingestConfigQuery.data ? (
                 <dl className="grid grid-cols-2 gap-3">
                   <Fact label="Worker" value={ingestConfigQuery.data.worker_online ? "Online" : "Offline"} />
                   <Fact label="Apply status" value={labelize(ingestConfigQuery.data.apply_status)} />
                   <Fact label="Observed pool" value={String(ingestConfigQuery.data.observed_pool_size)} />
                   <Fact label="Active jobs" value={String(ingestConfigQuery.data.active_jobs)} />
+                  <Fact label="OCR review" value={`Below ${thresholdPercentFromConfig(ingestConfigQuery.data.ocr_review_confidence_threshold)}%`} />
                 </dl>
               ) : null}
             </div>
+            {!ingestConfigIsValid ? (
+              <InlineMessage tone="error">
+                Worker concurrency must be 1-10 and OCR review threshold must be 0-100%.
+              </InlineMessage>
+            ) : null}
             {workerConcurrency > 2 ? (
               <InlineMessage tone="warning">
                 Concurrency above 2 can exhaust memory when Docling parses multiple documents.
@@ -695,15 +722,17 @@ export function FahamSettingsPage({ currentUser, onLogout, onNavigate }: Props) 
                 type="button"
                 className="sv-action-primary"
                 disabled={
-                  workerConcurrency < 1 ||
-                  workerConcurrency > 10 ||
+                  !ingestConfigIsValid ||
                   (workerConcurrency > 4 && !highConcurrencyConfirmed) ||
                   saveIngestConfigMutation.isPending
                 }
-                onClick={() => saveIngestConfigMutation.mutate({ worker_concurrency: workerConcurrency })}
+                onClick={() => saveIngestConfigMutation.mutate({
+                  worker_concurrency: workerConcurrency,
+                  ocr_review_confidence_threshold: thresholdFromPercent(ocrReviewThresholdPercent),
+                })}
               >
                 <Save size={16} />
-                {saveIngestConfigMutation.isPending ? "Applying" : "Save capacity"}
+                {saveIngestConfigMutation.isPending ? "Applying" : "Save ingestion config"}
               </button>
             </div>
             {ingestConfigQuery.isError ? <InlineMessage tone="error">{errorMessage(ingestConfigQuery.error, "Unable to load worker config.")}</InlineMessage> : null}
@@ -1280,6 +1309,7 @@ function VllmLimitsEditor({ includeKvCache = false, limits, onChange, title }: V
             onChange={(event) => update({ max_model_len: event.target.value })}
             className="sv-input"
           />
+          <span className="text-body-md text-secondary">Context length exposed by this vLLM service.</span>
         </label>
         <label className="sv-field">
           <span className="sv-label">GPU memory utilization</span>
@@ -1292,6 +1322,7 @@ function VllmLimitsEditor({ includeKvCache = false, limits, onChange, title }: V
             onChange={(event) => update({ gpu_memory_utilization: event.target.value })}
             className="sv-input"
           />
+          <span className="text-body-md text-secondary">Fraction of GPU memory vLLM may reserve.</span>
         </label>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="sv-field">
@@ -1304,6 +1335,7 @@ function VllmLimitsEditor({ includeKvCache = false, limits, onChange, title }: V
               onChange={(event) => update({ max_num_seqs: event.target.value })}
               className="sv-input"
             />
+            <span className="text-body-md text-secondary">Concurrent sequences accepted by this service.</span>
           </label>
           <label className="sv-field">
             <span className="sv-label">Batched tokens</span>
@@ -1315,6 +1347,7 @@ function VllmLimitsEditor({ includeKvCache = false, limits, onChange, title }: V
               onChange={(event) => update({ max_num_batched_tokens: event.target.value })}
               className="sv-input"
             />
+            <span className="text-body-md text-secondary">Token budget available to each scheduler batch.</span>
           </label>
         </div>
         {includeKvCache ? (
@@ -1326,6 +1359,7 @@ function VllmLimitsEditor({ includeKvCache = false, limits, onChange, title }: V
               placeholder="2G"
               className="sv-input"
             />
+            <span className="text-body-md text-secondary">Optional explicit KV cache size, such as 2G.</span>
           </label>
         ) : null}
       </div>
@@ -1489,4 +1523,21 @@ function labelize(value: string) {
 
 function safeWorkerConcurrency(value: number | null | undefined) {
   return Number.isFinite(value) ? Number(value) : 1;
+}
+
+function isValidWorkerConcurrency(value: number) {
+  return Number.isFinite(value) && value >= 1 && value <= 10;
+}
+
+function isValidThresholdPercent(value: number) {
+  return Number.isFinite(value) && value >= 0 && value <= 100;
+}
+
+export function thresholdPercentFromConfig(value: number | null | undefined): number {
+  return Number.isFinite(value) ? Math.round(Number(value) * 100) : 90;
+}
+
+export function thresholdFromPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0.9;
+  return Math.max(0, Math.min(1, Number((value / 100).toFixed(4))));
 }

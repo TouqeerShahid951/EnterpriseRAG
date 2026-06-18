@@ -4,9 +4,10 @@ import type { User } from "../types/api";
 
 export function useDocumentInventory(currentUser: User | null) {
   const documentsQuery = useQuery({
-    queryKey: ["documents", "list"],
+    queryKey: ["documents", "list", "active"],
     queryFn: () => documentsApi.list(),
     retry: false,
+    staleTime: 5000,
     enabled: Boolean(currentUser),
   });
 
