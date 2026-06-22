@@ -16,6 +16,7 @@ RouteIntent = Literal[
     "temporal_comparison",
     "multi_hop",
     "aggregation",
+    "graphrag_global",
     "conflict_check",
     "troubleshooting",
     "document_navigation",
@@ -108,7 +109,7 @@ class RoutePlan:
 def public_intent_for(intent: RouteIntent) -> QueryIntent:
     if intent in {"temporal", "temporal_comparison", "temporal_factual"}:
         return "temporal"
-    if intent in {"aggregation"}:
+    if intent in {"aggregation", "graphrag_global"}:
         return "aggregation"
     if intent in {"conflict_check"}:
         return "contradictory"

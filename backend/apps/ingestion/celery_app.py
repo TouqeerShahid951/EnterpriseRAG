@@ -14,6 +14,9 @@ hard_time_limit = int(os.getenv("INGEST_TASK_TIME_LIMIT_SECONDS", str(soft_time_
 celery_app = Celery("rag-ingestion-worker", broker=config.redis_url, include=["apps.ingestion.tasks"])
 celery_app.conf.update(
     task_default_queue=config.ingest_queue_name,
+    task_routes={
+        "apps.ingestion.tasks.index_document_graphrag": {"queue": config.graphrag_queue_name},
+    },
     task_serializer="json",
     accept_content=["json"],
     result_backend=None,

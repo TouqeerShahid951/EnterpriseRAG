@@ -10,23 +10,7 @@ TRUE_VALUES = {"1", "true", "yes", "on", "y"}
 FALSE_VALUES = {"0", "false", "no", "off", "n"}
 SUPPORTED_MODEL_PROVIDERS = {"mock", "ollama", "vllm"}
 DEFAULT_OLLAMA_BASE_URL = "http://host.docker.internal:11434"
-DEFAULT_TOPIC_TAXONOMY = (
-    "procurement",
-    "contracts",
-    "hr_policy",
-    "leave",
-    "finance",
-    "audit",
-    "security",
-    "it_policy",
-    "operations",
-    "logistics",
-    "compliance",
-    "legal",
-    "training",
-    "performance",
-    "health_safety",
-)
+DEFAULT_TOPIC_TAXONOMY: tuple[str, ...] = ()
 
 
 def parse_bool(value: str | None, default: bool) -> bool:
@@ -94,6 +78,13 @@ class VisionConfig:
 class WorkerConfig:
     redis_url: str
     ingest_queue_name: str
+    graphrag_queue_name: str
+    graphrag_enabled: bool
+    graphrag_community_collection: str
+    neo4j_uri: str
+    neo4j_user: str
+    neo4j_password: str
+    neo4j_database: str
     http_timeout_seconds: float
     heartbeat_interval_seconds: float
     ollama_retry_base_seconds: float
@@ -130,6 +121,13 @@ class WorkerConfig:
         return cls(
             redis_url=os.getenv("CELERY_BROKER_URL", os.getenv("REDIS_URL", "redis://redis:6379/0")),
             ingest_queue_name=os.getenv("INGEST_QUEUE_NAME", "ingest:jobs"),
+            graphrag_queue_name=os.getenv("GRAPHRAG_QUEUE_NAME", "graphrag:jobs"),
+            graphrag_enabled=parse_bool(os.getenv("GRAPHRAG_ENABLED"), False),
+            graphrag_community_collection=os.getenv("GRAPHRAG_COMMUNITY_COLLECTION", "graphrag_community_summaries"),
+            neo4j_uri=os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
+            neo4j_user=os.getenv("NEO4J_USER", "neo4j"),
+            neo4j_password=os.getenv("NEO4J_PASSWORD", "agenticrag-local-neo4j-password"),
+            neo4j_database=os.getenv("NEO4J_DATABASE", "neo4j"),
             http_timeout_seconds=http_timeout,
             heartbeat_interval_seconds=float(os.getenv("INGEST_HEARTBEAT_INTERVAL_SECONDS", "30")),
             ollama_retry_base_seconds=float(os.getenv("OLLAMA_RETRY_BASE_SECONDS", "2")),
@@ -213,4 +211,4 @@ def _topic_taxonomy(value: str | None) -> tuple[str, ...]:
     if not value:
         return DEFAULT_TOPIC_TAXONOMY
     topics = tuple(topic.strip() for topic in value.split(",") if topic.strip())
-    return topics or DEFAULT_TOPIC_TAXONOMY
+    return topics

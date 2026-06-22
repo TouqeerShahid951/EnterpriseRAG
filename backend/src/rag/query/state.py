@@ -35,6 +35,7 @@ class QueryContext(TypedDict):
     node_timings: list[dict[str, str | int | None]]
     execution_modes: dict[str, str]
     execution_details: dict[str, str]
+    graphrag_communities: NotRequired[list[object]]
     retry_count: int
     token_budget: int
     wall_time_start: float

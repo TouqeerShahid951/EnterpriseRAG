@@ -68,6 +68,15 @@ def retrieval_settings_for(intent: RouteIntent, *, query: str, base_top_k: int) 
             chunk_granularity="section",
             top_k=max(base_top_k, 24),
         )
+    elif intent == "graphrag_global":
+        settings.update(
+            retrieval_strategy="graphrag_global",
+            search_mode="hybrid",
+            use_query_planner=False,
+            use_reranker=False,
+            chunk_granularity="document",
+            top_k=max(base_top_k, 8),
+        )
     elif intent == "conflict_check":
         settings.update(
             retrieval_strategy="competing_claims_hybrid",
@@ -138,7 +147,7 @@ def _has_temporal_scope(query: str, target_date: str | None) -> bool:
 
 
 def _risk_level(intent: RouteIntent) -> RiskLevel:
-    if intent in {"aggregation", "conflict_check", "out_of_scope"}:
+    if intent in {"aggregation", "graphrag_global", "conflict_check", "out_of_scope"}:
         return "high"
     if intent in {
         "comparison",

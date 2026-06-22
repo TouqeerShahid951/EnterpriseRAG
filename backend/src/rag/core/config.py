@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     csrf_cookie_name: str = "csrf_token"
     auth_cookie_secure: bool = False
     auth_cookie_samesite: str = "lax"
-    bootstrap_admin_email: str = "admin@faham.ai"
+    bootstrap_admin_email: str = "admin@prudentia.ai"
     bootstrap_admin_name: str = "Platform Administrator"
     bootstrap_admin_password: str = Field(default="12345678", min_length=8)
     identity_repository: str = "postgres"
@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     celery_broker_url: str | None = None
     qdrant_url: str = "http://qdrant:6333"
     qdrant_collection: str = "documents"
+    neo4j_uri: str = "bolt://neo4j:7687"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "agenticrag-local-neo4j-password"
+    neo4j_database: str = "neo4j"
+    graphrag_enabled: bool = False
+    graphrag_community_collection: str = "graphrag_community_summaries"
     rag_model_provider: str = "ollama"
     ollama_base_url: str = "http://host.docker.internal:11434"
     ollama_chat_model: str = "llama3.1:8b"
@@ -96,6 +102,7 @@ class Settings(BaseSettings):
     rag_reranker_cache_dir: str | None = "/models/fastembed"
     rag_reranker_max_candidates: int = Field(default=40, ge=1, le=512)
     rag_retrieval_max_retries: int = Field(default=1, ge=0, le=3)
+    rag_query_planner_enabled: bool = True
     rag_query_rewrite_llm_enabled: bool = False
     rag_faithfulness_model: str | None = None
     rag_faithfulness_policy: str = "high_risk"
@@ -115,11 +122,6 @@ class Settings(BaseSettings):
     artifact_libreoffice_required: bool = False
     artifact_reranker_max_candidates: int = Field(default=8, ge=1, le=128)
     artifact_composer_timeout_seconds: float = Field(default=60.0, ge=5.0)
-    artifact_renderer_mode: str = "sandbox"
-    artifact_fast_paginated_renderer: bool = True
-    artifact_sandbox_url: str = "http://artifact-sandbox:8000"
-    artifact_sandbox_timeout_seconds: float = Field(default=120.0, ge=1.0, le=600.0)
-    artifact_sandbox_max_file_mb: int = Field(default=30, ge=1, le=100)
     evaluation_queue_backend: str = "celery"
     evaluation_queue_name: str = "evaluation:jobs"
     evaluation_task_name: str = "rag.evaluations.tasks.run_evaluation"

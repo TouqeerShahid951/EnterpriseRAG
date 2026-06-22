@@ -6,6 +6,8 @@ from dataclasses import replace
 from time import perf_counter
 
 from ...core.config import Settings
+from ...graphrag.graphrag_retriever import GraphRAGRetriever
+from ...graphrag.graphrag_synthesizer import synthesize_graphrag_response
 from ..artifact_composer import artifact_response_summary, compose_artifact_content
 from ..artifact_models import ArtifactValidation
 from ..artifact_pipeline import (
@@ -56,6 +58,7 @@ _HIGH_RISK_FAITHFULNESS_INTENTS = {
     "comparison",
     "comparative_summary",
     "conflict_check",
+    "graphrag_global",
     "multi_hop",
     "procedural",
     "temporal",
@@ -79,6 +82,7 @@ class QueryNodes:
         routing_model: str | None = None,
         faithfulness_model: str | None = None,
         reranker_model: str | None = None,
+        query_planner_enabled: bool | None = None,
     ) -> None:
         self.config = config
         self.ollama = ollama
@@ -91,6 +95,7 @@ class QueryNodes:
         self.routing_model = routing_model or self.reasoning_model
         self.faithfulness_model = faithfulness_model or config.rag_faithfulness_model or config.ollama_chat_model
         self.reranker_model = reranker_model or config.rag_reranker_model
+        self.query_planner_enabled = config.rag_query_planner_enabled if query_planner_enabled is None else query_planner_enabled
 
     def session_memory(self, ctx: QueryContext) -> QueryContext:
         _raise_if_cancelled(ctx)
@@ -132,6 +137,7 @@ class QueryNodes:
             llm_verifier=self.ollama,
             verifier_model=self.routing_model,
             verifier_enabled=self.config.rag_route_llm_verifier_enabled,
+            query_planner_enabled=self.query_planner_enabled,
             cancellation_token=cancellation_token_from_context(ctx),
         )
         _mark_execution(ctx, "intent_router", "ai_assisted" if plan.route_method == "llm_verifier" else "deterministic")
@@ -192,6 +198,29 @@ class QueryNodes:
 
     def abac_retriever(self, ctx: QueryContext) -> QueryContext:
         _raise_if_cancelled(ctx)
+        plan = ctx.get("route_plan")
+        if plan is not None and plan.retrieval_strategy == "graphrag_global":
+            result = GraphRAGRetriever(
+                config=self.config,
+                embedder=self.ollama,
+                document_qdrant=self.qdrant,
+            ).retrieve(ctx, top_k_communities=plan.top_k)
+            if result.is_available:
+                ctx["graphrag_communities"] = result.communities
+                ctx["retrieved_hits"] = result.source_hits
+                _mark_execution(
+                    ctx,
+                    "abac_retriever",
+                    "graphrag",
+                    f"communities={len(result.communities)},source_chunks={len(result.source_hits)}",
+                )
+                log_retrieval_summary(ctx, stage="retrieved")
+                return ctx
+            if "graphrag_communities" in ctx:
+                del ctx["graphrag_communities"]
+            ctx["degraded"] = True
+            ctx["degraded_reason"] = result.degraded_reason or "graphrag_unavailable"
+            _mark_execution(ctx, "abac_retriever", "graphrag_fallback", ctx["degraded_reason"])
         ctx["retrieved_hits"] = self.retrieval_service.retrieve(ctx)
         log_retrieval_summary(ctx, stage="retrieved")
         return ctx
@@ -245,6 +274,27 @@ class QueryNodes:
         artifact_plan = ctx.get("artifact_plan")
         if artifact_plan is not None:
             return self._verify_artifact_evidence(ctx, artifact_plan)
+        if ctx.get("graphrag_communities") and ctx["retrieved_hits"]:
+            distinct_docs = {
+                str(hit.payload["doc_id"])
+                for hit in ctx["retrieved_hits"]
+                if hit.payload.get("doc_id") not in (None, "")
+            }
+            ctx["evidence_quality"] = EvidenceQuality(
+                quality="supported",
+                reasons=("graphrag_community_sources",),
+                max_retrieval_score=max((hit.score for hit in ctx["retrieved_hits"]), default=0.0),
+                max_rerank_score=None,
+                query_token_coverage=1.0,
+                distinct_doc_count=len(distinct_docs),
+                evidence_score=1.0,
+                outcome="pass",
+                hit_count=len(ctx["retrieved_hits"]),
+            )
+            ctx["verifier_decision"] = "pass"
+            _mark_execution(ctx, "verifier", "deterministic", "graphrag_community_sources")
+            log_verifier_decision(ctx)
+            return ctx
         active_query = ctx["query_rewritten"][-1] if ctx["query_rewritten"] else (
             plan.resolved_query if plan else ctx["request"].query
         )
@@ -392,6 +442,8 @@ class QueryNodes:
 
     def synthesizer(self, ctx: QueryContext) -> QueryContext:
         _raise_if_cancelled(ctx)
+        if ctx.get("graphrag_communities") and ctx["retrieved_hits"]:
+            return synthesize_graphrag_response(ctx, self.ollama, cancellation_token=cancellation_token_from_context(ctx))
         return synthesize_response(ctx, self.ollama, cancellation_token=cancellation_token_from_context(ctx))
 
     def artifact_composer(self, ctx: QueryContext) -> QueryContext:

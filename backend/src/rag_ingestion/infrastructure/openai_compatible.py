@@ -106,6 +106,37 @@ class OpenAICompatibleClient:
     def embed(self, text: str) -> list[float]:
         return self.embed_many([text])[0]
 
+    def generate_json(self, *, prompt: str, model: str | None = None, system: str) -> str:
+        last_error: ServiceRequestError | None = None
+        for attempt in range(3):
+            try:
+                payload = request_json(
+                    self.base_url,
+                    _openai_path(self.base_url, "/v1/chat/completions"),
+                    service="vllm",
+                    method="POST",
+                    payload={
+                        "model": model or self.chat_model,
+                        "stream": False,
+                        "temperature": 0,
+                        "max_tokens": 4096,
+                        "response_format": {"type": "json_object"},
+                        **no_thinking_payload_fields(),
+                        "messages": [
+                            {"role": "system", "content": no_thinking_system(system)},
+                            {"role": "user", "content": no_thinking_prompt(prompt, model or self.chat_model)},
+                        ],
+                    },
+                    timeout_seconds=self.chat_timeout_seconds,
+                )
+                return _message_content(payload)
+            except ServiceRequestError as exc:
+                last_error = exc
+                if attempt >= 2 or not is_transient_service_error(exc):
+                    break
+                self._backoff(attempt)
+        raise last_error or ServiceRequestError("vllm", "JSON generation request failed", 502)
+
     def embed_many(
         self,
         texts: Sequence[str],

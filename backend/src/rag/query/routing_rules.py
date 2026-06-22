@@ -71,6 +71,38 @@ _SIGNALS: dict[RouteIntent, dict[str, tuple[str, ...]]] = {
         "medium": ("all of the", "all the", "every", "sum", "updated in"),
         "weak": ("list", "enumerate"),
     },
+    "graphrag_global": {
+        "strong": (
+            "major themes",
+            "main themes",
+            "key themes",
+            "recurring issues",
+            "recurring problems",
+            "common patterns",
+            "patterns across",
+            "trends across",
+            "main risks",
+            "major risks",
+            "risk patterns",
+            "executive overview",
+            "corpus-level",
+            "corpus level",
+            "across all documents",
+            "across the corpus",
+            "across the collection",
+        ),
+        "medium": (
+            "themes",
+            "patterns",
+            "trends",
+            "risks",
+            "document collection",
+            "big picture",
+            "overall narrative",
+            "overall picture",
+        ),
+        "weak": ("sensemaking", "synthesize across", "high-level takeaways", "strategic overview"),
+    },
     "conflict_check": {
         "strong": (
             "conflict",
@@ -114,6 +146,7 @@ _DATE_RE = re.compile(r"\b(?:19|20)\d{2}(?:-\d{2}){0,2}\b")
 _SUPERLATIVE_RE = re.compile(r"\b(?:highest|lowest|maximum|minimum|max|min|largest|smallest|most|least)\b")
 _EXHAUSTIVE_SUMMARY_RE = re.compile(r"\b(?:summari[sz]e|summary|overview|recap)\b")
 _EXHAUSTIVE_SCOPE_RE = re.compile(r"\b(?:all|every)\b")
+_EXACT_AGGREGATION_RE = re.compile(r"\b(?:how many|count|total|number of|list all|list the|show all|enumerate)\b")
 _DOCUMENT_CLASS_RE = re.compile(
     r"\b(?:firs?|documents?|docs?|files?|pdfs?|polic(?:y|ies)|contracts?|reports?|manuals?|forms?)\b"
 )
@@ -255,6 +288,11 @@ def _apply_penalties(
             if intent != "out_of_scope":
                 adjusted[intent] += CONFLICTING_SIGNAL_PENALTY
                 penalties.append(RoutePenalty(intent, "conflicting_out_of_scope_signal", CONFLICTING_SIGNAL_PENALTY))
+    if adjusted.get("graphrag_global", 0.0) >= 0.35 and _EXACT_AGGREGATION_RE.search(signals.normalized_query):
+        if "aggregation" in adjusted:
+            adjusted["aggregation"] += MEDIUM_WEIGHT
+        adjusted["graphrag_global"] += CONFLICTING_SIGNAL_PENALTY
+        penalties.append(RoutePenalty("graphrag_global", "exact_aggregation_requested", CONFLICTING_SIGNAL_PENALTY))
     return {intent: max(0.0, score) for intent, score in adjusted.items() if score > 0.0}, penalties
 
 

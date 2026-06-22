@@ -130,6 +130,42 @@ class OllamaClient:
     def embed(self, text: str) -> list[float]:
         return self.embed_many([text])[0]
 
+    def generate_json(self, *, prompt: str, model: str | None = None, system: str) -> str:
+        request_payload = {
+            "model": model or self.chat_model,
+            "stream": False,
+            "think": self.thinking_enabled,
+            "format": "json",
+            "keep_alive": "5m",
+            "options": _ollama_options(
+                temperature=0.0,
+                num_predict=4096,
+                num_ctx=self.num_ctx,
+            ),
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        last_error: ServiceRequestError | None = None
+        for attempt in range(3):
+            try:
+                payload = request_json(
+                    self.base_url,
+                    "/api/chat",
+                    service="ollama",
+                    method="POST",
+                    payload=request_payload,
+                    timeout_seconds=self.chat_timeout_seconds,
+                )
+                return _message_content(payload)
+            except ServiceRequestError as exc:
+                last_error = exc
+                if attempt >= 2 or not is_transient_service_error(exc):
+                    break
+                self._backoff(attempt)
+        raise last_error or ServiceRequestError("ollama", "JSON generation request failed", 502)
+
     def embed_many(
         self,
         texts: Sequence[str],

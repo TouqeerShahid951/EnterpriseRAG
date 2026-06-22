@@ -17,6 +17,7 @@ _VALID_INTENTS: set[RouteIntent] = {
     "temporal_comparison",
     "multi_hop",
     "aggregation",
+    "graphrag_global",
     "conflict_check",
     "troubleshooting",
     "document_navigation",

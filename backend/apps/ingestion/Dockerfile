@@ -53,6 +53,7 @@ ENV HF_HUB_DISABLE_XET=1
 
 COPY src/rag_ingestion /app/src/rag_ingestion
 COPY src/rag/__init__.py /app/src/rag/__init__.py
+COPY src/rag/graphrag /app/src/rag/graphrag
 COPY src/rag/shared /app/src/rag/shared
 COPY apps/__init__.py /app/apps/__init__.py
 COPY apps/ingestion /app/apps/ingestion

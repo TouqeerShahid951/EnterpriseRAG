@@ -83,8 +83,6 @@ _EVIDENCE_TEXT_FIELDS = (
 )
 _EVIDENCE_LIST_FIELDS = (
     "section_path",
-    "topics",
-    "llm_topics",
     "table_column_headers",
     "structured_field_names",
 )
@@ -96,7 +94,7 @@ _DOCUMENT_CLASS_FIELDS = (
     "source_id",
 )
 _AGGREGATION_INTENTS = {"aggregation"}
-_SUMMARY_INTENTS = {"summarization", "comparative_summary", "general_rag"}
+_SUMMARY_INTENTS = {"summarization", "comparative_summary", "general_rag", "graphrag_global"}
 _COMPARISON_INTENTS = {"comparison", "temporal_comparison", "comparative_summary"}
 _NAVIGATION_INTENTS = {"document_navigation"}
 
@@ -385,10 +383,6 @@ def _document_class_tokens(hit: SearchHit) -> set[str]:
         value = hit.payload.get(field)
         if isinstance(value, str):
             parts.append(value)
-    for field in ("topics", "llm_topics"):
-        value = hit.payload.get(field)
-        if isinstance(value, list):
-            parts.extend(str(item) for item in value)
     return normalized_match_tokens(" ".join(parts))
 
 
