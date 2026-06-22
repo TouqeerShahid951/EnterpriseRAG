@@ -18,6 +18,7 @@ def route_query(
     llm_verifier: object | None = None,
     verifier_model: str | None = None,
     verifier_enabled: bool = True,
+    query_planner_enabled: bool = True,
     cancellation_token: QueryCancellationToken | None = None,
 ) -> tuple[RoutePlan, QuerySignals]:
     if cancellation_token is not None:
@@ -41,11 +42,11 @@ def route_query(
             verifier_penalty = RoutePenalty(None, "llm_verifier_failed", -0.20)
 
     if verifier_decision is not None:
-        plan = _plan_from_verifier(verifier_decision, signals, rule_result, base_top_k)
+        plan = _plan_from_verifier(verifier_decision, signals, rule_result, base_top_k, query_planner_enabled)
     elif rule_result.confidence < LLM_VERIFIER_FLOOR and rule_result.intent != "conversational_followup":
-        plan = _fallback_plan(signals, rule_result, base_top_k, verifier_penalty)
+        plan = _fallback_plan(signals, rule_result, base_top_k, verifier_penalty, query_planner_enabled)
     else:
-        plan = _plan_from_rules(signals, rule_result, base_top_k, verifier_penalty)
+        plan = _plan_from_rules(signals, rule_result, base_top_k, verifier_penalty, query_planner_enabled)
     return plan, signals
 
 
@@ -54,6 +55,7 @@ def _plan_from_rules(
     rule_result: RuleRouteResult,
     base_top_k: int,
     verifier_penalty: RoutePenalty | None,
+    query_planner_enabled: bool,
 ) -> RoutePlan:
     penalties = rule_result.penalties + ((verifier_penalty,) if verifier_penalty else ())
     return _build_plan(
@@ -67,6 +69,7 @@ def _plan_from_rules(
         rule_hits=rule_result.rule_hits,
         penalties=penalties,
         margin=rule_result.margin,
+        query_planner_enabled=query_planner_enabled,
     )
 
 
@@ -75,6 +78,7 @@ def _plan_from_verifier(
     signals: QuerySignals,
     rule_result: RuleRouteResult,
     base_top_k: int,
+    query_planner_enabled: bool,
 ) -> RoutePlan:
     return _build_plan(
         signals,
@@ -87,6 +91,7 @@ def _plan_from_verifier(
         rule_hits=rule_result.rule_hits,
         penalties=rule_result.penalties,
         margin=rule_result.margin,
+        query_planner_enabled=query_planner_enabled,
     )
 
 
@@ -95,6 +100,7 @@ def _fallback_plan(
     rule_result: RuleRouteResult,
     base_top_k: int,
     verifier_penalty: RoutePenalty | None,
+    query_planner_enabled: bool,
 ) -> RoutePlan:
     penalties = rule_result.penalties + ((verifier_penalty,) if verifier_penalty else ())
     return _build_plan(
@@ -108,6 +114,7 @@ def _fallback_plan(
         rule_hits=rule_result.rule_hits,
         penalties=penalties,
         margin=rule_result.margin,
+        query_planner_enabled=query_planner_enabled,
     )
 
 
@@ -123,6 +130,7 @@ def _build_plan(
     rule_hits,
     penalties,
     margin: float,
+    query_planner_enabled: bool,
 ) -> RoutePlan:
     settings = retrieval_settings_for(intent, query=signals.resolved_query, base_top_k=base_top_k)
     return RoutePlan(
@@ -135,7 +143,7 @@ def _build_plan(
         needs_retrieval=bool(settings["needs_retrieval"]),
         retrieval_strategy=str(settings["retrieval_strategy"]),
         search_mode=settings["search_mode"],  # type: ignore[arg-type]
-        use_query_planner=bool(settings["use_query_planner"]),
+        use_query_planner=bool(settings["use_query_planner"]) and query_planner_enabled,
         use_reranker=bool(settings["use_reranker"]),
         use_conversation_memory=signals.use_conversation_memory,
         use_temporal_filter=bool(settings["use_temporal_filter"]),
