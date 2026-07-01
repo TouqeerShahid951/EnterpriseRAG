@@ -405,6 +405,11 @@
   background: var(--color-surface-container-high);
 }
 
+.rag-eval-case-row[aria-current="true"] {
+  outline: 1px solid color-mix(in srgb, var(--color-primary) 34%, transparent);
+  outline-offset: -1px;
+}
+
 .rag-eval-run-row strong,
 .rag-eval-case-row strong {
   display: block;
@@ -516,7 +521,7 @@
 
 .rag-eval-detail-grid {
   display: grid;
-  grid-template-columns: minmax(16rem, 0.4fr) minmax(0, 1fr);
+  grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
   min-height: 28rem;
 }
 
@@ -579,6 +584,18 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-surface-border));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-primary) 7%, var(--color-surface-container-low));
+  padding: 0.85rem;
+}
+
+.rag-eval-case-detail-header p {
+  display: -webkit-box;
+  max-width: 72ch;
+  overflow: hidden;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
 }
 
 .rag-eval-stage-badges {
@@ -656,6 +673,28 @@
   gap: 0.85rem;
 }
 
+.rag-eval-diagnostic-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.75rem;
+}
+
+.rag-eval-diagnostic-section-header h4 {
+  margin: 0;
+  color: var(--color-on-surface);
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.rag-eval-diagnostic-section-header p {
+  margin: 0.18rem 0 0;
+  color: var(--color-on-surface-variant);
+  font-size: 0.78rem;
+}
+
 .rag-eval-pipeline {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(8.75rem, 1fr));
@@ -718,45 +757,128 @@
   color: var(--color-warning-amber);
 }
 
-.rag-eval-coverage-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
-  gap: 0.55rem;
-}
-
-.rag-eval-coverage-item {
+.rag-eval-coverage-panel {
+  overflow: hidden;
   border: 1px solid var(--color-surface-border);
   border-radius: 0.5rem;
   background: var(--color-surface-container-low);
-  padding: 0.6rem;
+}
+
+.rag-eval-coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0;
+  margin: 0;
+}
+
+.rag-eval-coverage-item {
+  display: grid;
+  gap: 0.45rem;
+  border-right: 1px solid var(--color-surface-border);
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.75rem;
   min-width: 0;
+  min-height: 6.25rem;
 }
 
 .rag-eval-coverage-item[data-state="passed"] {
-  border-color: color-mix(in srgb, var(--color-success) 24%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-success) 5%, transparent);
 }
 
 .rag-eval-coverage-item[data-state="failed"] {
-  border-color: color-mix(in srgb, var(--color-error) 30%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-error) 6%, transparent);
 }
 
 .rag-eval-coverage-item[data-state="warning"] {
-  border-color: color-mix(in srgb, var(--color-warning-amber) 34%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-warning-amber) 7%, transparent);
 }
 
 .rag-eval-coverage-item dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   color: var(--color-on-surface-variant);
   font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
 }
 
+.rag-eval-coverage-item dt::before {
+  content: "";
+  width: 0.42rem;
+  height: 0.42rem;
+  flex: none;
+  border-radius: 999px;
+  background: var(--color-on-surface-variant);
+}
+
+.rag-eval-coverage-item[data-state="passed"] dt::before {
+  background: var(--color-success);
+}
+
+.rag-eval-coverage-item[data-state="failed"] dt::before {
+  background: var(--color-error);
+}
+
+.rag-eval-coverage-item[data-state="warning"] dt::before {
+  background: var(--color-warning-amber);
+}
+
 .rag-eval-coverage-item dd {
-  margin: 0.2rem 0 0;
-  overflow-wrap: anywhere;
+  margin: 0;
   color: var(--color-on-surface);
   font-size: 0.83rem;
   font-weight: 700;
+  min-width: 0;
+}
+
+.rag-eval-coverage-item dd > small {
+  display: block;
+  margin-top: 0.45rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.rag-eval-coverage-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.rag-eval-coverage-value,
+.rag-eval-coverage-more,
+.rag-eval-coverage-empty {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-surface-container-high) 82%, transparent);
+  padding: 0.2rem 0.5rem;
+  color: var(--color-on-surface);
+  font-size: 0.73rem;
+  line-height: 1.25;
+}
+
+.rag-eval-coverage-value span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-eval-coverage-value strong {
+  color: var(--color-primary);
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.rag-eval-coverage-more,
+.rag-eval-coverage-empty {
+  color: var(--color-on-surface-variant);
+  font-weight: 750;
 }
 
 .rag-eval-candidate-grid {
@@ -832,6 +954,10 @@
 .rag-eval-candidate-table small,
 .rag-eval-candidate-table span {
   display: block;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rag-eval-candidate-table small {

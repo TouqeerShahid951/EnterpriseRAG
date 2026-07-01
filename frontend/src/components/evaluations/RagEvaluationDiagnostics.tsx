@@ -87,14 +87,47 @@ function EvidenceCoverage({ checks, diagnostic, fallbackCount }: { checks: JsonR
   const retrievedPages = numberList(diagnostic.retrieved_pages).length ? numberList(diagnostic.retrieved_pages) : numberList(retrieval.retrieved_pages);
 
   return (
-    <div className="rag-eval-coverage-grid" aria-label="Expected evidence coverage">
-      <CoverageItem label="Expected docs" value={listText(expectedDocs)} />
-      <CoverageItem label="Indexed" value={listText(indexedDocs)} state={stateFromCheck(ingestion)} />
-      <CoverageItem label="Retrieved" value={listText(retrievedDocs)} state={stateFromCheck(retrieval)} />
-      <CoverageItem label="Reranked" value={rerankedDocs.length ? listText(rerankedDocs) : "Not recorded"} state={rerankedDocs.length ? "passed" : "pending"} />
-      <CoverageItem label="Final sources" value={listText(finalDocs)} state={stateFromCheck(finalSources)} />
-      <CoverageItem label="Pages" value={expectedPages.length ? `${listText(retrievedPages)} / expected ${listText(expectedPages)}` : listText(retrievedPages)} />
-      <CoverageItem label="Fallbacks" value={fallbackCount ? `${fallbackCount} candidate${fallbackCount === 1 ? "" : "s"}` : "None"} state={fallbackCount ? "warning" : "passed"} />
+    <section className="rag-eval-coverage-panel" aria-label="Expected evidence coverage">
+      <div className="rag-eval-diagnostic-section-header">
+        <div>
+          <h4>Evidence coverage</h4>
+          <p>Expected evidence compared with indexed, retrieved, and final sources.</p>
+        </div>
+      </div>
+      <dl className="rag-eval-coverage-grid">
+        <CoverageListItem label="Expected docs" values={expectedDocs} />
+        <CoverageListItem label="Indexed" values={indexedDocs} state={stateFromCheck(ingestion)} />
+        <CoverageListItem label="Retrieved" values={retrievedDocs} state={stateFromCheck(retrieval)} />
+        <CoverageListItem label="Reranked" values={rerankedDocs} empty="Not recorded" state={rerankedDocs.length ? "passed" : "pending"} />
+        <CoverageListItem label="Final sources" values={finalDocs} state={stateFromCheck(finalSources)} />
+        <CoverageListItem label="Pages" values={retrievedPages.map(String)} detail={expectedPages.length ? `Expected ${listText(expectedPages)}` : null} />
+        <CoverageItem label="Fallbacks" value={fallbackCount ? `${fallbackCount} candidate${fallbackCount === 1 ? "" : "s"}` : "None"} state={fallbackCount ? "warning" : "passed"} />
+      </dl>
+    </section>
+  );
+}
+
+function CoverageListItem({ detail, empty = "None", label, state, values }: { detail?: string | null; empty?: string; label: string; state?: StageState; values: Array<string | number> }) {
+  const summary = summarizeRepeatedValues(values);
+  return (
+    <div className="rag-eval-coverage-item" data-state={state ?? "pending"}>
+      <dt>{label}</dt>
+      <dd>
+        {summary.items.length ? (
+          <span className="rag-eval-coverage-values">
+            {summary.items.map((item) => (
+              <span key={item.value} className="rag-eval-coverage-value" title={item.value}>
+                <span>{item.value}</span>
+                {item.count > 1 ? <strong>x{item.count}</strong> : null}
+              </span>
+            ))}
+            {summary.hiddenCount ? <span className="rag-eval-coverage-more">+{summary.hiddenCount} more</span> : null}
+          </span>
+        ) : (
+          <span className="rag-eval-coverage-empty">{empty}</span>
+        )}
+        {detail ? <small>{detail}</small> : null}
+      </dd>
     </div>
   );
 }
@@ -138,11 +171,11 @@ function CandidateTable({ detail, empty = "No candidates recorded.", rows, title
                 <tr key={`${row.rank}-${row.docId}-${row.chunkId}`}>
                   <td>{row.rank}</td>
                   <td>
-                    <strong>{row.docTitle}</strong>
-                    <small>{row.docId}</small>
+                    <strong title={row.docTitle}>{row.docTitle}</strong>
+                    <small title={row.docId}>{compactIdentifier(row.docId)}</small>
                   </td>
                   <td>
-                    <span>{row.chunkId}</span>
+                    <span title={row.chunkId}>{compactIdentifier(row.chunkId)}</span>
                     <small>{[row.chunkType, row.structuredOrigin].filter(Boolean).join(" / ") || "text"}</small>
                   </td>
                   <td>{row.pageLabel}</td>
@@ -265,8 +298,23 @@ function numberValue(value: unknown): number | null {
   return null;
 }
 
+export function summarizeRepeatedValues(values: Array<string | number>, limit = 4): { hiddenCount: number; items: Array<{ value: string; count: number }> } {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    const normalized = String(value).trim();
+    if (!normalized) continue;
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  }
+  const items = Array.from(counts, ([value, count]) => ({ value, count })).sort((left, right) => right.count - left.count || left.value.localeCompare(right.value));
+  return { hiddenCount: Math.max(0, items.length - limit), items: items.slice(0, limit) };
+}
+
 function listText(items: string[] | number[]): string {
   return items.length ? items.join(", ") : "None";
+}
+
+function compactIdentifier(value: string): string {
+  return value.length > 30 ? `${value.slice(0, 14)}...${value.slice(-10)}` : value;
 }
 
 type Stage = {
