@@ -34,6 +34,10 @@ class Document(ContractModel):
     title: str
     doc_type: DocType | None = None
     group_path: str
+    owner_group_path: str
+    shared_group_paths: list[str] = Field(default_factory=list)
+    access_group_paths: list[str] = Field(default_factory=list)
+    governance_owner: Literal["space", "system"] = "space"
     clearance_level: ClearanceLevel = DEFAULT_CLEARANCE_LEVEL
     effective_date: str | None = None
     expiry_date: str | None = None
@@ -67,6 +71,27 @@ class DocumentClearanceUpdateRequest(ContractModel):
     clearance_level: ClearanceLevel
 
 
+class DocumentTopicsUpdateRequest(ContractModel):
+    topics: list[str] = Field(default_factory=list, max_length=32)
+    llm_topics: list[str] = Field(default_factory=list, max_length=32)
+
+
+class DocumentSharesUpdateRequest(ContractModel):
+    group_paths: list[str] = Field(default_factory=list, max_length=128)
+
+
+class DocumentUnshareRequest(ContractModel):
+    group_path: str = Field(..., min_length=1)
+
+
+class DocumentSharesResponse(ContractModel):
+    document_id: str
+    owner_group_path: str
+    shared_group_paths: list[str] = Field(default_factory=list)
+    access_group_paths: list[str] = Field(default_factory=list)
+    governance_owner: Literal["space", "system"] = "space"
+
+
 class SupersedeRequest(ContractModel):
     supersedes: list[str] = Field(default_factory=list)
 
@@ -92,3 +117,10 @@ class DocumentReingestResponse(ContractModel):
     document_id: str
     job_id: str
     status: Literal["queued"] = "queued"
+
+
+class DocumentGraphEnrichmentResponse(ContractModel):
+    document_id: str
+    job_id: str
+    status: Literal["queued"] = "queued"
+    message: str = "Graph enrichment queued."

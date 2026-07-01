@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from math import ceil
 
 from .docling_adapter import DoclingProgressCallback, parse_docling_pdf
 from .docling_repairs import merge_docling_repairs
@@ -28,16 +29,22 @@ def parse_layered_pdf(
     weak_page_threshold: int,
     full_doc_weak_page_ratio: float,
     max_docling_pages: int,
-    docling_batch_pages: int,
+    max_docling_page_ratio: float | None = None,
+    prefer_full_document_docling: bool = False,
+    docling_batch_pages: int = 4,
+    quality_preset: str = "fast",
     page_progress_callback: PageProgressCallback | None = None,
     docling_progress_callback: DoclingProgressCallback | None = None,
 ) -> DocumentParseResult:
     baseline = parse_pymupdf_pdf_with_metadata(file_bytes, page_progress_callback=page_progress_callback)
     config = {
         "min_chars_per_page": min_chars_per_page,
+        "quality_preset": quality_preset,
         "weak_page_threshold": weak_page_threshold,
         "full_doc_weak_page_ratio": full_doc_weak_page_ratio,
         "max_docling_pages": max_docling_pages,
+        "max_docling_page_ratio": max_docling_page_ratio,
+        "prefer_full_document_docling": prefer_full_document_docling,
         "docling_batch_pages": docling_batch_pages,
     }
     baseline_items = _baseline_items(baseline)
@@ -51,6 +58,9 @@ def parse_layered_pdf(
         weak_pages,
         page_count=baseline.page_count,
         max_docling_pages=max_docling_pages,
+        max_docling_page_ratio=max_docling_page_ratio,
+        full_doc_weak_page_ratio=full_doc_weak_page_ratio,
+        prefer_full_document_docling=prefer_full_document_docling,
     )
     if selected_pages == set():
         return _result(
@@ -270,11 +280,59 @@ def _selected_docling_pages(
     *,
     page_count: int,
     max_docling_pages: int,
+    max_docling_page_ratio: float | None,
+    full_doc_weak_page_ratio: float,
+    prefer_full_document_docling: bool,
 ) -> set[int] | None:
-    if page_count <= max_docling_pages:
+    if not weak_pages:
+        return None if prefer_full_document_docling and page_count <= max_docling_pages else set()
+    if _is_scanned_document_candidate(
+        weak_pages,
+        page_count=page_count,
+        full_doc_weak_page_ratio=full_doc_weak_page_ratio,
+    ):
         return None
+    if prefer_full_document_docling and page_count <= max_docling_pages:
+        return None
+    budget = _docling_page_budget(
+        page_count=page_count,
+        max_docling_pages=max_docling_pages,
+        max_docling_page_ratio=max_docling_page_ratio,
+    )
+    if budget <= 0:
+        return set()
     ranked = sorted(weak_pages, key=lambda page: (-page.score, page.page_no))
-    return {page.page_no for page in ranked[:max_docling_pages]}
+    return {page.page_no for page in ranked[:budget]}
+
+
+def _is_scanned_document_candidate(
+    weak_pages: list[WeakPage],
+    *,
+    page_count: int,
+    full_doc_weak_page_ratio: float,
+) -> bool:
+    if page_count <= 0:
+        return False
+    if weak_page_ratio(weak_pages, page_count) < full_doc_weak_page_ratio:
+        return False
+    ocr_page_ratio = len(ocr_candidate_pages(weak_pages)) / page_count
+    return ocr_page_ratio >= max(0.50, full_doc_weak_page_ratio)
+
+
+def _docling_page_budget(
+    *,
+    page_count: int,
+    max_docling_pages: int,
+    max_docling_page_ratio: float | None,
+) -> int:
+    absolute_budget = max(0, max_docling_pages)
+    if max_docling_page_ratio is None:
+        return absolute_budget
+    ratio = max(0.0, min(1.0, float(max_docling_page_ratio)))
+    if ratio <= 0:
+        return 0
+    ratio_budget = max(1, ceil(max(1, page_count) * ratio))
+    return min(absolute_budget, ratio_budget)
 
 
 def _result(
@@ -316,6 +374,7 @@ def _result(
         docling_selection={
             "mode": selection_mode,
             "budget_pages": config["max_docling_pages"],
+            "budget_page_ratio": config.get("max_docling_page_ratio"),
             "batch_pages": config["docling_batch_pages"],
             "weak_pages_total": len(weak_pages),
             "selected_pages": bounded_page_report(selected_entries),

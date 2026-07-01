@@ -10,7 +10,6 @@ from ..shared.contracts.clearance import normalize_clearance_level
 from .qdrant import SearchHit
 
 _TERM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{2,}")
-_LOW_INFORMATION_REFERENCE_RE = re.compile(r"^(?:table|figure)\s+\d+[\.:]", re.IGNORECASE)
 _STOPWORDS = {
     "about",
     "does",
@@ -163,24 +162,10 @@ def build_evidence_hits(
     limit: int,
     broader_table_context: bool = False,
 ) -> list[SearchHit]:
-    candidates = _prioritize_substantive_hits(dedupe_hits(_promote_parent_text(dedupe_hits(hits))))
-    scoped_order = _exhaustive_scope_order(candidates)
-    if scoped_order:
-        return _hits_within_budget(scoped_order, token_budget=token_budget, limit=limit)
-    direct_structured = [hit for hit in candidates if _is_direct_structured_hit(hit)]
-    structured_group_order = _round_robin_hits(_grouped_hits(direct_structured))
-    context_hits = _structured_context_hits(candidates, direct_structured)
-    sibling_cap = limit if broader_table_context else 4
-    sibling_hits = _round_robin_hits(_grouped_hits([hit for hit in candidates if _is_sibling_structured_hit(hit)], per_group_limit=sibling_cap))
-    remaining_hits = [
-        hit
-        for hit in candidates
-        if not _is_direct_structured_hit(hit)
-        and not _is_sibling_structured_hit(hit)
-        and not _is_context_marker_hit(hit)
-    ]
-    ordered = dedupe_hits([*context_hits, *structured_group_order, *sibling_hits, *remaining_hits])
-    return _hits_within_budget(ordered, token_budget=token_budget, limit=limit)
+    candidates = dedupe_hits(hits)
+    if broader_table_context:
+        candidates = dedupe_hits(_promote_parent_text(candidates))
+    return _hits_within_budget(candidates, token_budget=token_budget, limit=limit)
 
 
 def sources_from_hits(hits: list[SearchHit], *, query: str = "") -> list[SourceAnchor]:
@@ -225,9 +210,6 @@ def _dedupe_keys(hit: SearchHit) -> set[str]:
 def _promote_parent_text(hits: list[SearchHit]) -> list[SearchHit]:
     promoted: list[SearchHit] = []
     for hit in hits:
-        if _is_structured_hit(hit):
-            promoted.append(hit)
-            continue
         parent_text = _parent_text(hit)
         parent_page_start = optional_int(hit.payload.get("parent_page_start"))
         parent_page_end = optional_int(hit.payload.get("parent_page_end")) or parent_page_start
@@ -253,27 +235,6 @@ def _parent_text(hit: SearchHit) -> str:
     return ""
 
 
-def _prioritize_substantive_hits(hits: list[SearchHit]) -> list[SearchHit]:
-    substantive: list[SearchHit] = []
-    low_information: list[SearchHit] = []
-    for hit in hits:
-        if _is_low_information_reference(payload_text(hit)):
-            low_information.append(hit)
-        else:
-            substantive.append(hit)
-    return substantive + low_information
-
-
-def _is_low_information_reference(text: str) -> bool:
-    normalized = " ".join(text.lower().split())
-    if len(normalized) > 160:
-        return False
-    if not _LOW_INFORMATION_REFERENCE_RE.match(normalized):
-        return False
-    detailed_markers = ("controller features", "\uf0b7", "•", " rows:", " form factor ")
-    return not any(marker in normalized for marker in detailed_markers)
-
-
 def _normalized_text(text: str) -> str:
     return " ".join(text.lower().split())
 
@@ -293,141 +254,3 @@ def _hits_within_budget(hits: list[SearchHit], *, token_budget: int, limit: int)
         if len(selected) >= limit:
             break
     return selected
-
-
-def _is_structured_hit(hit: SearchHit) -> bool:
-    structured_kind = hit.payload.get("structured_kind")
-    if isinstance(structured_kind, str) and structured_kind.strip():
-        return True
-    if hit.payload.get("chunk_type") == "table_row":
-        return True
-    table_json = hit.payload.get("table_json")
-    return isinstance(table_json, dict) and bool(table_json)
-
-
-def _is_direct_structured_hit(hit: SearchHit) -> bool:
-    return _is_structured_hit(hit) and str(hit.payload.get("structured_origin", "direct")) != "sibling"
-
-
-def _is_sibling_structured_hit(hit: SearchHit) -> bool:
-    return _is_structured_hit(hit) and str(hit.payload.get("structured_origin", "")) == "sibling"
-
-
-def _structured_group_key(hit: SearchHit) -> tuple[str, str]:
-    payload = hit.payload
-    doc_id = str(payload.get("doc_id", hit.point_id))
-    table_title = payload.get("table_title")
-    if isinstance(table_title, str) and table_title.strip():
-        return doc_id, f"table:{table_title.strip()}"
-    parent_chunk_id = payload.get("parent_chunk_id")
-    if isinstance(parent_chunk_id, str) and parent_chunk_id.strip():
-        return doc_id, f"parent:{parent_chunk_id.strip()}"
-    parent_section_id = payload.get("parent_section_id")
-    if isinstance(parent_section_id, str) and parent_section_id.strip():
-        return doc_id, f"section:{parent_section_id.strip()}"
-    return doc_id, f"chunk:{str(payload.get('chunk_id', hit.point_id))}"
-
-
-def _grouped_hits(hits: list[SearchHit], *, per_group_limit: int | None = None) -> list[list[SearchHit]]:
-    groups: dict[tuple[str, str], list[SearchHit]] = {}
-    order: list[tuple[str, str]] = []
-    for hit in hits:
-        key = _structured_group_key(hit)
-        if key not in groups:
-            groups[key] = []
-            order.append(key)
-        if per_group_limit is None or len(groups[key]) < per_group_limit:
-            groups[key].append(hit)
-    return [groups[key] for key in order]
-
-
-def _round_robin_hits(groups: list[list[SearchHit]]) -> list[SearchHit]:
-    ordered: list[SearchHit] = []
-    index = 0
-    while True:
-        added = False
-        for group in groups:
-            if index < len(group):
-                ordered.append(group[index])
-                added = True
-        if not added:
-            return ordered
-        index += 1
-
-
-def _exhaustive_scope_order(candidates: list[SearchHit]) -> list[SearchHit]:
-    scoped = [hit for hit in candidates if _is_exhaustive_scope_hit(hit)]
-    if not scoped:
-        return []
-    remaining = [hit for hit in candidates if not _is_exhaustive_scope_hit(hit)]
-    return dedupe_hits([*_round_robin_hits(_grouped_hits_by_doc(scoped)), *remaining])
-
-
-def _is_exhaustive_scope_hit(hit: SearchHit) -> bool:
-    return str(hit.payload.get("exhaustive_scope_origin", "")) == "document_class_scope"
-
-
-def _grouped_hits_by_doc(hits: list[SearchHit]) -> list[list[SearchHit]]:
-    groups: dict[str, list[SearchHit]] = {}
-    order: list[str] = []
-    for hit in hits:
-        doc_id = str(hit.payload.get("doc_id", hit.point_id))
-        if doc_id not in groups:
-            groups[doc_id] = []
-            order.append(doc_id)
-        groups[doc_id].append(hit)
-    return [groups[doc_id] for doc_id in order]
-
-
-def _structured_context_hits(candidates: list[SearchHit], direct_hits: list[SearchHit]) -> list[SearchHit]:
-    contexts: list[SearchHit] = []
-    seen_groups: set[tuple[str, str]] = set()
-    for hit in direct_hits:
-        key = _structured_group_key(hit)
-        if key in seen_groups:
-            continue
-        seen_groups.add(key)
-        context = _existing_context_hit(candidates, key)
-        if context is None:
-            context = _parent_context_hit(hit)
-        if context is not None:
-            contexts.append(context)
-    return contexts
-
-
-def _existing_context_hit(candidates: list[SearchHit], key: tuple[str, str]) -> SearchHit | None:
-    for hit in candidates:
-        if _structured_group_key(hit) != key:
-            continue
-        if _is_direct_structured_hit(hit) or _is_sibling_structured_hit(hit):
-            continue
-        if payload_text(hit):
-            return _mark_context_hit(hit)
-    return None
-
-
-def _parent_context_hit(hit: SearchHit) -> SearchHit | None:
-    parent_text = _parent_text(hit)
-    parent_page_start = optional_int(hit.payload.get("parent_page_start"))
-    parent_page_end = optional_int(hit.payload.get("parent_page_end")) or parent_page_start
-    if not parent_text or parent_page_start is None:
-        return None
-    payload = {
-        **hit.payload,
-        "text": parent_text,
-        "page": parent_page_start,
-        "page_start": parent_page_start,
-        "page_end": parent_page_end,
-        "structured_origin": "context",
-    }
-    return SearchHit(point_id=hit.point_id, score=hit.score, payload=payload)
-
-
-def _mark_context_hit(hit: SearchHit) -> SearchHit:
-    payload = dict(hit.payload)
-    payload["structured_origin"] = "context"
-    return SearchHit(point_id=hit.point_id, score=hit.score, payload=payload)
-
-
-def _is_context_marker_hit(hit: SearchHit) -> bool:
-    return str(hit.payload.get("structured_origin", "")) == "context"

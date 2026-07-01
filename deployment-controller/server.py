@@ -42,6 +42,9 @@ SERVICE_LIMITS = {
 }
 
 KV_CACHE_PATTERN = re.compile(r"^[1-9][0-9]*(B|K|M|G|T|KB|MB|GB|TB|KiB|MiB|GiB|TiB)?$")
+WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(r"^[A-Za-z]:[\\/]")
+VLLM_CACHE_ENV = "VLLM_CACHE_HOST_DIR"
+VLLM_CACHE_CONTAINER_PATH = "/models"
 
 
 class DeploymentControllerHandler(BaseHTTPRequestHandler):
@@ -80,7 +83,10 @@ class DeploymentControllerHandler(BaseHTTPRequestHandler):
             HTTPStatus.OK,
             {
                 "status": "applied",
-                "message": "Recreated vLLM services with the requested launch limits. Model health may stay starting while weights load.",
+                "message": (
+                    f"Recreated {_service_message(services)} with the requested launch limits. "
+                    "Model health may stay starting while weights load."
+                ),
                 "services": result,
             },
         )
@@ -216,6 +222,7 @@ def _recreate_services(services: list[str], env_overrides: dict[str, str]) -> li
     ]
     env = os.environ.copy()
     env.update(env_overrides)
+    _reuse_existing_vllm_cache_bind(env, project_name, services)
     try:
         completed = subprocess.run(
             command,
@@ -228,10 +235,95 @@ def _recreate_services(services: list[str], env_overrides: dict[str, str]) -> li
         )
     except subprocess.TimeoutExpired as exc:
         raise TimeoutError(f"Docker Compose did not finish within {timeout_seconds} seconds.") from exc
+    except OSError as exc:
+        raise RuntimeError(f"Docker Compose could not be started: {exc}") from exc
     if completed.returncode != 0:
         raise RuntimeError(_format_process_error(completed))
     time.sleep(float(os.environ.get("DEPLOYMENT_STATUS_DELAY_SECONDS", "2")))
     return [_service_status(project_name, service) for service in services]
+
+
+def _reuse_existing_vllm_cache_bind(env: dict[str, str], project_name: str, services: list[str]) -> None:
+    configured = env.get(VLLM_CACHE_ENV, "")
+    if configured:
+        configured_source = _compose_bind_source(configured)
+        if _is_compose_absolute_path(configured_source):
+            env[VLLM_CACHE_ENV] = configured_source
+            return
+    source = _existing_mount_source(project_name, services, VLLM_CACHE_CONTAINER_PATH)
+    if source:
+        env[VLLM_CACHE_ENV] = _compose_bind_source(source)
+
+
+def _compose_bind_source(source: str) -> str:
+    normalized = source.strip()
+    if WINDOWS_ABSOLUTE_PATH_PATTERN.match(normalized):
+        drive = normalized[0].lower()
+        rest = normalized[2:].replace("\\", "/").lstrip("/")
+        return f"/run/desktop/mnt/host/{drive}/{rest}"
+    return normalized
+
+
+def _is_compose_absolute_path(value: str) -> bool:
+    normalized = value.strip()
+    return os.path.isabs(normalized) or normalized.startswith("\\\\")
+
+
+def _existing_mount_source(project_name: str, services: list[str], destination: str) -> str | None:
+    candidates = [*services, *(service for service in SERVICE_LIMITS if service not in services)]
+    for service in candidates:
+        container_id = _service_container_id(project_name, service)
+        if not container_id:
+            continue
+        source = _container_mount_source(container_id, destination)
+        if source:
+            return source
+    return None
+
+
+def _service_container_id(project_name: str, service: str) -> str | None:
+    command = [
+        "docker",
+        "ps",
+        "-a",
+        "--filter",
+        f"label=com.docker.compose.project={project_name}",
+        "--filter",
+        f"label=com.docker.compose.service={service}",
+        "--format",
+        "{{.ID}}",
+    ]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+    except OSError:
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip().splitlines()[0] if completed.stdout.strip() else None
+
+
+def _container_mount_source(container_id: str, destination: str) -> str | None:
+    command = ["docker", "inspect", container_id, "--format", "{{json .Mounts}}"]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+    except OSError:
+        return None
+    if completed.returncode != 0 or not completed.stdout.strip():
+        return None
+    try:
+        mounts = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(mounts, list):
+        return None
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        if mount.get("Type") == "bind" and mount.get("Destination") == destination:
+            source = mount.get("Source")
+            if isinstance(source, str) and source.strip():
+                return source.strip()
+    return None
 
 
 def _service_status(project_name: str, service: str) -> dict[str, str]:
@@ -245,7 +337,10 @@ def _service_status(project_name: str, service: str) -> dict[str, str]:
         "--format",
         "{{.Names}}\t{{.Status}}",
     ]
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+    except OSError as exc:
+        return {"service": service, "status": "unknown", "detail": f"Docker status check could not be started: {exc}"}
     if completed.returncode != 0:
         return {"service": service, "status": "unknown", "detail": _truncate(completed.stderr)}
     line = completed.stdout.strip().splitlines()[0] if completed.stdout.strip() else ""
@@ -253,6 +348,14 @@ def _service_status(project_name: str, service: str) -> dict[str, str]:
         return {"service": service, "status": "not_found", "detail": "No running container found."}
     parts = line.split("\t", 1)
     return {"service": service, "status": "running", "detail": parts[1] if len(parts) > 1 else parts[0]}
+
+
+def _service_message(services: list[str]) -> str:
+    if len(services) == 1:
+        return services[0]
+    if len(services) == 2:
+        return f"{services[0]} and {services[1]}"
+    return ", ".join(services[:-1]) + f", and {services[-1]}"
 
 
 def _format_process_error(completed: subprocess.CompletedProcess[str]) -> str:

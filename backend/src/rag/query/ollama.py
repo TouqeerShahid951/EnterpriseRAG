@@ -234,6 +234,7 @@ class OllamaClient:
         prompt: str,
         model: str | None,
         system: str,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
         return self._reasoning_chat(
@@ -241,7 +242,7 @@ class OllamaClient:
             model=model,
             system=system,
             empty_message="JSON generation response did not include message content",
-            num_predict=self.json_num_predict,
+            num_predict=max_tokens or self.json_num_predict,
             cancellation_token=cancellation_token,
         )
 

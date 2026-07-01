@@ -100,11 +100,6 @@ class ArtifactJobService:
             validation_results=job.validation_results_json,
             stage_timings=_public_stage_timings(job.stage_timings_json),
             errors=list(job.errors_json),
-            attempt_count=job.attempt_count,
-            max_attempts=job.max_attempts,
-            started_at=job.started_at.isoformat() if job.started_at else None,
-            completed_at=job.completed_at.isoformat() if job.completed_at else None,
-            last_heartbeat_at=job.last_heartbeat_at.isoformat() if job.last_heartbeat_at else None,
         )
 
     def add_clarifications(self, job_id: str, user: UserContext, answers: dict[str, str]) -> ArtifactJobSummary:
@@ -156,7 +151,9 @@ class ArtifactJobService:
             "cancellation_requested": False,
             "error_code": None,
             "error_message_safe": None,
+            "started_at": None,
             "completed_at": None,
+            "last_heartbeat_at": None,
         })
         if updated is None:
             raise ArtifactJobActionError("artifact_job_not_found", "Artifact job was not found.")
@@ -192,8 +189,13 @@ class ArtifactJobService:
             artifacts=artifacts,
             error_code=job.error_code,
             error_message=job.error_message_safe,
+            attempt_count=job.attempt_count,
+            max_attempts=job.max_attempts,
             created_at=job.created_at.isoformat() if job.created_at else None,
             updated_at=job.updated_at.isoformat() if job.updated_at else None,
+            started_at=job.started_at.isoformat() if job.started_at else None,
+            completed_at=job.completed_at.isoformat() if job.completed_at else None,
+            last_heartbeat_at=job.last_heartbeat_at.isoformat() if job.last_heartbeat_at else None,
             expires_at=job.expires_at.isoformat() if job.expires_at else None,
         )
 

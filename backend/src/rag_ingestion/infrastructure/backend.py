@@ -17,11 +17,18 @@ class InferenceRuntimeConfig:
     chat_timeout_seconds: float
     embed_timeout_seconds: float
     provider: str = "ollama"
+    embedding_provider: str = "ollama"
+    reasoning_provider: str | None = None
+    routing_provider: str | None = None
+    faithfulness_provider: str | None = None
+    ingestion_provider: str | None = None
+    vision_provider: str | None = None
     embedding_base_url: str = ""
     reasoning_base_url: str | None = None
     routing_base_url: str | None = None
     faithfulness_base_url: str | None = None
     ingestion_base_url: str | None = None
+    vision_base_url: str | None = None
     thinking_enabled: bool = False
     routing_model: str | None = None
     ingestion_model: str | None = None
@@ -32,6 +39,17 @@ class InferenceRuntimeConfig:
             object.__setattr__(self, "embedding_base_url", self.base_url)
         if not self.ingestion_base_url:
             object.__setattr__(self, "ingestion_base_url", self.base_url)
+        if not self.vision_base_url:
+            object.__setattr__(self, "vision_base_url", self.ingestion_base_url)
+        for field_name in (
+            "reasoning_provider",
+            "routing_provider",
+            "faithfulness_provider",
+            "ingestion_provider",
+            "vision_provider",
+        ):
+            if not getattr(self, field_name):
+                object.__setattr__(self, field_name, self.provider)
 
 
 @dataclass(frozen=True)
@@ -47,6 +65,8 @@ class IngestAttempt:
 class IngestRuntimeConfig:
     worker_concurrency: int
     ocr_review_confidence_threshold: float
+    quality_preset: str = "fast"
+    vision_layout_repair_enabled: bool = False
     source: str = "workspace"
 
 
@@ -289,7 +309,9 @@ class BackendInternalClient:
         )
         return IngestRuntimeConfig(
             worker_concurrency=int(payload.get("worker_concurrency", 1)),
+            quality_preset=str(payload.get("quality_preset") or "fast"),
             ocr_review_confidence_threshold=float(payload["ocr_review_confidence_threshold"]),
+            vision_layout_repair_enabled=bool(payload.get("vision_layout_repair_enabled", False)),
             source=str(payload.get("source") or "workspace"),
         )
 
@@ -297,12 +319,19 @@ class BackendInternalClient:
 def _runtime_config_from_payload(payload: dict[str, Any]) -> InferenceRuntimeConfig:
     return InferenceRuntimeConfig(
         provider=str(payload.get("provider") or "ollama"),
+        embedding_provider=str(payload.get("embedding_provider") or payload.get("provider") or "ollama"),
+        reasoning_provider=str(payload.get("reasoning_provider") or payload.get("provider") or "ollama"),
+        routing_provider=str(payload.get("routing_provider") or payload.get("reasoning_provider") or payload.get("provider") or "ollama"),
+        faithfulness_provider=str(payload.get("faithfulness_provider") or payload.get("provider") or "ollama"),
+        ingestion_provider=str(payload.get("ingestion_provider") or payload.get("provider") or "ollama"),
+        vision_provider=str(payload.get("vision_provider") or payload.get("ingestion_provider") or payload.get("provider") or "ollama"),
         base_url=str(payload["base_url"]),
         embedding_base_url=str(payload.get("embedding_base_url") or payload["base_url"]),
         reasoning_base_url=str(payload.get("reasoning_base_url") or payload["base_url"]),
         routing_base_url=str(payload.get("routing_base_url") or payload.get("reasoning_base_url") or payload["base_url"]),
         faithfulness_base_url=str(payload.get("faithfulness_base_url") or payload["base_url"]),
         ingestion_base_url=str(payload.get("ingestion_base_url") or payload["base_url"]),
+        vision_base_url=str(payload.get("vision_base_url") or payload.get("ingestion_base_url") or payload["base_url"]),
         chat_model=str(payload["chat_model"]),
         embed_model=str(payload["embed_model"]),
         routing_model=str(payload["routing_model"]).strip() if payload.get("routing_model") else None,

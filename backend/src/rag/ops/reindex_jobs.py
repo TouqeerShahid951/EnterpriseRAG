@@ -21,6 +21,7 @@ class ReindexDocument:
     expiry_date: str | None
     description: str | None
     supersedes: list[str]
+    acl_group_paths: list[str]
 
 
 def reindex_documents_query(
@@ -48,6 +49,7 @@ def reindex_documents_query(
             d.effective_date,
             d.expiry_date,
             d.description,
+            jsonb_build_array(d.group_path) || COALESCE(shares.shared_group_paths, '[]'::jsonb) AS acl_group_paths,
             COALESCE(
                 jsonb_agg(e.old_doc_id::text) FILTER (WHERE e.old_doc_id IS NOT NULL),
                 d.pending_supersedes,
@@ -55,11 +57,18 @@ def reindex_documents_query(
             ) AS supersedes
         FROM documents d
         LEFT JOIN supersession_edges e ON e.new_doc_id = d.id
+        LEFT JOIN (
+            SELECT
+                document_id,
+                jsonb_agg(group_path ORDER BY group_path) AS shared_group_paths
+            FROM document_shares
+            GROUP BY document_id
+        ) shares ON shares.document_id = d.id
         WHERE d.deleted_at IS NULL
           AND d.file_path IS NOT NULL
           {status_filter}
           {doc_filter}
-        GROUP BY d.id
+        GROUP BY d.id, shares.shared_group_paths
         ORDER BY d.created_at ASC, d.id ASC
         {limit_clause}
         """,
@@ -86,6 +95,7 @@ def reindex_document_from_row(row: dict[str, Any]) -> ReindexDocument:
         expiry_date=_optional_date_string(row.get("expiry_date")),
         description=str(row["description"]) if row.get("description") else None,
         supersedes=_coerce_supersedes(row.get("supersedes")),
+        acl_group_paths=_coerce_group_paths(row.get("acl_group_paths"), owner_group_path=str(row["group_path"])),
     )
 
 
@@ -95,6 +105,7 @@ def build_ingest_message(document: ReindexDocument, job_id: str) -> IngestQueueM
         doc_id=document.doc_id,
         file_path=document.file_path,
         group_path=document.group_path,
+        acl_group_paths=document.acl_group_paths,
         clearance_level=document.clearance_level,
         doc_type=document.doc_type,
         effective_date=document.effective_date,
@@ -110,6 +121,20 @@ def _coerce_supersedes(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     raise ValueError("supersedes must be decoded as a list")
+
+
+def _coerce_group_paths(value: Any, *, owner_group_path: str) -> list[str]:
+    if isinstance(value, list):
+        paths = [owner_group_path, *[str(item) for item in value if str(item) != owner_group_path]]
+    else:
+        paths = [owner_group_path]
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            normalized.append(path)
+    return normalized
 
 
 def _date_string(value: Any) -> str:

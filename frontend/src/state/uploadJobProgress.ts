@@ -1,4 +1,4 @@
-import type { JobStatus, UploadJobStageProgress, UploadJobState, UploadJobStep } from "../types/api";
+import type { GraphRAGStatus, JobStatus, UploadJobStageProgress, UploadJobState, UploadJobStep } from "../types/api";
 import type { UploadJobView } from "../types/chat";
 
 export const uploadTerminalStatuses: ReadonlySet<UploadJobState> = new Set(["complete", "failed", "human_review", "cancelled"]);
@@ -7,9 +7,12 @@ export const uploadCancellableStatuses: ReadonlySet<UploadJobState> = new Set(["
 export const uploadFallbackSteps: UploadJobStep[] = [
   { id: "scheduled", label: "Scheduled", detail: "Waiting for the scheduled ingestion window.", state: "active" },
   { id: "queued", label: "Queued", detail: "Waiting for the ingestion worker to start.", state: "active" },
-  { id: "reading_file", label: "Read file", detail: "Fetching the uploaded PDF from object storage.", state: "pending" },
+  { id: "reading_file", label: "Read file", detail: "Fetching the uploaded document from object storage.", state: "pending" },
   { id: "parsing_document", label: "Parse document", detail: "Extracting text, layout, tables, and hierarchy.", state: "pending" },
-  { id: "generating_metadata", label: "Generate metadata", detail: "Creating document metadata for retrieval filters.", state: "pending" },
+  { id: "docling_repair", label: "Docling repair", detail: "Repairing selected pages with Docling OCR and layout analysis.", state: "pending" },
+  { id: "vision_layout_repair", label: "Vision repair", detail: "Using the vision model to re-read complex PDF layout.", state: "pending" },
+  { id: "image_analysis", label: "Image analysis", detail: "Running OCR and descriptions for extracted document images.", state: "pending" },
+  { id: "metadata_enrichment", label: "Metadata enrichment", detail: "Creating document metadata for retrieval filters.", state: "pending" },
   { id: "chunking_document", label: "Build chunks", detail: "Creating retrieval chunks and extracted claims.", state: "pending" },
   { id: "saving_claims", label: "Save claims", detail: "Persisting extracted claims and conflict pairs.", state: "pending" },
   { id: "embedding_chunks", label: "Generate embeddings", detail: "Creating dense and sparse vectors for each chunk.", state: "pending" },
@@ -54,8 +57,89 @@ export function formatStageProgress(progress: UploadJobStageProgress | null | un
   return `${unitLabel(progress.unit, progress.total)} ${progress.current} of ${progress.total}`;
 }
 
+export function formatSecondaryStageProgress(
+  progress: UploadJobStageProgress | null | undefined,
+  primaryDetail: string | null | undefined,
+): string | null {
+  const formatted = formatStageProgress(progress);
+  if (!formatted) return null;
+  return formatted === primaryDetail?.trim() ? null : formatted;
+}
+
 export function formatUploadWarning(value: string): string {
   return WARNING_LABELS[value] ?? labelize(value);
+}
+
+export type GraphEnrichmentChipState = "queued" | "running" | "unavailable";
+
+export interface GraphEnrichmentChip {
+  state: GraphEnrichmentChipState;
+  label: string;
+  detail: string | null;
+}
+
+export interface GraphEnrichmentTask {
+  taskId: string;
+  jobId: string | null;
+  documentId: string | null;
+  state: "queued" | "running";
+  elapsedSeconds: number | null;
+}
+
+export function graphEnrichmentTaskForJob(
+  job: { jobId: string; documentId?: string | null },
+  graphStatus: GraphRAGStatus | null | undefined,
+): GraphEnrichmentTask | null {
+  const activeTask = graphStatus?.active_tasks.find((task) => graphTaskMatchesJob(task, job));
+  if (activeTask) {
+    return {
+      taskId: activeTask.task_id,
+      jobId: activeTask.job_id,
+      documentId: activeTask.document_id,
+      state: "running",
+      elapsedSeconds: activeTask.elapsed_seconds,
+    };
+  }
+  const queuedTask = graphStatus?.queued_tasks.find((task) => graphTaskMatchesJob(task, job));
+  if (!queuedTask) return null;
+  return {
+    taskId: queuedTask.task_id,
+    jobId: queuedTask.job_id,
+    documentId: queuedTask.document_id,
+    state: "queued",
+    elapsedSeconds: null,
+  };
+}
+
+export function graphEnrichmentForJob(
+  job: { jobId: string; status: UploadJobState; documentId?: string | null },
+  graphStatus: GraphRAGStatus | null | undefined,
+  graphStatusError?: string | null,
+): GraphEnrichmentChip | null {
+  if (job.status !== "complete") return null;
+  if (graphStatusError) {
+    return { state: "unavailable", label: "Graph enrichment unavailable", detail: graphStatusError };
+  }
+  if (!graphStatus?.enabled) return null;
+  if (graphStatus.queue_error || graphStatus.worker_error) {
+    return {
+      state: "unavailable",
+      label: "Graph enrichment unavailable",
+      detail: graphStatus.queue_error ?? graphStatus.worker_error ?? null,
+    };
+  }
+  const graphTask = graphEnrichmentTaskForJob(job, graphStatus);
+  if (graphTask?.state === "running") {
+    return {
+      state: "running",
+      label: "Graph enrichment running",
+      detail: graphTask.elapsedSeconds === null ? null : `Running ${durationLabel(graphTask.elapsedSeconds)}`,
+    };
+  }
+  if (graphTask?.state === "queued") {
+    return { state: "queued", label: "Graph enrichment queued", detail: null };
+  }
+  return null;
 }
 
 function unitLabel(unit: UploadJobStageProgress["unit"], total: number): string {
@@ -64,6 +148,7 @@ function unitLabel(unit: UploadJobStageProgress["unit"], total: number): string 
   if (unit === "chunks") return singular ? "Chunk" : "Chunks";
   if (unit === "vectors") return singular ? "Vector" : "Vectors";
   if (unit === "metadata") return "Metadata step";
+  if (unit === "images") return singular ? "Image" : "Images";
   return singular ? "File" : "Files";
 }
 
@@ -79,4 +164,18 @@ const WARNING_LABELS: Record<string, string> = {
 
 function labelize(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function graphTaskMatchesJob(
+  task: { job_id: string | null; document_id: string | null },
+  job: { jobId: string; documentId?: string | null },
+) {
+  if (job.jobId && task.job_id) return task.job_id === job.jobId;
+  return Boolean(task.document_id && job.documentId && task.document_id === job.documentId);
+}
+
+function durationLabel(totalSeconds: number): string {
+  if (totalSeconds < 60) return `${Math.max(0, totalSeconds)}s`;
+  if (totalSeconds < 3600) return `${Math.floor(totalSeconds / 60)}m`;
+  return `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`;
 }

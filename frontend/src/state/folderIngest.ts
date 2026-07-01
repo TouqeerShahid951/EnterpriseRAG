@@ -1,12 +1,13 @@
-import type { CreateMinioPrefixScheduleRequest, CreateSnapshotScheduleRequest } from "../api/contracts";
+import type { CreateConnectorScheduleRequest, CreateLocalFolderScheduleRequest, CreateSnapshotScheduleRequest } from "../api/contracts";
 import { defaultClearanceLevel } from "../authz";
-import type { ClearanceLevel, FolderScheduleType, RecurrenceWindow } from "../types/api";
+import type { ClearanceLevel, ConnectorDeletionPolicy, ConnectorIngestionMode, ConnectorType, FolderScheduleType, RecurrenceWindow } from "../types/api";
 
 export const WORKSPACE_TIMEZONE = "Asia/Karachi";
 export const FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES = 100;
 export const FOLDER_SNAPSHOT_MAX_BYTES = 5 * 1024 * 1024 * 1024;
 
-export type FolderSourceMode = "snapshot" | "minio_prefix";
+export type FolderSourceMode = "snapshot" | "local_folder" | "connector";
+export type FolderIngestPanelVariant = "folder_sources" | "database_connectors";
 
 export interface FolderFileEntry {
   file: File;
@@ -36,8 +37,15 @@ export interface FolderScheduleDraft {
   recurrenceDays: number[];
   recurrenceStartTime: string;
   recurrenceEndTime: string;
-  bucket: string;
-  prefix: string;
+  folderPath: string;
+  connectorProfileId: string;
+  connectorType: ConnectorType;
+  connectorQuery: string;
+  connectorIdentityFields: string;
+  connectorIngestionMode: ConnectorIngestionMode;
+  connectorDeletionPolicy: ConnectorDeletionPolicy;
+  connectorBatchSize: number;
+  connectorRowLimit: number;
 }
 
 export function defaultFolderScheduleDraft(effectiveDate: string): FolderScheduleDraft {
@@ -55,9 +63,34 @@ export function defaultFolderScheduleDraft(effectiveDate: string): FolderSchedul
     recurrenceDays: [0, 1, 2, 3, 4, 5, 6],
     recurrenceStartTime: "22:00",
     recurrenceEndTime: "06:00",
-    bucket: "",
-    prefix: "",
+    folderPath: "",
+    connectorProfileId: "",
+    connectorType: "sql_server",
+    connectorQuery: "",
+    connectorIdentityFields: "",
+    connectorIngestionMode: "json_snapshot",
+    connectorDeletionPolicy: "keep_deleted_documents",
+    connectorBatchSize: 500,
+    connectorRowLimit: 5000,
   };
+}
+
+export function defaultFolderScheduleDraftForVariant(effectiveDate: string, variant: FolderIngestPanelVariant): FolderScheduleDraft {
+  const draft = defaultFolderScheduleDraft(effectiveDate);
+  if (variant === "database_connectors") {
+    return { ...draft, sourceMode: "connector" };
+  }
+  return { ...draft, sourceMode: "snapshot", scheduleType: "one_time" };
+}
+
+export function sourceModesForPanelVariant(variant: FolderIngestPanelVariant): FolderSourceMode[] {
+  if (variant === "database_connectors") return [];
+  return ["snapshot"];
+}
+
+export function isScheduleVisibleForPanelVariant(sourceType: string, variant: FolderIngestPanelVariant): boolean {
+  if (variant === "database_connectors") return false;
+  return sourceType === "local_folder" || sourceType === "snapshot";
 }
 
 export function summarizeFolderFiles(files: File[]): FolderSelectionSummary {
@@ -116,11 +149,10 @@ export function buildSnapshotScheduleRequest(draft: FolderScheduleDraft, entries
   };
 }
 
-export function buildMinioPrefixScheduleRequest(draft: FolderScheduleDraft): CreateMinioPrefixScheduleRequest {
+export function buildLocalFolderScheduleRequest(draft: FolderScheduleDraft): CreateLocalFolderScheduleRequest {
   return {
     name: draft.name.trim(),
-    bucket: draft.bucket.trim(),
-    prefix: draft.prefix.trim().replace(/^\/+/, ""),
+    path: draft.folderPath.trim(),
     group_path: draft.groupPath.trim(),
     clearance_level: draft.clearanceLevel,
     effective_date: draft.effectiveDate || null,
@@ -131,6 +163,32 @@ export function buildMinioPrefixScheduleRequest(draft: FolderScheduleDraft): Cre
     scheduled_at: draft.scheduleType === "one_time" ? draft.scheduledAt || null : null,
     recurrence: buildRecurrence(draft),
   };
+}
+
+export function buildConnectorScheduleRequest(draft: FolderScheduleDraft): CreateConnectorScheduleRequest {
+  return {
+    name: draft.name.trim(),
+    connector_profile_id: draft.connectorProfileId,
+    selection: { query: draft.connectorQuery.trim(), row_limit: draft.connectorRowLimit },
+    identity_fields: identityFieldsFromDraft(draft.connectorIdentityFields),
+    ingestion_mode: draft.connectorIngestionMode,
+    deletion_policy: draft.connectorDeletionPolicy,
+    batch_size: draft.connectorBatchSize,
+    row_limit: draft.connectorRowLimit,
+    group_path: draft.groupPath.trim(),
+    clearance_level: draft.clearanceLevel,
+    effective_date: draft.effectiveDate || null,
+    expiry_date: draft.expiryDate || null,
+    description: draft.description.trim() || null,
+    schedule_type: draft.scheduleType,
+    timezone: draft.timezone,
+    scheduled_at: draft.scheduleType === "one_time" ? draft.scheduledAt || null : null,
+    recurrence: buildRecurrence(draft),
+  };
+}
+
+export function identityFieldsFromDraft(value: string): string[] {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 export function formatFolderCount(count: number, singular: string): string {

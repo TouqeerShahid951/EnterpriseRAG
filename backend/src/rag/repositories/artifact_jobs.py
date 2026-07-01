@@ -108,6 +108,7 @@ _UPDATABLE_FIELDS = {
     "cancellation_requested",
     "started_at",
     "completed_at",
+    "last_heartbeat_at",
 }
 _JSON_FIELDS = {
     "clarifications",

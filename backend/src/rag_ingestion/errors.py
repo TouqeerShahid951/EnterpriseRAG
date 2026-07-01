@@ -32,6 +32,9 @@ class IngestJobCancelled(RuntimeError):
         self.job_id = job_id
 
 
-class OllamaEmbeddingUnavailable(WorkerStepError):
+class EmbeddingUnavailable(WorkerStepError):
     def __init__(self, message: str = "The embedding model is temporarily unavailable.") -> None:
-        super().__init__("ollama_embedding_unavailable", message)
+        super().__init__("embedding_unavailable", message)
+
+
+OllamaEmbeddingUnavailable = EmbeddingUnavailable

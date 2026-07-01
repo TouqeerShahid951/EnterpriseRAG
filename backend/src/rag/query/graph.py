@@ -34,6 +34,7 @@ def _compile_graph(nodes: QueryNodes) -> Any | None:
 
     graph = StateGraph(QueryContext)
     graph.add_node("session_memory", _timed_node("session_memory", nodes.session_memory))
+    graph.add_node("source_resolver", _timed_node("source_resolver", nodes.source_resolver))
     graph.add_node("intent_router", _timed_node("intent_router", nodes.intent_router))
     graph.add_node("query_planner", _timed_node("query_planner", nodes.query_planner))
     graph.add_node("artifact_planner", _timed_node("artifact_planner", nodes.artifact_planner))
@@ -54,7 +55,8 @@ def _compile_graph(nodes: QueryNodes) -> Any | None:
     graph.add_node("response_serializer", _timed_node("response_serializer", nodes.response_serializer))
 
     graph.set_entry_point("session_memory")
-    graph.add_edge("session_memory", "intent_router")
+    graph.add_edge("session_memory", "source_resolver")
+    graph.add_edge("source_resolver", "intent_router")
     graph.add_conditional_edges("intent_router", route_intent, {
         "plan": "query_planner",
         "artifact": "artifact_planner",
@@ -109,6 +111,7 @@ def route_output(ctx: QueryContext) -> str:
 
 def _invoke_without_langgraph(ctx: QueryContext, nodes: QueryNodes) -> QueryContext:
     ctx = _run_timed_node("session_memory", ctx, nodes.session_memory)
+    ctx = _run_timed_node("source_resolver", ctx, nodes.source_resolver)
     ctx = _run_timed_node("intent_router", ctx, nodes.intent_router)
     intent_route = route_intent(ctx)
     if intent_route == "respond":

@@ -114,6 +114,12 @@ class ChunkRecord:
     page: int | None = None
     page_start: int | None = None
     page_end: int | None = None
+    chunk_type: str = ""
+    quality_flags: list[str] = field(default_factory=list)
+    text_hash: str = ""
+    claim_ids: list[str] = field(default_factory=list)
+    claims: list[dict[str, str]] = field(default_factory=list)
+    named_entities: list[dict[str, object]] = field(default_factory=list)
 
     @property
     def partition_key(self) -> str:

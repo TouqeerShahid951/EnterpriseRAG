@@ -9,6 +9,7 @@ export type RouteId =
   | "analytics"
   | "answer-review"
   | "chat"
+  | "database-connectors"
   | "document-extraction"
   | "document-overview"
   | "document-trash"
@@ -34,6 +35,7 @@ export const routePaths: Record<RouteId, string> = {
   analytics: "/analytics",
   "answer-review": "/answer-review",
   chat: "/chat",
+  "database-connectors": "/document-intake/connectors",
   "document-extraction": "/document-extraction",
   "document-overview": "/documents/overview",
   "document-trash": "/documents/trash",
@@ -69,7 +71,7 @@ const platformOnlyRoutes = new Set<RouteId>([
 const userManagementRoutes = new Set<RouteId>(["access"]);
 const auditRoutes = new Set<RouteId>(["activity-log", "security-audit"]);
 const uploadRoutes = new Set<RouteId>(["upload"]);
-const folderSourceRoutes = new Set<RouteId>(["document-extraction"]);
+const folderSourceRoutes = new Set<RouteId>(["document-extraction", "database-connectors"]);
 const ingestionRoutes = new Set<RouteId>(["ingestion-health", "ingestion-jobs"]);
 const queryRoutes = new Set<RouteId>(["advanced-search", "chat", "source-viewer"]);
 const spaceRoutes = new Set<RouteId>(["document-overview", "document-trash", "documents", "knowledge-spaces"]);
@@ -123,6 +125,7 @@ export const workspaceNavigation: WorkspaceNavigationItem[] = [
     children: [
       { label: "Add Files", route: "upload" },
       { label: "Folder Sources", route: "document-extraction" },
+      { label: "Database Connectors", route: "database-connectors" },
       { badge: "jobs", label: "Activity", route: "ingestion-jobs" },
     ],
     icon: "documents",

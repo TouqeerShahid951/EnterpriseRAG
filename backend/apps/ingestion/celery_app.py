@@ -16,6 +16,7 @@ celery_app.conf.update(
     task_default_queue=config.ingest_queue_name,
     task_routes={
         "apps.ingestion.tasks.index_document_graphrag": {"queue": config.graphrag_queue_name},
+        "apps.ingestion.tasks.rebuild_graphrag_partition": {"queue": config.graphrag_queue_name},
     },
     task_serializer="json",
     accept_content=["json"],

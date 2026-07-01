@@ -45,11 +45,21 @@ class IngestDependencies:
     parent_max_tokens: int
     metadata_use_gliner: bool = False
     topic_taxonomy: tuple[str, ...] = ()
+    ingestion_quality_preset: str = "fast"
     weak_page_threshold: int = 5
     full_doc_weak_page_ratio: float = 0.25
     layered_docling_max_pages: int = 40
+    layered_docling_max_page_ratio: float | None = None
+    prefer_full_document_docling: bool = False
     layered_docling_batch_pages: int = 4
+    pdf_image_analysis_max_images: int = -1
+    pdf_image_analysis_max_full_page_fallbacks: int = -1
+    scanned_visual_region_enabled: bool = True
+    scanned_visual_min_area_ratio: float = 0.03
+    scanned_visual_max_regions_per_page: int = 4
+    scanned_visual_text_mask_padding_px: int = 8
     ocr_review_confidence_threshold: float = 0.9
+    vision_layout_repair_enabled: bool = False
 
     @property
     def inference(self) -> IngestionInferenceClient:

@@ -32,11 +32,11 @@ WHERE jobs.origin = 'unknown'
 
 UPDATE ingest_jobs
 SET origin = 'unknown'
-WHERE origin NOT IN ('upload', 'reingest', 'restore', 'folder', 'unknown') OR origin IS NULL;
+WHERE origin NOT IN ('upload', 'reingest', 'restore', 'folder', 'connector', 'unknown') OR origin IS NULL;
 
 ALTER TABLE ingest_jobs DROP CONSTRAINT IF EXISTS ingest_jobs_origin_known;
 ALTER TABLE ingest_jobs ADD CONSTRAINT ingest_jobs_origin_known CHECK (
-    origin IN ('upload', 'reingest', 'restore', 'folder', 'unknown')
+    origin IN ('upload', 'reingest', 'restore', 'folder', 'connector', 'unknown')
 );
 """
 

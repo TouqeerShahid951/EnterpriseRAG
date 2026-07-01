@@ -17,11 +17,20 @@ from ...repositories.chat_history import ChatHistoryRepository, get_chat_history
 from ...repositories.chat_history_models import ChatSessionRecord
 from ...repositories.documents import DocumentRepository, get_document_repository
 from ...repositories.generated_artifacts import GeneratedArtifactRepository, get_generated_artifact_repository
+from ...repositories.folder_schedule_models import FolderScheduleRepository
+from ...repositories.folder_schedules import get_folder_schedule_repository
+from ...connectors.repositories import ConnectorProfileRepository, get_connector_profile_repository
 from ...query.cancellation import QueryCancellationToken, QueryCancelled, call_with_optional_cancellation
 from ...query.http import ServiceRequestError
 from ...query.service import LocalRagService, get_local_rag_service
 from ...query.query_stream import format_sse
-from ...schemas.query import ChatSession, ChatSessionListResponse, ChatSessionSummary, QueryRequest, QueryStreamEvent, RAGResponse
+from ...query.source_resolution import (
+    QuerySourceAccessError,
+    list_visible_query_sources,
+    public_query_source,
+    validate_query_source_access,
+)
+from ...schemas.query import ChatSession, ChatSessionListResponse, ChatSessionSummary, QueryRequest, QuerySourceListResponse, QueryStreamEvent, RAGResponse
 from ...services.generated_artifact_storage import GeneratedArtifactStorage, get_generated_artifact_storage
 
 router = APIRouter(prefix="/query", tags=["query"])
@@ -97,6 +106,41 @@ async def list_chat_sessions(
 
 
 @router.get(
+    "/sources",
+    response_model=QuerySourceListResponse,
+    summary="List visible approved query sources for source-scoped chat",
+)
+async def list_query_sources(
+    group_path: str | None = Query(default=None, min_length=1),
+    user: UserRecord = Depends(require_current_user),
+    identity_repo: IdentityRepository = Depends(get_identity_repository),
+    schedule_repo: FolderScheduleRepository = Depends(get_folder_schedule_repository),
+    connector_profile_repo: ConnectorProfileRepository = Depends(get_connector_profile_repository),
+) -> QuerySourceListResponse:
+    _require_query_user(user)
+    group_path = _validated_query_group_path(group_path, user, identity_repo)
+    user_context = _user_context(user, identity_repo)
+    if group_path:
+        user_context = user_context.__class__(
+            user_id=user_context.user_id,
+            email=user_context.email,
+            account_type=user_context.account_type,
+            group_paths=(group_path,),
+            clearance_level=user_context.clearance_level,
+            permission_version=user_context.permission_version,
+        )
+    sources = list_visible_query_sources(
+        user_context,
+        schedule_repo=schedule_repo,
+        connector_profile_repo=connector_profile_repo,
+    )
+    return QuerySourceListResponse(
+        items=[public_query_source(source) for source in sources],
+        total=len(sources),
+    )
+
+
+@router.get(
     "/sessions/{session_id}",
     response_model=ChatSession,
     summary="Read a saved chat session",
@@ -146,10 +190,13 @@ async def run_query(
     user: UserRecord = Depends(require_current_user),
     identity_repo: IdentityRepository = Depends(get_identity_repository),
     chat_history_repo: ChatHistoryRepository = Depends(get_chat_history_repository),
+    schedule_repo: FolderScheduleRepository = Depends(get_folder_schedule_repository),
+    connector_profile_repo: ConnectorProfileRepository = Depends(get_connector_profile_repository),
     rag_service: LocalRagService = Depends(get_local_rag_service),
 ) -> RAGResponse:
     require_csrf(request)
     payload = _query_request_for_user(payload, user, identity_repo)
+    _validate_query_source_for_user(payload, _user_context(user, identity_repo), schedule_repo, connector_profile_repo)
     try:
         response = rag_service.answer_query(payload, _user_context(user, identity_repo))
         _save_completed_query(chat_history_repo, user=user, payload=payload, response=response)
@@ -172,11 +219,14 @@ async def stream_query(
     user: UserRecord = Depends(require_current_user),
     identity_repo: IdentityRepository = Depends(get_identity_repository),
     chat_history_repo: ChatHistoryRepository = Depends(get_chat_history_repository),
+    schedule_repo: FolderScheduleRepository = Depends(get_folder_schedule_repository),
+    connector_profile_repo: ConnectorProfileRepository = Depends(get_connector_profile_repository),
     rag_service: LocalRagService = Depends(get_local_rag_service),
 ):
     require_csrf(request)
     payload = _query_request_for_user(payload, user, identity_repo)
     user_context = _user_context(user, identity_repo)
+    _validate_query_source_for_user(payload, user_context, schedule_repo, connector_profile_repo)
 
     async def stream():
         cancellation_token = QueryCancellationToken()
@@ -284,6 +334,33 @@ def _validated_query_group_path(group_path: str | None, user: UserRecord, repo: 
             detail={"code": "query_group_forbidden", "message": "User cannot query this Knowledge Space."},
         )
     return normalized
+
+
+def _validate_query_source_for_user(
+    payload: QueryRequest,
+    user_context: UserContext,
+    schedule_repo: FolderScheduleRepository,
+    connector_profile_repo: ConnectorProfileRepository,
+) -> None:
+    if payload.group_path:
+        user_context = UserContext(
+            user_id=user_context.user_id,
+            email=user_context.email,
+            account_type=user_context.account_type,
+            group_paths=(payload.group_path,),
+            clearance_level=user_context.clearance_level,
+            permission_version=user_context.permission_version,
+        )
+    try:
+        validate_query_source_access(
+            source_id=payload.query_source_id,
+            user=user_context,
+            schedule_repo=schedule_repo,
+            connector_profile_repo=connector_profile_repo,
+        )
+    except QuerySourceAccessError as exc:
+        status_code = status.HTTP_400_BAD_REQUEST if exc.code == "invalid_query_source" else status.HTTP_403_FORBIDDEN
+        raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": exc.message}) from exc
 
 
 def _user_context(user: UserRecord, repo: IdentityRepository) -> UserContext:

@@ -15,7 +15,7 @@ router = APIRouter(tags=["internal-abac"])
 )
 async def get_abac_filter(
     user_id: str,
-    email: str = "service-user@example.internal",
+    email: str = "service-user@prudentia.ai",
     group_paths: list[str] = Query(default_factory=list),
     clearance_level: str = "NATO_RESTRICTED",
     permission_version: int = 0,

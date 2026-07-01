@@ -126,7 +126,7 @@ class InMemoryIdentityRepository:
     def delete_user(self, user_id: str) -> bool:
         return self._users.pop(user_id, None) is not None
 
-    def set_user_password(self, user_id: str, password_hash: str) -> UserRecord | None:
+    def set_user_password(self, user_id: str, password_hash: str, *, must_change_password: bool = False) -> UserRecord | None:
         user = self._users.get(user_id)
         if user is None:
             return None
@@ -138,7 +138,7 @@ class InMemoryIdentityRepository:
             is_active=user.is_active,
             account_type=user.account_type,
             clearance_level=user.clearance_level,
-            must_change_password=False,
+            must_change_password=must_change_password,
             permission_version=user.permission_version,
             group_paths=user.group_paths,
             last_login_at=user.last_login_at,

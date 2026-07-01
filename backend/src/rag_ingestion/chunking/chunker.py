@@ -10,6 +10,8 @@ from .meta import merge_item, page_end, page_start, parent_section_id, parser_na
 from .tables import TableRow, form_like_record_chunks, table_chunks
 from .text import CHARS_PER_TOKEN_GUARD, _token_count, _too_large, split_text
 
+LOW_CONFIDENCE_OCR_TABLE_THRESHOLD = 0.9
+
 
 @dataclass(frozen=True)
 class TextChunk:
@@ -52,12 +54,13 @@ def chunk_items(
 ) -> list[TextChunk]:
     _validate_settings(target_tokens, overlap_tokens, parent_max_tokens)
     chunks: list[TextChunk] = []
+    vision_ocr_pages = _vision_ocr_pages(items)
     for parent_index, section in enumerate(_parent_sections(items, parent_max_tokens)):
         parent_id = f"{doc_id}:parent:{parent_index}"
         parent_text = section_text(section)
         parent_start = page_start(section)
         parent_end = page_end(section)
-        for row in _child_texts(section, target_tokens, overlap_tokens):
+        for row in _child_texts(section, target_tokens, overlap_tokens, vision_ocr_pages=vision_ocr_pages):
             chunks.append(
                 TextChunk(
                     index=len(chunks),
@@ -120,6 +123,8 @@ def _child_texts(
     section: list[ParsedPdfItem],
     target_tokens: int,
     overlap_tokens: int,
+    *,
+    vision_ocr_pages: set[int],
 ) -> list[TableRow]:
     rows: list[TableRow] = []
     text_items: list[ParsedPdfItem] = []
@@ -128,11 +133,52 @@ def _child_texts(
             table_title_hint = _nearest_table_title(text_items)
             rows.extend(_flush_text_items(text_items, target_tokens, overlap_tokens))
             text_items = []
-            rows.extend(table_chunks(item, target_tokens, table_title_hint=table_title_hint))
+            rows.extend(
+                table_chunks(
+                    item,
+                    target_tokens,
+                    table_title_hint=table_title_hint,
+                    include_row_chunks=not _prefer_page_vision_ocr_for_table(item, vision_ocr_pages),
+                )
+            )
         else:
             text_items.append(item)
     rows.extend(_flush_text_items(text_items, target_tokens, overlap_tokens))
     return rows
+
+
+def _vision_ocr_pages(items: list[ParsedPdfItem]) -> set[int]:
+    pages: set[int] = set()
+    for item in items:
+        flags = set(item.quality_flags)
+        if item.item_type != "image_text" or "source:vision" not in flags or "source:ocr" not in flags:
+            continue
+        if not item.text.strip():
+            continue
+        pages.update(_item_pages(item))
+    return pages
+
+
+def _prefer_page_vision_ocr_for_table(item: ParsedPdfItem, vision_ocr_pages: set[int]) -> bool:
+    if item.item_type != "table" or "source:vision" in item.quality_flags:
+        return False
+    if not any(page in vision_ocr_pages for page in _item_pages(item)):
+        return False
+    flags = set(item.quality_flags)
+    if "source:ocr" not in flags:
+        return False
+    if not (item.parser == "docling" or "source:docling_layout" in flags or "docling_ocr" in flags):
+        return False
+    return item.confidence is None or item.confidence < LOW_CONFIDENCE_OCR_TABLE_THRESHOLD
+
+
+def _item_pages(item: ParsedPdfItem) -> range:
+    if item.page_start is None:
+        return range(0)
+    page_end_value = item.page_end or item.page_start
+    if page_end_value < item.page_start:
+        return range(0)
+    return range(item.page_start, page_end_value + 1)
 
 
 def _nearest_table_title(items: list[ParsedPdfItem]) -> str:

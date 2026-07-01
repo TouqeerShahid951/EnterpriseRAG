@@ -20,7 +20,24 @@ def hit(point_id: str, score: float, text: str, **payload: object) -> SearchHit:
 
 
 class EvidenceBuilderTests(unittest.TestCase):
-    def test_structured_row_preserves_parent_table_context_before_isolated_rows(self) -> None:
+    def test_exact_chunks_do_not_promote_parent_text_by_default(self) -> None:
+        evidence = build_evidence_hits(
+            [
+                hit(
+                    "contact-row",
+                    0.80,
+                    "Value: Contact Numbers: 03009876543",
+                    parent_text="Parent table with unrelated rows.",
+                    parent_page_start=1,
+                )
+            ],
+            token_budget=4000,
+            limit=1,
+        )
+
+        self.assertEqual(evidence[0].payload["text"], "Value: Contact Numbers: 03009876543")
+
+    def test_parent_context_is_promoted_when_route_requests_broader_context(self) -> None:
         parent_text = (
             "| Person Information | Case Information |\n"
             "| --- | --- |\n"
@@ -60,14 +77,14 @@ class EvidenceBuilderTests(unittest.TestCase):
             ),
         ]
 
-        evidence = build_evidence_hits(hits, token_budget=4000, limit=1)
+        evidence = build_evidence_hits(hits, token_budget=4000, limit=1, broader_table_context=True)
 
         self.assertEqual(len(evidence), 1)
-        self.assertEqual(evidence[0].payload["structured_origin"], "context")
+        self.assertEqual(evidence[0].payload["chunk_id"], "contact-row")
         self.assertIn("Name(s): Sajjad Hussain", evidence[0].payload["text"])
         self.assertIn("Contact Numbers: 03009876543", evidence[0].payload["text"])
 
-    def test_exhaustive_scope_evidence_round_robins_across_documents(self) -> None:
+    def test_exhaustive_scope_evidence_keeps_retrieved_order(self) -> None:
         hits = [
             hit("doc-a:1", 0.90, "A first", doc_id="doc-a", exhaustive_scope_origin="document_class_scope"),
             hit("doc-a:2", 0.89, "A second", doc_id="doc-a", exhaustive_scope_origin="document_class_scope"),
@@ -78,7 +95,34 @@ class EvidenceBuilderTests(unittest.TestCase):
 
         evidence = build_evidence_hits(hits, token_budget=4000, limit=3)
 
-        self.assertEqual([item.payload["doc_id"] for item in evidence], ["doc-a", "doc-b", "doc-c"])
+        self.assertEqual([item.payload["chunk_id"] for item in evidence], ["doc-a:1", "doc-a:2", "doc-a:3"])
+
+    def test_high_ranked_plain_text_stays_before_structured_context(self) -> None:
+        parent_text = "| Item | Page |\n| --- | --- |\n| Legal Proceedings | 18 |"
+        hits = [
+            hit(
+                "image:0",
+                1.00,
+                "Image description:\nA soldier is handling ammunition while another operates artillery.",
+                doc_id="image",
+            ),
+            hit(
+                "table-row",
+                0.50,
+                "[Columns: Item | Page]\nRow: Item 3.\nValue: Legal Proceedings | 18",
+                doc_id="report",
+                chunk_type="table_row",
+                parent_chunk_id="table-1",
+                parent_text=parent_text,
+                parent_page_start=1,
+                structured_kind="table_row",
+            ),
+        ]
+
+        evidence = build_evidence_hits(hits, token_budget=4000, limit=2)
+
+        self.assertEqual(evidence[0].payload["chunk_id"], "image:0")
+        self.assertIn("soldier", evidence[0].payload["text"].lower())
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 from ..core.config import settings
 from ..shared.contracts.clearance import DEFAULT_CLEARANCE_LEVEL, normalize_clearance_level
+from ..shared.ingestion_quality import normalize_ingestion_quality_preset
 
 
 @dataclass(frozen=True)
@@ -18,17 +19,21 @@ class IngestQueueMessage:
     group_path: str
     effective_date: str | None
     supersedes: list[str]
+    acl_group_paths: list[str] | None = None
     doc_type: str | None = None
     clearance_level: str = DEFAULT_CLEARANCE_LEVEL
     expiry_date: str | None = None
     description: str | None = None
     content_type: str | None = None
+    quality_preset: str | None = None
     review_batch_id: str | None = None
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "IngestQueueMessage":
         raw_supersedes = payload.get("supersedes", [])
         supersedes = [str(item) for item in raw_supersedes] if isinstance(raw_supersedes, list) else []
+        raw_acl_group_paths = payload.get("acl_group_paths")
+        acl_group_paths = [str(item) for item in raw_acl_group_paths] if isinstance(raw_acl_group_paths, list) else None
         return cls(
             job_id=str(payload["job_id"]),
             doc_id=str(payload["doc_id"]),
@@ -37,10 +42,12 @@ class IngestQueueMessage:
             clearance_level=normalize_clearance_level(payload.get("clearance_level")),
             effective_date=str(payload["effective_date"]) if payload.get("effective_date") else None,
             supersedes=supersedes,
+            acl_group_paths=acl_group_paths,
             doc_type=str(payload["doc_type"]) if payload.get("doc_type") else None,
             expiry_date=str(payload["expiry_date"]) if payload.get("expiry_date") else None,
             description=str(payload["description"]) if payload.get("description") else None,
             content_type=str(payload["content_type"]) if payload.get("content_type") else None,
+            quality_preset=normalize_ingestion_quality_preset(payload.get("quality_preset")) if payload.get("quality_preset") else None,
             review_batch_id=str(payload["review_batch_id"]) if payload.get("review_batch_id") else None,
         )
 
@@ -125,6 +132,8 @@ def _message_payload(message: IngestQueueMessage) -> dict[str, Any]:
         "clearance_level": message.clearance_level,
         "supersedes": message.supersedes,
     }
+    if message.acl_group_paths is not None:
+        payload["acl_group_paths"] = list(message.acl_group_paths)
     if message.doc_type:
         payload["doc_type"] = message.doc_type
     if message.effective_date:
@@ -135,6 +144,8 @@ def _message_payload(message: IngestQueueMessage) -> dict[str, Any]:
         payload["description"] = message.description
     if message.content_type:
         payload["content_type"] = message.content_type
+    if message.quality_preset:
+        payload["quality_preset"] = message.quality_preset
     if message.review_batch_id:
         payload["review_batch_id"] = message.review_batch_id
     return payload

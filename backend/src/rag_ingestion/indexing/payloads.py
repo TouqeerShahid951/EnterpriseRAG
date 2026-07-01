@@ -11,7 +11,7 @@ from rag.shared.contracts.group_paths import normalize_group_path
 
 from ..chunking import TextChunk
 from ..messages import IngestJobPayload
-from .claims import claim_ids_for_chunk
+from .claims import claim_ids_for_chunk, claims_for_chunk
 from .metadata_text import compact_summary, metadata_terms_for_chunk, metadata_version, title_from_path
 from .sparse import SparseVector
 
@@ -32,6 +32,7 @@ def build_qdrant_points(
         raise ValueError("chunks and sparse_vectors must have the same length")
 
     group_path = normalize_group_path(job.group_path)
+    acl_group_paths = _acl_group_paths(owner_group_path=group_path, raw_group_paths=job.acl_group_paths)
     clearance_level = normalize_clearance_level(job.clearance_level)
     content_hash = hashlib.sha256(file_bytes).hexdigest()
     title = title_from_path(job.file_path)
@@ -45,10 +46,15 @@ def build_qdrant_points(
     doc_summary = compact_summary(metadata.get("summary"))
     metadata_confidence = metadata.get("metadata_confidence")
     normalized_confidence = metadata_confidence if isinstance(metadata_confidence, dict) else {}
+    metadata_flags = metadata.get("metadata_flags")
+    normalized_flags = metadata_flags if isinstance(metadata_flags, dict) else {}
+    source_deleted = bool(normalized_flags.get("source_deleted"))
+    retrieval_status = str(normalized_flags.get("retrieval_status") or "active")
     points: list[dict[str, object]] = []
     for chunk, vector, sparse_vector in zip(chunks, vectors, sparse_vectors):
         chunk_id = f"{job.doc_id}:{chunk.index}"
         chunk_claim_ids = claim_ids_for_chunk(claims or [], chunk_id)
+        chunk_claims = claims_for_chunk(claims or [], chunk_id)
         raw_text_hash = hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
         normalized_text_hash = hashlib.sha256(_normalized_text(chunk.text).encode("utf-8")).hexdigest()
         points.append(
@@ -86,7 +92,7 @@ def build_qdrant_points(
                     "structured_search_text": chunk.structured_search_text,
                     "source_regions": chunk.source_regions,
                     "group_path": group_path,
-                    "acl_group_paths": [group_path],
+                    "acl_group_paths": acl_group_paths,
                     "clearance_level": clearance_level,
                     "clearance_rank": clearance_rank(clearance_level),
                     "doc_type": indexed_doc_type,
@@ -106,9 +112,13 @@ def build_qdrant_points(
                     "metadata_terms": metadata_terms_for_chunk(title=title, chunk=chunk, metadata=metadata),
                     "metadata_version": metadata_version(metadata),
                     "metadata_confidence": normalized_confidence,
+                    "named_entities": _entities_for_chunk(metadata.get("named_entities"), chunk.text),
+                    "source_deleted": source_deleted,
+                    "retrieval_status": retrieval_status,
                     "generated_doc_type": str(metadata.get("doc_type") or ""),
                     "auto_doc_type": str(metadata.get("auto_doc_type") or ""),
                     "claim_ids": chunk_claim_ids,
+                    "claims": chunk_claims,
                     "has_conflict": any(claim_id in conflicted for claim_id in chunk_claim_ids),
                     "is_expired": is_expired,
                 },
@@ -119,6 +129,36 @@ def build_qdrant_points(
 
 def _normalized_text(text: str) -> str:
     return " ".join(text.lower().split())
+
+
+def _entities_for_chunk(value: object, text: str, *, limit: int = 20) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    haystack = text.lower()
+    entities: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        entity_text = str(item.get("text") or "").strip()
+        entity_type = str(item.get("type") or "entity").strip() or "entity"
+        if not entity_text or entity_text.lower() not in haystack:
+            continue
+        key = (entity_text.lower(), entity_type.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        entities.append(
+            {
+                "text": entity_text,
+                "type": entity_type,
+                "start": item.get("start"),
+                "end": item.get("end"),
+            }
+        )
+        if len(entities) >= limit:
+            break
+    return entities
 
 
 def _is_expired(expiry_date: str | None) -> bool:
@@ -148,3 +188,12 @@ def _unique(values: list[str]) -> list[str]:
             seen.add(key)
             normalized.append(text)
     return normalized
+
+
+def _acl_group_paths(*, owner_group_path: str, raw_group_paths: list[str] | None) -> list[str]:
+    candidates = raw_group_paths if raw_group_paths is not None else [owner_group_path]
+    normalized = [normalize_group_path(path) for path in candidates]
+    if owner_group_path not in normalized:
+        normalized.insert(0, owner_group_path)
+    ordered = [owner_group_path, *[path for path in normalized if path != owner_group_path]]
+    return _unique(ordered)

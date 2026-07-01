@@ -1,4 +1,4 @@
-"""Download or verify FastEmbed sparse and reranker models."""
+"""Download or verify FastEmbed dense, sparse, and reranker models."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from rag.shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL, SUPPORTED_RERANKER_MODELS
+from rag.shared.fastembed_dense import DEFAULT_FASTEMBED_DENSE_MODEL
 from rag.shared.runtime_offline import apply_runtime_offline_defaults
 
 DEFAULT_SPARSE_MODEL = "Qdrant/bm25"
@@ -16,15 +17,34 @@ DEFAULT_FASTEMBED_CACHE_DIR = Path("/models/fastembed")
 
 def prewarm_fastembed_models(
     *,
+    dense_model: str,
     sparse_model: str,
     reranker_models: list[str],
+    dense_cache_dir: Path,
     sparse_cache_dir: Path,
     reranker_cache_dir: Path,
 ) -> None:
     apply_runtime_offline_defaults()
+    _load_dense_model(dense_model, dense_cache_dir)
     _load_sparse_model(sparse_model, sparse_cache_dir)
     for reranker_model in reranker_models:
         _load_reranker_model(reranker_model, reranker_cache_dir)
+
+
+def _load_dense_model(model_name: str, cache_dir: Path) -> Any:
+    try:
+        from fastembed import TextEmbedding
+
+        model = TextEmbedding(model_name, cache_dir=str(cache_dir))
+        vectors = list(model.embed(["airgap dense verification"]))
+        if len(vectors) != 1:
+            raise RuntimeError("dense probe returned an unexpected vector count")
+        return model
+    except Exception as exc:
+        raise RuntimeError(
+            f"FastEmbed dense model {model_name!r} is unavailable in cache {cache_dir}. "
+            "Seed model-cache/fastembed while connected."
+        ) from exc
 
 
 def _load_sparse_model(model_name: str, cache_dir: Path) -> Any:
@@ -69,6 +89,7 @@ def _env_path(name: str, default: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dense-model", default=_env_value("RAG_FASTEMBED_MODEL", DEFAULT_FASTEMBED_DENSE_MODEL))
     parser.add_argument("--sparse-model", default=_env_value("RAG_SPARSE_MODEL", DEFAULT_SPARSE_MODEL))
     parser.add_argument(
         "--reranker-model",
@@ -79,6 +100,11 @@ def main() -> None:
         "--all-rerankers",
         action="store_true",
         help="Download or verify every supported local reranker model.",
+    )
+    parser.add_argument(
+        "--dense-cache-dir",
+        type=Path,
+        default=_env_path("RAG_DENSE_CACHE_DIR", DEFAULT_FASTEMBED_CACHE_DIR),
     )
     parser.add_argument(
         "--sparse-cache-dir",
@@ -100,16 +126,19 @@ def main() -> None:
         else args.reranker_model or [_env_value("RAG_RERANKER_MODEL", DEFAULT_RERANKER_MODEL)]
     )
     prewarm_fastembed_models(
+        dense_model=args.dense_model,
         sparse_model=args.sparse_model,
         reranker_models=reranker_models,
+        dense_cache_dir=args.dense_cache_dir,
         sparse_cache_dir=args.sparse_cache_dir,
         reranker_cache_dir=args.reranker_cache_dir,
     )
     action = "verified" if args.verify_only else "downloaded and verified"
     reranker_label = "all supported rerankers" if args.all_rerankers else ", ".join(reranker_models)
     print(
-        "FastEmbed sparse/reranker models "
-        f"{action} in {args.sparse_cache_dir} and {args.reranker_cache_dir}: {reranker_label}"
+        "FastEmbed dense/sparse/reranker models "
+        f"{action}: dense={args.dense_model} in {args.dense_cache_dir}; "
+        f"sparse={args.sparse_model} in {args.sparse_cache_dir}; rerankers={reranker_label} in {args.reranker_cache_dir}"
     )
 
 

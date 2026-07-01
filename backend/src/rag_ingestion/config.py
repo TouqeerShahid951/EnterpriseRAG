@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
+from rag.shared.ingestion_quality import DEFAULT_INGESTION_QUALITY_PRESET, normalize_ingestion_quality_preset
+
 TRUE_VALUES = {"1", "true", "yes", "on", "y"}
 FALSE_VALUES = {"0", "false", "no", "off", "n"}
 SUPPORTED_MODEL_PROVIDERS = {"mock", "ollama", "vllm"}
@@ -40,6 +42,7 @@ class ModelProviderConfig:
     ollama_embed_model: str
     ollama_chat_timeout_seconds: float
     ollama_embed_timeout_seconds: float
+    dense_cache_dir: str | None
     sparse_model: str
     sparse_cache_dir: str | None
 
@@ -81,12 +84,20 @@ class WorkerConfig:
     graphrag_queue_name: str
     graphrag_enabled: bool
     graphrag_community_collection: str
+    graphrag_extraction_concurrency: int
+    graphrag_summary_concurrency: int
+    graphrag_summarize_after_document: bool
+    graphrag_partition_rebuild_delay_seconds: int
+    graphrag_max_chunks_per_doc: int
+    graphrag_min_chunk_chars: int
+    graphrag_extraction_checkpoint_ttl_seconds: int
     neo4j_uri: str
     neo4j_user: str
     neo4j_password: str
     neo4j_database: str
     http_timeout_seconds: float
     heartbeat_interval_seconds: float
+    ingest_stale_after_seconds: float
     ollama_retry_base_seconds: float
     ollama_num_ctx: int
     embedding_batch_size: int
@@ -95,6 +106,12 @@ class WorkerConfig:
     full_doc_weak_page_ratio: float
     layered_docling_max_pages: int
     layered_docling_batch_pages: int
+    pdf_image_analysis_max_images: int
+    pdf_image_analysis_max_full_page_fallbacks: int
+    scanned_visual_region_enabled: bool
+    scanned_visual_min_area_ratio: float
+    scanned_visual_max_regions_per_page: int
+    scanned_visual_text_mask_padding_px: int
     ocr_review_confidence_threshold: float
     native_text_min_chars_per_page: int
     chunk_target_tokens: int
@@ -108,6 +125,7 @@ class WorkerConfig:
     minio: MinioConfig
     qdrant: QdrantConfig
     vision: VisionConfig
+    ingestion_quality_preset: str = DEFAULT_INGESTION_QUALITY_PRESET
 
     @classmethod
     def from_env(cls) -> "WorkerConfig":
@@ -124,20 +142,67 @@ class WorkerConfig:
             graphrag_queue_name=os.getenv("GRAPHRAG_QUEUE_NAME", "graphrag:jobs"),
             graphrag_enabled=parse_bool(os.getenv("GRAPHRAG_ENABLED"), False),
             graphrag_community_collection=os.getenv("GRAPHRAG_COMMUNITY_COLLECTION", "graphrag_community_summaries"),
+            graphrag_extraction_concurrency=_bounded_int(
+                "GRAPHRAG_EXTRACTION_CONCURRENCY",
+                2,
+                minimum=1,
+                maximum=32,
+            ),
+            graphrag_summary_concurrency=_bounded_int(
+                "GRAPHRAG_SUMMARY_CONCURRENCY",
+                2,
+                minimum=1,
+                maximum=16,
+            ),
+            graphrag_summarize_after_document=parse_bool(os.getenv("GRAPHRAG_SUMMARIZE_AFTER_DOCUMENT"), False),
+            graphrag_partition_rebuild_delay_seconds=_bounded_int(
+                "GRAPHRAG_PARTITION_REBUILD_DELAY_SECONDS",
+                60,
+                minimum=0,
+                maximum=3600,
+            ),
+            graphrag_max_chunks_per_doc=_bounded_int(
+                "GRAPHRAG_MAX_CHUNKS_PER_DOC",
+                0,
+                minimum=0,
+                maximum=10000,
+            ),
+            graphrag_min_chunk_chars=_bounded_int(
+                "GRAPHRAG_MIN_CHUNK_CHARS",
+                80,
+                minimum=0,
+                maximum=2000,
+            ),
+            graphrag_extraction_checkpoint_ttl_seconds=_bounded_int(
+                "GRAPHRAG_EXTRACTION_CHECKPOINT_TTL_SECONDS",
+                86400,
+                minimum=60,
+                maximum=604800,
+            ),
             neo4j_uri=os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
             neo4j_user=os.getenv("NEO4J_USER", "neo4j"),
             neo4j_password=os.getenv("NEO4J_PASSWORD", "agenticrag-local-neo4j-password"),
             neo4j_database=os.getenv("NEO4J_DATABASE", "neo4j"),
             http_timeout_seconds=http_timeout,
             heartbeat_interval_seconds=float(os.getenv("INGEST_HEARTBEAT_INTERVAL_SECONDS", "30")),
+            ingest_stale_after_seconds=float(os.getenv("INGEST_STALE_AFTER_SECONDS", "120")),
             ollama_retry_base_seconds=float(os.getenv("OLLAMA_RETRY_BASE_SECONDS", "2")),
             ollama_num_ctx=_bounded_int("OLLAMA_NUM_CTX", 16384, minimum=1024, maximum=262144),
             embedding_batch_size=max(1, int(os.getenv("OLLAMA_EMBED_BATCH_SIZE", "16"))),
             worker_boot_concurrency=max(1, min(10, int(os.getenv("INGEST_WORKER_BOOT_CONCURRENCY", "1")))),
+            ingestion_quality_preset=normalize_ingestion_quality_preset(
+                os.getenv("INGESTION_QUALITY_PRESET", DEFAULT_INGESTION_QUALITY_PRESET)
+            ),
             weak_page_threshold=int(os.getenv("PDF_WEAK_PAGE_THRESHOLD", "5")),
             full_doc_weak_page_ratio=float(os.getenv("PDF_FULL_DOC_WEAK_PAGE_RATIO", "0.25")),
             layered_docling_max_pages=max(1, int(os.getenv("LAYERED_DOCLING_MAX_PAGES", "40"))),
             layered_docling_batch_pages=max(1, int(os.getenv("LAYERED_DOCLING_BATCH_PAGES", "4"))),
+            pdf_image_analysis_max_images=int(os.getenv("PDF_IMAGE_ANALYSIS_MAX_IMAGES", "-1")),
+            pdf_image_analysis_max_full_page_fallbacks=int(os.getenv("PDF_IMAGE_ANALYSIS_MAX_FULL_PAGE_FALLBACKS", "-1")),
+            scanned_visual_region_enabled=parse_bool(os.getenv("SCANNED_VISUAL_REGION_ENABLED"), True),
+            scanned_visual_min_area_ratio=max(0.0, float(os.getenv("SCANNED_VISUAL_MIN_AREA_RATIO", "0.03"))),
+            scanned_visual_max_regions_per_page=max(0, int(os.getenv("SCANNED_VISUAL_MAX_REGIONS_PER_PAGE", "4"))),
+            scanned_visual_text_mask_padding_px=max(0, int(os.getenv("SCANNED_VISUAL_TEXT_MASK_PADDING_PX", "8"))),
             ocr_review_confidence_threshold=float(os.getenv("OCR_REVIEW_CONFIDENCE_THRESHOLD", "0.9")),
             native_text_min_chars_per_page=int(os.getenv("NATIVE_TEXT_MIN_CHARS_PER_PAGE", "10")),
             chunk_target_tokens=_token_setting("RAG_CHUNK_TARGET_TOKENS", "RAG_CHUNK_MAX_CHARS", 512),
@@ -158,6 +223,7 @@ class WorkerConfig:
                 ollama_embed_model=os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text:latest"),
                 ollama_chat_timeout_seconds=float(os.getenv("RAG_OLLAMA_CHAT_TIMEOUT_SECONDS", "180")),
                 ollama_embed_timeout_seconds=float(os.getenv("RAG_OLLAMA_EMBED_TIMEOUT_SECONDS", str(http_timeout))),
+                dense_cache_dir=os.getenv("RAG_DENSE_CACHE_DIR", "/models/fastembed"),
                 sparse_model=os.getenv("RAG_SPARSE_MODEL", "Qdrant/bm25"),
                 sparse_cache_dir=os.getenv("RAG_SPARSE_CACHE_DIR", "/models/fastembed"),
             ),

@@ -1,4 +1,4 @@
-.faham-toast-viewport {
+.Prudentia-toast-viewport {
   position: fixed;
   right: 1rem;
   bottom: 1rem;
@@ -10,7 +10,7 @@
   pointer-events: none;
 }
 
-.faham-toast {
+.Prudentia-toast {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: start;
@@ -24,60 +24,60 @@
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   pointer-events: auto;
-  animation: faham-toast-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: Prudentia-toast-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.faham-toast[data-closing] {
-  animation: faham-toast-exit 180ms cubic-bezier(0.76, 0, 0.24, 1) both;
+.Prudentia-toast[data-closing] {
+  animation: Prudentia-toast-exit 180ms cubic-bezier(0.76, 0, 0.24, 1) both;
 }
 
-.faham-toast[data-tone="success"] {
+.Prudentia-toast[data-tone="success"] {
   border-color: color-mix(in srgb, var(--color-success) 34%, var(--color-surface-border));
 }
 
-.faham-toast[data-tone="warning"] {
+.Prudentia-toast[data-tone="warning"] {
   border-color: color-mix(in srgb, var(--color-warning-amber) 36%, var(--color-surface-border));
 }
 
-.faham-toast[data-tone="error"] {
+.Prudentia-toast[data-tone="error"] {
   border-color: color-mix(in srgb, var(--color-error-red) 38%, var(--color-surface-border));
 }
 
-.faham-toast-icon {
+.Prudentia-toast-icon {
   display: inline-flex;
   color: var(--color-secondary);
 }
 
-.faham-toast[data-tone="success"] .faham-toast-icon {
+.Prudentia-toast[data-tone="success"] .Prudentia-toast-icon {
   color: var(--color-success);
 }
 
-.faham-toast[data-tone="warning"] .faham-toast-icon {
+.Prudentia-toast[data-tone="warning"] .Prudentia-toast-icon {
   color: var(--color-warning-amber);
 }
 
-.faham-toast[data-tone="error"] .faham-toast-icon {
+.Prudentia-toast[data-tone="error"] .Prudentia-toast-icon {
   color: var(--color-error-red);
 }
 
-.faham-toast-copy {
+.Prudentia-toast-copy {
   display: grid;
   min-width: 0;
   gap: 0.2rem;
 }
 
-.faham-toast-copy strong {
+.Prudentia-toast-copy strong {
   font-size: 0.84rem;
   line-height: 1.25rem;
 }
 
-.faham-toast-copy span {
+.Prudentia-toast-copy span {
   color: var(--color-on-surface-variant);
   font-size: 0.78rem;
   line-height: 1.2rem;
 }
 
-.faham-toast button {
+.Prudentia-toast button {
   display: inline-flex;
   min-height: 2rem;
   min-width: 2rem;
@@ -89,12 +89,12 @@
   color: var(--color-secondary);
 }
 
-.faham-toast button:hover {
+.Prudentia-toast button:hover {
   background: var(--color-surface-container-highest);
   color: var(--color-on-surface);
 }
 
-@keyframes faham-toast-enter {
+@keyframes Prudentia-toast-enter {
   from {
     opacity: 0;
     transform: translate3d(1rem, 0.5rem, 0) scale(0.98);
@@ -105,7 +105,7 @@
   }
 }
 
-@keyframes faham-toast-exit {
+@keyframes Prudentia-toast-exit {
   from {
     opacity: 1;
     transform: translate3d(0, 0, 0) scale(1);
@@ -117,7 +117,7 @@
 }
 
 @media (max-width: 640px) {
-  .faham-toast-viewport {
+  .Prudentia-toast-viewport {
     right: 0.75rem;
     bottom: 0.75rem;
     width: calc(100vw - 1.5rem);
@@ -125,8 +125,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .faham-toast,
-  .faham-toast[data-closing] {
+  .Prudentia-toast,
+  .Prudentia-toast[data-closing] {
     animation-duration: 1ms;
   }
 }

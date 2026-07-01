@@ -31,6 +31,8 @@ QueryIntent = Literal[
     "conversational",
 ]
 FaithfulnessStatus = Literal["pending", "checked", "skipped", "failed"]
+QuerySourceMode = Literal["auto", "corpus_only", "db_only", "hybrid"]
+QuerySourceKind = Literal["connector_schema_catalog"]
 
 
 class HighlightRange(ContractModel):
@@ -137,6 +139,39 @@ class QueryRequest(ContractModel):
     client_request_id: str | None = Field(default=None, min_length=1, max_length=120)
     group_path: str | None = Field(default=None, min_length=1)
     document_ids: list[str] = Field(default_factory=list, max_length=20)
+    source_mode: QuerySourceMode = "auto"
+    query_source_id: str | None = Field(default=None, min_length=1, max_length=240)
+    allow_source_expansion: bool = False
+
+    @model_validator(mode="after")
+    def validate_source_scope(self) -> "QueryRequest":
+        if self.source_mode == "corpus_only" and self.query_source_id:
+            raise ValueError("corpus_only queries cannot specify a query_source_id")
+        if self.source_mode == "db_only" and self.document_ids:
+            raise ValueError("db_only queries cannot specify document_ids")
+        return self
+
+
+class QuerySource(ContractModel):
+    id: str
+    kind: QuerySourceKind
+    name: str
+    description: str | None = None
+    connector_type: str
+    scope: Literal["database_scope"]
+    group_path: str
+    clearance_level: ClearanceLevel = DEFAULT_CLEARANCE_LEVEL
+
+
+class QuerySourceListResponse(ContractModel):
+    items: list[QuerySource] = Field(default_factory=list)
+    total: int = Field(..., ge=0)
+
+
+class SourceExpansion(ContractModel):
+    available: bool = False
+    reason: str
+    suggested_source_mode: QuerySourceMode = "hybrid"
 
 
 class GeneratedArtifact(ContractModel):
@@ -169,8 +204,13 @@ class ArtifactJobSummary(ContractModel):
     artifacts: list[GeneratedArtifact] = Field(default_factory=list)
     error_code: str | None = None
     error_message: str | None = None
+    attempt_count: int = Field(default=0, ge=0)
+    max_attempts: int = Field(default=3, ge=1)
     created_at: str | None = None
     updated_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    last_heartbeat_at: str | None = None
     expires_at: str | None = None
 
 
@@ -198,6 +238,9 @@ class RAGResponse(ContractModel):
     node_timings: list[QueryNodeTiming] = Field(default_factory=list)
     degraded: bool
     degraded_reason: str | None = None
+    source_mode: str | None = None
+    source_decision_reason: str | None = None
+    source_expansion: SourceExpansion | None = None
 
 
 class ChatSession(ContractModel):

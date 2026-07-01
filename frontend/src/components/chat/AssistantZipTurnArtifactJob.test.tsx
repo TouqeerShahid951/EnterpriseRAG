@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ArtifactJobSummary, RAGResponse } from "../../types/api";
 import type { AssistantTurn } from "../../types/chat";
@@ -42,6 +42,57 @@ describe("AssistantZipTurn artifact job progress", () => {
 
     expect(markup).toContain("Rendering");
     expect(markup).toContain("Rendering Pptx Slide");
+  });
+
+  it("times queued retry jobs from the retry update time", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-17T09:05:10+00:00"));
+    try {
+      const markup = renderToStaticMarkup(
+        <AssistantZipTurn
+          documents={[]}
+          onSelectSource={() => undefined}
+          selectedSource={null}
+          turn={turnWithJob({
+            ...baseJob,
+            status: "queued",
+            stage: "queued",
+            progress_pct: 0,
+            started_at: null,
+            updated_at: "2026-06-17T09:05:00+00:00",
+          })}
+        />,
+      );
+
+      expect(markup).toContain("10s");
+      expect(markup).not.toContain("5m 10s");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("times active retry attempts from started_at", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-17T09:05:10+00:00"));
+    try {
+      const markup = renderToStaticMarkup(
+        <AssistantZipTurn
+          documents={[]}
+          onSelectSource={() => undefined}
+          selectedSource={null}
+          turn={turnWithJob({
+            ...baseJob,
+            started_at: "2026-06-17T09:05:00+00:00",
+            updated_at: "2026-06-17T09:05:00+00:00",
+          })}
+        />,
+      );
+
+      expect(markup).toContain("10s");
+      expect(markup).not.toContain("5m 10s");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

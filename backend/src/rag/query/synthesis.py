@@ -133,6 +133,11 @@ def synthesize_response(
             available_sources = []
             ctx["degraded"] = True
             ctx["degraded_reason"] = ctx["degraded_reason"] or "Insufficient relevant evidence after retrieval retries"
+    elif ctx.get("source_expansion"):
+        available_sources = []
+        answer = "I could not answer from the selected source. You can search all sources too."
+        ctx["degraded"] = True
+        ctx["degraded_reason"] = ctx["degraded_reason"] or "explicit_source_no_answer"
     else:
         available_sources = []
         answer = "No accessible current sources were found for this query."
@@ -377,7 +382,10 @@ def is_global_abstention(answer: str) -> bool:
             "indexed sources do not contain enough information",
             "sources do not contain enough information",
             "sources do not contain the answer",
+            "sources do not contain information about",
             "evidence does not contain enough information",
+            "evidence does not contain information about",
+            "documents do not contain information about",
             "not enough information in the indexed sources",
             "no accessible current sources were found",
         )
@@ -442,6 +450,7 @@ def build_conflict_answer(conflicts: list[ConflictPair]) -> str:
 
 
 def build_rag_response(ctx: QueryContext, *, answer: str, sources: list[SourceAnchor]) -> RAGResponse:
+    source_decision = ctx.get("source_decision")
     return RAGResponse(
         trace_id=ctx["trace_id"],
         answer=answer,
@@ -456,4 +465,7 @@ def build_rag_response(ctx: QueryContext, *, answer: str, sources: list[SourceAn
         latency_ms=max(0, int((perf_counter() - ctx["wall_time_start"]) * 1000)),
         degraded=ctx["degraded"],
         degraded_reason=ctx["degraded_reason"],
+        source_mode=str(getattr(source_decision, "resolved_mode", "")) or None,
+        source_decision_reason=str(getattr(source_decision, "reason", "")) or None,
+        source_expansion=ctx.get("source_expansion"),  # type: ignore[arg-type]
     )

@@ -19,6 +19,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
+    KeepTogether,
     NextPageTemplate,
     PageBreak,
     PageTemplate,
@@ -31,12 +32,12 @@ from reportlab.platypus import (
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS_DIR = ROOT / "docs"
-DOCX_PATH = DOCS_DIR / "Faham-AI-End-User-Walkthrough.docx"
-PDF_PATH = DOCS_DIR / "Faham-AI-End-User-Walkthrough.pdf"
+DOCX_PATH = DOCS_DIR / "Prudentia-AI-End-User-Walkthrough.docx"
+PDF_PATH = DOCS_DIR / "Prudentia-AI-End-User-Walkthrough.pdf"
 
-TITLE = "Faham AI End User Walkthrough"
-SUBTITLE = "How to search, verify evidence, upload documents, monitor indexing, and use role-based features"
-UPDATED = "2026-06-18"
+TITLE = "Prudentia AI End User Walkthrough"
+SUBTITLE = "Search documents and live data, choose ingestion profiles, verify evidence, and use optional GraphRAG"
+UPDATED = "2026-06-23"
 
 BLUE = RGBColor(46, 116, 181)
 DARK_BLUE = RGBColor(31, 77, 120)
@@ -62,11 +63,13 @@ FEATURE_ROWS = [
     FeatureRow("Query Intelligence", "Ask questions, watch the retrieval progress, and inspect cited evidence.", "Operate > Query Intelligence"),
     FeatureRow("Knowledge Space selector", "Choose the document scope used for queries and uploads.", "Sidebar header"),
     FeatureRow("Document Library", "Browse, search, inspect, download, and manage visible documents.", "Corpus > Document Library"),
-    FeatureRow("Add Files", "Upload PDF, DOCX, JPG, JPEG, or PNG files up to 50 MB each.", "Corpus > Document Intake > Add Files"),
+    FeatureRow("Add Files", "Upload PDF, DOCX, JPG, JPEG, PNG, or JSON files and choose an ingestion profile.", "Corpus > Document Intake > Add Files"),
     FeatureRow("Activity", "Track upload, folder, restore, and reingestion jobs.", "Corpus > Document Intake > Activity"),
-    FeatureRow("Folder Sources", "Schedule browser folder snapshots or S3/MinIO prefix ingestion.", "Corpus > Document Intake > Folder Sources"),
+    FeatureRow("Folder Sources", "Upload local folder snapshots.", "Corpus > Document Intake > Folder Sources"),
+    FeatureRow("Database Connectors", "Approve SQL Server or PostgreSQL scopes for live read-only answers.", "Corpus > Document Intake > Database Connectors"),
     FeatureRow("Review Queue", "Correct low-confidence OCR blocks before indexing continues.", "Evaluate > Review Queue"),
     FeatureRow("System Audit", "Review visible authentication, document, and ingestion activity.", "Govern > System Audit"),
+    FeatureRow("Configs", "Assign inference roles, tune services, and choose ingestion defaults.", "Govern > Configs"),
 ]
 
 
@@ -85,11 +88,13 @@ TROUBLESHOOTING_ROWS = [
     ("A page is missing", "Your account does not have that route.", "Ask an admin to confirm your role and Knowledge Space memberships."),
     ("You cannot query", "The active space has no indexed current documents, or the model runtime is unavailable.", "Switch space, wait for indexing, or report the runtime issue."),
     ("No documents appear", "Wrong active space, insufficient clearance, or no documents are current.", "Check the space selector and ask your workspace admin to verify access."),
-    ("Upload is rejected", "Unsupported type, empty file, file over 50 MB, or no writable space.", "Use PDF, DOCX, JPG, JPEG, or PNG and choose a writable Knowledge Space."),
+    ("Upload is rejected", "Unsupported type, empty file, file over 50 MB, or no writable space.", "Use PDF, DOCX, JPG, JPEG, PNG, or JSON and choose a writable Knowledge Space."),
     ("A document needs review", "Low-confidence OCR paused indexing.", "A reviewer should correct or reject the pending block in Review Queue."),
     ("An ingestion job looks stuck", "Worker heartbeat, parsing, OCR, or model services may be delayed.", "Open Activity or Ingestion Health and share the job ID with operations."),
     ("Source highlight is unavailable", "The source may lack page coordinates or exact text matching.", "Use the original document link and compare page, excerpt, and citation details."),
     ("The answer has a warning", "Sources may conflict, faithfulness may be low, or the response is degraded.", "Inspect citations manually before using the answer."),
+    ("No Live DB source appears", "No approved catalog is visible for your space and clearance.", "Ask a connector admin to test the profile and approve the minimum required schema scope."),
+    ("Graph enrichment is absent", "GraphRAG was not selected, is disabled, or its worker is unavailable.", "Standard retrieval still works. Check the GraphRAG choice and Ingestion Health when graph analysis is needed."),
 ]
 
 
@@ -102,6 +107,16 @@ GLOSSARY_ROWS = [
     ("Citation", "A link between an answer claim and its supporting source evidence."),
     ("Faithfulness", "A grounding check that estimates whether the answer is supported by retrieved evidence."),
     ("Generated artifact", "A downloadable DOCX, PDF, or PPTX produced from a qualifying request."),
+    ("Approved database scope", "A reviewed set of database tables, columns, relationships, space, and clearance allowed for live read-only SQL."),
+    ("Ingestion profile", "Fast, Balanced, or High accuracy parsing selected for a new document."),
+    ("GraphRAG", "Optional entity-and-relationship enrichment for corpus-level themes and patterns."),
+]
+
+
+INGESTION_PROFILE_ROWS = [
+    ("Fast", "Native text first, no vision, and capped Docling repair.", "High-volume, text-native files"),
+    ("Balanced", "Native text first with a larger Docling repair budget.", "Mixed collections and moderate layout complexity"),
+    ("High accuracy", "Deeper layout repair with preference for full-document repair.", "Scans, tables, and fidelity-sensitive layouts"),
 ]
 
 
@@ -122,7 +137,7 @@ def build_docx(path: Path) -> None:
     add_h1(doc, "How to Use This Guide")
     add_note_box(
         doc,
-        "Your sidebar is permission-aware. If a feature described here does not appear, your account does not include that permission. The guide focuses on end-user workflows, not platform setup, user provisioning, or model/runtime configuration.",
+        "Your sidebar is permission-aware. If a feature described here does not appear, your account does not include that permission. Connector governance and Configs are included for administrators who can see those pages.",
     )
     add_numbered_list(
         doc,
@@ -193,6 +208,19 @@ def build_docx(path: Path) -> None:
             "Treat warnings as review signals, not as final conclusions.",
         ],
     )
+    add_h2(doc, "Choose a Query Source")
+    add_table(
+        doc,
+        ["Mode", "Use it for"],
+        [
+            ("Auto", "Let Prudentia choose visible documents, approved live data, or both."),
+            ("Documents", "Use only indexed files in the active space and optional @ document tags."),
+            ("Live DB", "Use current structured facts from approved SQL Server or PostgreSQL scopes."),
+            ("Hybrid", "Combine indexed document evidence with live database rows."),
+        ],
+        [1800, 7560],
+    )
+    add_para(doc, "In Live DB or Hybrid mode, select one approved database source or leave All visible DB sources selected. If a selected source cannot answer, use Search all sources when offered.")
 
     add_h1(doc, "Verify Answers With Evidence")
     add_para(
@@ -214,6 +242,18 @@ def build_docx(path: Path) -> None:
         fill=CAUTION_FILL,
     )
 
+    add_h1(doc, "Use Optional GraphRAG")
+    add_para(doc, "GraphRAG is opt-in. Select it during upload or reingestion only for documents that should participate in relationship, theme, risk, trend, and corpus-level analysis. Leaving it off keeps standard document retrieval fully available and does not create a graph task.")
+    add_bullets(
+        doc,
+        [
+            "Opted-in documents are indexed normally before a separate graph task extracts entities and relationships.",
+            "A document can be searchable while graph enrichment is still queued or running.",
+            "Ask for major themes, recurring issues, patterns, risks, trends, relationships, or an executive overview across opted-in documents.",
+            "Graph answers remain grounded in source chunks and include normal citations. Exact counts and exhaustive lists use structured or standard retrieval.",
+        ],
+    )
+
     add_h1(doc, "Use Chat History and Generated Files")
     add_bullets(
         doc,
@@ -232,9 +272,10 @@ def build_docx(path: Path) -> None:
         doc,
         ["Item", "Details"],
         [
-            ("Supported files", "PDF, DOCX, JPG, JPEG, and PNG"),
+            ("Supported files", "PDF, DOCX, JPG, JPEG, PNG, and JSON"),
             ("Maximum size", "50 MB per file"),
             ("Required metadata", "A writable Knowledge Space"),
+            ("Processing choice", "Fast, Balanced, or High accuracy; optional GraphRAG opt-in"),
             ("Optional metadata", "Effective date, expiry date, description, and supersedes IDs for single-file replacements"),
             ("Result", "Each file receives its own ingestion job"),
         ],
@@ -246,6 +287,8 @@ def build_docx(path: Path) -> None:
             "Open Document Intake > Add Files.",
             "Select one or more supported files.",
             "Choose the writable Knowledge Space.",
+            "Choose Fast, Balanced, or High accuracy ingestion.",
+            "Enable GraphRAG only when relationship or corpus-level analysis is needed.",
             "Add dates, description, or supersession details if needed.",
             "Click Upload documents.",
             "Watch Recent upload jobs for progress and warnings.",
@@ -262,6 +305,7 @@ def build_docx(path: Path) -> None:
             "Open a job to review stage details, warnings, attempts, and parser provenance.",
             "If you have write access, you may cancel jobs that are still scheduled, queued, or processing.",
             "Use Ingestion Health to see active pipeline, failed jobs, review queues, and recent failures.",
+            "GraphRAG activity shows queue depth, worker health, and active tasks for opted-in documents.",
         ],
     )
 
@@ -288,16 +332,31 @@ def build_docx(path: Path) -> None:
     )
 
     add_h1(doc, "Use Folder Sources")
-    add_para(doc, "If Folder Sources appears in your sidebar, you can schedule bulk ingestion.")
+    add_para(doc, "If Folder Sources appears in your sidebar, you can upload local folder snapshots for bulk ingestion.")
     add_bullets(
         doc,
         [
-            "Browser snapshot mode submits files selected from a local folder in the browser.",
-            "S3/MinIO prefix mode stores the bucket, prefix, schedule, and metadata while credentials stay on the backend.",
-            "Schedules can be one-time or recurring with selected days and a time window.",
+            "Choose a folder from the browser to stage a point-in-time copy with relative paths preserved.",
+            "Folder snapshots are one-time schedules. Re-browse the folder later to ingest newer local edits.",
             "Use schedule run details to review queued, skipped, and failed files.",
         ],
     )
+
+    add_h1(doc, "Use Database Connectors")
+    add_para(doc, "Platform Admins, System Admins, and Space Admins can prepare live read-only access to SQL Server and PostgreSQL. Database record-sync schedules are retired; approved data is queried at question time and is not copied into the document corpus.")
+    add_numbered_list(
+        doc,
+        [
+            "Open Document Intake > Database Connectors and add a read-only profile.",
+            "Enter server or host, port, database, user, password, and the required driver or SSL mode.",
+            "Save the encrypted profile, then click Test.",
+            "Click Schema to inspect tables, columns, relationships, indexes, and raw schema JSON.",
+            "Create an AI draft, then correct its catalog name, business rules, descriptions, synonyms, allowed fields, and sensitivity flags.",
+            "Assign the correct Knowledge Space and clearance, then Approve Scope.",
+            "In Query Intelligence, choose Live DB or Hybrid and select the approved source.",
+        ],
+    )
+    add_note_box(doc, "Only approved, non-sensitive tables, columns, and relationships can be queried. Write statements, wildcards, unapproved joins, system schemas, and chained SQL are blocked.", fill=CAUTION_FILL)
 
     add_h1(doc, "Review OCR Blocks")
     add_para(doc, "If Review Queue appears in your sidebar, use it to resolve low-confidence OCR before indexing continues.")
@@ -317,6 +376,31 @@ def build_docx(path: Path) -> None:
     add_para(
         doc,
         "If System Audit appears in your sidebar, use it to review visible authentication, document, ingestion, and workspace events.",
+    )
+
+    add_h1(doc, "Use Configs")
+    add_para(doc, "Configs is Platform Admin-only and contains Models & Roles, Inference Services, and Ingestion Worker Capacity.")
+    add_h2(doc, "Models & Roles")
+    add_bullets(
+        doc,
+        [
+            "Choose an Ollama local or vLLM text starting stack, check service discovery, and assign answer synthesis, reasoning, router, faithfulness, ingestion metadata, vision, embedding, and reranker roles.",
+            "Changing the embedding provider or model requires reindexing existing documents.",
+            "Tune JSON/Layout and evidence budgets, chat and embedding timeouts, Ollama model thinking, and the query planner.",
+            "Test draft validates without activation. Save & activate validates again and makes the draft active without restarting containers.",
+        ],
+    )
+    add_h2(doc, "Inference Services")
+    add_para(doc, "Check provider availability and manage vLLM text, embedding, and vision limits. Applying limits restarts only the selected service and interrupts requests using it.")
+    add_h2(doc, "Ingestion Profiles and Worker Capacity")
+    add_table(doc, ["Profile", "Behavior", "Best for"], INGESTION_PROFILE_ROWS, [1800, 4460, 3100], compact=True)
+    add_bullets(
+        doc,
+        [
+            "Worker concurrency is 1-10 per replica; one is recommended for the default 8 GB environment.",
+            "OCR blocks below the review threshold pause in Review Queue.",
+            "Vision layout repair re-reads complex PDF pages after Docling and trades throughput for fidelity.",
+        ],
     )
     add_bullets(
         doc,
@@ -441,9 +525,9 @@ def add_docx_cover(doc: Document) -> None:
         doc,
         ["Field", "Details"],
         [
-            ("Audience", "End users, contributors, reviewers, and auditors using the web workspace"),
-            ("Scope", "Sign-in, navigation, querying, evidence review, uploads, document library, activity, review, and audit"),
-            ("Not covered", "Deployment, user provisioning, model/runtime configuration, and developer operations"),
+            ("Audience", "Members, contributors, reviewers, auditors, space admins, system admins, and platform admins"),
+            ("Scope", "Document and live-data queries, connectors, ingestion profiles, optional GraphRAG, evidence, activity, governance, and Configs"),
+            ("Not covered", "Deployment internals, secret rotation, database administration, and developer operations"),
             ("Updated", UPDATED),
         ],
         [1900, 7460],
@@ -460,7 +544,7 @@ def set_section_header_footer(section) -> None:
     header = section.header.paragraphs[0]
     header.alignment = WD_ALIGN_PARAGRAPH.LEFT
     header.paragraph_format.space_after = Pt(0)
-    run = header.add_run("Faham AI End User Walkthrough")
+    run = header.add_run("Prudentia AI End User Walkthrough")
     set_run_font(run, size=9, color=MUTED, bold=True)
 
     footer = section.footer.paragraphs[0]
@@ -525,7 +609,7 @@ def add_numbered_list(doc: Document, items: Iterable[str]) -> None:
 def add_note_box(doc: Document, text: str, fill: str = NOTE_FILL) -> None:
     table = doc.add_table(rows=1, cols=1)
     table.alignment = WD_TABLE_ALIGNMENT.LEFT
-    set_table_geometry(table, [CONTENT_WIDTH_DXA], indent=TABLE_INDENT_DXA)
+    set_table_geometry(table, [CONTENT_WIDTH_DXA], indent=160)
     cell = table.cell(0, 0)
     set_cell_shading(cell, fill)
     set_cell_margins(cell, top=120, bottom=120, start=160, end=160)
@@ -549,6 +633,7 @@ def add_table(
     table.style = "Table Grid"
 
     header_cells = table.rows[0].cells
+    set_repeat_table_header(table.rows[0])
     for idx, text in enumerate(headers):
         set_cell_text(header_cells[idx], text, bold=True, fill=LIGHT_BLUE, size=9.5 if compact else 10)
         set_cell_width(header_cells[idx], widths_dxa[idx])
@@ -559,6 +644,15 @@ def add_table(
             set_cell_text(cells[idx], text, size=9.5 if compact else 10)
             set_cell_width(cells[idx], widths_dxa[idx])
     doc.add_paragraph().paragraph_format.space_after = Pt(2)
+
+
+def set_repeat_table_header(row) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    tbl_header = tr_pr.find(qn("w:tblHeader"))
+    if tbl_header is None:
+        tbl_header = OxmlElement("w:tblHeader")
+        tr_pr.append(tbl_header)
+    tbl_header.set(qn("w:val"), "true")
 
 
 def set_cell_text(cell, text: str, bold: bool = False, fill: str | None = None, size: float = 10) -> None:
@@ -682,11 +776,13 @@ def build_pdf(path: Path) -> None:
     story.extend(pdf_numbered_section(styles, "Ask Grounded Questions", [
         "Open Query Intelligence.",
         "Confirm the active Knowledge Space.",
+        "Choose Auto, Documents, Live DB, or Hybrid. Select one approved DB source when needed.",
         "Type a specific question. Mention dates, document names, entities, or constraints when useful.",
         "Press Enter or click Send. Use Shift+Enter for a new line.",
         "Watch the progress panel as the system routes the query, retrieves evidence, and drafts the answer.",
         "Read the answer and inspect the citations.",
     ]))
+    story.extend(pdf_query_sources_section(styles))
     story.extend(pdf_section(styles, "Verify Answers With Evidence", [
         "PDF sources can show page navigation and highlighted regions.",
         "DOCX sources can show matching text where available.",
@@ -700,6 +796,13 @@ def build_pdf(path: Path) -> None:
         "Delete old conversations that are no longer useful.",
         "When document generation starts, answer clarification questions and download the DOCX, PDF, or PPTX when ready.",
     ]))
+    story.extend(pdf_section(styles, "Use Optional GraphRAG", [
+        "Select GraphRAG during upload or reingestion only for documents that should participate in relationship and corpus-level analysis.",
+        "Leaving GraphRAG off keeps standard document search available and does not create a graph task.",
+        "Opted-in documents are searchable before the separate graph task necessarily finishes.",
+        "Ask for themes, patterns, trends, recurring issues, risks, relationships, or executive overviews across opted-in documents.",
+        "Graph answers cite source chunks. Exact counts and exhaustive lists use structured or standard retrieval.",
+    ]))
     story.extend(pdf_upload_section(styles))
     story.extend(pdf_activity_section(styles))
     story.extend(pdf_section(styles, "Browse the Document Library", [
@@ -710,11 +813,11 @@ def build_pdf(path: Path) -> None:
         "The Document Inspector shows metadata, extracted facts, version history, downloads, and allowed lifecycle actions.",
     ]))
     story.extend(pdf_section(styles, "Use Folder Sources", [
-        "Browser snapshot mode submits files selected from a local folder in the browser.",
-        "S3/MinIO prefix mode stores bucket, prefix, schedule, and metadata while credentials stay on the backend.",
-        "Schedules can be one-time or recurring with selected days and a time window.",
+        "Choose a folder from the browser to stage a point-in-time copy with relative paths preserved.",
+        "Folder snapshots are one-time schedules. Re-browse the folder later to ingest newer local edits.",
         "Use schedule run details to review queued, skipped, and failed files.",
     ]))
+    story.extend(pdf_database_connectors_section(styles))
     story.extend(pdf_numbered_section(styles, "Review OCR Blocks", [
         "Open Review Queue.",
         "Select a pending block grouped under a document.",
@@ -727,6 +830,7 @@ def build_pdf(path: Path) -> None:
         "Each row shows event type, target, actor, payload summary, and created time.",
         "Audit is for review and escalation. It is not an editing surface.",
     ], lead="If System Audit appears in your sidebar, use it to review visible authentication, document, ingestion, and workspace events."))
+    story.extend(pdf_configs_section(styles))
     story.extend(pdf_troubleshooting(styles))
     story.extend(pdf_section(styles, "Safe Usage Practices", [
         "Do not rely on an answer without checking citations for important decisions.",
@@ -749,7 +853,7 @@ def draw_pdf_footer(canvas, doc) -> None:
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.HexColor("#5B6770"))
-    canvas.drawString(doc.leftMargin, 0.45 * inch, "Faham AI End User Walkthrough")
+    canvas.drawString(doc.leftMargin, 0.45 * inch, "Prudentia AI End User Walkthrough")
     canvas.drawRightString(letter[0] - doc.rightMargin, 0.45 * inch, f"Page {doc.page}")
     canvas.restoreState()
 
@@ -780,9 +884,9 @@ def pdf_cover(styles: dict[str, ParagraphStyle]) -> list:
             styles,
             ["Field", "Details"],
             [
-                ("Audience", "End users, contributors, reviewers, and auditors using the web workspace"),
-                ("Scope", "Sign-in, navigation, querying, evidence review, uploads, document library, activity, review, and audit"),
-                ("Not covered", "Deployment, user provisioning, model/runtime configuration, and developer operations"),
+                ("Audience", "Members, contributors, reviewers, auditors, space admins, system admins, and platform admins"),
+                ("Scope", "Document and live-data queries, connectors, ingestion profiles, optional GraphRAG, evidence, activity, governance, and Configs"),
+                ("Not covered", "Deployment internals, secret rotation, database administration, and developer operations"),
                 ("Updated", UPDATED),
             ],
             [1.35 * inch, 5.15 * inch],
@@ -824,7 +928,7 @@ def pdf_section(styles: dict[str, ParagraphStyle], title: str, bullets: list[str
     if lead:
         story.append(Paragraph(lead, styles["body"]))
     story.extend(pdf_bullets(styles, bullets))
-    return story
+    return [KeepTogether(story)]
 
 
 def pdf_numbered_section(styles: dict[str, ParagraphStyle], title: str, items: list[str], lead: str | None = None) -> list:
@@ -832,7 +936,25 @@ def pdf_numbered_section(styles: dict[str, ParagraphStyle], title: str, items: l
     if lead:
         story.append(Paragraph(lead, styles["body"]))
     story.extend(pdf_numbered_items(styles, items))
-    return story
+    return [KeepTogether(story)]
+
+
+def pdf_query_sources_section(styles: dict[str, ParagraphStyle]) -> list:
+    return [KeepTogether([
+        Paragraph("Choose a Query Source", styles["h1"]),
+        pdf_table(
+            styles,
+            ["Mode", "Use it for"],
+            [
+                ("Auto", "Let Prudentia choose visible documents, approved live data, or both."),
+                ("Documents", "Use indexed files in the active space and optional @ document tags."),
+                ("Live DB", "Use current structured facts from approved SQL Server or PostgreSQL scopes."),
+                ("Hybrid", "Combine indexed document evidence with live database rows."),
+            ],
+            [1.25 * inch, 5.25 * inch],
+        ),
+        Paragraph("In Live DB or Hybrid mode, select one source or leave All visible DB sources selected. If a selected source cannot answer, use Search all sources when offered.", styles["body"]),
+    ])]
 
 
 def pdf_upload_section(styles: dict[str, ParagraphStyle]) -> list:
@@ -843,21 +965,73 @@ def pdf_upload_section(styles: dict[str, ParagraphStyle]) -> list:
             styles,
             ["Item", "Details"],
             [
-                ("Supported files", "PDF, DOCX, JPG, JPEG, and PNG"),
+                ("Supported files", "PDF, DOCX, JPG, JPEG, PNG, and JSON"),
                 ("Maximum size", "50 MB per file"),
                 ("Required metadata", "A writable Knowledge Space"),
+                ("Processing choice", "Fast, Balanced, or High accuracy; optional GraphRAG opt-in"),
                 ("Optional metadata", "Effective date, expiry date, description, and supersedes IDs for single-file replacements"),
                 ("Result", "Each file receives its own ingestion job"),
             ],
             [1.75 * inch, 4.75 * inch],
         ),
+        KeepTogether([
+            Paragraph("Upload Workflow", styles["h2"]),
+            *pdf_numbered_items(styles, [
+                "Open Document Intake > Add Files.",
+                "Select one or more supported files.",
+                "Choose the writable Knowledge Space.",
+                "Choose the ingestion profile and enable GraphRAG only when graph analysis is needed.",
+                "Add dates, description, or supersession details if needed.",
+                "Click Upload documents.",
+                "Watch Recent upload jobs for progress and warnings.",
+            ]),
+        ]),
+    ]
+
+
+def pdf_database_connectors_section(styles: dict[str, ParagraphStyle]) -> list:
+    return [KeepTogether([
+        Paragraph("Use Database Connectors", styles["h1"]),
+        Paragraph("Platform Admins, System Admins, and Space Admins can prepare SQL Server or PostgreSQL for governed live read-only answers. Record-sync schedules are retired; rows are queried at question time and are not copied into the document corpus.", styles["body"]),
         *pdf_numbered_items(styles, [
-            "Open Document Intake > Add Files.",
-            "Select one or more supported files.",
-            "Choose the writable Knowledge Space.",
-            "Add dates, description, or supersession details if needed.",
-            "Click Upload documents.",
-            "Watch Recent upload jobs for progress and warnings.",
+            "Add a read-only profile with host, port, database, credentials, and required driver or SSL mode.",
+            "Save the encrypted profile and click Test.",
+            "Click Schema to inspect tables, columns, relationships, indexes, and raw schema JSON.",
+            "Create an AI draft and review names, business rules, descriptions, synonyms, allowed fields, and sensitivity flags.",
+            "Assign the correct Knowledge Space and clearance, then Approve Scope.",
+            "Choose Live DB or Hybrid in Query Intelligence and select the approved source.",
+        ]),
+        pdf_note(styles, "Only approved, non-sensitive tables, columns, and relationships can be queried. Write statements, wildcards, unapproved joins, system schemas, and chained SQL are blocked."),
+    ])]
+
+
+def pdf_configs_section(styles: dict[str, ParagraphStyle]) -> list:
+    return [
+        KeepTogether([
+            Paragraph("Use Configs", styles["h1"]),
+            Paragraph("Configs is Platform Admin-only. It contains Models & Roles, Inference Services, and Ingestion Worker Capacity.", styles["body"]),
+        ]),
+        KeepTogether([
+            Paragraph("Models & Roles", styles["h2"]),
+            *pdf_bullets(styles, [
+                "Choose an Ollama or vLLM starting stack, check service discovery, and assign synthesis, reasoning, router, faithfulness, ingestion, vision, embedding, and reranker roles.",
+                "Embedding changes require document reindexing.",
+                "Tune output and evidence budgets, timeouts, Ollama thinking, and the query planner.",
+                "Test draft validates without activation; Save & activate validates again and makes the draft active without a container restart.",
+            ]),
+        ]),
+        KeepTogether([
+            Paragraph("Inference Services", styles["h2"]),
+            Paragraph("Check provider availability and manage vLLM text, embedding, and vision limits. Applying limits restarts only the selected service and interrupts requests that use it.", styles["body"]),
+        ]),
+        KeepTogether([
+            Paragraph("Ingestion Profiles", styles["h2"]),
+            pdf_table(styles, ["Profile", "Behavior", "Best for"], INGESTION_PROFILE_ROWS, [1.15 * inch, 3.15 * inch, 2.2 * inch]),
+            *pdf_bullets(styles, [
+                "Worker concurrency is 1-10 per replica; one is recommended for the default 8 GB environment.",
+                "OCR below the review threshold pauses in Review Queue.",
+                "Vision layout repair re-reads complex PDF pages after Docling and trades throughput for fidelity.",
+            ]),
         ]),
     ]
 
@@ -872,22 +1046,23 @@ def pdf_activity_section(styles: dict[str, ParagraphStyle]) -> list:
             "Open a job to review stage details, warnings, attempts, and parser provenance.",
             "If you have write access, you may cancel jobs that are still scheduled, queued, or processing.",
             "Use Ingestion Health to see active pipeline, failed jobs, review queues, and recent failures.",
+            "GraphRAG activity shows queue, worker, and active-task status for documents that opted in to graph enrichment.",
         ]),
     ]
 
 
 def pdf_troubleshooting(styles: dict[str, ParagraphStyle]) -> list:
-    return [
+    return [KeepTogether([
         Paragraph("Troubleshooting", styles["h1"]),
         pdf_table(styles, ["Issue", "Likely cause", "What to do"], TROUBLESHOOTING_ROWS, [1.45 * inch, 2.45 * inch, 2.6 * inch]),
-    ]
+    ])]
 
 
 def pdf_glossary(styles: dict[str, ParagraphStyle]) -> list:
-    return [
+    return [KeepTogether([
         Paragraph("Glossary", styles["h1"]),
         pdf_table(styles, ["Term", "Meaning"], GLOSSARY_ROWS, [1.75 * inch, 4.75 * inch]),
-    ]
+    ])]
 
 
 def pdf_bullets(styles: dict[str, ParagraphStyle], items: list[str]) -> list:

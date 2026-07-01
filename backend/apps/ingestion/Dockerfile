@@ -13,6 +13,9 @@ ENV PIP_RETRIES=5
 ENV SERVICE_NAME=ingestion-worker
 ENV SERVICE_KIND=rag-ingestion-worker-celery
 ENV RAG_MODEL_PROVIDER=ollama
+ENV RAG_EMBEDDING_PROVIDER=fastembed
+ENV RAG_FASTEMBED_MODEL=nomic-ai/nomic-embed-text-v1.5-Q
+ENV RAG_DENSE_CACHE_DIR=/models/fastembed
 ENV RAG_SPARSE_MODEL=Qdrant/bm25
 ENV RAG_SPARSE_CACHE_DIR=/models/fastembed
 ENV OLLAMA_BASE_URL=http://host.docker.internal:11434
@@ -60,7 +63,7 @@ COPY apps/ingestion /app/apps/ingestion
 ARG PREWARM_FASTEMBED=false
 ARG PREWARM_DOCLING=false
 RUN if [ "$PREWARM_FASTEMBED" = "true" ]; then \
-        python -c "from fastembed import SparseTextEmbedding; SparseTextEmbedding('Qdrant/bm25', cache_dir='/models/fastembed')"; \
+        python -c "import os; from fastembed import TextEmbedding, SparseTextEmbedding; TextEmbedding(os.getenv('RAG_FASTEMBED_MODEL', 'nomic-ai/nomic-embed-text-v1.5-Q'), cache_dir='/models/fastembed'); SparseTextEmbedding(os.getenv('RAG_SPARSE_MODEL', 'Qdrant/bm25'), cache_dir='/models/fastembed')"; \
     fi
 RUN python -c 'from pathlib import Path; import rapidocr; path = Path(rapidocr.__file__).resolve().parent / "models"; path.mkdir(parents=True, exist_ok=True); print(path)' > /tmp/rapidocr_models_path \
     && chown -R appuser:appuser "$(cat /tmp/rapidocr_models_path)" /models/fastembed \

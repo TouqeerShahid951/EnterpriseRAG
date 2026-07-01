@@ -24,7 +24,12 @@ def inspect_evidence_for_reroute(plan: RoutePlan, hits: list[SearchHit], *, rero
             reason="comparison_evidence_covered_one_side",
             next_plan=_general_rag_reroute(plan),
         )
-    if plan.intent == "aggregation" and plan.use_structured_query and not any(_has_table_evidence(hit) for hit in hits):
+    if (
+        plan.intent == "aggregation"
+        and plan.use_structured_query
+        and not any(_has_table_evidence(hit) for hit in hits)
+        and not any(_has_exhaustive_scope_evidence(hit) for hit in hits)
+    ):
         return EvidenceInspection(
             True,
             reason="aggregation_without_structured_evidence",
@@ -80,6 +85,10 @@ def _general_rag_reroute(plan: RoutePlan) -> RoutePlan:
 def _has_table_evidence(hit: SearchHit) -> bool:
     table_json = hit.payload.get("table_json")
     return isinstance(table_json, dict) and bool(table_json)
+
+
+def _has_exhaustive_scope_evidence(hit: SearchHit) -> bool:
+    return str(hit.payload.get("exhaustive_scope_origin", "")) == "document_class_scope"
 
 
 def _has_claim_evidence(hit: SearchHit) -> bool:

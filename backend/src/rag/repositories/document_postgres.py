@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from ..auth.abac import normalize_group_path
@@ -58,14 +58,94 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
     def list_documents(self, *, state: Literal["active", "deleted"] = "active") -> list[DocumentRecord]:
         if state not in {"active", "deleted"}:
             raise ValueError("document state must be active or deleted")
-        deleted_clause = "deleted_at IS NULL" if state == "active" else "deleted_at IS NOT NULL"
-        rows = self._execute_all(f"SELECT * FROM documents WHERE {deleted_clause} ORDER BY created_at DESC")
+        deleted_clause = "d.deleted_at IS NULL" if state == "active" else "d.deleted_at IS NOT NULL"
+        rows = self._execute_all(
+            f"""
+            SELECT d.*, COALESCE(shares.shared_group_paths, '[]'::jsonb) AS shared_group_paths
+            FROM documents d
+            LEFT JOIN (
+                SELECT document_id, jsonb_agg(group_path ORDER BY group_path) AS shared_group_paths
+                FROM document_shares
+                GROUP BY document_id
+            ) shares ON shares.document_id = d.id
+            WHERE {deleted_clause}
+            ORDER BY d.created_at DESC
+            """
+        )
         return [document_from_row(row) for row in rows]
 
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None:
-        deleted_clause = "" if include_deleted else "AND deleted_at IS NULL"
-        row = self._execute_optional(f"SELECT * FROM documents WHERE id = %s {deleted_clause}", (document_id,))
+        deleted_clause = "" if include_deleted else "AND d.deleted_at IS NULL"
+        row = self._execute_optional(
+            f"""
+            SELECT d.*, COALESCE(shares.shared_group_paths, '[]'::jsonb) AS shared_group_paths
+            FROM documents d
+            LEFT JOIN (
+                SELECT document_id, jsonb_agg(group_path ORDER BY group_path) AS shared_group_paths
+                FROM document_shares
+                GROUP BY document_id
+            ) shares ON shares.document_id = d.id
+            WHERE d.id = %s {deleted_clause}
+            """,
+            (document_id,),
+        )
         return document_from_row(row) if row else None
+
+    def list_document_shares(self, document_id: str) -> list[str]:
+        rows = self._execute_all(
+            """
+            SELECT group_path
+            FROM document_shares
+            WHERE document_id = %s
+            ORDER BY group_path
+            """,
+            (document_id,),
+        )
+        return [str(row["group_path"]) for row in rows]
+
+    def replace_document_shares(
+        self,
+        document_id: str,
+        *,
+        group_paths: list[str],
+        actor_id: str | None,
+    ) -> DocumentRecord | None:
+        normalized = _unique_text([normalize_group_path(path) for path in group_paths])
+        with self._connect() as conn:
+            with conn.transaction():
+                document = conn.execute(
+                    "SELECT id::text, group_path FROM documents WHERE id = %s",
+                    (document_id,),
+                ).fetchone()
+                if document is None:
+                    return None
+                owner_group_path = normalize_group_path(str(document["group_path"]))
+                shares = [path for path in normalized if path != owner_group_path]
+                conn.execute("DELETE FROM document_shares WHERE document_id = %s", (document_id,))
+                for group_path in shares:
+                    conn.execute(
+                        """
+                        INSERT INTO document_shares (document_id, group_path, created_by)
+                        VALUES (%s, %s, %s)
+                        """,
+                        (document_id, group_path, actor_id),
+                    )
+                conn.execute("UPDATE documents SET updated_at = NOW() WHERE id = %s", (document_id,))
+        return self.get_document(document_id, include_deleted=True)
+
+    def remove_document_share(self, document_id: str, group_path: str) -> DocumentRecord | None:
+        normalized = normalize_group_path(group_path)
+        with self._connect() as conn:
+            with conn.transaction():
+                document = conn.execute("SELECT id::text FROM documents WHERE id = %s", (document_id,)).fetchone()
+                if document is None:
+                    return None
+                conn.execute(
+                    "DELETE FROM document_shares WHERE document_id = %s AND group_path = %s",
+                    (document_id, normalized),
+                )
+                conn.execute("UPDATE documents SET updated_at = NOW() WHERE id = %s", (document_id,))
+        return self.get_document(document_id, include_deleted=True)
 
     def update_document_clearance(self, document_id: str, clearance_level: ClearanceLevel) -> DocumentRecord | None:
         row = self._execute_optional(
@@ -77,6 +157,60 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
             RETURNING *
             """,
             (normalize_clearance_level(clearance_level), document_id),
+        )
+        return document_from_row(row) if row else None
+
+    def update_document_topics(
+        self,
+        document_id: str,
+        *,
+        topics: list[str],
+        llm_topics: list[str],
+    ) -> DocumentRecord | None:
+        row = self._execute_optional(
+            """
+            UPDATE documents
+            SET topics = %s::jsonb,
+                llm_topics = %s::jsonb,
+                updated_at = NOW()
+            WHERE id = %s AND deleted_at IS NULL
+            RETURNING *
+            """,
+            (
+                json.dumps(_unique_text(topics)),
+                json.dumps(_unique_text(llm_topics)),
+                document_id,
+            ),
+        )
+        return document_from_row(row) if row else None
+
+    def mark_document_stale(
+        self,
+        document_id: str,
+        *,
+        source_deleted: bool = True,
+        retrieval_status: str = "stale",
+        reason: str = "source_deleted",
+    ) -> DocumentRecord | None:
+        row = self._execute_optional(
+            """
+            UPDATE documents
+            SET metadata_flags = metadata_flags || %s::jsonb,
+                updated_at = NOW()
+            WHERE id = %s AND deleted_at IS NULL
+            RETURNING *
+            """,
+            (
+                json.dumps(
+                    {
+                        "source_deleted": source_deleted,
+                        "retrieval_status": retrieval_status,
+                        "stale_reason": reason,
+                        "stale_at": datetime.now(UTC).isoformat(),
+                    }
+                ),
+                document_id,
+            ),
         )
         return document_from_row(row) if row else None
 
@@ -749,6 +883,7 @@ def validate_edges(conn: Any, new_doc_id: str, old_doc_ids: list[str]) -> None:
 
 def document_from_row(row: dict[str, Any]) -> DocumentRecord:
     pending = row.get("pending_supersedes") or []
+    shared = tuple(str(value) for value in _json_list(row.get("shared_group_paths")))
     return DocumentRecord(
         id=str(row["id"]),
         title=row.get("title"),
@@ -776,6 +911,7 @@ def document_from_row(row: dict[str, Any]) -> DocumentRecord:
         deleted_at=row.get("deleted_at"),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
+        shared_group_paths=shared,
     )
 
 

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
+import { AlertTriangle, CheckCircle2, Info, XCircle, type LucideIcon } from "lucide-react";
 
-import { FahamWordmark } from "../brand/FahamBrand";
+import { PrudentiaWordmark } from "../brand/PrudentiaBrand";
 
 export function Fact({ label, value }: { label: string; value: string }) {
   return (
@@ -11,13 +12,30 @@ export function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function EmptyPanel({ children }: { children: ReactNode }) {
-  return <div className="rounded-lg border border-dashed border-surface-border bg-surface-container-low p-4 text-body-md text-secondary">{children}</div>;
+export function EmptyPanel({ action, children, icon: Icon = Info, title }: { action?: ReactNode; children: ReactNode; icon?: LucideIcon; title?: string }) {
+  return (
+    <div className="sv-empty-panel">
+      <span className="sv-empty-icon" aria-hidden="true">
+        <Icon size={17} />
+      </span>
+      <div className="sv-empty-content">
+        {title ? <strong className="sv-empty-title">{title}</strong> : null}
+        <div className="sv-empty-copy">{children}</div>
+        {action ? <div className="sv-empty-action">{action}</div> : null}
+      </div>
+    </div>
+  );
 }
 
 export function InlineMessage({ children, tone }: { children: ReactNode; tone: "error" | "success" | "warning" }) {
-  const className = tone === "error" ? "faham-error-banner" : tone === "success" ? "faham-success-banner" : "faham-planned-banner";
-  return <div className={`mt-4 rounded p-3 text-body-md ${className}`}>{children}</div>;
+  const Icon = tone === "error" ? XCircle : tone === "success" ? CheckCircle2 : AlertTriangle;
+  const className = tone === "error" ? "Prudentia-error-banner" : tone === "success" ? "Prudentia-success-banner" : "Prudentia-planned-banner";
+  return (
+    <div className={`sv-inline-message sv-inline-message-${tone} mt-4 ${className}`} role={tone === "error" ? "alert" : "status"}>
+      <Icon size={16} aria-hidden="true" />
+      <div>{children}</div>
+    </div>
+  );
 }
 
 export function Skeleton({ className = "" }: { className?: string }) {
@@ -27,11 +45,11 @@ export function Skeleton({ className = "" }: { className?: string }) {
 export function SessionLoading() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-background text-on-background">
-      <section className="sv-card w-[min(32rem,calc(100vw-2rem))] p-8" role="status">
-        <FahamWordmark className="faham-session-wordmark" />
+      <section className="Prudentia-session-card sv-card w-[min(32rem,calc(100vw-2rem))] p-8" role="status">
+        <PrudentiaWordmark className="Prudentia-session-wordmark" />
         <p className="sv-eyebrow">Secure Workspace</p>
         <h1 className="text-headline-md">Checking secure session</h1>
-        <p className="sr-only">Preparing your authenticated Faham AI workspace.</p>
+        <p className="sr-only">Preparing your authenticated Prudentia AI workspace.</p>
         <div className="mt-5 grid gap-3" aria-hidden="true">
           <Skeleton className="h-4 w-4/5" />
           <Skeleton className="h-4 w-3/5" />

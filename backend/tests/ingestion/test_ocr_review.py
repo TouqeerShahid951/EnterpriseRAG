@@ -16,8 +16,12 @@ def _ocr_item(*, confidence: float | None) -> ParsedPdfItem:
     )
 
 
-def test_missing_ocr_confidence_does_not_force_human_review() -> None:
-    assert _low_confidence_ocr_items([_ocr_item(confidence=None)], 0.9) == []
+def test_missing_ocr_confidence_requires_human_review() -> None:
+    review_items = _low_confidence_ocr_items([_ocr_item(confidence=None)], 0.9)
+
+    assert len(review_items) == 1
+    assert review_items[0]["partial_text"] == "Recognized OCR text"
+    assert review_items[0]["confidence"] is None
 
 
 def test_explicit_low_ocr_confidence_requires_human_review() -> None:

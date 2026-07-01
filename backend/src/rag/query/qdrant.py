@@ -382,6 +382,89 @@ class QdrantClient:
                 return
             raise
 
+    def set_document_topics(
+        self,
+        doc_id: str,
+        *,
+        topics: list[str],
+        cancellation_token: QueryCancellationToken | None = None,
+    ) -> None:
+        try:
+            request_json(
+                self.base_url,
+                f"{self._collection_path}/points/payload?wait=true",
+                service="qdrant",
+                method="POST",
+                payload={
+                    "payload": {
+                        "topics": topics,
+                    },
+                    "filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]},
+                },
+                timeout_seconds=self.timeout_seconds,
+                cancellation_token=cancellation_token,
+            )
+        except ServiceRequestError as exc:
+            if exc.status_code == 404:
+                return
+            raise
+
+    def set_document_acl_group_paths(
+        self,
+        doc_id: str,
+        *,
+        acl_group_paths: list[str],
+        cancellation_token: QueryCancellationToken | None = None,
+    ) -> None:
+        try:
+            request_json(
+                self.base_url,
+                f"{self._collection_path}/points/payload?wait=true",
+                service="qdrant",
+                method="POST",
+                payload={
+                    "payload": {
+                        "acl_group_paths": acl_group_paths,
+                    },
+                    "filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]},
+                },
+                timeout_seconds=self.timeout_seconds,
+                cancellation_token=cancellation_token,
+            )
+        except ServiceRequestError as exc:
+            if exc.status_code == 404:
+                return
+            raise
+
+    def set_document_retrieval_status(
+        self,
+        doc_id: str,
+        *,
+        retrieval_status: str,
+        source_deleted: bool,
+        cancellation_token: QueryCancellationToken | None = None,
+    ) -> None:
+        try:
+            request_json(
+                self.base_url,
+                f"{self._collection_path}/points/payload?wait=true",
+                service="qdrant",
+                method="POST",
+                payload={
+                    "payload": {
+                        "retrieval_status": retrieval_status,
+                        "source_deleted": source_deleted,
+                    },
+                    "filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]},
+                },
+                timeout_seconds=self.timeout_seconds,
+                cancellation_token=cancellation_token,
+            )
+        except ServiceRequestError as exc:
+            if exc.status_code == 404:
+                return
+            raise
+
 
 def _validated_mode(payload: dict[str, Any], vector_size: int) -> str:
     mode = collection_mode(payload, vector_size)

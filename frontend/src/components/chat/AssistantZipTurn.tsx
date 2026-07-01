@@ -12,7 +12,7 @@ import { sourceMatchedSpanCount, sourceMatchedSpanLabel } from "../../utils/sour
 import { sourcePageLabel } from "../../utils/sourcePage";
 import { CitedAnswer } from "./CitedAnswer";
 
-export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArtifactJob, onRetryArtifactJob, onSelectSource, selectedSource, turn }: Props) {
+export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArtifactJob, onExpandSourceSearch, onRetryArtifactJob, onSelectSource, selectedSource, turn }: Props) {
   if (turn.status === "pending") return <PendingAssistant documents={documents} onSelectSource={onSelectSource} selectedSource={selectedSource} turn={turn} />;
   if (turn.status === "cancelled") return <StoppedAssistant turn={turn} />;
   if (turn.status === "error" || !turn.response) return <ErrorAssistant message={turn.errorMessage} />;
@@ -26,7 +26,7 @@ export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArti
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex items-center gap-1 text-label-md text-on-surface">
           <Bot size={18} className="text-primary" />
-          Faham AI
+          Prudentia AI
         </span>
         <span className={`sv-pill ${headerBadge.className}`}>
           {headerBadge.icon}
@@ -46,6 +46,16 @@ export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArti
         faithfulnessStatus={response.faithfulness_status}
         unfoundedClaims={response.unfounded_claims}
       />
+      {response.source_expansion?.available ? (
+        <div className="rag-source-expansion">
+          <AlertTriangle size={16} />
+          <span>{response.source_expansion.reason || "The selected source could not answer this question."}</span>
+          <button type="button" className="sv-action-secondary" onClick={() => onExpandSourceSearch?.(turn.id)}>
+            <SearchAllIcon />
+            Search all sources
+          </button>
+        </div>
+      ) : null}
       <div className="rag-assistant-prose space-y-3 text-body-md text-on-surface">
         <CitedAnswer answer={response.answer} documents={documents} onSelectSource={onSelectSource} sources={response.sources} />
       </div>
@@ -81,11 +91,15 @@ export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArti
   );
 }
 
+function SearchAllIcon() {
+  return <GitBranch size={14} aria-hidden="true" />;
+}
+
 function NodeTimingsPanel({ timings }: { timings: QueryNodeTiming[] }) {
   const slowest = [...timings].sort((left, right) => right.duration_ms - left.duration_ms).slice(0, 3);
   return (
     <details className="rag-node-timings rounded border border-surface-border bg-surface-container-low px-3 py-2 text-label-md text-secondary">
-      <summary className="cursor-pointer font-bold text-on-surface">Node timings · {formatNodeDurationMs(totalNodeDuration(timings))}</summary>
+      <summary className="cursor-pointer font-bold text-on-surface">Node timings - {formatNodeDurationMs(totalNodeDuration(timings))}</summary>
       <div className="mt-2 grid gap-2">
         <div className="flex flex-wrap gap-2">
           {slowest.map((timing, index) => (
@@ -99,8 +113,8 @@ function NodeTimingsPanel({ timings }: { timings: QueryNodeTiming[] }) {
             <div key={`${timing.node}-${index}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                 {formatNodeLabel(timing.node)}
-                {timing.execution_mode ? <span className="text-secondary"> · {timing.execution_mode}</span> : null}
-                {timing.detail ? <span className="text-secondary"> · {timing.detail}</span> : null}
+                {timing.execution_mode ? <span className="text-secondary"> - {timing.execution_mode}</span> : null}
+                {timing.detail ? <span className="text-secondary"> - {timing.detail}</span> : null}
               </span>
               <span className="font-bold text-on-surface">{formatNodeDurationMs(timing.duration_ms)}</span>
             </div>
@@ -145,7 +159,7 @@ export function ArtifactDownloads({ artifacts }: { artifacts: GeneratedArtifact[
             <Icon size={16} aria-hidden="true" />
             <span className="rag-artifact-copy">
               <strong>{artifact.filename}</strong>
-              <small>{artifact.format.toUpperCase()} · {formatArtifactSize(artifact.size_bytes)}</small>
+              <small>{artifact.format.toUpperCase()} - {formatArtifactSize(artifact.size_bytes)}</small>
             </span>
             <Download size={15} aria-hidden="true" />
           </a>
@@ -208,7 +222,7 @@ function ArtifactJobPanel({ job, onCancel, onClarify, onRetry }: ArtifactJobPane
         <div>
           <p className="rag-live-eyebrow">Document generation</p>
           <h3>{stageLabel}</h3>
-          <p>{stageDetail}{formats ? ` · ${formats}` : ""}</p>
+          <p>{stageDetail}{formats ? ` - ${formats}` : ""}</p>
         </div>
         <span className="sv-pill">
           {artifactJobIcon(job.status)}
@@ -270,10 +284,10 @@ function formatArtifactSize(bytes: number): string {
 }
 
 function ArtifactJobElapsed({ fallbackCreatedAt, job }: { fallbackCreatedAt: string; job: ArtifactJobSummary }) {
-  const startedAt = job.created_at ?? fallbackCreatedAt;
+  const startedAt = artifactJobElapsedStart(job, fallbackCreatedAt);
   const liveElapsedSeconds = useElapsedSeconds(startedAt);
   const elapsedSeconds = isArtifactJobTerminal(job.status)
-    ? secondsBetween(startedAt, job.updated_at ?? startedAt)
+    ? secondsBetween(startedAt, artifactJobElapsedEnd(job, startedAt))
     : liveElapsedSeconds;
 
   return (
@@ -281,6 +295,16 @@ function ArtifactJobElapsed({ fallbackCreatedAt, job }: { fallbackCreatedAt: str
       {formatElapsed(elapsedSeconds)}
     </span>
   );
+}
+
+function artifactJobElapsedStart(job: ArtifactJobSummary, fallbackCreatedAt: string): string {
+  if (job.started_at) return job.started_at;
+  if (job.status === "queued" && job.updated_at) return job.updated_at;
+  return job.created_at ?? fallbackCreatedAt;
+}
+
+function artifactJobElapsedEnd(job: ArtifactJobSummary, startedAt: string): string {
+  return job.completed_at ?? job.updated_at ?? startedAt;
 }
 
 function artifactJobStatusLabel(status: ArtifactJobSummary["status"]): string {
@@ -306,7 +330,7 @@ function artifactJobStageLabel(job: ArtifactJobSummary): string {
   if (composingMatch) {
     const [, completed, total, mode] = composingMatch;
     return mode === "direct"
-      ? `Composing ${completed}/${total} · Direct evidence`
+      ? `Composing ${completed}/${total} - Direct evidence`
       : `Composing ${completed}/${total}`;
   }
   return job.stage
@@ -377,7 +401,7 @@ function SourceChip({
       onClick={() => onSelectSource(withSourceDocumentTitle(source, documents))}
       className={`rag-source-chip ${selected ? "is-selected" : ""}`}
       aria-label={`Open ${sourceName}: ${title}${ariaDetails ? `, ${ariaDetails}` : ""}`}
-      title={`${sourceName} · ${title}${pageLabel ? ` · ${pageLabel}` : ""} · ${citationLabel}`}
+      title={`${sourceName} - ${title}${pageLabel ? ` - ${pageLabel}` : ""} - ${citationLabel}`}
     >
       <FileText aria-hidden="true" size={15} />
       <span className="rag-source-chip-copy">
@@ -404,7 +428,7 @@ function PendingAssistant({ documents, onSelectSource, selectedSource, turn }: P
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex items-center gap-1 text-label-md text-on-surface">
           <Bot size={18} className="text-primary" />
-          Faham AI
+          Prudentia AI
         </span>
         <span className="rag-live-badge">
           <Activity size={14} />
@@ -477,7 +501,7 @@ function StoppedAssistant({ turn }: { turn: Extract<ChatTurn, { role: "assistant
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex items-center gap-1 text-label-md text-on-surface">
           <Bot size={18} className="text-primary" />
-          Faham AI
+          Prudentia AI
         </span>
         <span className="rag-stopped-badge">
           <AlertTriangle size={14} />
@@ -581,6 +605,7 @@ function useElapsedSeconds(createdAt: string): number {
   const [elapsedSeconds, setElapsedSeconds] = useState(() => secondsSince(createdAt));
 
   useEffect(() => {
+    setElapsedSeconds(secondsSince(createdAt));
     const timer = window.setInterval(() => {
       setElapsedSeconds(secondsSince(createdAt));
     }, 1000);
@@ -679,6 +704,7 @@ type Props = {
   documents: Document[];
   onCancelArtifactJob?: (jobId: string) => Promise<void>;
   onClarifyArtifactJob?: (jobId: string, answers: Record<string, string>) => Promise<void>;
+  onExpandSourceSearch?: (assistantTurnId: string) => void;
   onRetryArtifactJob?: (jobId: string) => Promise<void>;
   onSelectSource: (source: SourceAnchor | null) => void;
   selectedSource: SourceAnchor | null;

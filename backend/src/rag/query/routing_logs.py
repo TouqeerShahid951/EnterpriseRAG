@@ -364,8 +364,11 @@ def _top_hit_summaries(hits: list[SearchHit], *, limit: int = 5) -> list[dict[st
             "chunk_type": payload.get("chunk_type"),
             "retrieval_score": _round(hit.score),
             "rerank_score": _round(payload.get("_rerank_score")),
+            "rerank_adjusted_score": _round(payload.get("_rerank_adjusted_score")),
             "rerank_status": payload.get("_rerank_status"),
             "rerank_error": payload.get("_rerank_error"),
+            "low_value_penalty": _round(payload.get("_low_value_penalty")),
+            "low_value_reasons": payload.get("_low_value_reasons"),
             "is_current": payload.get("is_current"),
             "structured_origin": payload.get("structured_origin"),
         })

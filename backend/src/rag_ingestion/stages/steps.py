@@ -18,7 +18,10 @@ from ..parsers.models import ParsedPdfItem, parsed_image_asset_to_dict, parsed_i
 from .state import IngestDependencies, IngestState
 
 METADATA_PROGRESS_INTERVAL_SECONDS = 15.0
-METADATA_PROGRESS_START = 36
+PARSE_PROGRESS_COMPLETE = 36
+IMAGE_PROGRESS_START = 35
+IMAGE_PROGRESS_END = 36
+METADATA_PROGRESS_START = 37
 METADATA_PROGRESS_END = 49
 
 
@@ -45,12 +48,24 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
                 content_type=payload.content_type,
                 file_path=payload.file_path,
                 min_chars_per_page=deps.min_chars_per_page,
+                ingestion_quality_preset=deps.ingestion_quality_preset,
                 weak_page_threshold=deps.weak_page_threshold,
                 full_doc_weak_page_ratio=deps.full_doc_weak_page_ratio,
                 layered_docling_max_pages=deps.layered_docling_max_pages,
+                layered_docling_max_page_ratio=deps.layered_docling_max_page_ratio,
+                prefer_full_document_docling=deps.prefer_full_document_docling,
                 layered_docling_batch_pages=deps.layered_docling_batch_pages,
                 page_progress_callback=_page_progress_reporter(deps, payload.job_id),
                 docling_progress_callback=_docling_progress_reporter(deps, payload.job_id),
+                vision_layout_progress_callback=_vision_layout_progress_reporter(deps, payload.job_id),
+                image_progress_callback=_image_progress_reporter(deps, payload.job_id),
+                pdf_image_analysis_max_images=deps.pdf_image_analysis_max_images,
+                pdf_image_analysis_max_full_page_fallbacks=deps.pdf_image_analysis_max_full_page_fallbacks,
+                scanned_visual_region_enabled=deps.scanned_visual_region_enabled,
+                scanned_visual_min_area_ratio=deps.scanned_visual_min_area_ratio,
+                scanned_visual_max_regions_per_page=deps.scanned_visual_max_regions_per_page,
+                scanned_visual_text_mask_padding_px=deps.scanned_visual_text_mask_padding_px,
+                vision_layout_repair_enabled=deps.vision_layout_repair_enabled,
                 doc_id=payload.doc_id,
                 image_asset_store=deps.image_asset_writer,
                 image_analyzer=deps.vision,
@@ -82,7 +97,7 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
             deps.backend.update_job(
                 job_id=payload.job_id,
                 status="human_review",
-                progress_pct=35,
+                progress_pct=PARSE_PROGRESS_COMPLETE,
                 stage_progress=_items_progress("pages", _page_count(parsed_items), _page_count(parsed_items), "Parsed pages need review"),
             )
             raise HumanReviewRequired(review_batch_id=review_batch_id)
@@ -91,7 +106,7 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
     deps.backend.update_job(
         job_id=state["payload"].job_id,
         status="processing",
-        progress_pct=35,
+        progress_pct=PARSE_PROGRESS_COMPLETE,
         stage_progress=_items_progress("pages", page_count, page_count, "Parsed all pages") if page_count else None,
     )
     return state
@@ -281,7 +296,7 @@ def _page_progress_reporter(deps: IngestDependencies, job_id: str):
         deps.backend.update_job(
             job_id=job_id,
             status="processing",
-            progress_pct=_bounded_progress(20, 34, page_no, page_count),
+            progress_pct=_bounded_progress(20, 30, page_no, page_count),
             stage_progress=_items_progress("pages", page_no, page_count, f"Parsing page {page_no} of {page_count}"),
         )
 
@@ -296,8 +311,38 @@ def _docling_progress_reporter(deps: IngestDependencies, job_id: str):
         deps.backend.update_job(
             job_id=job_id,
             status="processing",
-            progress_pct=34,
+            progress_pct=_bounded_progress(30, 34, current, total),
             stage_progress=_items_progress("pages", current, total, _docling_progress_label(event)),
+        )
+
+    return report
+
+
+def _vision_layout_progress_reporter(deps: IngestDependencies, job_id: str):
+    def report(event: dict[str, object]) -> None:
+        _raise_if_job_cancelled(deps, job_id)
+        current = _int_value(event.get("current"))
+        total = max(1, _int_value(event.get("total")))
+        deps.backend.update_job(
+            job_id=job_id,
+            status="processing",
+            progress_pct=_bounded_progress(34, 35, current, total),
+            stage_progress=_items_progress("pages", current, total, _vision_layout_progress_label(event)),
+        )
+
+    return report
+
+
+def _image_progress_reporter(deps: IngestDependencies, job_id: str):
+    def report(event: dict[str, object]) -> None:
+        _raise_if_job_cancelled(deps, job_id)
+        current = _int_value(event.get("current"))
+        total = max(1, _int_value(event.get("total")))
+        deps.backend.update_job(
+            job_id=job_id,
+            status="processing",
+            progress_pct=_bounded_progress(IMAGE_PROGRESS_START, IMAGE_PROGRESS_END, current, total),
+            stage_progress=_items_progress("images", current, total, _image_progress_label(event)),
         )
 
     return report
@@ -444,6 +489,47 @@ def _docling_action(*, phase: str, status: str) -> str:
     return "Docling processed" if complete else "Docling processing"
 
 
+def _vision_layout_progress_label(event: dict[str, object]) -> str:
+    status = str(event.get("status") or "running")
+    current = _int_value(event.get("current"))
+    total = max(1, _int_value(event.get("total")))
+    page_no = _int_value(event.get("page"))
+    page_label = f"PDF page {page_no}" if page_no else "PDF page"
+    if status == "complete":
+        return f"Vision layout repaired page {current} of {total} ({page_label})"
+    if status == "skipped":
+        reason = str(event.get("reason") or "not used")
+        return f"Vision layout skipped page {current} of {total} ({page_label}: {reason})"
+    if status == "failed":
+        return f"Vision layout failed page {current} of {total} ({page_label})"
+    return f"Vision layout repairing page {current + 1} of {total} ({page_label})"
+
+
+def _image_progress_label(event: dict[str, object]) -> str:
+    status = str(event.get("status") or "running")
+    current = _int_value(event.get("current"))
+    total = max(1, _int_value(event.get("total")))
+    page_no = _int_value(event.get("page"))
+    source_kind = str(event.get("source_kind") or "image")
+    image_label = _image_source_label(source_kind)
+    page_label = f" (PDF page {page_no})" if page_no else ""
+    if status == "complete":
+        return f"Image analysis completed {image_label} {current} of {total}{page_label}"
+    return f"Image analysis analyzing {image_label} {min(current + 1, total)} of {total}{page_label}"
+
+
+def _image_source_label(source_kind: str) -> str:
+    if source_kind == "pdf_page_image":
+        return "page image"
+    if source_kind == "pdf_page_layout":
+        return "layout image"
+    if source_kind == "pdf_image":
+        return "embedded image"
+    if source_kind == "docx_media":
+        return "document image"
+    return "image"
+
+
 def _pdf_page_label(pages: tuple[int, ...]) -> str:
     if not pages:
         return "whole document"
@@ -479,9 +565,12 @@ def _parser_failure_provenance(deps: IngestDependencies, content_type: str | Non
     document_kind = "json" if getattr(exc, "code", None) == "json_parse_failed" else _document_kind(content_type, file_path)
     parser_config: dict[str, object] = {} if document_kind == "json" else {
         "min_chars_per_page": deps.min_chars_per_page,
+        "quality_preset": deps.ingestion_quality_preset,
         "weak_page_threshold": deps.weak_page_threshold,
         "full_doc_weak_page_ratio": deps.full_doc_weak_page_ratio,
         "layered_docling_max_pages": deps.layered_docling_max_pages,
+        "layered_docling_max_page_ratio": deps.layered_docling_max_page_ratio,
+        "prefer_full_document_docling": deps.prefer_full_document_docling,
         "layered_docling_batch_pages": deps.layered_docling_batch_pages,
     }
     return {
@@ -519,9 +608,7 @@ def _low_confidence_ocr_items(items: list[ParsedPdfItem], threshold: float) -> l
     for item in items:
         if "source:ocr" not in item.quality_flags:
             continue
-        if item.confidence is None:
-            continue
-        if item.confidence >= threshold:
+        if item.confidence is not None and item.confidence >= threshold:
             continue
         if not item.text.strip():
             continue

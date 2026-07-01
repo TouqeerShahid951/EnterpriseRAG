@@ -79,7 +79,6 @@ and the offline Windows target. Adjust the Ollama model names to match
 
 ```powershell
 @'
-API_PORT=8000
 FRONTEND_PORT=3000
 QDRANT_HTTP_PORT=6333
 QDRANT_GRPC_PORT=6334
@@ -95,7 +94,7 @@ MINIO_BUCKET=agenticrag-uploads
 JWT_SECRET_KEY=replace-with-local-jwt-secret
 CSRF_SECRET_KEY=replace-with-local-csrf-secret
 SERVICE_TOKEN=replace-with-local-service-token
-BOOTSTRAP_ADMIN_EMAIL=admin@faham.ai
+BOOTSTRAP_ADMIN_EMAIL=admin@prudentia.ai
 BOOTSTRAP_ADMIN_PASSWORD=replace-with-local-admin-password
 
 RAG_MODEL_PROVIDER=ollama
@@ -132,10 +131,14 @@ DO_NOT_TRACK=1
 CLAMAV_NO_FRESHCLAMD=true
 CLAMAV_SCAN_ENABLED=true
 
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=
 VITE_POLLING_INTERVAL_MS=2000
 '@ | Set-Content -Encoding ASCII .env.windows-airgap
 ```
+
+Leave `VITE_API_BASE_URL` blank for the default same-origin setup. Users can
+open the frontend at the current host IP and port, and the frontend will call
+the API through that same origin.
 
 If the airgapped deployment does not have a pre-seeded ClamAV database in the
 image or through an internal update process, file uploads may fail while virus
@@ -337,17 +340,19 @@ The frontend is available at:
 http://localhost:3000
 ```
 
-The API is available at:
+The API is available through the frontend reverse proxy at:
 
 ```text
-http://localhost:8000
+http://localhost:3000/api/v1
 ```
 
 Useful checks:
 
 ```powershell
 docker compose --env-file .env.windows-airgap ps
-Invoke-RestMethod http://localhost:8000/health/live
+Invoke-RestMethod http://localhost:3000/healthz
+docker compose --env-file .env.windows-airgap exec api `
+  python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"
 docker compose --env-file .env.windows-airgap logs --tail 100 api
 docker compose --env-file .env.windows-airgap logs --tail 100 ingestion-worker
 ```
@@ -375,8 +380,6 @@ These cache folders are expected in the project directory:
 
 These named volumes are also expected:
 
-- `agenticrag_frontend-node-modules`: Node dependencies copied from the frontend
-  image on first start. Do not transfer this volume.
 - `agenticrag_postgres-data`: application database.
 - `agenticrag_qdrant-data`: vector database.
 - `agenticrag_minio-data`: uploaded source documents and generated artifacts.

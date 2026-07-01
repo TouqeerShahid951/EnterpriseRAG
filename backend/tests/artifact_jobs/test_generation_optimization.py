@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from io import BytesIO
 import json
+import zipfile
 
-from rag.artifact_jobs.build_program import generate_build_program
 from rag.artifact_jobs.composer import (
     COMPOSITION_RECORD_TEXT_LIMIT,
     _compose_section,
@@ -35,14 +35,12 @@ from rag.artifact_jobs.contracts import (
 )
 from rag.artifact_jobs.execution import ArtifactJobExecutor
 from rag.artifact_jobs.llm_json import LlmContractError
+from rag.artifact_jobs.layout_profiles import select_layout_profile
 from rag.artifact_jobs.planner import plan_document
 from rag.artifact_jobs.renderer import render_document
 from rag.artifact_jobs.retrieval import retrieve_document_evidence
-from rag.artifact_jobs.sandbox_runner import InMemoryArtifactSandboxRunner
 from rag.artifact_jobs.service import ArtifactJobService, _public_stage_timings
-from rag.artifact_sandbox.sdk import ArtifactDocument
-from rag.artifact_sandbox.sdk_pdf import PdfArtifact
-from rag.artifact_sandbox.sdk_pptx import PptxArtifact
+from rag.auth.context import UserContext
 from rag.core.config import Settings
 from rag.query.qdrant import SearchHit
 from rag.repositories.artifact_jobs import InMemoryArtifactJobRepository
@@ -83,6 +81,52 @@ def test_artifact_job_summary_exposes_user_facing_progress() -> None:
     assert summary.stage_detail == "Building slide 4 of 11"
     assert summary.stage_progress is not None
     assert summary.stage_progress.unit == "slides"
+    assert summary.attempt_count == (updated.attempt_count if updated else job.attempt_count)
+
+
+def test_retry_resets_artifact_job_attempt_timestamps() -> None:
+    job_repo = InMemoryArtifactJobRepository()
+    queue = _Queue()
+    job = _job(repo=job_repo)
+    running, claimed = job_repo.start_attempt(job.id)
+    assert claimed
+    old_started_at = datetime(2026, 1, 1, tzinfo=UTC)
+    failed = job_repo.update_job((running or job).id, {
+        "status": "failed",
+        "stage": "failed",
+        "progress_pct": 100,
+        "started_at": old_started_at,
+        "completed_at": datetime(2026, 1, 1, 0, 5, tzinfo=UTC),
+        "last_heartbeat_at": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
+        "error_code": "artifact_generation_failed",
+        "error_message_safe": "Generation failed.",
+    })
+    assert failed is not None
+    service = ArtifactJobService(
+        repo_factory=lambda: job_repo,
+        artifact_repo_factory=InMemoryGeneratedArtifactRepository,
+        queue_factory=lambda: queue,
+        retention_days=1,
+    )
+
+    summary = service.retry(job.id, _user_context())
+
+    assert summary.status == "queued"
+    assert summary.started_at is None
+    assert summary.completed_at is None
+    assert summary.last_heartbeat_at is None
+    assert summary.updated_at is not None
+    assert queue.job_ids == [job.id]
+    queued = job_repo.get_job(job.id)
+    assert queued is not None
+    assert queued.started_at is None
+    assert queued.completed_at is None
+    assert queued.last_heartbeat_at is None
+    restarted, restarted_claimed = job_repo.start_attempt(job.id)
+    assert restarted_claimed
+    assert restarted is not None
+    assert restarted.started_at is not None
+    assert restarted.started_at != old_started_at
 
 
 def test_composer_truncates_evidence_payload_for_llm_prompt() -> None:
@@ -326,6 +370,53 @@ def test_planner_extracts_topic_from_detailed_presentation_request() -> None:
     assert "Create a detailed presentation" not in plan.purpose
 
 
+def test_planner_keeps_simple_request_on_fast_path() -> None:
+    inference = _CountingPlannerInference()
+
+    plan = plan_document(
+        _job(original_request="Create a report about vendor policy", requested_formats=("pdf",)),
+        inference=inference,
+        model=None,
+    )
+
+    assert inference.calls == 0
+    assert plan.title == "Vendor Policy"
+    assert [section.title for section in plan.sections] == ["Summary", "Details"]
+
+
+def test_planner_uses_single_llm_call_for_complex_artifact_request() -> None:
+    inference = _CountingPlannerInference(_planner_plan_json())
+
+    plan = plan_document(
+        _job(
+            original_request="Create a comprehensive executive briefing with a timeline and risk matrix for vendor policy changes",
+            requested_formats=("pptx",),
+        ),
+        inference=inference,
+        model="planner-model",
+    )
+
+    assert inference.calls == 1
+    assert plan.title == "Vendor Policy Change Briefing"
+    assert [section.retrieval_mode for section in plan.sections] == ["timeline", "structured_rows"]
+    assert all(len(section.retrieval_queries) <= 4 for section in plan.sections)
+    assert "pptx" in plan.format_requirements
+
+
+def test_planner_falls_back_when_complex_llm_plan_fails() -> None:
+    plan = plan_document(
+        _job(
+            original_request="Create a comprehensive timeline of all vendor policy changes",
+            requested_formats=("pptx",),
+        ),
+        inference=_FailingInference(),
+        model=None,
+    )
+
+    assert plan.title == "Timeline Of All Vendor Policy Changes"
+    assert [section.title for section in plan.sections] == ["Summary", "Details", "Timeline"]
+
+
 def test_retrieval_infers_document_family_scope(monkeypatch) -> None:
     monkeypatch.setattr("rag.artifact_jobs.retrieval._retrieve_query", lambda *_args, **_kwargs: [])
     qdrant = _ScopedQdrant()
@@ -416,7 +507,6 @@ def test_seeded_response_job_renders_without_artifact_composition(tmp_path) -> N
     executor = ArtifactJobExecutor(
         config=Settings(
             document_repository="memory",
-            artifact_renderer_mode="deterministic",
             artifact_libreoffice_required=False,
         ),
         repo_factory=lambda: job_repo,
@@ -470,7 +560,6 @@ def test_seeded_response_job_normalizes_recoverable_evidence_ids(tmp_path) -> No
     executor = ArtifactJobExecutor(
         config=Settings(
             document_repository="memory",
-            artifact_renderer_mode="deterministic",
             artifact_libreoffice_required=False,
         ),
         repo_factory=lambda: job_repo,
@@ -532,7 +621,6 @@ def test_seeded_response_job_falls_back_when_repair_json_is_malformed(tmp_path, 
     executor = ArtifactJobExecutor(
         config=Settings(
             document_repository="memory",
-            artifact_renderer_mode="deterministic",
             artifact_libreoffice_required=False,
         ),
         repo_factory=lambda: job_repo,
@@ -595,7 +683,6 @@ def test_seeded_response_job_uses_deterministic_repair_before_llm(tmp_path, monk
     executor = ArtifactJobExecutor(
         config=Settings(
             document_repository="memory",
-            artifact_renderer_mode="deterministic",
             artifact_libreoffice_required=False,
         ),
         repo_factory=lambda: job_repo,
@@ -700,32 +787,14 @@ def test_executor_records_render_format_progress() -> None:
     }
 
 
-def test_build_program_can_be_limited_to_subset_of_requested_formats() -> None:
-    inference = _PptxBuildProgramInference()
-    program = generate_build_program(
-        _job(requested_formats=("docx", "pptx")),
-        _plan(),
-        _bundle(),
-        inference=inference,
-        model=None,
-        requested_formats=("pptx",),
-    )
-
-    assert [output.format for output in program.expected_outputs] == ["pptx"]
-    assert program.expected_outputs[0].filename.endswith(".pptx")
-
-
-def test_fast_paginated_renderer_skips_sandbox_for_docx_pdf_and_pptx(tmp_path) -> None:
+def test_artifact_job_renderer_uses_shared_renderer_for_all_formats(tmp_path) -> None:
     job_repo = InMemoryArtifactJobRepository()
     job = _job(repo=job_repo, requested_formats=("docx", "pdf", "pptx"))
     artifact_repo = InMemoryGeneratedArtifactRepository()
     storage = LocalGeneratedArtifactStorage(str(tmp_path))
-    sandbox = InMemoryArtifactSandboxRunner(error=AssertionError("sandbox should not render fast formats"))
     executor = ArtifactJobExecutor(
         config=Settings(
             document_repository="memory",
-            artifact_renderer_mode="sandbox",
-            artifact_fast_paginated_renderer=True,
             artifact_libreoffice_required=False,
         ),
         repo_factory=lambda: job_repo,
@@ -744,13 +813,11 @@ def test_fast_paginated_renderer_skips_sandbox_for_docx_pdf_and_pptx(tmp_path) -
             chat_timeout_seconds=1,
             embed_timeout_seconds=1,
         ),
-        sandbox_runner=sandbox,
     )
 
-    failures = executor._render_formats(job, _plan(), _evidence_manifest([_evidence_record()]), _bundle())
+    failures = executor._render_formats(job, _evidence_manifest([_evidence_record()]), _bundle())
 
     assert failures == []
-    assert sandbox.requests == []
     assert {artifact.format for artifact in artifact_repo.list_artifacts_for_job(job.id)} == {"docx", "pdf", "pptx"}
     assert set(job_repo.get_job(job.id).stage_timings_json) == {"storing"}  # type: ignore[union-attr]
 
@@ -768,39 +835,90 @@ def test_deterministic_pdf_renders_polished_primitives() -> None:
     assert len(rendered.content) > 2000
 
 
-def test_sandbox_pdf_sdk_renders_polished_primitives(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("ARTIFACT_SANDBOX_OUT_DIR", str(tmp_path))
-    path = tmp_path / "artifact.pdf"
-    artifact = PdfArtifact(
-        path=str(path),
-        title="PDF layout showcase",
-        subtitle="Evidence-backed output",
+def test_adaptive_layout_profile_infers_document_archetypes() -> None:
+    assert select_layout_profile(_pdf_showcase_bundle()).key == "evidence_brief"
+    assert select_layout_profile(_timeline_bundle()).key == "timeline_report"
+    assert select_layout_profile(_operator_guide_bundle()).key == "operator_guide"
+    assert select_layout_profile(_standard_layout_bundle()).key == "standard_report"
+
+
+def test_deterministic_docx_uses_adaptive_style_system() -> None:
+    rendered = render_document(
+        artifact_format="docx",
+        bundle=_pdf_showcase_bundle(),
         generated_at=datetime(2026, 1, 1, tzinfo=UTC),
-        citations=[_citation()],
+        require_libreoffice=False,
     )
 
-    artifact.add_heading("Highlights")
-    artifact.add_paragraph("Evidence fact.", evidence_ids=["E1"])
-    artifact.add_bullet_list([
-        ContentListItem(text="First cited point.", evidence_ids=["E1"]),
-        ContentListItem(text="Second cited point.", evidence_ids=["E1"]),
-    ])
-    artifact.add_callout("Prioritize cited conclusions over unsupported details.", evidence_ids=["E1"])
-    artifact.add_table(
-        ["Document", "Topic", "Outcome", "Status", "Owner"],
-        [
-            ContentTableRow(
-                values=["FIR_02_kidnapping.pdf", "Kidnapping", "Evidence reviewed", "Open", "Investigator"],
-                evidence_ids=["E1"],
-            )
-        ],
-    )
-    artifact.add_references()
-    artifact.finalize()
+    with zipfile.ZipFile(BytesIO(rendered.content)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+        header_xml = "\n".join(
+            archive.read(name).decode("utf-8")
+            for name in archive.namelist()
+            if name.startswith("word/header")
+        )
+        footer_xml = "\n".join(
+            archive.read(name).decode("utf-8")
+            for name in archive.namelist()
+            if name.startswith("word/footer")
+        )
 
-    content = path.read_bytes()
-    assert content.startswith(b"%PDF")
-    assert len(content) > 2000
+    assert "EVIDENCE BRIEF" in document_xml
+    assert "w:tblGrid" in document_xml
+    assert "w:tblHeader" in document_xml
+    assert "Prudentia AI" in header_xml
+    assert " PAGE " in footer_xml
+
+
+def test_deterministic_pptx_labels_timeline_profile() -> None:
+    rendered = render_document(
+        artifact_format="pptx",
+        bundle=_timeline_bundle(),
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        require_libreoffice=False,
+    )
+
+    from pptx import Presentation
+
+    presentation = Presentation(BytesIO(rendered.content))
+    assert "TIMELINE REPORT" in _presentation_text(presentation)
+    assert _slide_background_hex(presentation.slides[0]) == "1F3A5F"
+
+
+def test_deterministic_pptx_table_geometry_uses_content_shape() -> None:
+    rendered = render_document(
+        artifact_format="pptx",
+        bundle=_dynamic_table_bundle(row_count=2),
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        require_libreoffice=False,
+    )
+
+    from pptx import Presentation
+
+    presentation = Presentation(BytesIO(rendered.content))
+    table = _presentation_tables(presentation)[0]
+    widths = [column.width for column in table.columns]
+    row_heights = [row.height for row in table.rows]
+
+    assert widths[1] > widths[0] * 2
+    assert widths[1] > widths[2]
+    assert row_heights[1] > row_heights[2]
+
+
+def test_deterministic_pptx_splits_tables_by_estimated_height() -> None:
+    rendered = render_document(
+        artifact_format="pptx",
+        bundle=_dynamic_table_bundle(row_count=8),
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        require_libreoffice=False,
+    )
+
+    from pptx import Presentation
+
+    presentation = Presentation(BytesIO(rendered.content))
+
+    assert len(_presentation_tables(presentation)) >= 2
+    assert "Event 8" in _presentation_table_text(presentation)
 
 
 def test_deterministic_pptx_splits_large_lists_without_truncation() -> None:
@@ -890,72 +1008,6 @@ def test_deterministic_pptx_reports_slide_progress_without_changing_content() ->
     assert len(events) == len(presentation.slides)
 
 
-def test_sandbox_pptx_sdk_splits_bullets_without_truncation(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("ARTIFACT_SANDBOX_OUT_DIR", str(tmp_path))
-    path = tmp_path / "artifact.pptx"
-    artifact = PptxArtifact(
-        path=str(path),
-        title="Facts",
-        subtitle=None,
-        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
-        citations=[_citation()],
-    )
-
-    artifact.add_slide()
-    artifact.add_bullet_list([
-        ContentListItem(text=f"Item {index} evidence fact.", evidence_ids=["E1"])
-        for index in range(1, 19)
-    ])
-    artifact.finalize()
-
-    from pptx import Presentation
-
-    presentation = Presentation(str(path))
-    text = _presentation_text(presentation)
-    assert "Item 18 evidence fact." in text
-    assert len(presentation.slides) >= 3
-    slides = list(presentation.slides)
-    assert _slide_background_hex(slides[0]) == "173B3F"
-    content_backgrounds = [_slide_background_hex(slide) for slide in slides[1:]]
-    assert content_backgrounds[0] == "DCEBE8"
-    assert len(set(content_backgrounds)) > 1
-
-
-def test_sandbox_pptx_sdk_reuses_placeholder_references_slide(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("ARTIFACT_SANDBOX_OUT_DIR", str(tmp_path))
-    path = tmp_path / "artifact.pptx"
-    artifact = PptxArtifact(
-        path=str(path),
-        title="Facts",
-        subtitle=None,
-        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
-        citations=[_citation()],
-    )
-
-    artifact.add_slide("References")
-    artifact.add_paragraph("References")
-    artifact.add_references_slide()
-    artifact.finalize()
-
-    from pptx import Presentation
-
-    presentation = Presentation(str(path))
-    reference_slide_texts = [
-        _slide_text(slide)
-        for slide in presentation.slides
-        if _slide_text(slide).startswith("References")
-    ]
-    assert len(reference_slide_texts) == 1
-    assert "FIR_02_kidnapping.pdf" in reference_slide_texts[0]
-    assert "References\nReferences" not in reference_slide_texts[0]
-
-
-def test_sandbox_document_sections_expose_objective_compatibility() -> None:
-    document = ArtifactDocument(_bundle(), datetime(2026, 1, 1, tzinfo=UTC))
-
-    assert document.sections[0].objective == "Facts"
-
-
 def _job(
     *,
     repo: InMemoryArtifactJobRepository | None = None,
@@ -979,6 +1031,17 @@ def _job(
         document_ids=[],
         conversation_context=[],
         retention_days=1,
+    )
+
+
+def _user_context() -> UserContext:
+    return UserContext(
+        user_id="user-1",
+        email="user@example.test",
+        account_type="platform_admin",
+        group_paths=("/",),
+        clearance_level="NATO_RESTRICTED",
+        permission_version=1,
     )
 
 
@@ -1121,6 +1184,147 @@ def _pdf_showcase_bundle() -> ArtifactContentBundle:
     )
 
 
+def _timeline_bundle() -> ArtifactContentBundle:
+    citation = _citation()
+    section = ContentSection(
+        title="Timeline",
+        blocks=[
+            ContentBlock(
+                kind="numbered_list",
+                list_items=[
+                    ContentListItem(text="Complaint registered at 21:30.", evidence_ids=["E1"]),
+                    ContentListItem(text="Recovered property logged after midnight.", evidence_ids=["E1"]),
+                ],
+            ),
+            ContentBlock(
+                kind="table",
+                table=ContentTable(
+                    headers=["Time", "Event"],
+                    rows=[
+                        ContentTableRow(values=["21:30", "Complaint registered."], evidence_ids=["E1"]),
+                        ContentTableRow(values=["00:25", "Medical note completed."], evidence_ids=["E1"]),
+                    ],
+                ),
+            ),
+        ],
+    )
+    return ArtifactContentBundle(
+        content=EvidenceBackedContent(
+            title="Incident timeline",
+            purpose="Build a chronological timeline of events.",
+            sections=[section],
+            citations=[citation],
+        ),
+        paginated=PaginatedDocumentSpec(title="Incident timeline", sections=[section]),
+        presentation=PresentationSpec(
+            title="Incident timeline",
+            slides=[PresentationSlide(title="Timeline", blocks=section.blocks)],
+        ),
+    )
+
+
+def _operator_guide_bundle() -> ArtifactContentBundle:
+    citation = _citation()
+    section = ContentSection(
+        title="SOP checklist",
+        blocks=[
+            ContentBlock(
+                kind="numbered_list",
+                list_items=[
+                    ContentListItem(text="Review authorized source records.", evidence_ids=["E1"]),
+                    ContentListItem(text="Confirm each generated claim has a citation.", evidence_ids=["E1"]),
+                ],
+            )
+        ],
+    )
+    return ArtifactContentBundle(
+        content=EvidenceBackedContent(
+            title="Artifact generation SOP",
+            purpose="Provide a workflow checklist for artifact review.",
+            sections=[section],
+            citations=[citation],
+        ),
+        paginated=PaginatedDocumentSpec(title="Artifact generation SOP", sections=[section]),
+        presentation=PresentationSpec(
+            title="Artifact generation SOP",
+            slides=[PresentationSlide(title="SOP checklist", blocks=section.blocks)],
+        ),
+    )
+
+
+def _standard_layout_bundle() -> ArtifactContentBundle:
+    citation = _citation()
+    section = ContentSection(
+        title="Overview",
+        blocks=[
+            ContentBlock(
+                kind="paragraph",
+                text="A neutral layout showcase should remain on the standard report profile.",
+                evidence_ids=["E1"],
+            )
+        ],
+    )
+    return ArtifactContentBundle(
+        content=EvidenceBackedContent(
+            title="Layout showcase",
+            purpose="Summarize available materials in a neutral document.",
+            sections=[section],
+            citations=[citation],
+        ),
+        paginated=PaginatedDocumentSpec(title="Layout showcase", sections=[section]),
+        presentation=PresentationSpec(
+            title="Layout showcase",
+            slides=[PresentationSlide(title="Overview", blocks=section.blocks)],
+        ),
+    )
+
+
+def _dynamic_table_bundle(*, row_count: int) -> ArtifactContentBundle:
+    citation = _citation()
+    long_event = (
+        "Event {index}: custody metadata reconciliation requires a careful comparison of intake notes, "
+        "handoff records, and ledger timestamps before this row can be treated as a final conclusion. "
+        "The reviewer should keep the source caveat visible, preserve the operational sequence, and avoid "
+        "collapsing unresolved chain-of-custody gaps into a confirmed finding."
+    )
+    rows = [
+        ContentTableRow(
+            values=[
+                f"{8 + index:02d}:15",
+                long_event.format(index=index) if index == 1 or row_count > 2 else f"Event {index}: short verified update.",
+                "Needs timestamp reconciliation" if index == 1 else "Verified",
+            ],
+            evidence_ids=["E1"],
+        )
+        for index in range(1, row_count + 1)
+    ]
+    section = ContentSection(
+        title="Timeline",
+        blocks=[
+            ContentBlock(
+                kind="table",
+                table=ContentTable(
+                    headers=["Time", "Event Description", "Status"],
+                    rows=rows,
+                ),
+            )
+        ],
+    )
+    return ArtifactContentBundle(
+        content=EvidenceBackedContent(
+            title="Incident timeline",
+            purpose="Build a chronological timeline of events.",
+            sections=[section],
+            citations=[citation],
+        ),
+        paginated=PaginatedDocumentSpec(title="Incident timeline", sections=[section]),
+        presentation=PresentationSpec(
+            title="Incident timeline",
+            slides=[PresentationSlide(title="Timeline", blocks=section.blocks)],
+        ),
+    )
+
+
 def _large_list_bundle(*, item_count: int) -> ArtifactContentBundle:
     citation = _citation()
     section = ContentSection(
@@ -1224,6 +1428,24 @@ def _slide_text(slide) -> str:
     return "\n".join(shape.text for shape in slide.shapes if hasattr(shape, "text"))
 
 
+def _presentation_tables(presentation):
+    return [
+        shape.table
+        for slide in presentation.slides
+        for shape in slide.shapes
+        if getattr(shape, "has_table", False)
+    ]
+
+
+def _presentation_table_text(presentation) -> str:
+    return "\n".join(
+        cell.text
+        for table in _presentation_tables(presentation)
+        for row in table.rows
+        for cell in row.cells
+    )
+
+
 def _slide_background_hex(slide) -> str:
     return str(slide.background.fill.fore_color.rgb)
 
@@ -1294,9 +1516,61 @@ class _PresentationFormattingInference:
         })
 
 
+class _CountingPlannerInference:
+    def __init__(self, response: str | None = None) -> None:
+        self.response = response or "{}"
+        self.calls = 0
+        self.prompts: list[str] = []
+
+    def generate_json(self, *, prompt: str, **_kwargs) -> str:
+        self.calls += 1
+        self.prompts.append(prompt)
+        return self.response
+
+
 class _FailingInference:
     def generate_json(self, **_kwargs) -> str:
         raise TimeoutError("composition call failed")
+
+
+def _planner_plan_json() -> str:
+    return json.dumps({
+        "title": "Vendor Policy Change Briefing",
+        "purpose": "Create an evidence-grounded briefing on vendor policy changes.",
+        "audience": "Executive leadership",
+        "language": "English",
+        "tone": "professional",
+        "detail_level": "detailed",
+        "document_type": "presentation",
+        "assumptions": ["Use only authorized retrieved evidence."],
+        "clarification_questions": [],
+        "sections": [
+            {
+                "title": "Timeline",
+                "objective": "Build a chronological view of vendor policy changes.",
+                "preferred_blocks": ["numbered_list", "table"],
+                "retrieval_queries": [
+                    "vendor policy changes timeline",
+                    "vendor policy amendments dates",
+                    "vendor policy version history",
+                    "vendor policy chronology",
+                ],
+                "retrieval_mode": "timeline",
+                "coverage_requirement": "relevant_evidence",
+            },
+            {
+                "title": "Risk Matrix",
+                "objective": "Extract policy risks and classify their status.",
+                "preferred_blocks": ["table", "bullet_list"],
+                "retrieval_queries": ["vendor policy risks", "vendor risk matrix"],
+                "retrieval_mode": "structured_rows",
+                "coverage_requirement": "complete_authorized_scope",
+            },
+        ],
+        "format_requirements": {
+            "pptx": ["Use executive slide titles.", "Use tables for risks."],
+        },
+    })
 
 
 def _format_spec_json(
@@ -1321,22 +1595,6 @@ def _format_spec_json(
             "include_references_slide": True,
         },
     })
-
-
-class _PptxBuildProgramInference:
-    def generate_json(self, **_kwargs) -> str:
-        return json.dumps({
-            "sdk_version": "artifact_sdk_v1",
-            "layout_profile": "professional",
-            "expected_outputs": [{"format": "pptx", "filename": "FIR-summary.pptx"}],
-            "python_code": "\n".join([
-                "from rag.artifact_sandbox.sdk import ArtifactDocument",
-                "doc = ArtifactDocument.from_input('/work/input.json')",
-                "pptx = doc.create_pptx('/work/out/FIR-summary.pptx', title=doc.title)",
-                "pptx.add_title_slide(doc.title)",
-                "pptx.finalize()",
-            ]),
-        })
 
 
 class _CatalogDocumentRepo:

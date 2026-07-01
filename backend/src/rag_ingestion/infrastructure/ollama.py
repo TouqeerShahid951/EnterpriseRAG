@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from ..errors import OllamaEmbeddingUnavailable
+from ..errors import EmbeddingUnavailable
 from .http import ServiceRequestError, request_json
 
 
@@ -183,7 +183,7 @@ class OllamaClient:
                 if expected_dimension is None:
                     expected_dimension = len(vector)
                 elif len(vector) != expected_dimension:
-                    raise OllamaEmbeddingUnavailable("Ollama returned inconsistent embedding dimensions.")
+                    raise EmbeddingUnavailable("Ollama returned inconsistent embedding dimensions.")
             vectors.extend(batch_vectors)
             if progress is not None:
                 progress(len(vectors), len(texts))
@@ -213,7 +213,7 @@ class OllamaClient:
                     break
                 self._backoff(attempt)
         message = last_error.message if last_error else "embedding request failed"
-        raise OllamaEmbeddingUnavailable(message[:500])
+        raise EmbeddingUnavailable(message[:500])
 
     def _backoff(self, attempt: int) -> None:
         delay = self.retry_base_seconds * (2**attempt)

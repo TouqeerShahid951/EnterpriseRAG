@@ -22,22 +22,30 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
         row = self._execute_one(
             """
             INSERT INTO workspace_rag_config (
-                config_key, provider, base_url, embedding_base_url, reasoning_base_url, routing_base_url,
-                faithfulness_base_url, ingestion_base_url, chat_model, embed_model, reasoning_model, routing_model,
+                config_key, provider, embedding_provider, reasoning_provider, routing_provider, faithfulness_provider,
+                ingestion_provider, vision_provider, base_url, embedding_base_url, reasoning_base_url, routing_base_url,
+                faithfulness_base_url, ingestion_base_url, vision_base_url, chat_model, embed_model, reasoning_model, routing_model,
                 faithfulness_model, ingestion_model, vision_model, thinking_enabled, json_num_predict, retrieval_token_budget,
-                reranker_model, chat_timeout_seconds, embed_timeout_seconds, health_status,
+                query_planner_enabled, reranker_model, chat_timeout_seconds, embed_timeout_seconds, health_status,
                 health_message, embedding_dimension, chat_latency_ms, embed_latency_ms,
                 last_checked_at, updated_by, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::uuid, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::uuid, %s)
             ON CONFLICT (config_key) DO UPDATE SET
                 provider = EXCLUDED.provider,
+                embedding_provider = EXCLUDED.embedding_provider,
+                reasoning_provider = EXCLUDED.reasoning_provider,
+                routing_provider = EXCLUDED.routing_provider,
+                faithfulness_provider = EXCLUDED.faithfulness_provider,
+                ingestion_provider = EXCLUDED.ingestion_provider,
+                vision_provider = EXCLUDED.vision_provider,
                 base_url = EXCLUDED.base_url,
                 embedding_base_url = EXCLUDED.embedding_base_url,
                 reasoning_base_url = EXCLUDED.reasoning_base_url,
                 routing_base_url = EXCLUDED.routing_base_url,
                 faithfulness_base_url = EXCLUDED.faithfulness_base_url,
                 ingestion_base_url = EXCLUDED.ingestion_base_url,
+                vision_base_url = EXCLUDED.vision_base_url,
                 chat_model = EXCLUDED.chat_model,
                 embed_model = EXCLUDED.embed_model,
                 reasoning_model = EXCLUDED.reasoning_model,
@@ -48,6 +56,7 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                 thinking_enabled = EXCLUDED.thinking_enabled,
                 json_num_predict = EXCLUDED.json_num_predict,
                 retrieval_token_budget = EXCLUDED.retrieval_token_budget,
+                query_planner_enabled = EXCLUDED.query_planner_enabled,
                 reranker_model = EXCLUDED.reranker_model,
                 chat_timeout_seconds = EXCLUDED.chat_timeout_seconds,
                 embed_timeout_seconds = EXCLUDED.embed_timeout_seconds,
@@ -64,12 +73,19 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
             (
                 ACTIVE_CONFIG_KEY,
                 saved.provider,
+                saved.embedding_provider,
+                saved.effective_reasoning_provider,
+                saved.effective_routing_provider,
+                saved.effective_faithfulness_provider,
+                saved.effective_ingestion_provider,
+                saved.effective_vision_provider,
                 saved.base_url,
                 saved.embedding_base_url,
                 saved.effective_reasoning_base_url,
                 saved.effective_routing_base_url,
                 saved.effective_faithfulness_base_url,
                 saved.effective_ingestion_base_url,
+                saved.effective_vision_base_url,
                 saved.chat_model,
                 saved.embed_model,
                 saved.reasoning_model,
@@ -80,6 +96,7 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                 saved.thinking_enabled,
                 saved.json_num_predict,
                 saved.retrieval_token_budget,
+                saved.query_planner_enabled,
                 saved.reranker_model,
                 saved.chat_timeout_seconds,
                 saved.embed_timeout_seconds,
@@ -102,12 +119,19 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                 CREATE TABLE IF NOT EXISTS workspace_rag_config (
                     config_key TEXT PRIMARY KEY DEFAULT 'active',
                     provider TEXT NOT NULL DEFAULT 'ollama',
+                    embedding_provider TEXT NOT NULL DEFAULT 'ollama',
+                    reasoning_provider TEXT NULL,
+                    routing_provider TEXT NULL,
+                    faithfulness_provider TEXT NULL,
+                    ingestion_provider TEXT NULL,
+                    vision_provider TEXT NULL,
                     base_url TEXT NOT NULL,
                     embedding_base_url TEXT NOT NULL,
                     reasoning_base_url TEXT NULL,
                     routing_base_url TEXT NULL,
                     faithfulness_base_url TEXT NULL,
                     ingestion_base_url TEXT NULL,
+                    vision_base_url TEXT NULL,
                     chat_model TEXT NOT NULL,
                     embed_model TEXT NOT NULL,
                     reasoning_model TEXT NULL,
@@ -118,6 +142,7 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                     thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                     json_num_predict INTEGER NOT NULL DEFAULT 4096,
                     retrieval_token_budget INTEGER NOT NULL DEFAULT 12000,
+                    query_planner_enabled BOOLEAN NOT NULL DEFAULT TRUE,
                     reranker_model TEXT NOT NULL DEFAULT 'jinaai/jina-reranker-v1-turbo-en',
                     chat_timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 180,
                     embed_timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 45,
@@ -132,6 +157,16 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     CONSTRAINT workspace_rag_config_singleton CHECK (config_key = 'active'),
                     CONSTRAINT workspace_rag_config_provider_known CHECK (provider IN ('ollama', 'vllm')),
+                    CONSTRAINT workspace_rag_config_embedding_provider_known CHECK (
+                        embedding_provider IN ('ollama', 'openai_compatible', 'fastembed')
+                    ),
+                    CONSTRAINT workspace_rag_config_role_providers_known CHECK (
+                        (reasoning_provider IS NULL OR reasoning_provider IN ('ollama', 'vllm')) AND
+                        (routing_provider IS NULL OR routing_provider IN ('ollama', 'vllm')) AND
+                        (faithfulness_provider IS NULL OR faithfulness_provider IN ('ollama', 'vllm')) AND
+                        (ingestion_provider IS NULL OR ingestion_provider IN ('ollama', 'vllm')) AND
+                        (vision_provider IS NULL OR vision_provider IN ('ollama', 'vllm'))
+                    ),
                     CONSTRAINT workspace_rag_config_base_url_not_blank CHECK (length(btrim(base_url)) > 0),
                     CONSTRAINT workspace_rag_config_chat_model_not_blank CHECK (length(btrim(chat_model)) > 0),
                     CONSTRAINT workspace_rag_config_embed_model_not_blank CHECK (length(btrim(embed_model)) > 0),
@@ -153,16 +188,40 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
             )
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS reasoning_model TEXT NULL")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'ollama'")
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS embedding_provider TEXT NULL")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS embedding_base_url TEXT NULL")
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS reasoning_provider TEXT NULL")
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS routing_provider TEXT NULL")
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS faithfulness_provider TEXT NULL")
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS ingestion_provider TEXT NULL")
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS vision_provider TEXT NULL")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS reasoning_base_url TEXT NULL")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS routing_base_url TEXT NULL")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS faithfulness_base_url TEXT NULL")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS ingestion_base_url TEXT NULL")
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS vision_base_url TEXT NULL")
             conn.execute("UPDATE workspace_rag_config SET embedding_base_url = base_url WHERE embedding_base_url IS NULL")
+            conn.execute("UPDATE workspace_rag_config SET reasoning_provider = provider WHERE reasoning_provider IS NULL")
+            conn.execute("UPDATE workspace_rag_config SET routing_provider = COALESCE(reasoning_provider, provider) WHERE routing_provider IS NULL")
+            conn.execute("UPDATE workspace_rag_config SET faithfulness_provider = provider WHERE faithfulness_provider IS NULL")
+            conn.execute("UPDATE workspace_rag_config SET ingestion_provider = provider WHERE ingestion_provider IS NULL")
+            conn.execute("UPDATE workspace_rag_config SET vision_provider = COALESCE(ingestion_provider, provider) WHERE vision_provider IS NULL")
             conn.execute("UPDATE workspace_rag_config SET reasoning_base_url = base_url WHERE reasoning_base_url IS NULL")
             conn.execute("UPDATE workspace_rag_config SET routing_base_url = COALESCE(reasoning_base_url, base_url) WHERE routing_base_url IS NULL")
             conn.execute("UPDATE workspace_rag_config SET faithfulness_base_url = base_url WHERE faithfulness_base_url IS NULL")
             conn.execute("UPDATE workspace_rag_config SET ingestion_base_url = base_url WHERE ingestion_base_url IS NULL")
+            conn.execute("UPDATE workspace_rag_config SET vision_base_url = COALESCE(ingestion_base_url, base_url) WHERE vision_base_url IS NULL")
+            conn.execute(
+                """
+                UPDATE workspace_rag_config
+                SET embedding_provider = CASE
+                    WHEN provider = 'vllm' THEN 'openai_compatible'
+                    ELSE 'ollama'
+                END
+                WHERE embedding_provider IS NULL
+                """
+            )
+            conn.execute("ALTER TABLE workspace_rag_config ALTER COLUMN embedding_provider SET NOT NULL")
             conn.execute("ALTER TABLE workspace_rag_config ALTER COLUMN embedding_base_url SET NOT NULL")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS routing_model TEXT NULL")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS ingestion_model TEXT NULL")
@@ -170,5 +229,6 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS json_num_predict INTEGER NOT NULL DEFAULT 4096")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS retrieval_token_budget INTEGER NOT NULL DEFAULT 12000")
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS query_planner_enabled BOOLEAN NOT NULL DEFAULT TRUE")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS reranker_model TEXT NOT NULL DEFAULT 'jinaai/jina-reranker-v1-turbo-en'")
             conn.execute("UPDATE workspace_rag_config SET reasoning_model = routing_model WHERE reasoning_model IS NULL AND routing_model IS NOT NULL")

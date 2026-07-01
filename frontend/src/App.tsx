@@ -1,37 +1,44 @@
 import { useEffect, useMemo, useState } from "react";
+import { Clock3 } from "lucide-react";
 
 import { isGlobalAdmin } from "./authz";
 import { ChatKnowledgeSpaceControl, type ChatSpaceOption } from "./components/chat/ChatWorkspaceHeader";
-import { FahamSidebarHeaderProvider } from "./components/layout/FahamWorkspace";
-import { FahamAccountPage } from "./pages/FahamAccountPage";
-import { FahamAccessPage } from "./pages/FahamAccessPage";
-import { FahamAuditPage } from "./pages/FahamAuditPage";
-import { FahamChatPage } from "./pages/FahamChatPage";
-import { FahamDocumentOverviewPage } from "./pages/FahamDocumentOverviewPage";
-import { FahamDocumentsPage } from "./pages/FahamDocumentsPage";
-import { FahamFolderSourcesPage } from "./pages/FahamFolderSourcesPage";
-import { FahamIngestionHealthPage } from "./pages/FahamIngestionHealthPage";
-import { FahamIngestionJobsPage } from "./pages/FahamIngestionJobsPage";
-import { FahamLogin } from "./pages/FahamLogin";
-import { FahamOverviewPage } from "./pages/FahamPlannedPage";
-import { FahamRagEvaluationsPage } from "./pages/FahamRagEvaluationsPage";
-import { FahamReviewQueuePage } from "./pages/FahamReviewQueuePage";
-import { FahamSettingsPage } from "./pages/FahamSettingsPage";
+import { InlineMessage, SessionLoading } from "./components/layout/Common";
+import { Modal } from "./components/layout/Modal";
+import { PrudentiaSidebarHeaderProvider } from "./components/layout/PrudentiaWorkspace";
+import { PrudentiaAccountPage } from "./pages/PrudentiaAccountPage";
+import { PrudentiaAccessPage } from "./pages/PrudentiaAccessPage";
+import { PrudentiaAuditPage } from "./pages/PrudentiaAuditPage";
+import { PrudentiaChatPage } from "./pages/PrudentiaChatPage";
+import { PrudentiaDatabaseConnectorsPage } from "./pages/PrudentiaDatabaseConnectorsPage";
+import { PrudentiaDocumentOverviewPage } from "./pages/PrudentiaDocumentOverviewPage";
+import { PrudentiaDocumentsPage } from "./pages/PrudentiaDocumentsPage";
+import { PrudentiaFolderSourcesPage } from "./pages/PrudentiaFolderSourcesPage";
+import { PrudentiaIngestionHealthPage } from "./pages/PrudentiaIngestionHealthPage";
+import { PrudentiaIngestionJobsPage } from "./pages/PrudentiaIngestionJobsPage";
+import { PrudentiaLogin } from "./pages/PrudentiaLogin";
+import { PrudentiaOverviewPage } from "./pages/PrudentiaPlannedPage";
+import { PrudentiaRagEvaluationsPage } from "./pages/PrudentiaRagEvaluationsPage";
+import { PrudentiaReviewQueuePage } from "./pages/PrudentiaReviewQueuePage";
+import { PrudentiaSettingsPage } from "./pages/PrudentiaSettingsPage";
 import { SourceViewerPage } from "./pages/SourceViewerPage";
-import { FahamUploadPage } from "./pages/FahamUploadPage";
+import { PrudentiaUploadPage } from "./pages/PrudentiaUploadPage";
 import { canAccessRoute, canonicalRoute, defaultRouteForUser, routeFromLocation, routePaths, type NavigateOptions, type RouteId } from "./routes";
-import { SessionLoading } from "./components/layout/Common";
+import { formatIdleCountdown } from "./state/authSessionTiming";
 import { useAuthSession } from "./state/useAuthSession";
 import { useChatSession } from "./state/useChatSession";
 import { useDocumentInventory } from "./state/useDocumentInventory";
 import { usePdfUpload } from "./state/usePdfUpload";
+import { readStoredBoolean, writeStoredBoolean } from "./state/uiPreferences";
 import type { Document, User as AuthUser } from "./types/api";
 import { isDocumentInSpace, userSpacesFromPaths } from "./utils/groups";
 import "./styles.css";
 
+const THEME_STORAGE_KEY = "Prudentia-theme-light";
+
 function App() {
   const [activeRoute, setActiveRoute] = useState<RouteId>(() => routeFromLocation() ?? "chat");
-  const [isLightMode, setIsLightMode] = useState(false);
+  const [isLightMode, setIsLightMode] = useState(() => readStoredBoolean(THEME_STORAGE_KEY, false));
   const auth = useAuthSession();
   const chat = useChatSession(auth.currentUser);
   const inventory = useDocumentInventory(auth.currentUser);
@@ -44,6 +51,7 @@ function App() {
 
   useEffect(() => {
     document.documentElement.classList.toggle("light", isLightMode);
+    writeStoredBoolean(THEME_STORAGE_KEY, isLightMode);
   }, [isLightMode]);
 
   useEffect(() => {
@@ -74,9 +82,18 @@ function App() {
     else history.pushState(null, "", target);
   }
 
-  function handleAuthChanged() {
+  function handleAuthChanged(authenticatedUser: AuthUser) {
     auth.authChanged();
-    navigate("overview", { replace: true });
+    if (authenticatedUser.must_change_password) {
+      navigate("account", { replace: true });
+      return;
+    }
+    const redirect = redirectTargetFromStoredPath(auth.consumePostLoginRedirect());
+    if (redirect && canAccessRoute(authenticatedUser, redirect.route)) {
+      navigate(redirect.route, { replace: true, search: redirect.search });
+      return;
+    }
+    navigate(defaultRouteForUser(authenticatedUser), { replace: true });
   }
 
   function handleLogout() {
@@ -84,11 +101,28 @@ function App() {
   }
 
   if (auth.currentUserQuery.isLoading) return <SessionLoading />;
-  if (!auth.currentUser) return <FahamLogin onAuthChanged={handleAuthChanged} />;
+  if (!auth.currentUser) return <PrudentiaLogin onAuthChanged={handleAuthChanged} sessionExpired={auth.sessionExpired} />;
 
   const user = auth.currentUser;
+  const sessionTimeoutDialog = (
+    <SessionTimeoutDialog
+      open={auth.idleWarning.open}
+      remainingSeconds={auth.idleWarning.remainingSeconds}
+      staySignedInError={auth.staySignedInMutation.isError}
+      staySignedInPending={auth.staySignedInMutation.isPending}
+      timeoutMinutes={auth.idleWarning.timeoutMinutes}
+      onLogout={handleLogout}
+      onStaySignedIn={auth.staySignedIn}
+    />
+  );
+
   if (activeRoute === "source-viewer") {
-    return <div className="app-route-stage"><SourceViewerPage /></div>;
+    return (
+      <>
+        <div className="app-route-stage"><SourceViewerPage /></div>
+        {sessionTimeoutDialog}
+      </>
+    );
   }
 
   const sidebarHeaderContent = (
@@ -98,13 +132,13 @@ function App() {
       documentCount={sidebarDocumentCount}
       documentsLoading={inventory.documentsQuery.isLoading}
       onActiveSpaceChange={chat.changeActiveSpacePath}
-      spaceSwitchDisabled={activeRoute === "chat" && chat.hasPendingTurn}
+      spaceSwitchDisabled={activeRoute === "chat" && chat.hasPendingGeneration}
       spaces={sidebarSpaceOptions}
     />
   );
 
   return (
-    <FahamSidebarHeaderProvider
+    <PrudentiaSidebarHeaderProvider
       isLightMode={isLightMode}
       onToggleTheme={() => setIsLightMode((value) => !value)}
       value={sidebarHeaderContent}
@@ -113,7 +147,7 @@ function App() {
 
       <div className="app-route-stage" key={activeRoute}>
         {activeRoute === "chat" ? (
-          <FahamChatPage
+          <PrudentiaChatPage
             activeSessionId={chat.activeSessionId}
             activeSpacePath={chat.activeSpacePath}
             addScopedDocument={chat.addScopedDocument}
@@ -123,7 +157,9 @@ function App() {
             deleteChatSession={chat.deleteChatSession}
             documents={inventory.documents}
             documentsLoading={inventory.documentsQuery.isLoading}
-            hasPendingTurn={chat.hasPendingTurn}
+            activeSessionHasPendingTurn={chat.activeSessionHasPendingTurn}
+            generatingSessionId={chat.generatingSessionId}
+            hasPendingGeneration={chat.hasPendingGeneration}
             latestResponse={chat.latestResponse}
             loadChatSession={chat.loadChatSession}
             loadMoreSavedSessions={chat.loadMoreSavedSessions}
@@ -131,6 +167,7 @@ function App() {
             onActiveSpaceChange={chat.changeActiveSpacePath}
             onCancelArtifactJob={chat.cancelArtifactJob}
             onClarifyArtifactJob={chat.clarifyArtifactJob}
+            onExpandSourceSearch={chat.expandSourceSearch}
             onLogout={handleLogout}
             onNavigate={navigate}
             onQuestionChange={chat.setQuestion}
@@ -138,6 +175,8 @@ function App() {
             onReset={chat.resetChat}
             onRetryArtifactJob={chat.retryArtifactJob}
             onSelectSource={chat.setSelectedSource}
+            onSelectedQuerySourceChange={chat.setSelectedQuerySourceId}
+            onSourceModeChange={chat.setSourceMode}
             question={chat.question}
             removeScopedDocument={chat.removeScopedDocument}
             savedSessions={chat.savedSessions}
@@ -148,28 +187,43 @@ function App() {
             savedSessionsLoading={chat.savedSessionsLoading}
             savedSessionsTotal={chat.savedSessionsTotal}
             scopedDocumentIds={chat.scopedDocumentIds}
+            selectedQuerySourceId={chat.selectedQuerySourceId}
             selectedSource={chat.selectedSource}
+            sourceMode={chat.sourceMode}
             user={user}
           />
         ) : null}
-        {activeRoute === "knowledge-spaces" ? <FahamDocumentsPage onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} view="spaces" /> : null}
-        {activeRoute === "document-overview" ? <FahamDocumentOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} /> : null}
-        {activeRoute === "documents" ? <FahamDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="documents" /> : null}
-        {activeRoute === "document-trash" ? <FahamDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="trash" /> : null}
-        {activeRoute === "upload" ? <FahamUploadPage batchItems={pdfUpload.batchItems} cancelingJobId={pdfUpload.cancelingJobId} currentDocuments={inventory.documents} currentUser={user} onCancelIngestJob={pdfUpload.cancelJob} onLogout={handleLogout} onNavigate={navigate} onPdfDraftChange={pdfUpload.updatePdfDraft} onPdfSubmit={pdfUpload.onPdfSubmit} pdfDraft={pdfUpload.pdfDraft} selectionError={pdfUpload.selectionError} uploadPending={pdfUpload.uploadMutation.isPending} /> : null}
-        {activeRoute === "document-extraction" ? <FahamFolderSourcesPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "ingestion-jobs" ? <FahamIngestionJobsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "ingestion-health" ? <FahamIngestionHealthPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "review" ? <FahamReviewQueuePage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "access" ? <FahamAccessPage currentUser={user} onAuthChanged={auth.authChanged} onLogout={handleLogout} onNavigate={navigate} /> : null}
-        {activeRoute === "account" ? <FahamAccountPage currentUser={user} isLoggingOut={auth.logoutMutation.isPending} onAuthChanged={auth.authChanged} onLogout={handleLogout} onNavigate={navigate} /> : null}
-        {activeRoute === "settings" ? <FahamSettingsPage currentUser={user} onLogout={handleLogout} onNavigate={navigate} /> : null}
+        {activeRoute === "knowledge-spaces" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} view="spaces" /> : null}
+        {activeRoute === "document-overview" ? <PrudentiaDocumentOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} /> : null}
+        {activeRoute === "documents" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="documents" /> : null}
+        {activeRoute === "document-trash" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="trash" /> : null}
+        {activeRoute === "upload" ? <PrudentiaUploadPage batchItems={pdfUpload.batchItems} cancelingJobId={pdfUpload.cancelingJobId} currentDocuments={inventory.documents} currentUser={user} onCancelIngestJob={pdfUpload.cancelJob} onLogout={handleLogout} onNavigate={navigate} onPdfDraftChange={pdfUpload.updatePdfDraft} onPdfSubmit={pdfUpload.onPdfSubmit} pdfDraft={pdfUpload.pdfDraft} selectionError={pdfUpload.selectionError} uploadPending={pdfUpload.uploadMutation.isPending} /> : null}
+        {activeRoute === "document-extraction" ? <PrudentiaFolderSourcesPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {activeRoute === "database-connectors" ? <PrudentiaDatabaseConnectorsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {activeRoute === "ingestion-jobs" ? <PrudentiaIngestionJobsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {activeRoute === "ingestion-health" ? <PrudentiaIngestionHealthPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {activeRoute === "review" ? <PrudentiaReviewQueuePage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {activeRoute === "access" ? <PrudentiaAccessPage currentUser={user} onAuthChanged={auth.authChanged} onLogout={handleLogout} onNavigate={navigate} /> : null}
+        {activeRoute === "account" ? <PrudentiaAccountPage currentUser={user} isLoggingOut={auth.logoutMutation.isPending} onAuthChanged={auth.authChanged} onLogout={handleLogout} onNavigate={navigate} /> : null}
+        {activeRoute === "settings" ? <PrudentiaSettingsPage currentUser={user} onLogout={handleLogout} onNavigate={navigate} /> : null}
 
-        {activeRoute === "overview" ? <FahamOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "activity-log" ? <FahamAuditPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "evaluations" ? <FahamRagEvaluationsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {activeRoute === "overview" ? <PrudentiaOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {activeRoute === "activity-log" ? <PrudentiaAuditPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {activeRoute === "evaluations" ? (
+          <PrudentiaRagEvaluationsPage
+            activeSpacePath={chat.activeSpacePath}
+            currentDocuments={inventory.currentDocuments}
+            documents={inventory.documents}
+            documentsLoading={inventory.documentsQuery.isLoading}
+            onActiveSpaceChange={chat.changeActiveSpacePath}
+            onLogout={handleLogout}
+            onNavigate={navigate}
+            user={user}
+          />
+        ) : null}
       </div>
-    </FahamSidebarHeaderProvider>
+      {sessionTimeoutDialog}
+    </PrudentiaSidebarHeaderProvider>
   );
 }
 
@@ -196,3 +250,77 @@ function normalizeSearch(search: NavigateOptions["search"]) {
   if (!value) return "";
   return value.startsWith("?") ? value : `?${value}`;
 }
+
+function redirectTargetFromStoredPath(target: string | null): { route: RouteId; search: string } | null {
+  if (!target || target === "/") return null;
+  try {
+    const url = new URL(target, window.location.origin);
+    const route = routeFromLocation(url.pathname, url.search);
+    if (!route || route === "login") return null;
+    return { route: canonicalRoute(route), search: url.search };
+  } catch {
+    return null;
+  }
+}
+
+function SessionTimeoutDialog({
+  onLogout,
+  onStaySignedIn,
+  open,
+  remainingSeconds,
+  staySignedInError,
+  staySignedInPending,
+  timeoutMinutes,
+}: SessionTimeoutDialogProps) {
+  const progress = Math.max(0, Math.min(100, (remainingSeconds / Math.max(1, timeoutMinutes * 60)) * 100));
+  return (
+    <Modal
+      closeButton={false}
+      description={`No activity has reached the server for ${timeoutMinutes} minutes.`}
+      icon={<Clock3 size={18} aria-hidden="true" />}
+      onClose={() => undefined}
+      open={open}
+      size="sm"
+      title="Session timeout"
+    >
+      <div className="grid gap-4">
+        <div className="sv-panel p-4" role="status" aria-live="polite">
+          <p className="sv-metadata">Time remaining</p>
+          <p className="mt-2 text-headline-md text-on-surface">{formatIdleCountdown(remainingSeconds)}</p>
+          <p className="mt-1 text-body-md text-on-surface-variant">
+            Stay signed in to continue working, or sign out now.
+          </p>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-surface-container-low" aria-hidden="true">
+            <span
+              className="block h-full rounded-full bg-warning-amber transition-[width] duration-200"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+        {staySignedInError ? (
+          <InlineMessage tone="error">
+            Unable to extend this session. Sign in again if the session has already expired.
+          </InlineMessage>
+        ) : null}
+        <div className="flex flex-wrap justify-end gap-3">
+          <button type="button" className="sv-action-secondary" onClick={onLogout} disabled={staySignedInPending}>
+            Sign out
+          </button>
+          <button type="button" className="sv-action-primary" onClick={onStaySignedIn} disabled={staySignedInPending}>
+            {staySignedInPending ? "Extending session" : "Stay signed in"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+type SessionTimeoutDialogProps = {
+  onLogout: () => void;
+  onStaySignedIn: () => void;
+  open: boolean;
+  remainingSeconds: number;
+  staySignedInError: boolean;
+  staySignedInPending: boolean;
+  timeoutMinutes: number;
+};

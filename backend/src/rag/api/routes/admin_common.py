@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Request, status
 
 from ...auth.dependencies import require_current_user
+from ...auth.refresh_sessions import RefreshSessionStore
 from ...auth.permissions import (
     can_assign_account_type,
     can_assign_clearance_level,
@@ -19,10 +20,10 @@ from ...repositories.identity import GroupRecord, IdentityRepository, UserRecord
 from ...schemas.admin import Group, UserAdmin
 
 
-def require_admin_if_users_exist(request: Request, repo: IdentityRepository) -> UserRecord | None:
+def require_admin_if_users_exist(request: Request, repo: IdentityRepository, sessions: RefreshSessionStore) -> UserRecord | None:
     if repo.count_users() == 0:
         return None
-    user = require_current_user(request, repo)
+    user = require_current_user(request, repo, sessions)
     if not can_manage_users(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

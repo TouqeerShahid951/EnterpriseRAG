@@ -33,7 +33,21 @@ class PymuPDFParseResult:
     page_quality_flags: dict[int, list[str]]
 
 
+@dataclass(frozen=True)
+class PageProfile:
+    text_blocks: list[dict[str, Any]]
+    image_blocks: list[dict[str, Any]]
+    text_chars: int
+    block_text_chars: int
+    quality_flags: list[str]
+    has_large_image_block: bool
+
+
 PageProgressCallback = Callable[[int, int], None]
+
+SIMPLE_TEXT_MIN_CHARS = 80
+SIMPLE_TEXT_MAX_BLOCKS = 12
+LARGE_IMAGE_PAGE_RATIO = 0.65
 
 
 def parse_pymupdf_pdf(file_bytes: bytes, *, page_progress_callback: PageProgressCallback | None = None) -> tuple[list[ParsedPdfItem], int]:
@@ -69,9 +83,10 @@ def _document_items_with_metadata(document: Any, *, page_progress_callback: Page
     for page_index in range(page_count):
         page_no = page_index + 1
         page = document.load_page(page_index)
-        page_text_chars[page_no] = _page_text_char_count(page)
-        page_quality_flags[page_no] = _page_quality_flags(page)
-        for entry in _page_entries(page, page_no):
+        profile = _page_profile(page)
+        page_text_chars[page_no] = profile.text_chars
+        page_quality_flags[page_no] = profile.quality_flags
+        for entry in _page_entries(page, page_no, profile):
             if is_boilerplate_text(entry.text):
                 continue
             text, item_type = contextualized_item(entry.text, entry.item_type, current_section)
@@ -95,13 +110,20 @@ def _document_items_with_metadata(document: Any, *, page_progress_callback: Page
     return PymuPDFParseResult(parsed, page_count, page_text_chars, page_quality_flags)
 
 
-def _page_entries(page: Any, page_no: int) -> list[PageEntry]:
+def _page_entries(page: Any, page_no: int, profile: PageProfile | None = None) -> list[PageEntry]:
+    profile = profile or _page_profile(page)
+    if _text_blocks_only_page(profile):
+        return column_aware_reading_order(
+            _text_entries_from_blocks(profile.text_blocks, page_no, []),
+            bbox_for=lambda item: item.bbox,
+            page_width_value=_page_width(page),
+        )
     tables = table_entries(page, page_no)
     layout_entries = layout_page_entries(page, page_no, tables)
     if layout_entries:
         return [_from_layout_entry(entry) for entry in layout_entries]
     table_boxes = [entry.bbox for entry in tables]
-    text_entries = _text_entries(page, page_no, table_boxes)
+    text_entries = _text_entries_from_blocks(profile.text_blocks, page_no, table_boxes)
     table_page_entries = [_table_page_entry(entry) for entry in tables]
     return column_aware_reading_order(
         [*text_entries, *table_page_entries],
@@ -111,7 +133,14 @@ def _page_entries(page: Any, page_no: int) -> list[PageEntry]:
 
 
 def _text_entries(page: Any, page_no: int, table_boxes: list[tuple[float, float, float, float]]) -> list[PageEntry]:
-    blocks = [block for block in page.get_text("dict").get("blocks", []) if block.get("type") == 0]
+    return _text_entries_from_blocks(_text_blocks(_page_blocks(page)), page_no, table_boxes)
+
+
+def _text_entries_from_blocks(
+    blocks: list[dict[str, Any]],
+    page_no: int,
+    table_boxes: list[tuple[float, float, float, float]],
+) -> list[PageEntry]:
     body_size = _body_font_size(blocks)
     entries: list[PageEntry] = []
     for block in blocks:
@@ -187,6 +216,10 @@ def _from_layout_entry(entry: LayoutEntry) -> PageEntry:
 
 
 def _page_text_char_count(page: Any) -> int:
+    return _page_profile(page).text_chars
+
+
+def _page_text_char_count_from_text(page: Any) -> int:
     get_text = getattr(page, "get_text", None)
     if get_text is None:
         return 0
@@ -197,11 +230,32 @@ def _page_text_char_count(page: Any) -> int:
 
 
 def _page_quality_flags(page: Any) -> list[str]:
-    flags: list[str] = []
+    return _page_profile(page).quality_flags
+
+
+def _page_profile(page: Any) -> PageProfile:
     blocks = _page_blocks(page)
-    text_blocks = [block for block in blocks if block.get("type") == 0]
+    text_blocks = _text_blocks(blocks)
     image_blocks = [block for block in blocks if block.get("type") == 1]
-    text_chars = _text_chars_from_blocks(text_blocks)
+    block_text_chars = _text_chars_from_blocks(text_blocks)
+    quality_flags = _quality_flags_from_blocks(text_blocks, image_blocks, block_text_chars, page)
+    return PageProfile(
+        text_blocks=text_blocks,
+        image_blocks=image_blocks,
+        text_chars=_page_text_char_count_from_text(page),
+        block_text_chars=block_text_chars,
+        quality_flags=quality_flags,
+        has_large_image_block=_has_large_image_block(image_blocks, page),
+    )
+
+
+def _quality_flags_from_blocks(
+    text_blocks: list[dict[str, Any]],
+    image_blocks: list[dict[str, Any]],
+    text_chars: int,
+    page: Any,
+) -> list[str]:
+    flags: list[str] = []
     rotation = getattr(page, "rotation", 0)
     if isinstance(rotation, int) and rotation % 360:
         flags.append("rotated_page")
@@ -220,6 +274,10 @@ def _page_quality_flags(page: Any) -> list[str]:
     return flags
 
 
+def _text_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [block for block in blocks if block.get("type") == 0]
+
+
 def _page_blocks(page: Any) -> list[dict[str, Any]]:
     get_text = getattr(page, "get_text", None)
     if get_text is None:
@@ -233,6 +291,32 @@ def _page_blocks(page: Any) -> list[dict[str, Any]]:
 
 def _text_chars_from_blocks(blocks: list[dict[str, Any]]) -> int:
     return sum(len(_block_text(block)) for block in blocks)
+
+
+def _text_blocks_only_page(profile: PageProfile) -> bool:
+    if profile.has_large_image_block:
+        return True
+    return (
+        profile.text_chars >= SIMPLE_TEXT_MIN_CHARS
+        and profile.block_text_chars >= SIMPLE_TEXT_MIN_CHARS
+        and 0 < len(profile.text_blocks) <= SIMPLE_TEXT_MAX_BLOCKS
+        and not profile.image_blocks
+        and not profile.quality_flags
+        and not _looks_table_like_light(profile.text_blocks)
+    )
+
+
+def _has_large_image_block(blocks: list[dict[str, Any]], page: Any) -> bool:
+    page_area = _page_width(page) * _page_height(page)
+    if page_area <= 0:
+        return False
+    return any(_bbox_area(_block_bbox(block)) / page_area >= LARGE_IMAGE_PAGE_RATIO for block in blocks)
+
+
+def _looks_table_like_light(blocks: list[dict[str, Any]]) -> bool:
+    texts = [_block_text(block) for block in blocks]
+    short_numeric = sum(1 for text in texts if 0 < len(text) <= 80 and any(char.isdigit() for char in text))
+    return len(texts) >= 4 and short_numeric >= 3
 
 
 def _has_rotated_text(blocks: list[dict[str, Any]]) -> bool:
@@ -269,6 +353,24 @@ def _page_width(page: Any) -> float:
     rect = getattr(page, "rect", None)
     width = getattr(rect, "width", None)
     return float(width) if isinstance(width, (int, float)) else 0.0
+
+
+def _page_height(page: Any) -> float:
+    rect = getattr(page, "rect", None)
+    height = getattr(rect, "height", None)
+    return float(height) if isinstance(height, (int, float)) else 0.0
+
+
+def _block_bbox(block: dict[str, Any]) -> tuple[float, float, float, float]:
+    try:
+        bbox = tuple(float(value) for value in block.get("bbox", (0, 0, 0, 0)))
+    except (TypeError, ValueError):
+        return (0.0, 0.0, 0.0, 0.0)
+    return bbox if len(bbox) == 4 else (0.0, 0.0, 0.0, 0.0)
+
+
+def _bbox_area(bbox: tuple[float, float, float, float]) -> float:
+    return max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
 
 
 def _looks_form_like(blocks: list[dict[str, Any]]) -> bool:

@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from billiard.exceptions import SoftTimeLimitExceeded
+from rag.shared.ingestion_quality import parser_tuning_for_quality_preset
 
 from .infrastructure.backend import BackendInternalClient, IngestAttempt
 from .infrastructure.http import ServiceRequestError
@@ -15,7 +16,7 @@ from .infrastructure.ollama import is_transient_service_error
 from .infrastructure.storage import DocumentImageAssetWriter, UploadObjectReader
 from .infrastructure.vision import OPENAI_COMPATIBLE_PROVIDER, OLLAMA_PROVIDER, VisionClient
 from .config import WorkerConfig
-from .errors import HumanReviewRequired, IngestJobCancelled, OllamaEmbeddingUnavailable, WorkerStepError
+from .errors import EmbeddingUnavailable, HumanReviewRequired, IngestJobCancelled, WorkerStepError
 from .indexing.qdrant import QdrantClient
 from .indexing.sparse import SparseEmbedder
 from .messages import IngestJobPayload
@@ -33,7 +34,7 @@ def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
     deps: IngestDependencies | None = None
     try:
         with _job_heartbeat(backend, job.job_id, config.heartbeat_interval_seconds):
-            deps = _build_dependencies(config, backend=backend)
+            deps = _build_dependencies(config, backend=backend, quality_preset=job.quality_preset)
             state = run_ingest_graph(job, deps)
     except HumanReviewRequired as exc:
         return {
@@ -44,7 +45,7 @@ def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
         }
     except IngestJobCancelled:
         return _cancelled_result(config, backend=backend, job=job, deps=deps)
-    except OllamaEmbeddingUnavailable as exc:
+    except EmbeddingUnavailable as exc:
         return _retry_or_fail(
             task,
             config=config,
@@ -52,7 +53,7 @@ def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
             job=job,
             attempt=attempt,
             exc=exc,
-            error_code="ollama_embedding_unavailable",
+            error_code="embedding_unavailable",
         )
     except SoftTimeLimitExceeded as exc:
         return _retry_or_fail(
@@ -163,7 +164,8 @@ def _retry_or_fail(
     if _job_is_cancelled(backend, job.job_id):
         return _cancelled_result(config, backend=backend, job=job)
     if attempt.attempt_count >= attempt.max_attempts:
-        backend.update_job(
+        _update_job_best_effort(
+            backend,
             job_id=job.job_id,
             status="failed",
             progress_pct=100,
@@ -179,13 +181,15 @@ def _retry_or_fail(
         raise exc
 
     countdown = 30 * (2 ** (attempt.attempt_count - 1))
-    backend.update_job(
+    requeued = _update_job_best_effort(
+        backend,
         job_id=job.job_id,
         status="queued",
         progress_pct=0,
         error_code=None,
         error_message_safe=None,
     )
+    retry_countdown = _retry_countdown(config, countdown, requeued=requeued)
     _record_event(
         backend,
         job.job_id,
@@ -194,10 +198,44 @@ def _retry_or_fail(
             "error_code": error_code,
             "attempt_count": attempt.attempt_count,
             "next_attempt": attempt.attempt_count + 1,
-            "countdown_seconds": countdown,
+            "countdown_seconds": retry_countdown,
+            "status_requeued": requeued,
         },
     )
-    raise task.retry(exc=exc, countdown=countdown, max_retries=None)
+    raise task.retry(exc=exc, countdown=retry_countdown, max_retries=None)
+
+
+def _retry_countdown(config: WorkerConfig, base_countdown: int, *, requeued: bool) -> int:
+    if requeued:
+        return base_countdown
+    stale_after = max(0, int(getattr(config, "ingest_stale_after_seconds", 120)))
+    return max(base_countdown, stale_after + 5)
+
+
+def _update_job_best_effort(
+    backend: BackendInternalClient,
+    *,
+    job_id: str,
+    status: str,
+    progress_pct: int,
+    stage_progress: dict[str, object] | None = None,
+    error_code: str | None = None,
+    error_message_safe: str | None = None,
+    warnings: list[str] | None = None,
+) -> bool:
+    try:
+        backend.update_job(
+            job_id=job_id,
+            status=status,
+            progress_pct=progress_pct,
+            stage_progress=stage_progress,
+            error_code=error_code,
+            error_message_safe=error_message_safe,
+            warnings=warnings,
+        )
+    except ServiceRequestError:
+        return False
+    return True
 
 
 def _cancelled_result(
@@ -281,10 +319,21 @@ def _build_backend(config: WorkerConfig) -> BackendInternalClient:
     )
 
 
-def _build_dependencies(config: WorkerConfig, *, backend: BackendInternalClient | None = None) -> IngestDependencies:
+def _build_dependencies(
+    config: WorkerConfig,
+    *,
+    backend: BackendInternalClient | None = None,
+    quality_preset: str | None = None,
+) -> IngestDependencies:
     backend = backend or _build_backend(config)
     inference_config = backend.get_rag_config()
     ingest_config = backend.get_ingest_config()
+    parser_tuning = parser_tuning_for_quality_preset(
+        quality_preset or ingest_config.quality_preset or config.ingestion_quality_preset,
+        weak_page_threshold=config.weak_page_threshold,
+        full_doc_weak_page_ratio=config.full_doc_weak_page_ratio,
+        layered_docling_max_pages=config.layered_docling_max_pages,
+    )
     return IngestDependencies(
         backend=backend,
         storage=UploadObjectReader(config.minio),
@@ -294,6 +343,7 @@ def _build_dependencies(config: WorkerConfig, *, backend: BackendInternalClient 
             timeout_seconds=config.http_timeout_seconds,
             retry_base_seconds=config.ollama_retry_base_seconds,
             embedding_batch_size=config.embedding_batch_size,
+            dense_cache_dir=config.model_provider.dense_cache_dir,
             num_ctx=config.ollama_num_ctx,
         ),
         sparse_embedder=SparseEmbedder(
@@ -313,21 +363,36 @@ def _build_dependencies(config: WorkerConfig, *, backend: BackendInternalClient 
         parent_max_tokens=config.parent_max_tokens,
         metadata_use_gliner=config.metadata_use_gliner,
         topic_taxonomy=config.topic_taxonomy,
-        weak_page_threshold=config.weak_page_threshold,
-        full_doc_weak_page_ratio=config.full_doc_weak_page_ratio,
-        layered_docling_max_pages=config.layered_docling_max_pages,
+        ingestion_quality_preset=parser_tuning.quality_preset,
+        weak_page_threshold=parser_tuning.weak_page_threshold,
+        full_doc_weak_page_ratio=parser_tuning.full_doc_weak_page_ratio,
+        layered_docling_max_pages=parser_tuning.layered_docling_max_pages,
+        layered_docling_max_page_ratio=parser_tuning.layered_docling_max_page_ratio,
+        prefer_full_document_docling=parser_tuning.prefer_full_document_docling,
         layered_docling_batch_pages=config.layered_docling_batch_pages,
+        pdf_image_analysis_max_images=config.pdf_image_analysis_max_images,
+        pdf_image_analysis_max_full_page_fallbacks=config.pdf_image_analysis_max_full_page_fallbacks,
+        scanned_visual_region_enabled=config.scanned_visual_region_enabled,
+        scanned_visual_min_area_ratio=config.scanned_visual_min_area_ratio,
+        scanned_visual_max_regions_per_page=config.scanned_visual_max_regions_per_page,
+        scanned_visual_text_mask_padding_px=config.scanned_visual_text_mask_padding_px,
         ocr_review_confidence_threshold=ingest_config.ocr_review_confidence_threshold,
+        vision_layout_repair_enabled=ingest_config.vision_layout_repair_enabled,
     )
 
 
 def _build_vision_client(config: WorkerConfig, runtime_config: object) -> VisionClient:
-    provider = str(getattr(runtime_config, "provider", "")).strip().lower()
+    provider = str(
+        getattr(runtime_config, "vision_provider", None)
+        or getattr(runtime_config, "ingestion_provider", None)
+        or getattr(runtime_config, "provider", "")
+    ).strip().lower()
     if provider == OLLAMA_PROVIDER:
         return VisionClient(
             provider=OLLAMA_PROVIDER,
             base_url=str(
-                getattr(runtime_config, "ingestion_base_url", None)
+                getattr(runtime_config, "vision_base_url", None)
+                or getattr(runtime_config, "ingestion_base_url", None)
                 or getattr(runtime_config, "base_url", "")
             ),
             model=str(
@@ -341,7 +406,7 @@ def _build_vision_client(config: WorkerConfig, runtime_config: object) -> Vision
         )
     return VisionClient(
         provider=OPENAI_COMPATIBLE_PROVIDER,
-        base_url=config.vision.base_url,
+        base_url=str(getattr(runtime_config, "vision_base_url", None) or config.vision.base_url),
         model=str(getattr(runtime_config, "vision_model", None) or config.vision.model),
         timeout_seconds=config.http_timeout_seconds,
     )

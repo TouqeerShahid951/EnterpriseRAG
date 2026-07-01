@@ -9,14 +9,20 @@ from fastapi.responses import StreamingResponse
 from ...auth.abac import normalize_group_path
 from ...auth.dependencies import require_csrf, require_current_user
 from ...auth.document_access import can_read_document, can_write_document
-from ...auth.permissions import can_manage_group_path
+from ...auth.permissions import can_manage_group_path, is_global_admin
 from ...core.config import settings
+from ...graphrag.cleanup import (
+    GraphRAGCleanupError,
+    GraphRAGDeletionService,
+    deletion_service_from_settings,
+    partition_key_for_document,
+)
 from ...repositories.claims import ClaimRepository, get_claim_repository
 from ...query.sources import source_from_hit
 from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
 from ...repositories.documents import DocumentRecord, DocumentRepository, IngestJobRecord, get_document_repository
-from ...repositories.identity import UserRecord
+from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
 from ...schemas.common import ErrorResponse
 from ...schemas.docs import (
     DeleteDocumentResponse,
@@ -25,17 +31,29 @@ from ...schemas.docs import (
     DocumentClearanceUpdateRequest,
     DocumentCrossReference,
     DocumentEntity,
+    DocumentGraphEnrichmentResponse,
     DocumentListResponse,
     DocumentReingestResponse,
+    DocumentSharesResponse,
+    DocumentSharesUpdateRequest,
+    DocumentTopicsUpdateRequest,
+    DocumentUnshareRequest,
     SupersedeRequest,
     VersionNode,
     VersionChainResponse,
 )
 from ...schemas.query import SourceAnchor
 from ...services.ingest_queue import IngestQueue, IngestQueueMessage, get_ingest_queue
+from ...services.graphrag_queue import (
+    GraphRAGDocumentIndexMessage,
+    GraphRAGMaintenanceQueue,
+    GraphRAGPartitionRebuildMessage,
+    get_graphrag_maintenance_queue,
+)
 from ...services.document_image_asset_storage import DocumentImageAssetStorage, get_document_image_asset_storage
 from ...services.upload_storage import UploadStorage, get_upload_storage
 from ...shared.contracts.clearance import clearance_rank, normalize_clearance_level
+from ...connectors.models import CONNECTOR_RECORD_CONTENT_TYPE
 
 router = APIRouter(prefix="/docs", tags=["documents"])
 
@@ -50,6 +68,10 @@ def get_document_qdrant_client() -> QdrantClient:
     )
 
 
+def get_document_graphrag_deletion_service() -> GraphRAGDeletionService:
+    return deletion_service_from_settings(settings)
+
+
 @router.get("", response_model=DocumentListResponse, summary="List visible documents")
 async def list_documents(
     state: str = Query(default="active"),
@@ -62,7 +84,7 @@ async def list_documents(
     documents = [
         document_to_schema(document)
         for document in repo.list_documents(state=state_value)
-        if can_read_document(user, document) and _matches_group_filter(document.group_path, normalized_group)
+        if can_read_document(user, document) and _matches_group_filter(document.access_group_paths, normalized_group)
     ]
     return DocumentListResponse(items=documents, total=len(documents))
 
@@ -92,10 +114,108 @@ async def get_document(
 
 
 @router.get(
+    "/{document_id}/shares",
+    response_model=DocumentSharesResponse,
+    responses={
+        status.HTTP_200_OK: {"model": DocumentSharesResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+    summary="Read document Knowledge Space shares",
+)
+async def get_document_shares(
+    document_id: str,
+    user: UserRecord = Depends(require_current_user),
+    repo: DocumentRepository = Depends(get_document_repository),
+) -> DocumentSharesResponse:
+    document = require_visible_document(user, repo.get_document(document_id, include_deleted=True))
+    return document_shares_to_schema(document)
+
+
+@router.put(
+    "/{document_id}/shares",
+    response_model=DocumentSharesResponse,
+    responses={
+        status.HTTP_200_OK: {"model": DocumentSharesResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+    },
+    summary="Replace document Knowledge Space shares",
+)
+async def replace_document_shares(
+    document_id: str,
+    payload: DocumentSharesUpdateRequest,
+    request: Request,
+    user: UserRecord = Depends(require_current_user),
+    repo: DocumentRepository = Depends(get_document_repository),
+    identity_repo: IdentityRepository = Depends(get_identity_repository),
+    qdrant: QdrantClient = Depends(get_document_qdrant_client),
+) -> DocumentSharesResponse:
+    require_csrf(request)
+    if not is_global_admin(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "document_share_forbidden", "message": "Only global administrators can share documents across Knowledge Spaces."},
+        )
+    document = require_visible_document(user, repo.get_document(document_id, include_deleted=True))
+    shares = _validated_share_groups(payload.group_paths, document=document, identity_repo=identity_repo)
+    updated = _replace_document_shares_with_index(
+        document,
+        shares,
+        actor_id=user.id,
+        repo=repo,
+        qdrant=qdrant,
+        event_type="documents.shares.replace",
+    )
+    return document_shares_to_schema(updated)
+
+
+@router.post(
+    "/{document_id}/shares/unshare",
+    response_model=DocumentSharesResponse,
+    responses={
+        status.HTTP_200_OK: {"model": DocumentSharesResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+    },
+    summary="Remove one shared Knowledge Space from a document",
+)
+async def unshare_document(
+    document_id: str,
+    payload: DocumentUnshareRequest,
+    request: Request,
+    user: UserRecord = Depends(require_current_user),
+    repo: DocumentRepository = Depends(get_document_repository),
+    qdrant: QdrantClient = Depends(get_document_qdrant_client),
+) -> DocumentSharesResponse:
+    require_csrf(request)
+    document = require_visible_document(user, repo.get_document(document_id, include_deleted=True))
+    target_group = normalize_group_path(payload.group_path)
+    if target_group not in document.shared_group_paths:
+        return document_shares_to_schema(document)
+    if not (is_global_admin(user) or can_manage_group_path(user, target_group)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "document_unshare_forbidden", "message": "Only global administrators or the target Space Admin can remove this share."},
+        )
+    updated = _replace_document_shares_with_index(
+        document,
+        [path for path in document.shared_group_paths if path != target_group],
+        actor_id=user.id,
+        repo=repo,
+        qdrant=qdrant,
+        event_type="documents.shares.unshare",
+    )
+    return document_shares_to_schema(updated)
+
+
+@router.get(
     "/{document_id}/content",
     responses={
-        status.HTTP_200_OK: {"content": {"application/pdf": {}, "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {}, "image/jpeg": {}, "image/png": {}, "application/json": {}}},
-        status.HTTP_206_PARTIAL_CONTENT: {"content": {"application/pdf": {}, "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {}, "image/jpeg": {}, "image/png": {}, "application/json": {}}},
+        status.HTTP_200_OK: {"content": {"application/pdf": {}, "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {}, "image/jpeg": {}, "image/png": {}, "application/json": {}, CONNECTOR_RECORD_CONTENT_TYPE: {}}},
+        status.HTTP_206_PARTIAL_CONTENT: {"content": {"application/pdf": {}, "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {}, "image/jpeg": {}, "image/png": {}, "application/json": {}, CONNECTOR_RECORD_CONTENT_TYPE: {}}},
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
     },
     summary="Stream original document content",
@@ -321,6 +441,82 @@ async def update_document_clearance(
     return document_to_schema(updated)
 
 
+@router.patch(
+    "/{document_id}/topics",
+    response_model=Document,
+    responses={
+        status.HTTP_200_OK: {"model": Document},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+    },
+    summary="Update document topics",
+)
+async def update_document_topics(
+    document_id: str,
+    payload: DocumentTopicsUpdateRequest,
+    request: Request,
+    user: UserRecord = Depends(require_current_user),
+    repo: DocumentRepository = Depends(get_document_repository),
+    qdrant: QdrantClient = Depends(get_document_qdrant_client),
+) -> Document:
+    require_csrf(request)
+    document = require_writable_document(user, repo.get_document(document_id))
+    topics = _normalize_topic_values(payload.topics)
+    llm_topics = _normalize_topic_values(payload.llm_topics)
+    indexed_topics = _unique_text([*topics, *llm_topics])
+    if topics == list(document.topics) and llm_topics == list(document.llm_topics):
+        return document_to_schema(document)
+
+    updated = repo.update_document_topics(document.id, topics=topics, llm_topics=llm_topics)
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "document_not_found", "message": "Document was not found."})
+    try:
+        qdrant.set_document_topics(document.id, topics=indexed_topics)
+    except ServiceRequestError as exc:
+        repo.update_document_topics(document.id, topics=list(document.topics), llm_topics=list(document.llm_topics))
+        repo.append_audit_event(
+            event_type="documents.topics_update",
+            actor_id=user.id,
+            target_type="document",
+            target_id=document.id,
+            payload={
+                "group_path": document.group_path,
+                "old_topics": list(document.topics),
+                "old_llm_topics": list(document.llm_topics),
+                "new_topics": topics,
+                "new_llm_topics": llm_topics,
+                "action_result": "failed",
+                "error_code": "document_topics_index_update_failed",
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "document_topics_index_update_failed",
+                "message": f"Unable to update indexed document topics: {exc}",
+            },
+        ) from exc
+
+    repo.append_audit_event(
+        event_type="documents.topics_update",
+        actor_id=user.id,
+        target_type="document",
+        target_id=document.id,
+        payload={
+            "group_path": document.group_path,
+            "old_topics": list(document.topics),
+            "old_llm_topics": list(document.llm_topics),
+            "new_topics": topics,
+            "new_llm_topics": llm_topics,
+            "qdrant_collection": settings.qdrant_collection,
+            "action_result": "success",
+        },
+    )
+    return document_to_schema(updated)
+
+
 @router.post(
     "/{document_id}/supersede",
     response_model=VersionChainResponse,
@@ -391,6 +587,68 @@ async def reingest_document(
 
 
 @router.post(
+    "/{document_id}/graph-enrichment",
+    response_model=DocumentGraphEnrichmentResponse,
+    responses={
+        status.HTTP_202_ACCEPTED: {"model": DocumentGraphEnrichmentResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
+        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
+    },
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue optional graph enrichment for an indexed document",
+)
+async def queue_document_graph_enrichment(
+    document_id: str,
+    request: Request,
+    user: UserRecord = Depends(require_current_user),
+    repo: DocumentRepository = Depends(get_document_repository),
+    queue: GraphRAGMaintenanceQueue = Depends(get_graphrag_maintenance_queue),
+) -> DocumentGraphEnrichmentResponse:
+    require_csrf(request)
+    document = require_writable_document(user, repo.get_document(document_id))
+    if not settings.graphrag_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "graphrag_disabled", "message": "Graph enrichment is disabled for this workspace."},
+        )
+    job = next(
+        (candidate for candidate in repo.list_ingest_jobs() if candidate.doc_id == document.id and candidate.status == "complete"),
+        None,
+    )
+    if document.ingest_status != "complete" or job is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "document_not_indexed", "message": "Graph enrichment is available after document indexing completes."},
+        )
+    try:
+        queue.enqueue_document_index(
+            GraphRAGDocumentIndexMessage(doc_id=document.id, job_id=job.id, reason="user_request")
+        )
+    except Exception as exc:
+        repo.append_audit_event(
+            event_type="documents.graph_enrichment.enqueue_failed",
+            actor_id=user.id,
+            target_type="document",
+            target_id=document.id,
+            payload={"job_id": job.id, "error": str(exc)[:300]},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "graphrag_enqueue_failed", "message": "Graph enrichment could not be queued."},
+        ) from exc
+    repo.append_audit_event(
+        event_type="documents.graph_enrichment.queued",
+        actor_id=user.id,
+        target_type="document",
+        target_id=document.id,
+        payload={"job_id": job.id, "reason": "user_request"},
+    )
+    return DocumentGraphEnrichmentResponse(document_id=document.id, job_id=job.id)
+
+
+@router.post(
     "/{document_id}/restore",
     response_model=DocumentReingestResponse,
     responses={
@@ -455,9 +713,18 @@ async def delete_document(
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
     qdrant: QdrantClient = Depends(get_document_qdrant_client),
+    graphrag: GraphRAGDeletionService = Depends(get_document_graphrag_deletion_service),
+    graphrag_queue: GraphRAGMaintenanceQueue = Depends(get_graphrag_maintenance_queue),
 ) -> DeleteDocumentResponse:
     require_csrf(request)
     document = require_writable_document(user, repo.get_document(document_id))
+    graph_cleanup = _delete_document_graphrag(
+        document,
+        event_type="documents.delete",
+        actor_id=user.id,
+        repo=repo,
+        graphrag=graphrag,
+    )
     try:
         qdrant.delete_document_points(document.id)
     except ServiceRequestError as exc:
@@ -475,12 +742,27 @@ async def delete_document(
     deleted = repo.soft_delete_document(document.id)
     if deleted is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "document_not_found", "message": "Document was not found."})
+    graph_rebuild_status = _enqueue_graphrag_partition_rebuild(
+        document,
+        event_type="documents.delete",
+        actor_id=user.id,
+        repo=repo,
+        queue=graphrag_queue,
+        partition_key=graph_cleanup.partition_key,
+    )
     repo.append_audit_event(
         event_type="documents.delete",
         actor_id=user.id,
         target_type="document",
         target_id=document.id,
-        payload={"group_path": document.group_path, "action_result": "success", "qdrant_collection": settings.qdrant_collection},
+        payload={
+            "group_path": document.group_path,
+            "action_result": "success",
+            "qdrant_collection": settings.qdrant_collection,
+            "graphrag_cleanup_status": graph_cleanup.status,
+            "graphrag_partition_key": graph_cleanup.partition_key,
+            "graphrag_rebuild_status": graph_rebuild_status,
+        },
     )
     return DeleteDocumentResponse(id=document.id)
 
@@ -503,14 +785,23 @@ async def permanently_delete_document(
     storage: UploadStorage = Depends(get_upload_storage),
     image_storage: DocumentImageAssetStorage = Depends(get_document_image_asset_storage),
     qdrant: QdrantClient = Depends(get_document_qdrant_client),
+    graphrag: GraphRAGDeletionService = Depends(get_document_graphrag_deletion_service),
+    graphrag_queue: GraphRAGMaintenanceQueue = Depends(get_graphrag_maintenance_queue),
 ) -> DeleteDocumentResponse:
     require_csrf(request)
     document = require_visible_document(user, repo.get_document(document_id, include_deleted=True))
-    if not can_manage_group_path(user, document.group_path):
+    if not _can_permanently_delete_document(user, document):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "document_forbidden", "message": "Only platform admins and scoped Space Admins can permanently delete documents."},
         )
+    graph_cleanup = _delete_document_graphrag(
+        document,
+        event_type="documents.permanent_delete",
+        actor_id=user.id,
+        repo=repo,
+        graphrag=graphrag,
+    )
     try:
         qdrant.delete_document_points(document.id)
         for asset in repo.list_document_image_assets(document.id):
@@ -531,12 +822,28 @@ async def permanently_delete_document(
     deleted = repo.permanently_delete_document(document.id)
     if deleted is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "document_not_found", "message": "Document was not found."})
+    graph_rebuild_status = _enqueue_graphrag_partition_rebuild(
+        document,
+        event_type="documents.permanent_delete",
+        actor_id=user.id,
+        repo=repo,
+        queue=graphrag_queue,
+        partition_key=graph_cleanup.partition_key,
+    )
     repo.append_audit_event(
         event_type="documents.permanent_delete",
         actor_id=user.id,
         target_type="document",
         target_id=document.id,
-        payload={"file_path": document.file_path, "group_path": document.group_path, "qdrant_collection": settings.qdrant_collection, "action_result": "success"},
+        payload={
+            "file_path": document.file_path,
+            "group_path": document.group_path,
+            "qdrant_collection": settings.qdrant_collection,
+            "action_result": "success",
+            "graphrag_cleanup_status": graph_cleanup.status,
+            "graphrag_partition_key": graph_cleanup.partition_key,
+            "graphrag_rebuild_status": graph_rebuild_status,
+        },
     )
     return DeleteDocumentResponse(id=document.id, status="permanently_deleted")
 
@@ -550,11 +857,88 @@ def _document_state(value: str) -> Literal["active", "deleted"]:
     return cast(Literal["active", "deleted"], value)
 
 
-def _matches_group_filter(document_group_path: str, group_path: str | None) -> bool:
+def _matches_group_filter(document_group_paths: tuple[str, ...], group_path: str | None) -> bool:
     if group_path is None:
         return True
-    normalized_document_group = normalize_group_path(document_group_path)
-    return normalized_document_group == group_path
+    return any(normalize_group_path(document_group_path) == group_path for document_group_path in document_group_paths)
+
+
+def _can_permanently_delete_document(user: UserRecord, document: DocumentRecord) -> bool:
+    if document.shared_group_paths:
+        return is_global_admin(user)
+    return can_manage_group_path(user, document.group_path)
+
+
+def _delete_document_graphrag(
+    document: DocumentRecord,
+    *,
+    event_type: str,
+    actor_id: str,
+    repo: DocumentRepository,
+    graphrag: GraphRAGDeletionService,
+):
+    partition_key = partition_key_for_document(document)
+    try:
+        return graphrag.delete_document(doc_id=document.id, partition_key=partition_key)
+    except GraphRAGCleanupError as exc:
+        repo.append_audit_event(
+            event_type=event_type,
+            actor_id=actor_id,
+            target_type="document",
+            target_id=document.id,
+            payload={
+                "group_path": document.group_path,
+                "action_result": "failed",
+                "error_code": "document_graphrag_delete_failed",
+                "graphrag_partition_key": partition_key,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "document_graphrag_delete_failed",
+                "message": f"Unable to delete GraphRAG document data: {exc}",
+            },
+        ) from exc
+
+
+def _enqueue_graphrag_partition_rebuild(
+    document: DocumentRecord,
+    *,
+    event_type: str,
+    actor_id: str,
+    repo: DocumentRepository,
+    queue: GraphRAGMaintenanceQueue,
+    partition_key: str | None,
+) -> str:
+    if not settings.graphrag_enabled:
+        return "skipped"
+    if not partition_key:
+        return "skipped_missing_partition"
+    try:
+        queue.enqueue_partition_rebuild(
+            GraphRAGPartitionRebuildMessage(
+                doc_id=document.id,
+                partition_key=partition_key,
+                reason=event_type,
+            )
+        )
+    except RuntimeError as exc:
+        repo.append_audit_event(
+            event_type=event_type,
+            actor_id=actor_id,
+            target_type="document",
+            target_id=document.id,
+            payload={
+                "group_path": document.group_path,
+                "action_result": "warning",
+                "warning_code": "graphrag_rebuild_enqueue_failed",
+                "graphrag_partition_key": partition_key,
+                "message": str(exc)[:240],
+            },
+        )
+        return "enqueue_failed"
+    return "queued"
 
 
 def _set_qdrant_document_clearance(qdrant: QdrantClient, document_id: str, clearance_level: str) -> None:
@@ -570,6 +954,113 @@ def _try_set_qdrant_document_clearance(qdrant: QdrantClient, document_id: str, c
         _set_qdrant_document_clearance(qdrant, document_id, clearance_level)
     except ServiceRequestError:
         return
+
+
+def _set_qdrant_document_acl(qdrant: QdrantClient, document_id: str, access_group_paths: list[str]) -> None:
+    qdrant.set_document_acl_group_paths(document_id, acl_group_paths=access_group_paths)
+
+
+def _try_set_qdrant_document_acl(qdrant: QdrantClient, document_id: str, access_group_paths: list[str]) -> None:
+    try:
+        _set_qdrant_document_acl(qdrant, document_id, access_group_paths)
+    except ServiceRequestError:
+        return
+
+
+def _replace_document_shares_with_index(
+    document: DocumentRecord,
+    shares: list[str],
+    *,
+    actor_id: str | None,
+    repo: DocumentRepository,
+    qdrant: QdrantClient,
+    event_type: str,
+) -> DocumentRecord:
+    old_shares = list(document.shared_group_paths)
+    old_acl = list(document.access_group_paths)
+    next_acl = _document_acl_group_paths(document.group_path, shares)
+    removes_access = bool(set(old_acl) - set(next_acl))
+    updated: DocumentRecord | None = None
+    try:
+        if removes_access:
+            _set_qdrant_document_acl(qdrant, document.id, next_acl)
+        updated = repo.replace_document_shares(document.id, group_paths=shares, actor_id=actor_id)
+        if updated is None:
+            if removes_access:
+                _try_set_qdrant_document_acl(qdrant, document.id, old_acl)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "document_not_found", "message": "Document was not found."})
+        if not removes_access:
+            _set_qdrant_document_acl(qdrant, document.id, next_acl)
+    except ServiceRequestError as exc:
+        repo.replace_document_shares(document.id, group_paths=old_shares, actor_id=actor_id)
+        repo.append_audit_event(
+            event_type=event_type,
+            actor_id=actor_id,
+            target_type="document",
+            target_id=document.id,
+            payload={
+                "group_path": document.group_path,
+                "old_shared_group_paths": old_shares,
+                "new_shared_group_paths": shares,
+                "action_result": "failed",
+                "error_code": "document_acl_index_update_failed",
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "document_acl_index_update_failed", "message": f"Unable to update indexed document ACL: {exc}"},
+        ) from exc
+    repo.append_audit_event(
+        event_type=event_type,
+        actor_id=actor_id,
+        target_type="document",
+        target_id=document.id,
+        payload={
+            "group_path": document.group_path,
+            "old_shared_group_paths": old_shares,
+            "new_shared_group_paths": list(updated.shared_group_paths),
+            "qdrant_collection": settings.qdrant_collection,
+            "action_result": "success",
+        },
+    )
+    return updated
+
+
+def _validated_share_groups(group_paths: list[str], *, document: DocumentRecord, identity_repo: IdentityRepository) -> list[str]:
+    known = {group.path for group in identity_repo.list_groups()}
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_path in group_paths:
+        try:
+            group_path = normalize_group_path(raw_path)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "invalid_group_path", "message": str(exc)}) from exc
+        if group_path == document.group_path:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "invalid_document_share", "message": "The owner Knowledge Space already has access and cannot be added as a share."},
+            )
+        if group_path not in known:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "group_not_found", "message": f"Knowledge Space does not exist: {group_path}"},
+            )
+        if group_path not in seen:
+            seen.add(group_path)
+            normalized.append(group_path)
+    return normalized
+
+
+def _document_acl_group_paths(owner_group_path: str, shared_group_paths: list[str]) -> list[str]:
+    normalized_owner = normalize_group_path(owner_group_path)
+    paths = [normalized_owner, *[normalize_group_path(path) for path in shared_group_paths]]
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            ordered.append(path)
+    return ordered
 
 
 def _queue_document_reingest(
@@ -640,6 +1131,7 @@ def _ingest_message_for_document(document: DocumentRecord, job_id: str, stored: 
         doc_id=document.id,
         file_path=str(document.file_path),
         group_path=document.group_path,
+        acl_group_paths=list(document.access_group_paths),
         clearance_level=document.clearance_level,
         doc_type=document.doc_type,
         effective_date=document.effective_date.isoformat() if document.effective_date else None,
@@ -662,6 +1154,10 @@ def document_to_schema(
         title=document.title or document.source_id,
         doc_type=document.doc_type,
         group_path=document.group_path,
+        owner_group_path=document.owner_group_path,
+        shared_group_paths=list(document.shared_group_paths),
+        access_group_paths=list(document.access_group_paths),
+        governance_owner=document.governance_owner,
         clearance_level=document.clearance_level,
         effective_date=document.effective_date.isoformat() if document.effective_date else None,
         expiry_date=document.expiry_date.isoformat() if document.expiry_date else None,
@@ -685,6 +1181,16 @@ def document_to_schema(
         superseded_by=document.superseded_by,
         deleted_at=document.deleted_at,
         created_at=document.created_at,
+    )
+
+
+def document_shares_to_schema(document: DocumentRecord) -> DocumentSharesResponse:
+    return DocumentSharesResponse(
+        document_id=document.id,
+        owner_group_path=document.owner_group_path,
+        shared_group_paths=list(document.shared_group_paths),
+        access_group_paths=list(document.access_group_paths),
+        governance_owner=document.governance_owner,
     )
 
 
@@ -732,6 +1238,29 @@ def _metadata_version(flags: dict[str, object]) -> int | None:
 def _dict_metadata_field(flags: dict[str, object], key: str) -> dict[str, object]:
     value = flags.get(key)
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _normalize_topic_values(values: list[str]) -> list[str]:
+    topics = _unique_text(values)
+    too_long = [topic for topic in topics if len(topic) > 80]
+    if too_long:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "invalid_topic", "message": "Topic labels must be 80 characters or fewer."},
+        )
+    return topics[:32]
+
+
+def _unique_text(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        key = text.lower()
+        if text and key not in seen:
+            seen.add(key)
+            normalized.append(text)
+    return normalized
 
 
 def require_visible_document(user: UserRecord, document: DocumentRecord | None) -> DocumentRecord:

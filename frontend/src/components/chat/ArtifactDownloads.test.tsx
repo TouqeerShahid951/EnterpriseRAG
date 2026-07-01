@@ -22,6 +22,6 @@ describe("ArtifactDownloads", () => {
     expect(markup).toContain("PDF");
     expect(markup).toContain("2 KB");
     expect(markup).toContain('download="records-retention.pdf"');
-    expect(markup).toContain("http://localhost:8000/api/v1/query/artifacts/artifact-1/content");
+    expect(markup).toContain("http://localhost:3000/api/v1/query/artifacts/artifact-1/content");
   });
 });

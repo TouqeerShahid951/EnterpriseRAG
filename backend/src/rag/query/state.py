@@ -26,6 +26,8 @@ class QueryContext(TypedDict):
     route_plan: NotRequired[RoutePlan]
     initial_route_intent: NotRequired[str]
     route_signals: NotRequired[QuerySignals]
+    source_decision: NotRequired[object]
+    source_expansion: NotRequired[dict[str, object]]
     route_reroute_count: int
     sub_queries: list[str]
     is_current_only: bool

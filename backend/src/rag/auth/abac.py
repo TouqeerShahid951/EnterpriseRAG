@@ -24,8 +24,12 @@ def build_abac_filter(user: UserContext, is_current_only: bool = True) -> dict[s
     must: list[dict[str, Any]] = [
         {
             "should": [
-                {"key": "group_path", "match": {"value": group_path}}
+                matcher
                 for group_path in user_group_paths
+                for matcher in (
+                    {"key": "acl_group_paths", "match": {"value": group_path}},
+                    {"key": "group_path", "match": {"value": group_path}},
+                )
             ]
         },
         {"key": "clearance_rank", "range": {"lte": clearance_rank(user.clearance_level)}},

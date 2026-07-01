@@ -42,6 +42,32 @@ def test_aggregation_scores_breadth_and_document_class_above_token_overlap() -> 
     assert quality.in_scope_doc_ids == frozenset({"fir-1", "fir-2", "fir-3", "fir-4"})
 
 
+def test_aggregation_accepts_exhaustive_plain_text_scope_evidence() -> None:
+    quality = assess_evidence_quality(
+        "What are all the soldiers doing in all the documents?",
+        [
+            hit(
+                "image-1",
+                doc_id="image",
+                doc_title="images.jpg",
+                text=(
+                    "Image description: A soldier is kneeling on the ground, handling ammunition. "
+                    "Another soldier is operating an artillery piece with a large barrel."
+                ),
+                score=0.0,
+                exhaustive_scope_origin="document_class_scope",
+                _rerank_score=-4.144,
+            )
+        ],
+        route_plan=SimpleNamespace(intent="aggregation"),
+    )
+
+    assert quality.outcome == "pass"
+    assert quality.quality == "supported"
+    assert quality.exhaustive_scope_match_count == 1
+    assert quality.in_scope_doc_ids == frozenset({"image"})
+
+
 def test_factual_route_still_degrades_unrelated_low_overlap_evidence() -> None:
     quality = assess_evidence_quality(
         "what is vacation policy",
@@ -62,3 +88,14 @@ def test_factual_route_passes_directly_supported_evidence() -> None:
 
     assert quality.outcome == "pass"
     assert quality.quality == "supported"
+
+
+def test_topics_do_not_count_as_answer_evidence() -> None:
+    quality = assess_evidence_quality(
+        "what does OCR say about benchmark accuracy",
+        [hit("doc-1", doc_id="doc", doc_title="Maintenance notes.pdf", text="Rail kit installation steps.", topics=["OCR benchmark accuracy"])],
+        route_plan=SimpleNamespace(intent="factual_simple"),
+    )
+
+    assert quality.outcome == "degrade"
+    assert quality.quality == "weak"

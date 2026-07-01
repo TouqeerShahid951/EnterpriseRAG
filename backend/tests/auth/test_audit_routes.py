@@ -68,6 +68,7 @@ def test_auditor_visibility_stays_scoped_to_readable_documents() -> None:
 
     assert response.total == 1
     assert response.items[0].target_id == finance_doc.id
+    assert response.items[0].target_document_title == finance_doc.title
 
 
 def test_auditor_cannot_see_upper_level_events_outside_visible_scope() -> None:
@@ -200,6 +201,33 @@ def test_audit_pagination_and_summary_use_filtered_visible_result_set() -> None:
     assert response.summary.event_type_counts["auth.login"] == 3
 
 
+def test_audit_export_uses_filters_and_records_export_event() -> None:
+    repo = InMemoryDocumentRepository()
+    admin = _user("platform_admin", email="admin@example.test")
+    uploader = _user("contributor", email="uploader@example.test", group_paths=("/finance",))
+    finance_doc = _document(repo, uploader, "/finance")
+    repo.append_audit_event(
+        event_type="upload.queued",
+        actor_id=uploader.id,
+        target_type="document",
+        target_id=finance_doc.id,
+        payload={"filename": "Budget.pdf", "group_path": "/finance", "doc_id": finance_doc.id},
+    )
+    repo.append_audit_event(event_type="auth.login", actor_id=admin.id, target_type="user", target_id=admin.id, payload={"email": admin.email})
+
+    response = _export(user=admin, repo=repo, identity=FakeIdentityRepository([admin, uploader]), category="document")
+    body = response.body.decode("utf-8")
+
+    assert "upload.queued" in body
+    assert "target_document_title" in body
+    assert finance_doc.title in body
+    assert "Budget.pdf" in body
+    assert "auth.login" not in body
+    assert repo.audit_events[-1]["event_type"] == "audit.exported"
+    assert repo.audit_events[-1]["payload"]["row_count"] == 1
+    assert repo.audit_events[-1]["payload"]["matched_count"] == 1
+
+
 def test_deleted_user_target_email_falls_back_to_payload() -> None:
     repo = InMemoryDocumentRepository()
     actor = _user("platform_admin", email="admin@example.test")
@@ -217,6 +245,24 @@ def test_deleted_user_target_email_falls_back_to_payload() -> None:
     assert response.items[0].actor_email == "admin@example.test"
     assert response.items[0].target_user_email == "deleted@example.test"
     assert response.items[0].target_user_name == "Deleted User"
+
+
+def test_document_title_is_enriched_for_document_events_without_filename_payload() -> None:
+    repo = InMemoryDocumentRepository()
+    admin = _user("platform_admin", email="admin@example.test")
+    document = _document(repo, admin, "/finance")
+    repo.append_audit_event(
+        event_type="documents.delete",
+        actor_id=admin.id,
+        target_type="document",
+        target_id=document.id,
+        payload={"group_path": "/finance", "doc_id": document.id},
+    )
+
+    response = _list(user=admin, repo=repo, identity=FakeIdentityRepository([admin]), search=document.title)
+
+    assert response.total == 1
+    assert response.items[0].target_document_title == document.title
 
 
 def _list(
@@ -249,6 +295,41 @@ def _list(
             created_to=created_to,
             limit=limit,
             offset=offset,
+            user=user,
+            repo=repo,
+            identity_repo=identity,  # type: ignore[arg-type]
+        )
+    )
+
+
+def _export(
+    *,
+    user: UserRecord,
+    repo: InMemoryDocumentRepository,
+    identity: FakeIdentityRepository,
+    search: str | None = None,
+    category: str | None = None,
+    event_type: str | None = None,
+    actor_id: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    group_path: str | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    max_rows: int = audit_routes.AUDIT_SCAN_LIMIT,
+):
+    return asyncio.run(
+        audit_routes.export_audit_events(
+            search=search,
+            category=category,
+            event_type=event_type,
+            actor_id=actor_id,
+            target_type=target_type,
+            target_id=target_id,
+            group_path=group_path,
+            created_from=created_from,
+            created_to=created_to,
+            max_rows=max_rows,
             user=user,
             repo=repo,
             identity_repo=identity,  # type: ignore[arg-type]

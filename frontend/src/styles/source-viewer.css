@@ -33,7 +33,7 @@
   max-width: 52rem;
   margin-top: 0.25rem;
   color: var(--color-on-surface);
-  font-size: clamp(1.25rem, 2vw, 1.75rem);
+  font-size: 1.45rem;
   font-weight: 800;
   line-height: 1.2;
   overflow-wrap: anywhere;
@@ -98,7 +98,7 @@
   gap: 0.75rem;
   margin: 6rem auto 0;
   border: 1px solid var(--color-surface-border);
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
   background: var(--color-surface-card);
   padding: 2rem;
   color: var(--color-secondary);

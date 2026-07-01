@@ -28,6 +28,7 @@ describe("PDF upload batches", () => {
     expect(requests.map((request) => request.file)).toEqual(files);
     expect(requests.every((request) => request.group_path === "/finance")).toBe(true);
     expect(requests.every((request) => request.clearance_level === "NATO_SECRET")).toBe(true);
+    expect(requests.every((request) => !("quality_preset" in request))).toBe(true);
     expect(requests.every((request) => request.description === "Shared batch context")).toBe(true);
     expect(requests.every((request) => !("doc_type" in request))).toBe(true);
     expect(requests.every((request) => request.supersedes?.length === 0)).toBe(true);

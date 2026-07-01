@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiClient, ApiClientError, AUTH_SESSION_EXPIRED_EVENT } from "./client";
+import { ApiClient, ApiClientError, AUTH_SESSION_EXPIRED_EVENT, AUTH_SESSION_TOUCHED_EVENT } from "./client";
 
 describe("ApiClient auth refresh", () => {
   afterEach(() => {
@@ -96,6 +96,38 @@ describe("ApiClient auth refresh", () => {
     expect(dispatchEvent).toHaveBeenCalledTimes(1);
     expect(dispatchEvent.mock.calls[0][0]).toMatchObject({ type: AUTH_SESSION_EXPIRED_EVENT });
   });
+
+  it("dedupes session-expired notifications until a later successful request", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errorResponse(401, "invalid_token"))
+      .mockResolvedValueOnce(errorResponse(401, "invalid_refresh_session"))
+      .mockResolvedValueOnce(errorResponse(401, "invalid_token"))
+      .mockResolvedValueOnce(errorResponse(401, "invalid_refresh_session"))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(errorResponse(401, "invalid_token"))
+      .mockResolvedValueOnce(errorResponse(401, "invalid_refresh_session"));
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", { dispatchEvent });
+
+    const client = new ApiClient({
+      baseUrl: "http://api.test",
+      getCsrfToken: () => "csrf-token",
+    });
+
+    await expect(client.get("/api/v1/docs")).rejects.toBeInstanceOf(ApiClientError);
+    await expect(client.get("/api/v1/admin/users")).rejects.toBeInstanceOf(ApiClientError);
+    expect(dispatchedEventTypes(dispatchEvent)).toEqual([AUTH_SESSION_EXPIRED_EVENT]);
+
+    await expect(client.postJson("/api/v1/auth/login", { email: "admin@prudentia.ai", password: "secret" })).resolves.toEqual({ ok: true });
+    await expect(client.get("/api/v1/docs")).rejects.toBeInstanceOf(ApiClientError);
+    expect(dispatchedEventTypes(dispatchEvent)).toEqual([
+      AUTH_SESSION_EXPIRED_EVENT,
+      AUTH_SESSION_TOUCHED_EVENT,
+      AUTH_SESSION_EXPIRED_EVENT,
+    ]);
+  });
 });
 
 function jsonResponse(payload: unknown) {
@@ -110,4 +142,8 @@ function errorResponse(status: number, code: string) {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function dispatchedEventTypes(dispatchEvent: ReturnType<typeof vi.fn>): string[] {
+  return dispatchEvent.mock.calls.map(([event]) => (event as Event).type);
 }

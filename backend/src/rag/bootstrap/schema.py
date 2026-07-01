@@ -52,6 +52,7 @@ def ensure_postgres_schema(config: Settings = settings) -> None:
         conn.execute(GENERATED_ARTIFACT_SCHEMA_SQL)
         conn.execute(GENERATED_ARTIFACT_COMPAT_SQL)
         conn.execute(EVALUATION_SCHEMA_SQL)
+        conn.execute(CONNECTOR_SCHEMA_SQL)
         conn.execute(DEFAULT_GROUP_CLEANUP_SQL)
 
     # Reuse repository-owned schema repair for workspace configuration tables.
@@ -163,6 +164,16 @@ CREATE INDEX IF NOT EXISTS documents_clearance_level_idx ON documents (clearance
 CREATE INDEX IF NOT EXISTS documents_current_idx ON documents (is_current, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS documents_content_hash_current_idx ON documents (content_hash) WHERE deleted_at IS NULL AND is_current = TRUE;
 
+CREATE TABLE IF NOT EXISTS document_shares (
+    document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    group_path TEXT NOT NULL REFERENCES groups(path) ON UPDATE CASCADE ON DELETE RESTRICT,
+    created_by UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (document_id, group_path)
+);
+
+CREATE INDEX IF NOT EXISTS document_shares_group_path_idx ON document_shares (group_path);
+
 CREATE TABLE IF NOT EXISTS ingest_jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     doc_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -180,7 +191,7 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMPTZ NULL,
     CONSTRAINT ingest_jobs_origin_known CHECK (
-        origin IN ('upload', 'reingest', 'restore', 'folder', 'unknown')
+        origin IN ('upload', 'reingest', 'restore', 'folder', 'connector', 'unknown')
     ),
     CONSTRAINT ingest_jobs_status_known CHECK (
         status IN ('scheduled', 'queued', 'processing', 'complete', 'failed', 'human_review', 'cancelled')
@@ -241,8 +252,16 @@ WHERE group_row.path IN ('/admin', '/review', '/finance', '/engineering')
     WHERE document.group_path = group_row.path
   )
   AND NOT EXISTS (
+    SELECT 1 FROM document_shares AS share
+    WHERE share.group_path = group_row.path
+  )
+  AND NOT EXISTS (
     SELECT 1 FROM folder_ingest_schedules AS schedule
     WHERE schedule.group_path = group_row.path
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM connector_schema_catalogs AS catalog
+    WHERE catalog.group_path = group_row.path
   )
   AND NOT EXISTS (
     SELECT 1 FROM artifact_generation_jobs AS artifact_job
@@ -252,6 +271,91 @@ WHERE group_row.path IN ('/admin', '/review', '/finance', '/engineering')
     SELECT 1 FROM rag_evaluation_runs AS evaluation_run
     WHERE evaluation_run.group_path = group_row.path
   );
+"""
+
+
+CONNECTOR_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS connector_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    connector_type TEXT NOT NULL,
+    public_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    encrypted_secrets TEXT NOT NULL,
+    created_by UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    last_test_status TEXT NULL,
+    last_test_message TEXT NULL,
+    last_tested_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT connector_profiles_name_not_blank CHECK (length(btrim(name)) > 0),
+    CONSTRAINT connector_profiles_config_object CHECK (jsonb_typeof(public_config) = 'object'),
+    CONSTRAINT connector_profiles_type_known CHECK (
+        connector_type IN (
+            'sql_server', 'postgres', 'mysql', 'mariadb', 'mongodb', 'oracle',
+            'opensearch', 'elasticsearch', 'redis', 'cassandra', 'fake'
+        )
+    ),
+    CONSTRAINT connector_profiles_test_status_known CHECK (
+        last_test_status IS NULL OR last_test_status IN ('ok', 'failed')
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS connector_profiles_name_uidx ON connector_profiles (lower(name));
+
+CREATE TABLE IF NOT EXISTS connector_schema_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    profile_id UUID NOT NULL REFERENCES connector_profiles(id) ON DELETE CASCADE,
+    connector_type TEXT NOT NULL,
+    schema_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status TEXT NOT NULL DEFAULT 'ok',
+    error_message_safe TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT connector_schema_snapshots_json_object CHECK (jsonb_typeof(schema_json) = 'object'),
+    CONSTRAINT connector_schema_snapshots_status_known CHECK (status IN ('ok', 'failed'))
+);
+
+CREATE INDEX IF NOT EXISTS connector_schema_snapshots_profile_idx
+    ON connector_schema_snapshots (profile_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS connector_schema_catalogs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    profile_id UUID NOT NULL REFERENCES connector_profiles(id) ON DELETE CASCADE,
+    connector_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft',
+    group_path TEXT NOT NULL REFERENCES groups(path) ON UPDATE CASCADE ON DELETE RESTRICT,
+    clearance_level TEXT NOT NULL DEFAULT 'NATO_RESTRICTED',
+    catalog_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    approved_by UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT connector_schema_catalogs_json_object CHECK (jsonb_typeof(catalog_json) = 'object'),
+    CONSTRAINT connector_schema_catalogs_status_known CHECK (
+        status IN ('draft', 'reviewed', 'approved', 'disabled')
+    ),
+    CONSTRAINT connector_schema_catalogs_clearance_level_known CHECK (
+        clearance_level IN (
+            'NATO_UNCLASSIFIED', 'NATO_RESTRICTED', 'NATO_CONFIDENTIAL',
+            'NATO_SECRET', 'COSMIC_TOP_SECRET'
+        )
+    )
+);
+
+CREATE INDEX IF NOT EXISTS connector_schema_catalogs_profile_idx
+    ON connector_schema_catalogs (profile_id, status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS connector_schema_catalogs_access_idx
+    ON connector_schema_catalogs (group_path, clearance_level, status);
+
+ALTER TABLE folder_ingest_schedules DROP CONSTRAINT IF EXISTS folder_ingest_schedules_source_type_known;
+ALTER TABLE folder_ingest_schedules ADD CONSTRAINT folder_ingest_schedules_source_type_known CHECK (
+    source_type IN ('snapshot', 'local_folder', 'minio_prefix')
+) NOT VALID;
+
+ALTER TABLE ingest_jobs DROP CONSTRAINT IF EXISTS ingest_jobs_origin_known;
+ALTER TABLE ingest_jobs ADD CONSTRAINT ingest_jobs_origin_known CHECK (
+    origin IN ('upload', 'reingest', 'restore', 'folder', 'connector', 'unknown')
+);
 """
 
 

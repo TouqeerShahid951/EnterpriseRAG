@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildMinioPrefixScheduleRequest,
+  buildConnectorScheduleRequest,
+  buildLocalFolderScheduleRequest,
   buildRecurrence,
   buildSnapshotScheduleRequest,
   defaultFolderScheduleDraft,
+  defaultFolderScheduleDraftForVariant,
   folderSnapshotLabel,
+  isScheduleVisibleForPanelVariant,
   relativePathForFile,
+  sourceModesForPanelVariant,
   summarizeFolderFiles,
 } from "./folderIngest";
 
@@ -60,26 +64,24 @@ describe("folder ingestion scheduling", () => {
     expect(request.description).toBe("Folder metadata");
   });
 
-  it("builds recurrence and MinIO prefix schedule payloads", () => {
+  it("builds recurrence and local folder schedule payloads", () => {
     const draft = {
       ...defaultFolderScheduleDraft("2026-06-09"),
-      sourceMode: "minio_prefix" as const,
-      name: "Nightly prefix",
+      sourceMode: "local_folder" as const,
+      name: "Nightly folder watcher",
       groupPath: "/finance",
       clearanceLevel: "NATO_CONFIDENTIAL" as const,
       scheduleType: "recurring" as const,
       recurrenceDays: [0, 1, 2, 3, 4],
       recurrenceStartTime: "21:00",
       recurrenceEndTime: "06:00",
-      bucket: "enterprise-docs",
-      prefix: "/finance/policies/",
+      folderPath: "C:\\Cases\\Incoming",
     };
 
     expect(buildRecurrence(draft)).toEqual({ days_of_week: [0, 1, 2, 3, 4], start_time: "21:00", end_time: "06:00" });
-    expect(buildMinioPrefixScheduleRequest(draft)).toMatchObject({
-      name: "Nightly prefix",
-      bucket: "enterprise-docs",
-      prefix: "finance/policies/",
+    expect(buildLocalFolderScheduleRequest(draft)).toMatchObject({
+      name: "Nightly folder watcher",
+      path: "C:\\Cases\\Incoming",
       group_path: "/finance",
       clearance_level: "NATO_CONFIDENTIAL",
       scheduled_at: null,
@@ -90,15 +92,57 @@ describe("folder ingestion scheduling", () => {
   it("allows schedules without an effective date", () => {
     const draft = {
       ...defaultFolderScheduleDraft(""),
-      sourceMode: "minio_prefix" as const,
+      sourceMode: "local_folder" as const,
       name: "Undated policies",
       groupPath: "/finance",
-      bucket: "docs",
-      prefix: "finance/",
+      folderPath: "/data/folder-sources/finance",
       scheduledAt: "2026-06-09T22:00",
     };
 
-    expect(buildMinioPrefixScheduleRequest(draft).effective_date).toBeNull();
+    expect(buildLocalFolderScheduleRequest(draft).effective_date).toBeNull();
+  });
+
+  it("builds connector schedule payloads with stable identity fields", () => {
+    const draft = {
+      ...defaultFolderScheduleDraft("2026-06-09"),
+      sourceMode: "connector" as const,
+      name: "Case DB sync",
+      groupPath: "/finance",
+      connectorProfileId: "profile-1",
+      connectorQuery: "SELECT id, status FROM dbo.Cases",
+      connectorIdentityFields: "id, updated_at",
+      connectorIngestionMode: "json_snapshot" as const,
+      connectorDeletionPolicy: "keep_deleted_documents" as const,
+      connectorBatchSize: 250,
+      connectorRowLimit: 1000,
+      scheduledAt: "2026-06-09T22:00",
+    };
+
+    expect(buildConnectorScheduleRequest(draft)).toMatchObject({
+      connector_profile_id: "profile-1",
+      selection: { query: "SELECT id, status FROM dbo.Cases", row_limit: 1000 },
+      identity_fields: ["id", "updated_at"],
+      ingestion_mode: "json_snapshot",
+      deletion_policy: "keep_deleted_documents",
+      batch_size: 250,
+      row_limit: 1000,
+    });
+  });
+
+  it("separates folder source and database connector panel modes", () => {
+    expect(sourceModesForPanelVariant("folder_sources")).toEqual(["snapshot"]);
+    expect(sourceModesForPanelVariant("database_connectors")).toEqual([]);
+    expect(defaultFolderScheduleDraftForVariant("", "database_connectors").sourceMode).toBe("connector");
+    expect(defaultFolderScheduleDraftForVariant("", "folder_sources")).toMatchObject({ sourceMode: "snapshot", scheduleType: "one_time" });
+  });
+
+  it("filters schedule lists by panel variant", () => {
+    expect(isScheduleVisibleForPanelVariant("local_folder", "folder_sources")).toBe(true);
+    expect(isScheduleVisibleForPanelVariant("snapshot", "folder_sources")).toBe(true);
+    expect(isScheduleVisibleForPanelVariant("minio_prefix", "folder_sources")).toBe(false);
+    expect(isScheduleVisibleForPanelVariant("connector", "folder_sources")).toBe(false);
+    expect(isScheduleVisibleForPanelVariant("connector", "database_connectors")).toBe(false);
+    expect(isScheduleVisibleForPanelVariant("snapshot", "database_connectors")).toBe(false);
   });
 
   it("rejects browser folder snapshots larger than 5 GB", () => {

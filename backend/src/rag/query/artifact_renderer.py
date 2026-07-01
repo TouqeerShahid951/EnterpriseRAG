@@ -1,39 +1,38 @@
-"""Render semantic artifact content into DOCX, PPTX, and PDF files."""
+"""Render query artifact content through the shared artifact renderer."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from io import BytesIO
 import re
-from xml.sax.saxutils import escape
+from typing import TypeVar
 
+from ..artifact_jobs.contracts import (
+    ArtifactContentBundle,
+    ContentBlock,
+    ContentListItem,
+    ContentSection,
+    ContentTable,
+    ContentTableRow,
+    EvidenceBackedContent,
+    EvidenceCitation as JobEvidenceCitation,
+    PaginatedDocumentSpec,
+    PresentationSlide,
+    PresentationSpec,
+)
+from ..artifact_jobs.renderer import render_document
 from ..schemas.query import ArtifactFormat, RAGResponse
 from .artifact_models import (
     ArtifactCitation,
     ArtifactContent,
     ArtifactTable,
     CoverageReport,
-    FormatProjection,
     SemanticSection,
     SupportedClaim,
 )
-from .artifact_projection import project_artifact
 
-CONTENT_TYPES: dict[ArtifactFormat, str] = {
-    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "pdf": "application/pdf",
-}
-PPTX_TITLE_BACKGROUND = (23, 59, 63)
-PPTX_CONTENT_BACKGROUNDS = (
-    (220, 235, 232),
-    (246, 231, 203),
-    (226, 232, 245),
-    (241, 224, 220),
-    (229, 235, 213),
-)
-PPTX_CONTENT_BACKGROUND = PPTX_CONTENT_BACKGROUNDS[0]
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -54,380 +53,157 @@ def render_artifact(
     response: RAGResponse | None = None,
 ) -> RenderedArtifact:
     content = artifact_content or _legacy_content(title=title, prompt=prompt, response=response)
-    projection = project_artifact(content, artifact_format)
-    filename = f"{_safe_filename(content.title or title)}.{artifact_format}"
-    if artifact_format == "docx":
-        rendered = _render_docx(content=content, projection=projection, generated_at=generated_at)
-    elif artifact_format == "pptx":
-        rendered = _render_pptx(content=content, projection=projection, generated_at=generated_at)
-    elif artifact_format == "pdf":
-        rendered = _render_pdf(content=content, projection=projection, generated_at=generated_at)
-    else:
-        raise ValueError(f"unsupported artifact format: {artifact_format}")
+    rendered = render_document(
+        artifact_format=artifact_format,
+        bundle=_artifact_bundle(content),
+        generated_at=generated_at,
+        require_libreoffice=False,
+    )
     return RenderedArtifact(
-        filename=filename,
-        format=artifact_format,
-        content_type=CONTENT_TYPES[artifact_format],
-        content=rendered,
+        filename=rendered.filename,
+        format=rendered.format,
+        content_type=rendered.content_type,
+        content=rendered.content,
     )
 
 
-def _render_docx(*, content: ArtifactContent, projection: FormatProjection, generated_at: datetime) -> bytes:
-    from docx import Document
-    from docx.enum.section import WD_ORIENT
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-    from docx.shared import Inches, Pt
-
-    document = Document()
-    section = document.sections[0]
-    section.top_margin = Inches(0.7)
-    section.bottom_margin = Inches(0.7)
-    section.left_margin = Inches(0.75)
-    section.right_margin = Inches(0.75)
-    normal = document.styles["Normal"]
-    normal.font.name = "Aptos"
-    normal.font.size = Pt(10.5)
-
-    title = document.add_heading(content.title, level=0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    purpose = document.add_paragraph(content.purpose)
-    purpose.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    purpose.style = document.styles["Subtitle"]
-    metadata = document.add_paragraph()
-    metadata.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    metadata.add_run(
-        f"Generated {generated_at.strftime('%Y-%m-%d %H:%M UTC')} | "
-        f"Coverage: {content.coverage.status.replace('_', ' ')}"
-    )
-
-    _append_docx_warnings(document, content)
-    citation_map = {citation.evidence_id: citation for citation in content.citations}
-    for unit in projection.units:
-        if unit.kind == "section":
-            document.add_heading(unit.title, level=1)
-            for paragraph_text in unit.body:
-                document.add_paragraph(_strip_citation_tokens(paragraph_text))
-            citation_text = _citation_summary(unit.citation_ids, citation_map)
-            if citation_text:
-                citation_paragraph = document.add_paragraph(citation_text)
-                citation_paragraph.style = document.styles["Caption"]
-        elif unit.kind == "table" and unit.table is not None:
-            if len(unit.table.fields) > 6 and section.orientation != WD_ORIENT.LANDSCAPE:
-                section.orientation = WD_ORIENT.LANDSCAPE
-                section.page_width, section.page_height = section.page_height, section.page_width
-            document.add_heading(unit.title, level=1)
-            _append_docx_table(document, unit.table, citation_map)
-
-    document.add_page_break()
-    document.add_heading("References", level=1)
-    _append_docx_references(document, content.citations)
-    footer = section.footer.paragraphs[0]
-    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    footer.add_run("Evidence-backed artifact generated by Faham AI")
-    footer.add_run(" | Page ")
-    _append_page_number(footer.add_run(), OxmlElement, qn)
-
-    buffer = BytesIO()
-    document.save(buffer)
-    return buffer.getvalue()
-
-
-def _append_docx_warnings(document, content: ArtifactContent) -> None:
-    warnings = tuple(dict.fromkeys((*content.coverage.warnings, *content.warnings)))
-    if not warnings:
-        return
-    document.add_heading("Coverage Notes", level=1)
-    for warning in warnings:
-        document.add_paragraph(warning, style="List Bullet")
-
-
-def _append_docx_table(document, table: ArtifactTable, citations: dict[str, ArtifactCitation]) -> None:
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-
-    word_table = document.add_table(rows=1, cols=len(table.fields) + 1)
-    word_table.style = "Table Grid"
-    word_table.autofit = True
-    header = word_table.rows[0]
-    for index, field in enumerate(table.fields):
-        run = header.cells[index].paragraphs[0].add_run(field.label)
-        run.bold = True
-    source_run = header.cells[-1].paragraphs[0].add_run("Source")
-    source_run.bold = True
-    tr_pr = header._tr.get_or_add_trPr()
-    repeat = OxmlElement("w:tblHeader")
-    repeat.set(qn("w:val"), "true")
-    tr_pr.append(repeat)
-    for row in table.rows:
-        cells = word_table.add_row().cells
-        values = dict(row.values)
-        for index, field in enumerate(table.fields):
-            cells[index].text = values.get(field.name) or "Not stated"
-        cells[-1].text = _citation_summary(row.evidence_ids, citations)
-
-
-def _append_docx_references(document, citations: tuple[ArtifactCitation, ...]) -> None:
-    if not citations:
-        document.add_paragraph("No references were available.")
-        return
-    for index, citation in enumerate(citations, start=1):
-        document.add_paragraph(_reference_line(index, citation))
-
-
-def _append_page_number(run, oxml_element, qn) -> None:
-    begin = oxml_element("w:fldChar")
-    begin.set(qn("w:fldCharType"), "begin")
-    instruction = oxml_element("w:instrText")
-    instruction.set(qn("xml:space"), "preserve")
-    instruction.text = " PAGE "
-    end = oxml_element("w:fldChar")
-    end.set(qn("w:fldCharType"), "end")
-    run._r.extend((begin, instruction, end))
-
-
-def _render_pptx(*, content: ArtifactContent, projection: FormatProjection, generated_at: datetime) -> bytes:
-    from pptx import Presentation
-    from pptx.dml.color import RGBColor
-    from pptx.enum.text import PP_ALIGN
-    from pptx.util import Inches, Pt
-
-    presentation = Presentation()
-    presentation.slide_width = Inches(13.333)
-    presentation.slide_height = Inches(7.5)
-    citation_map = {citation.evidence_id: citation for citation in content.citations}
-    content_slide_index = 0
-    for unit in projection.units:
-        slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-        if unit.kind == "title":
-            _slide_background(slide, RGBColor, dark=True)
-            _add_pptx_text(slide, unit.title, 0.8, 1.4, 11.7, 1.0, 30, bold=True, color="FFFFFF")
-            _add_pptx_text(
-                slide,
-                unit.body[0] if unit.body else "",
-                0.85,
-                2.7,
-                10.8,
-                1.0,
-                17,
-                color="D6E4E5",
-            )
-            _add_pptx_text(
-                slide,
-                f"Generated {generated_at.date().isoformat()}",
-                0.85,
-                6.65,
-                4.0,
-                0.3,
-                10,
-                color="AFC7C9",
-            )
-            continue
-        _slide_background(slide, RGBColor, dark=False, content_slide_index=content_slide_index)
-        content_slide_index += 1
-        _add_pptx_text(slide, unit.title, 0.65, 0.35, 12.0, 0.55, 23, bold=True, color="173B3F")
-        if unit.kind == "table_slide" and unit.table is not None:
-            _add_pptx_table(slide, unit.table)
-        else:
-            _add_pptx_bullets(slide, unit.body)
-        citations = _citation_summary(unit.citation_ids, citation_map)
-        if citations:
-            _add_pptx_text(slide, citations, 0.7, 6.85, 11.8, 0.25, 8, color="53676A")
-    if content.citations:
-        _add_pptx_sources_slide(presentation, content.citations, content_slide_index=content_slide_index)
-    buffer = BytesIO()
-    presentation.save(buffer)
-    return buffer.getvalue()
-
-
-def _slide_background(slide, rgb_color, *, dark: bool, content_slide_index: int = 0) -> None:
-    background = slide.background.fill
-    background.solid()
-    background.fore_color.rgb = rgb_color(*(
-        PPTX_TITLE_BACKGROUND if dark else _content_background(content_slide_index)
-    ))
-
-
-def _content_background(index: int) -> tuple[int, int, int]:
-    return PPTX_CONTENT_BACKGROUNDS[index % len(PPTX_CONTENT_BACKGROUNDS)]
-
-
-def _add_pptx_text(
-    slide,
-    text: str,
-    left: float,
-    top: float,
-    width: float,
-    height: float,
-    size: int,
-    *,
-    bold: bool = False,
-    color: str,
-) -> None:
-    from pptx.dml.color import RGBColor
-    from pptx.util import Inches, Pt
-
-    box = slide.shapes.add_textbox(Inches(left), Inches(top), Inches(width), Inches(height))
-    frame = box.text_frame
-    frame.word_wrap = True
-    paragraph = frame.paragraphs[0]
-    paragraph.text = _strip_citation_tokens(text)
-    paragraph.font.name = "Aptos"
-    paragraph.font.size = Pt(size)
-    paragraph.font.bold = bold
-    paragraph.font.color.rgb = RGBColor.from_string(color)
-
-
-def _add_pptx_bullets(slide, items: tuple[str, ...]) -> None:
-    from pptx.util import Inches, Pt
-
-    box = slide.shapes.add_textbox(Inches(0.9), Inches(1.25), Inches(11.4), Inches(5.15))
-    frame = box.text_frame
-    frame.word_wrap = True
-    frame.clear()
-    for index, item in enumerate(items or ("No content was generated.",)):
-        paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
-        paragraph.text = _compact(_strip_citation_tokens(item), 420)
-        paragraph.level = 0
-        paragraph.font.name = "Aptos"
-        paragraph.font.size = Pt(17)
-        paragraph.space_after = Pt(10)
-
-
-def _add_pptx_table(slide, table: ArtifactTable) -> None:
-    from pptx.dml.color import RGBColor
-    from pptx.util import Inches, Pt
-
-    rows = len(table.rows) + 1
-    cols = len(table.fields)
-    shape = slide.shapes.add_table(rows, cols, Inches(0.55), Inches(1.2), Inches(12.2), Inches(5.35))
-    pptx_table = shape.table
-    for column, field in enumerate(table.fields):
-        cell = pptx_table.cell(0, column)
-        cell.text = field.label
-        cell.fill.solid()
-        cell.fill.fore_color.rgb = RGBColor(23, 59, 63)
-        run = cell.text_frame.paragraphs[0].runs[0]
-        run.font.color.rgb = RGBColor(255, 255, 255)
-        run.font.bold = True
-        run.font.size = Pt(11)
-    for row_index, row in enumerate(table.rows, start=1):
-        values = dict(row.values)
-        for column, field in enumerate(table.fields):
-            cell = pptx_table.cell(row_index, column)
-            cell.text = _compact(values.get(field.name) or "Not stated", 160)
-            for paragraph in cell.text_frame.paragraphs:
-                paragraph.font.size = Pt(10)
-
-
-def _add_pptx_sources_slide(presentation, citations: tuple[ArtifactCitation, ...], *, content_slide_index: int) -> None:
-    from pptx.dml.color import RGBColor
-
-    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-    _slide_background(slide, RGBColor, dark=False, content_slide_index=content_slide_index)
-    _add_pptx_text(slide, "References", 0.65, 0.35, 12.0, 0.55, 23, bold=True, color="173B3F")
-    lines = tuple(_reference_line(index, citation) for index, citation in enumerate(citations[:14], start=1))
-    _add_pptx_bullets(slide, lines)
-
-
-def _render_pdf(*, content: ArtifactContent, projection: FormatProjection, generated_at: datetime) -> bytes:
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.lib.units import mm
-    from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-
-    buffer = BytesIO()
-    wide_table = any(unit.table is not None and len(unit.table.fields) > 5 for unit in projection.units)
-    page_size = landscape(A4) if wide_table else A4
-    document = SimpleDocTemplate(
-        buffer,
-        pagesize=page_size,
-        title=content.title,
-        leftMargin=16 * mm,
-        rightMargin=16 * mm,
-        topMargin=15 * mm,
-        bottomMargin=16 * mm,
-    )
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="CenteredMeta", parent=styles["Normal"], alignment=TA_CENTER, textColor=colors.HexColor("#53676A")))
-    story = [
-        Paragraph(escape(content.title), styles["Title"]),
-        Paragraph(escape(content.purpose), styles["CenteredMeta"]),
-        Paragraph(
-            escape(
-                f"Generated {generated_at.strftime('%Y-%m-%d %H:%M UTC')} | "
-                f"Coverage: {content.coverage.status.replace('_', ' ')}"
-            ),
-            styles["CenteredMeta"],
+def _artifact_bundle(content: ArtifactContent) -> ArtifactContentBundle:
+    sections = _content_sections(content)
+    return ArtifactContentBundle(
+        content=EvidenceBackedContent(
+            title=content.title,
+            purpose=content.purpose,
+            sections=sections,
+            citations=_citations(content.citations),
+            warnings=list(dict.fromkeys((*content.coverage.warnings, *content.warnings))),
         ),
-        Spacer(1, 12),
-    ]
-    warnings = tuple(dict.fromkeys((*content.coverage.warnings, *content.warnings)))
-    if warnings:
-        story.append(Paragraph("Coverage Notes", styles["Heading2"]))
-        for warning in warnings:
-            story.append(Paragraph(escape(f"- {warning}"), styles["Normal"]))
-        story.append(Spacer(1, 8))
-    citation_map = {citation.evidence_id: citation for citation in content.citations}
-    for unit in projection.units:
-        story.append(Paragraph(escape(unit.title), styles["Heading2"]))
-        if unit.kind == "table" and unit.table is not None:
-            story.append(_pdf_table(unit.table, styles, colors, Table, TableStyle))
-        else:
-            for item in unit.body:
-                story.append(Paragraph(escape(_strip_citation_tokens(item)), styles["BodyText"]))
-                story.append(Spacer(1, 5))
-        citation_text = _citation_summary(unit.citation_ids, citation_map)
-        if citation_text:
-            story.append(Paragraph(escape(citation_text), styles["Italic"]))
-        story.append(Spacer(1, 9))
-    story.extend([PageBreak(), Paragraph("References", styles["Heading1"])])
-    for index, citation in enumerate(content.citations, start=1):
-        story.append(Paragraph(escape(_reference_line(index, citation)), styles["BodyText"]))
-    document.build(story, onFirstPage=_pdf_footer, onLaterPages=_pdf_footer)
-    return buffer.getvalue()
+        paginated=PaginatedDocumentSpec(
+            title=content.title,
+            subtitle=content.purpose,
+            sections=sections,
+            include_references=True,
+            include_coverage_notes=True,
+        ),
+        presentation=PresentationSpec(
+            title=content.title,
+            subtitle=content.purpose,
+            slides=_presentation_slides(sections),
+            include_references_slide=True,
+        ),
+    )
 
 
-def _pdf_table(table: ArtifactTable, styles, colors, table_cls, table_style_cls):
-    from reportlab.platypus import Paragraph
-
-    headers = [field.label for field in table.fields]
-    rows = [headers]
-    for row in table.rows:
-        values = dict(row.values)
-        rows.append(
-            [
-                Paragraph(escape(values.get(field.name) or "Not stated"), styles["BodyText"])
-                for field in table.fields
-            ]
+def _content_sections(content: ArtifactContent) -> list[ContentSection]:
+    claims = {claim.claim_id: claim for claim in content.claims}
+    sections = [_content_section(section, claims) for section in content.sections]
+    if sections:
+        return sections
+    return [
+        ContentSection(
+            title="Summary",
+            blocks=[ContentBlock(kind="paragraph", text="No supported content was generated.", evidence_ids=[])],
         )
-    rendered = table_cls(rows, repeatRows=1, hAlign="LEFT")
-    rendered.setStyle(
-        table_style_cls(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#173B3F")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#AAB7B8")),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 5),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ]
+    ]
+
+
+def _content_section(section: SemanticSection, claims: dict[str, SupportedClaim]) -> ContentSection:
+    section_evidence_ids = _section_evidence_ids(section, claims)
+    fallback_evidence_ids = section_evidence_ids or ["uncited"]
+    blocks: list[ContentBlock] = []
+    for paragraph in section.paragraphs:
+        blocks.append(
+            ContentBlock(
+                kind="paragraph",
+                text=_strip_citation_tokens(paragraph),
+                evidence_ids=section_evidence_ids,
+            )
+        )
+    if section.bullets:
+        if section_evidence_ids:
+            blocks.append(
+                ContentBlock(
+                    kind="bullet_list",
+                    list_items=[
+                        ContentListItem(text=_strip_citation_tokens(item), evidence_ids=section_evidence_ids)
+                        for item in section.bullets
+                    ],
+                )
+            )
+        else:
+            blocks.extend(
+                ContentBlock(kind="paragraph", text=_strip_citation_tokens(item), evidence_ids=[])
+                for item in section.bullets
+            )
+    for table in section.tables:
+        blocks.append(_table_block(table, fallback_evidence_ids))
+    if not blocks:
+        blocks.append(ContentBlock(kind="paragraph", text="No supported content was generated.", evidence_ids=[]))
+    return ContentSection(title=section.heading or "Summary", blocks=blocks)
+
+
+def _table_block(table: ArtifactTable, fallback_evidence_ids: list[str]) -> ContentBlock:
+    return ContentBlock(
+        kind="table",
+        table=ContentTable(
+            headers=[field.label for field in table.fields],
+            rows=[
+                ContentTableRow(
+                    values=[dict(row.values).get(field.name) or "Not stated" for field in table.fields],
+                    evidence_ids=list(row.evidence_ids) or fallback_evidence_ids,
+                )
+                for row in table.rows
+            ],
+        ),
+    )
+
+
+def _presentation_slides(sections: list[ContentSection]) -> list[PresentationSlide]:
+    slides: list[PresentationSlide] = []
+    for section in sections:
+        narrative_blocks: list[ContentBlock] = []
+        table_blocks: list[ContentBlock] = []
+        for block in section.blocks:
+            if block.kind == "table":
+                table_blocks.append(block)
+            else:
+                narrative_blocks.append(block)
+        for chunk in _chunks(narrative_blocks, 8):
+            slides.append(PresentationSlide(title=section.title, blocks=chunk))
+        for block in table_blocks:
+            slides.append(PresentationSlide(title=section.title, blocks=[block]))
+    if slides:
+        return slides
+    return [
+        PresentationSlide(
+            title="Summary",
+            blocks=[ContentBlock(kind="paragraph", text="No supported content was generated.", evidence_ids=[])],
+        )
+    ]
+
+
+def _section_evidence_ids(section: SemanticSection, claims: dict[str, SupportedClaim]) -> list[str]:
+    return list(
+        dict.fromkeys(
+            evidence_id
+            for claim_id in section.claim_ids
+            if claim_id in claims
+            for evidence_id in claims[claim_id].evidence_ids
         )
     )
-    return rendered
 
 
-def _pdf_footer(canvas, document) -> None:
-    canvas.saveState()
-    canvas.setFont("Helvetica", 8)
-    canvas.setFillColorRGB(0.32, 0.4, 0.42)
-    canvas.drawCentredString(document.pagesize[0] / 2, 10 * 2.83465, f"Faham AI | Page {document.page}")
-    canvas.restoreState()
+def _citations(citations: tuple[ArtifactCitation, ...]) -> list[JobEvidenceCitation]:
+    return [
+        JobEvidenceCitation(
+            evidence_id=citation.evidence_id,
+            doc_id=citation.doc_id,
+            doc_title=citation.doc_title,
+            chunk_id=citation.chunk_id,
+            page_start=citation.page_start,
+            page_end=citation.page_end,
+        )
+        for citation in citations
+    ]
 
 
 def _legacy_content(*, title: str, prompt: str, response: RAGResponse | None) -> ArtifactContent:
@@ -463,43 +239,9 @@ def _legacy_content(*, title: str, prompt: str, response: RAGResponse | None) ->
     )
 
 
-def _citation_summary(
-    evidence_ids: tuple[str, ...],
-    citations: dict[str, ArtifactCitation],
-) -> str:
-    labels = [
-        _short_citation(citations[evidence_id])
-        for evidence_id in evidence_ids
-        if evidence_id in citations
-    ]
-    return "Sources: " + "; ".join(dict.fromkeys(labels)) if labels else ""
-
-
-def _short_citation(citation: ArtifactCitation) -> str:
-    page = citation.page_start
-    return f"{citation.doc_title}, p. {page}" if page else citation.doc_title
-
-
-def _reference_line(index: int, citation: ArtifactCitation) -> str:
-    page = ""
-    if citation.page_start is not None and citation.page_end is not None and citation.page_end != citation.page_start:
-        page = f", pages {citation.page_start}-{citation.page_end}"
-    elif citation.page_start is not None:
-        page = f", page {citation.page_start}"
-    return f"[{index}] {citation.doc_title}{page} ({citation.doc_id}:{citation.chunk_id})"
-
-
 def _strip_citation_tokens(text: str) -> str:
     return re.sub(r"\[[^\[\]\n]{1,200}:[^\[\]\n]{1,200}\]", "", text).strip()
 
 
-def _safe_filename(title: str) -> str:
-    candidate = re.sub(r"[^A-Za-z0-9._-]+", "-", title.strip()).strip(".-")
-    return _compact(candidate or "evidence-artifact", 80).strip(".-") or "evidence-artifact"
-
-
-def _compact(value: str, limit: int) -> str:
-    normalized = re.sub(r"\s+", " ", value).strip()
-    if len(normalized) <= limit:
-        return normalized
-    return f"{normalized[: max(0, limit - 3)].rstrip()}..."
+def _chunks(values: list[T], size: int) -> list[list[T]]:
+    return [values[offset : offset + size] for offset in range(0, len(values), size)]

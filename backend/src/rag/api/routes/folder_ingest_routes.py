@@ -11,6 +11,8 @@ from pydantic import ValidationError
 
 from ...auth.dependencies import require_csrf, require_current_user
 from ...auth.permissions import can_manage_group_path, can_manage_spaces, filter_group_paths_for_user, is_global_admin
+from ...core.config import settings
+from ...connectors.repositories import ConnectorProfileRepository, get_connector_profile_repository
 from ...shared.contracts.clearance import can_access_clearance
 from ...repositories.documents import DocumentRepository, get_document_repository
 from ...repositories.folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord, FolderScheduleRepository
@@ -25,15 +27,37 @@ from ...schemas.folder_ingest import (
     FolderScheduleActionResponse,
     FolderScheduleListResponse,
     FolderScheduleUpdateRequest,
+    ConnectorScheduleCreateRequest,
+    LocalFolderListResponse,
+    LocalFolderScheduleCreateRequest,
     MinioPrefixScheduleCreateRequest,
     RecurrenceWindow,
 )
 from ...services.file_scanning import FileScanner, get_file_scanner
-from ...services.folder_ingestion import create_minio_prefix_schedule, create_snapshot_schedule
+from ...services.folder_ingestion import create_local_folder_schedule, create_minio_prefix_schedule, create_snapshot_schedule
+from ...services.folder_sources import list_local_folder_directories
 from ...services.folder_schedule_time import next_run_for_schedule
 from ...services.upload_storage import UploadStorage, get_upload_storage
 
 router = APIRouter(prefix="/folder-ingest", tags=["folder-ingest"])
+
+
+@router.get("/local-folders", response_model=LocalFolderListResponse, summary="List mounted local folder directories")
+async def list_local_folders(
+    path: str | None = None,
+    user: UserRecord = Depends(require_current_user),
+) -> LocalFolderListResponse:
+    _require_schedule_admin(user)
+    try:
+        root, current, parent, items = list_local_folder_directories(root_path=settings.folder_sources_root, current_path=path)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail={"code": "invalid_local_folder_path", "message": str(exc)}) from exc
+    return LocalFolderListResponse(
+        root_path=str(root),
+        current_path=str(current),
+        parent_path=str(parent) if parent else None,
+        items=[{"name": item.name, "path": item.path, "has_children": item.has_children} for item in items],
+    )
 
 
 @router.get("/schedules", response_model=FolderScheduleListResponse, summary="List visible folder ingestion schedules")
@@ -135,6 +159,58 @@ async def create_minio_folder_schedule(
         schedule_repo=schedule_repo,
     )
     return _schedule_to_schema(schedule, schedule_repo=schedule_repo)
+
+
+@router.post("/schedules/local-folder", status_code=status.HTTP_202_ACCEPTED, response_model=FolderSchedule, summary="Schedule a watched local folder sync")
+async def create_local_folder_schedule_route(
+    request: Request,
+    payload: LocalFolderScheduleCreateRequest,
+    user: UserRecord = Depends(require_current_user),
+    identity_repo: IdentityRepository = Depends(get_identity_repository),
+    document_repo: DocumentRepository = Depends(get_document_repository),
+    schedule_repo: FolderScheduleRepository = Depends(get_folder_schedule_repository),
+) -> FolderSchedule:
+    require_csrf(request)
+    schedule = create_local_folder_schedule(
+        name=payload.name,
+        path=payload.path,
+        group_path=payload.group_path,
+        clearance_level=payload.clearance_level,
+        effective_date=payload.effective_date,
+        expiry_date=payload.expiry_date,
+        doc_type=_normalize_declared_doc_type(payload.doc_type),
+        description=payload.description,
+        schedule_type=payload.schedule_type,
+        timezone_name=payload.timezone,
+        scheduled_at=payload.scheduled_at,
+        recurrence=payload.recurrence.model_dump() if payload.recurrence else {},
+        user=user,
+        identity_repo=identity_repo,
+        document_repo=document_repo,
+        schedule_repo=schedule_repo,
+    )
+    return _schedule_to_schema(schedule, schedule_repo=schedule_repo)
+
+
+@router.post("/schedules/connector", status_code=status.HTTP_410_GONE, summary="Database connector sync schedules are retired")
+async def create_connector_folder_schedule(
+    request: Request,
+    payload: ConnectorScheduleCreateRequest,
+    user: UserRecord = Depends(require_current_user),
+    identity_repo: IdentityRepository = Depends(get_identity_repository),
+    document_repo: DocumentRepository = Depends(get_document_repository),
+    schedule_repo: FolderScheduleRepository = Depends(get_folder_schedule_repository),
+    connector_profile_repo: ConnectorProfileRepository = Depends(get_connector_profile_repository),
+) -> None:
+    _ = payload, user, identity_repo, document_repo, schedule_repo, connector_profile_repo
+    require_csrf(request)
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "connector_schedules_retired",
+            "message": "Database connector sync schedules are retired. Use approved schema catalogs for live read-only SQL.",
+        },
+    )
 
 
 @router.patch("/schedules/{schedule_id}", response_model=FolderSchedule, summary="Reschedule a folder ingestion schedule")
@@ -351,9 +427,24 @@ def _item_to_schema(item: FolderRunItemRecord) -> FolderRunItem:
 
 
 def _public_source_config(schedule: FolderScheduleRecord) -> dict[str, object]:
+    if schedule.source_type == "local_folder":
+        return {
+            "path": str(schedule.source_config.get("path") or ""),
+        }
     if schedule.source_type == "minio_prefix":
         return {
             "bucket": str(schedule.source_config.get("bucket") or ""),
             "prefix": str(schedule.source_config.get("prefix") or ""),
+        }
+    if schedule.source_type == "connector":
+        return {
+            "connector_profile_id": str(schedule.source_config.get("connector_profile_id") or ""),
+            "connector_type": str(schedule.source_config.get("connector_type") or ""),
+            "selection": dict(schedule.source_config.get("selection") or {}),
+            "identity_fields": list(schedule.source_config.get("identity_fields") or []),
+            "ingestion_mode": str(schedule.source_config.get("ingestion_mode") or "json_snapshot"),
+            "deletion_policy": str(schedule.source_config.get("deletion_policy") or "keep_deleted_documents"),
+            "batch_size": int(schedule.source_config.get("batch_size") or 500),
+            "row_limit": int(schedule.source_config.get("row_limit") or 5000),
         }
     return {"mode": "browser_snapshot"}

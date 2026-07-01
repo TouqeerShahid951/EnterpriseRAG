@@ -83,6 +83,26 @@ def test_vllm_runtime_config_keeps_openai_compatible_vision_endpoint() -> None:
     assert client.model == "Qwen/Qwen2.5-VL-7B-Instruct-AWQ"
 
 
+def test_mixed_runtime_config_can_route_vision_to_ollama() -> None:
+    client = _build_vision_client(
+        _worker_config(),
+        SimpleNamespace(
+            provider="vllm",
+            ingestion_provider="vllm",
+            vision_provider="ollama",
+            base_url="http://vllm-text:8000/v1",
+            vision_base_url="http://ollama:11434",
+            chat_model="Qwen/Qwen3-14B-AWQ",
+            ingestion_model="Qwen/Qwen3-14B-AWQ",
+            vision_model="qwen2.5vl:3b",
+        ),
+    )
+
+    assert client.provider == OLLAMA_PROVIDER
+    assert client.base_url == "http://ollama:11434"
+    assert client.model == "qwen2.5vl:3b"
+
+
 def test_ollama_vision_client_uses_api_chat_images_payload(monkeypatch) -> None:
     calls = []
 
@@ -163,6 +183,70 @@ def test_openai_compatible_vision_client_uses_rag_description_prompt(monkeypatch
     assert "concise caption" not in text_part["text"]
 
 
+def test_openai_compatible_vision_client_supports_structured_layout_repair(monkeypatch) -> None:
+    calls = []
+
+    def fake_request_json(base_url, path, **kwargs):
+        calls.append((base_url, path, kwargs))
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"blocks":[{"type":"heading","text":"Case Summary"},{"type":"text","text":"Ordered page text"}],"confidence":0.86}'
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(vision_module, "request_json", fake_request_json)
+    result = VisionClient(
+        provider="openai_compatible",
+        base_url="http://vllm-vision:8000",
+        model="vision-model",
+        timeout_seconds=10,
+    ).analyze_layout(content=b"image-bytes", content_type="image/png")
+
+    assert [block.text for block in result.blocks] == ["Case Summary", "Ordered page text"]
+    assert result.blocks[0].block_type == "heading"
+    assert result.confidence == 0.86
+    assert calls[0][0] == "http://vllm-vision:8000/v1"
+    assert calls[0][1] == "/chat/completions"
+    payload = calls[0][2]["payload"]
+    assert payload["messages"][1]["content"][0]["type"] == "text"
+    assert "reconstruct the page in correct human reading order" in payload["messages"][1]["content"][0]["text"]
+    assert "blocks" in payload["messages"][1]["content"][0]["text"]
+
+
+def test_ollama_vision_client_supports_structured_layout_repair(monkeypatch) -> None:
+    calls = []
+
+    def fake_request_json(base_url, path, **kwargs):
+        calls.append((base_url, path, kwargs))
+        return {
+            "message": {
+                "content": '{"blocks":[{"type":"form_field","text":"Case No: 123"}],"confidence":0.81}'
+            }
+        }
+
+    monkeypatch.setattr(vision_module, "request_json", fake_request_json)
+    result = VisionClient(
+        provider="ollama",
+        base_url="http://ollama:11434",
+        model="qwen2.5vl:3b",
+        timeout_seconds=10,
+        num_ctx=8192,
+    ).analyze_layout(content=b"image-bytes", content_type="image/png")
+
+    assert [block.text for block in result.blocks] == ["Case No: 123"]
+    assert result.blocks[0].block_type == "form_field"
+    assert calls[0][0] == "http://ollama:11434"
+    assert calls[0][1] == "/api/chat"
+    payload = calls[0][2]["payload"]
+    assert payload["format"]["required"] == ["blocks", "confidence"]
+    assert payload["messages"][1]["images"] == ["aW1hZ2UtYnl0ZXM="]
+    assert "reading order" in payload["messages"][1]["content"]
+
+
 def test_image_item_text_indexes_visual_description_not_caption() -> None:
     text = _image_item_text("Serial No. 123", "A detailed description of the photographed form.")
 
@@ -175,8 +259,23 @@ def _worker_config(*, ollama_vision_model: str = "") -> WorkerConfig:
     return WorkerConfig(
         redis_url="redis://redis:6379/0",
         ingest_queue_name="ingest:jobs",
+        graphrag_queue_name="graphrag:jobs",
+        graphrag_enabled=False,
+        graphrag_community_collection="graphrag_community_summaries",
+        graphrag_extraction_concurrency=2,
+        graphrag_summary_concurrency=2,
+        graphrag_summarize_after_document=False,
+        graphrag_partition_rebuild_delay_seconds=60,
+        graphrag_max_chunks_per_doc=0,
+        graphrag_min_chunk_chars=80,
+        graphrag_extraction_checkpoint_ttl_seconds=86400,
+        neo4j_uri="bolt://neo4j:7687",
+        neo4j_user="neo4j",
+        neo4j_password="password",
+        neo4j_database="neo4j",
         http_timeout_seconds=45,
         heartbeat_interval_seconds=30,
+        ingest_stale_after_seconds=120,
         ollama_retry_base_seconds=2,
         ollama_num_ctx=16384,
         embedding_batch_size=16,
@@ -185,6 +284,12 @@ def _worker_config(*, ollama_vision_model: str = "") -> WorkerConfig:
         full_doc_weak_page_ratio=0.25,
         layered_docling_max_pages=40,
         layered_docling_batch_pages=4,
+        pdf_image_analysis_max_images=-1,
+        pdf_image_analysis_max_full_page_fallbacks=-1,
+        scanned_visual_region_enabled=True,
+        scanned_visual_min_area_ratio=0.03,
+        scanned_visual_max_regions_per_page=4,
+        scanned_visual_text_mask_padding_px=8,
         ocr_review_confidence_threshold=0.9,
         native_text_min_chars_per_page=10,
         chunk_target_tokens=512,
@@ -200,6 +305,7 @@ def _worker_config(*, ollama_vision_model: str = "") -> WorkerConfig:
             ollama_embed_model="nomic-embed-text:latest",
             ollama_chat_timeout_seconds=180,
             ollama_embed_timeout_seconds=45,
+            dense_cache_dir="/models/fastembed",
             sparse_model="Qdrant/bm25",
             sparse_cache_dir="/models/fastembed",
         ),

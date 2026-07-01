@@ -18,24 +18,6 @@ from .sparse import embed_sparse_text
 from .sources import dedupe_hits
 from .temporal import add_effective_date_scope, target_date_for_query
 
-TOPIC_TAXONOMY = (
-    "procurement",
-    "contracts",
-    "hr_policy",
-    "leave",
-    "finance",
-    "audit",
-    "security",
-    "it_policy",
-    "operations",
-    "logistics",
-    "compliance",
-    "legal",
-    "training",
-    "performance",
-    "health_safety",
-)
-TOPIC_STOPWORDS = {"it", "policy"}
 _STRUCTURED_QUERY_STOPWORDS = {
     "all",
     "give",
@@ -112,6 +94,25 @@ _DOCUMENT_SCOPE_STOPWORDS = _STRUCTURED_QUERY_STOPWORDS | {
     "you",
 }
 _BROAD_DOCUMENT_SCOPE_TOKENS = {"doc", "docs", "document", "documents", "file", "files", "source", "sources"}
+_DOCUMENT_SCOPE_FOCUS_STOPWORDS = _DOCUMENT_SCOPE_STOPWORDS | _BROAD_DOCUMENT_SCOPE_TOKENS | {
+    "activity",
+    "activities",
+    "are",
+    "be",
+    "been",
+    "being",
+    "did",
+    "doing",
+    "is",
+    "was",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+}
 _DOCUMENT_SCOPE_FIELDS = (
     "doc_title",
     "source_id",
@@ -147,6 +148,8 @@ def retrieve_candidates(
         _target_date_from_plan(plan, active_query) if not ctx["is_current_only"] else None,
     )
     qdrant_filter = add_expiry_scope(qdrant_filter)
+    if not getattr(config, "connector_include_stale_in_retrieval", False):
+        qdrant_filter = add_stale_scope(qdrant_filter)
     qdrant_filter = add_document_scope(qdrant_filter, ctx["request"].document_ids)
     for query in ctx["sub_queries"] or [active_query]:
         if cancellation_token is not None:
@@ -346,6 +349,10 @@ def _document_scope_hits(query: str, hits: list[SearchHit]) -> list[SearchHit]:
     if not target_doc_ids:
         return []
     scoped = [hit for hit in hits if _hit_doc_id(hit) in target_doc_ids]
+    if _has_broad_document_scope(query):
+        focused = _focused_document_scope_hits(query, scoped)
+        if focused:
+            scoped = focused
     return [_mark_document_scope_hit(hit) for hit in _round_robin_document_hits(scoped)]
 
 
@@ -380,6 +387,65 @@ def _document_scope_token_groups(query: str) -> list[set[str]]:
             if tokens and tokens not in groups:
                 groups.append(tokens)
     return groups
+
+
+def _has_broad_document_scope(query: str) -> bool:
+    return any(tokens and tokens <= _BROAD_DOCUMENT_SCOPE_TOKENS for tokens in _document_scope_token_groups(query))
+
+
+def _focused_document_scope_hits(query: str, hits: list[SearchHit]) -> list[SearchHit]:
+    focus_tokens = _document_scope_focus_tokens(query)
+    if not focus_tokens:
+        return []
+    scored = [
+        (len(focus_tokens & _hit_focus_tokens(hit)), index, hit)
+        for index, hit in enumerate(hits)
+    ]
+    matched = [(score, index, hit) for score, index, hit in scored if score > 0]
+    if not matched:
+        return []
+    return [
+        hit
+        for _, _, hit in sorted(
+            matched,
+            key=lambda item: (-item[0], _document_scope_sort_key(item[2]), item[1]),
+        )
+    ]
+
+
+def _document_scope_focus_tokens(query: str) -> set[str]:
+    return {
+        token
+        for token in normalized_match_tokens(query)
+        if len(token) > 2 and token not in _DOCUMENT_SCOPE_FOCUS_STOPWORDS
+    }
+
+
+def _hit_focus_tokens(hit: SearchHit) -> set[str]:
+    payload = hit.payload
+    tokens: set[str] = set()
+    for field in (
+        "doc_title",
+        "doc_summary",
+        "doc_type",
+        "generated_doc_type",
+        "auto_doc_type",
+        "section_title",
+        "table_title",
+        "table_caption",
+        "table_row_label",
+        "text",
+        "parent_text",
+        "structured_search_text",
+    ):
+        value = payload.get(field)
+        if isinstance(value, str):
+            tokens.update(normalized_match_tokens(value))
+    for field in ("topics", "llm_topics", "metadata_terms", "section_path", "table_column_headers"):
+        value = payload.get(field)
+        if isinstance(value, list):
+            tokens.update(token for item in value for token in normalized_match_tokens(item))
+    return tokens
 
 
 def _scope_tokens(text: str) -> set[str]:
@@ -560,6 +626,14 @@ def add_expiry_scope(qdrant_filter: dict[str, object]) -> dict[str, object]:
     return scoped
 
 
+def add_stale_scope(qdrant_filter: dict[str, object]) -> dict[str, object]:
+    scoped = dict(qdrant_filter)
+    must = list(scoped.get("must", []))
+    must.append(not_stale_condition())
+    scoped["must"] = must
+    return scoped
+
+
 def not_expired_condition() -> dict[str, object]:
     return {
         "should": [
@@ -569,18 +643,27 @@ def not_expired_condition() -> dict[str, object]:
     }
 
 
+def not_stale_condition() -> dict[str, object]:
+    return {
+        "must": [
+            {
+                "should": [
+                    {"key": "source_deleted", "match": {"value": False}},
+                    {"is_empty": {"key": "source_deleted"}},
+                ]
+            },
+            {
+                "should": [
+                    {"key": "retrieval_status", "match": {"value": "active"}},
+                    {"is_empty": {"key": "retrieval_status"}},
+                ]
+            },
+        ]
+    }
+
+
 def topics_for_query(query: str) -> list[str]:
-    normalized = {token.strip(".,:;!?()[]{}").lower() for token in query.split()} - TOPIC_STOPWORDS
-    matches: list[str] = []
-    for topic in TOPIC_TAXONOMY:
-        topic_tokens = {
-            token
-            for token in topic.replace("_", " ").split()
-            if len(token) > 2 and token not in TOPIC_STOPWORDS
-        }
-        if normalized & topic_tokens:
-            matches.append(topic)
-    return matches[:3]
+    return []
 
 
 def prioritize_language(hits: list[SearchHit], language: str) -> list[SearchHit]:

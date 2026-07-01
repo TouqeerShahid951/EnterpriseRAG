@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 
-export function Modal({ children, description, icon, onClose, open, size = "md", title }: ModalProps) {
+export function Modal({ children, closeButton = true, description, icon, onClose, open, size = "md", title }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const descriptionId = useId();
@@ -49,9 +49,11 @@ export function Modal({ children, description, icon, onClose, open, size = "md",
               ) : null}
             </div>
           </div>
-          <button type="button" onClick={onClose} className="faham-icon-button" aria-label="Close dialog">
-            <X size={17} />
-          </button>
+          {closeButton ? (
+            <button type="button" onClick={onClose} className="Prudentia-icon-button" aria-label="Close dialog">
+              <X size={17} />
+            </button>
+          ) : null}
         </header>
         <div className="sv-dialog-body">{children}</div>
       </div>
@@ -61,6 +63,7 @@ export function Modal({ children, description, icon, onClose, open, size = "md",
 
 type ModalProps = {
   children: ReactNode;
+  closeButton?: boolean;
   description?: string;
   icon?: ReactNode;
   onClose: () => void;

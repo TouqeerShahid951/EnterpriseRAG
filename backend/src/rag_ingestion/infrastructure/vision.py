@@ -40,6 +40,23 @@ VISION_USER_PROMPT = (
     "visible; say when a detail is unclear.\n"
     "confidence: number from 0 to 1 for the combined OCR and visual description accuracy."
 )
+VISION_LAYOUT_SYSTEM_PROMPT = (
+    "You repair complex document page layout for enterprise RAG ingestion. "
+    "Return structured reading-order blocks only from visible page content."
+)
+VISION_LAYOUT_USER_PROMPT = (
+    "Analyze this full PDF page image and reconstruct the page in correct human reading order.\n"
+    "Return only valid JSON with keys blocks and confidence.\n"
+    "blocks: an array ordered exactly as a person should read the page. Each block must include type and text. "
+    "Allowed type values: heading, text, table, form_field, caption. Use table for tables and put a markdown "
+    "table in text when possible. Use form_field for label/value fields and write text as 'Label: Value'. "
+    "Preserve all readable words, numbers, labels, dates, signatures, stamps, table cells, and field values. "
+    "Do not summarize, omit repeated legal/form labels, invent missing values, or reorder unrelated columns. "
+    "For multi-column pages, read each column in the natural document order. For forms and invoices, keep field "
+    "labels adjacent to their values. Include bbox as [left, top, right, bottom] normalized 0-1 when you can, "
+    "and per-block confidence when useful.\n"
+    "confidence: number from 0 to 1 for the overall layout reconstruction accuracy."
+)
 OLLAMA_VISION_FORMAT = {
     "type": "object",
     "properties": {
@@ -49,12 +66,47 @@ OLLAMA_VISION_FORMAT = {
     },
     "required": ["extracted_text", "caption", "confidence"],
 }
+OLLAMA_LAYOUT_FORMAT = {
+    "type": "object",
+    "properties": {
+        "blocks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string"},
+                    "text": {"type": "string"},
+                    "bbox": {"type": "array", "items": {"type": "number"}},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["type", "text"],
+            },
+        },
+        "confidence": {"type": "number"},
+    },
+    "required": ["blocks", "confidence"],
+}
 
 
 @dataclass(frozen=True)
 class ImageAnalysis:
     extracted_text: str = ""
     caption: str = ""
+    confidence: float | None = None
+    quality_flags: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class VisionLayoutBlock:
+    text: str
+    block_type: str = "text"
+    bbox: list[float] | None = None
+    confidence: float | None = None
+
+
+@dataclass(frozen=True)
+class VisionLayoutAnalysis:
+    blocks: list[VisionLayoutBlock] = field(default_factory=list)
     confidence: float | None = None
     quality_flags: list[str] = field(default_factory=list)
 
@@ -81,6 +133,13 @@ class VisionClient:
         if self.provider == OLLAMA_PROVIDER:
             return self._analyze_ollama(content=content, content_type=content_type)
         return self._analyze_openai_compatible(content=content, content_type=content_type)
+
+    def analyze_layout(self, *, content: bytes, content_type: str) -> VisionLayoutAnalysis:
+        if not self.base_url:
+            return VisionLayoutAnalysis(quality_flags=["vision_unconfigured"])
+        if self.provider == OLLAMA_PROVIDER:
+            return self._analyze_layout_ollama(content=content, content_type=content_type)
+        return self._analyze_layout_openai_compatible(content=content, content_type=content_type)
 
     def _analyze_openai_compatible(self, *, content: bytes, content_type: str) -> ImageAnalysis:
         payload = {
@@ -125,6 +184,49 @@ class VisionClient:
             return ImageAnalysis(quality_flags=["vision_empty_response"])
         return _analysis_from_text(content_text)
 
+    def _analyze_layout_openai_compatible(self, *, content: bytes, content_type: str) -> VisionLayoutAnalysis:
+        payload = {
+            "model": self.model,
+            **no_thinking_payload_fields(),
+            "messages": [
+                {
+                    "role": "system",
+                    "content": no_thinking_system(VISION_LAYOUT_SYSTEM_PROMPT),
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": VISION_LAYOUT_USER_PROMPT,
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{content_type};base64,{base64.b64encode(content).decode('ascii')}"
+                            },
+                        },
+                    ],
+                }
+            ],
+            "temperature": 0,
+        }
+        try:
+            response = request_json(
+                self._api_base_url(),
+                "/chat/completions",
+                service="vision-layout",
+                method="POST",
+                payload=payload,
+                timeout_seconds=self.timeout_seconds,
+            )
+        except ServiceRequestError as exc:
+            return VisionLayoutAnalysis(quality_flags=[f"vision_layout_failed:{exc.status_code or 'request'}"])
+        content_text = _message_content(response)
+        if not content_text:
+            return VisionLayoutAnalysis(quality_flags=["vision_layout_empty_response"])
+        return _layout_analysis_from_text(content_text)
+
     def _analyze_ollama(self, *, content: bytes, content_type: str) -> ImageAnalysis:
         payload = {
             "model": self.model,
@@ -160,6 +262,42 @@ class VisionClient:
         if not content_text:
             return ImageAnalysis(quality_flags=["vision_empty_response"])
         return _analysis_from_text(content_text)
+
+    def _analyze_layout_ollama(self, *, content: bytes, content_type: str) -> VisionLayoutAnalysis:
+        payload = {
+            "model": self.model,
+            "stream": False,
+            "think": False,
+            "format": OLLAMA_LAYOUT_FORMAT,
+            "keep_alive": "5m",
+            "options": _ollama_options(temperature=0.0, num_ctx=self.num_ctx),
+            "messages": [
+                {
+                    "role": "system",
+                    "content": no_thinking_system(VISION_LAYOUT_SYSTEM_PROMPT),
+                },
+                {
+                    "role": "user",
+                    "content": VISION_LAYOUT_USER_PROMPT,
+                    "images": [base64.b64encode(content).decode("ascii")],
+                },
+            ],
+        }
+        try:
+            response = request_json(
+                self.base_url,
+                "/api/chat",
+                service="ollama-vision-layout",
+                method="POST",
+                payload=payload,
+                timeout_seconds=self.timeout_seconds,
+            )
+        except ServiceRequestError as exc:
+            return VisionLayoutAnalysis(quality_flags=[f"vision_layout_failed:{exc.status_code or 'request'}"])
+        content_text = _ollama_message_content(response)
+        if not content_text:
+            return VisionLayoutAnalysis(quality_flags=["vision_layout_empty_response"])
+        return _layout_analysis_from_text(content_text)
 
     def _api_base_url(self) -> str:
         return self.base_url if self.base_url.endswith("/v1") else f"{self.base_url}/v1"
@@ -229,3 +367,76 @@ def _analysis_from_text(value: str) -> ImageAnalysis:
         confidence=max(0.0, min(1.0, float(confidence))) if isinstance(confidence, (int, float)) else None,
         quality_flags=[str(flag) for flag in flags] if isinstance(flags, list) else [],
     )
+
+
+def _layout_analysis_from_text(value: str) -> VisionLayoutAnalysis:
+    candidate = value.strip()
+    if candidate.startswith("```"):
+        candidate = candidate.strip("`").strip()
+        if candidate.lower().startswith("json"):
+            candidate = candidate[4:].strip()
+    try:
+        parsed = json.loads(candidate)
+    except JSONDecodeError:
+        return VisionLayoutAnalysis(quality_flags=["vision_layout_plain_text_response"])
+    if not isinstance(parsed, dict):
+        return VisionLayoutAnalysis(quality_flags=["vision_layout_non_object_response"])
+    blocks = _layout_blocks(parsed.get("blocks"))
+    confidence = parsed.get("confidence")
+    flags = parsed.get("quality_flags")
+    return VisionLayoutAnalysis(
+        blocks=blocks,
+        confidence=max(0.0, min(1.0, float(confidence))) if isinstance(confidence, (int, float)) else None,
+        quality_flags=[str(flag) for flag in flags] if isinstance(flags, list) else [],
+    )
+
+
+def _layout_blocks(value: object) -> list[VisionLayoutBlock]:
+    if not isinstance(value, list):
+        return []
+    blocks: list[VisionLayoutBlock] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        text = _layout_block_text(item)
+        if not text:
+            continue
+        confidence = item.get("confidence")
+        blocks.append(
+            VisionLayoutBlock(
+                text=text,
+                block_type=_layout_block_type(item.get("type")),
+                bbox=_layout_block_bbox(item.get("bbox")),
+                confidence=max(0.0, min(1.0, float(confidence))) if isinstance(confidence, (int, float)) else None,
+            )
+        )
+    return blocks
+
+
+def _layout_block_text(item: dict[str, object]) -> str:
+    text = str(item.get("text") or "").strip()
+    if text:
+        return text
+    label = str(item.get("field_label") or item.get("label") or "").strip()
+    value = str(item.get("field_value") or item.get("value") or "").strip()
+    if label and value:
+        return f"{label}: {value}"
+    return label or value
+
+
+def _layout_block_type(value: object) -> str:
+    normalized = str(value or "text").strip().lower().replace("-", "_")
+    if normalized in {"heading", "title", "section_header"}:
+        return "heading"
+    if normalized in {"table", "form_field", "caption"}:
+        return normalized
+    return "text"
+
+
+def _layout_block_bbox(value: object) -> list[float] | None:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    try:
+        return [float(item) for item in value]
+    except (TypeError, ValueError):
+        return None

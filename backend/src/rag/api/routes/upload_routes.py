@@ -17,6 +17,7 @@ from ...repositories.identity import IdentityRepository, UserRecord, get_identit
 from ...schemas.common import StubResponse
 from ...schemas.upload import JobStatusResponse, UploadResponse
 from ...shared.contracts.clearance import DEFAULT_CLEARANCE_LEVEL, clearance_rank, normalize_clearance_level
+from ...shared.ingestion_quality import normalize_ingestion_quality_preset
 from ...services.document_uploads import (
     default_filename,
     default_title,
@@ -52,6 +53,7 @@ async def create_upload(
     expiry_date: date | None = Form(default=None),
     doc_type: str | None = Form(default=None),
     description: str | None = Form(default=None),
+    quality_preset: str | None = Form(default=None),
     supersedes: list[str] = Form(default_factory=list),
     user: UserRecord = Depends(require_current_user),
     identity_repo: IdentityRepository = Depends(get_identity_repository),
@@ -65,6 +67,7 @@ async def create_upload(
     normalized_clearance = _validated_upload_clearance(clearance_level, user)
     validate_declared_dates(effective_date, expiry_date)
     normalized_description = validated_description(description)
+    normalized_quality_preset = _validated_quality_preset(quality_preset)
     supersedes_ids = _validate_supersedes(list(supersedes), user, document_repo)
     initial_doc_type = _normalize_declared_doc_type(doc_type)
     content = await file.read()
@@ -94,8 +97,8 @@ async def create_upload(
         ingest_status="queued",
     )
     job = document_repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin="upload")
-    _audit_upload(document_repo, user, document.id, job.id, file.filename, stored.size_bytes, normalized_group, normalized_clearance, content_type)
-    _enqueue_upload(queue, document_repo, job.id, document.id, stored.object_path, normalized_group, normalized_clearance, initial_doc_type, effective_date, expiry_date, normalized_description, supersedes_ids, content_type)
+    _audit_upload(document_repo, user, document.id, job.id, file.filename, stored.size_bytes, normalized_group, normalized_clearance, content_type, normalized_quality_preset)
+    _enqueue_upload(queue, document_repo, job.id, document.id, stored.object_path, normalized_group, normalized_clearance, initial_doc_type, effective_date, expiry_date, normalized_description, supersedes_ids, content_type, normalized_quality_preset)
     return UploadResponse(job_id=job.id)
 
 
@@ -179,13 +182,28 @@ def _validate_supersedes(doc_ids: list[str], user: UserRecord, repo: DocumentRep
     return validated
 
 
-def _audit_upload(repo: DocumentRepository, user: UserRecord, doc_id: str, job_id: str, filename: str | None, size: int, group: str, clearance: str, content_type: str) -> None:
+def _validated_quality_preset(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    normalized = normalize_ingestion_quality_preset(value)
+    if normalized != value.strip().lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "invalid_quality_preset", "message": "Ingestion quality preset must be fast, balanced, or high_accuracy."},
+        )
+    return normalized
+
+
+def _audit_upload(repo: DocumentRepository, user: UserRecord, doc_id: str, job_id: str, filename: str | None, size: int, group: str, clearance: str, content_type: str, quality_preset: str | None) -> None:
+    payload = {"job_id": job_id, "filename": filename, "size_bytes": size, "group_path": group, "clearance_level": clearance, "content_type": content_type}
+    if quality_preset:
+        payload["quality_preset"] = quality_preset
     repo.append_audit_event(
         event_type="upload.queued",
         actor_id=user.id,
         target_type="document",
         target_id=doc_id,
-        payload={"job_id": job_id, "filename": filename, "size_bytes": size, "group_path": group, "clearance_level": clearance, "content_type": content_type},
+        payload=payload,
     )
 
 
@@ -203,6 +221,7 @@ def _enqueue_upload(
     description: str | None,
     supersedes: list[str],
     content_type: str,
+    quality_preset: str | None,
 ) -> None:
     try:
         queue.enqueue(
@@ -211,6 +230,7 @@ def _enqueue_upload(
                 doc_id=doc_id,
                 file_path=file_path,
                 group_path=group_path,
+                acl_group_paths=[group_path],
                 clearance_level=clearance_level,
                 doc_type=doc_type,
                 effective_date=effective_date.isoformat() if effective_date else None,
@@ -218,6 +238,7 @@ def _enqueue_upload(
                 expiry_date=expiry_date.isoformat() if expiry_date else None,
                 description=description,
                 content_type=content_type,
+                quality_preset=quality_preset,
             )
         )
     except RuntimeError as exc:

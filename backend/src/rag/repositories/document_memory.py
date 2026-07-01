@@ -32,6 +32,7 @@ class InMemoryDocumentRepository:
         self._review_items: dict[str, ReviewItemRecord] = {}
         self._image_assets: dict[str, DocumentImageAssetRecord] = {}
         self._edges: set[tuple[str, str]] = set()
+        self._shares: dict[str, set[str]] = {}
         self.audit_events: list[dict[str, Any]] = []
 
     def create_document(self, **kwargs: Any) -> DocumentRecord:
@@ -67,6 +68,7 @@ class InMemoryDocumentRepository:
             updated_at=now,
         )
         self._documents[record.id] = record
+        self._shares[record.id] = set()
         return record
 
     def list_documents(self, *, state: Literal["active", "deleted"] = "active") -> list[DocumentRecord]:
@@ -74,7 +76,7 @@ class InMemoryDocumentRepository:
             raise ValueError("document state must be active or deleted")
         return sorted(
             [
-                document
+                self._with_shares(document)
                 for document in self._documents.values()
                 if (document.deleted_at is None) == (state == "active")
             ],
@@ -84,7 +86,41 @@ class InMemoryDocumentRepository:
 
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None:
         document = self._documents.get(document_id)
-        return None if document is None or (document.deleted_at is not None and not include_deleted) else document
+        return None if document is None or (document.deleted_at is not None and not include_deleted) else self._with_shares(document)
+
+    def list_document_shares(self, document_id: str) -> list[str]:
+        return sorted(self._shares.get(document_id, set()))
+
+    def replace_document_shares(
+        self,
+        document_id: str,
+        *,
+        group_paths: list[str],
+        actor_id: str | None,
+    ) -> DocumentRecord | None:
+        _ = actor_id
+        document = self._documents.get(document_id)
+        if document is None:
+            return None
+        owner_group = normalize_group_path(document.group_path)
+        shares = {
+            normalize_group_path(path)
+            for path in group_paths
+            if normalize_group_path(path) != owner_group
+        }
+        self._shares[document_id] = shares
+        updated = replace(document, updated_at=datetime.now(UTC))
+        self._documents[document_id] = updated
+        return self._with_shares(updated)
+
+    def remove_document_share(self, document_id: str, group_path: str) -> DocumentRecord | None:
+        document = self._documents.get(document_id)
+        if document is None:
+            return None
+        self._shares.setdefault(document_id, set()).discard(normalize_group_path(group_path))
+        updated = replace(document, updated_at=datetime.now(UTC))
+        self._documents[document_id] = updated
+        return self._with_shares(updated)
 
     def update_document_clearance(self, document_id: str, clearance_level: ClearanceLevel) -> DocumentRecord | None:
         document = self.get_document(document_id)
@@ -95,6 +131,47 @@ class InMemoryDocumentRepository:
             clearance_level=normalize_clearance_level(clearance_level),
             updated_at=datetime.now(UTC),
         )
+        self._documents[document_id] = updated
+        return updated
+
+    def update_document_topics(
+        self,
+        document_id: str,
+        *,
+        topics: list[str],
+        llm_topics: list[str],
+    ) -> DocumentRecord | None:
+        document = self.get_document(document_id)
+        if document is None:
+            return None
+        updated = replace(
+            document,
+            topics=tuple(_unique_text(topics)),
+            llm_topics=tuple(_unique_text(llm_topics)),
+            updated_at=datetime.now(UTC),
+        )
+        self._documents[document_id] = updated
+        return updated
+
+    def mark_document_stale(
+        self,
+        document_id: str,
+        *,
+        source_deleted: bool = True,
+        retrieval_status: str = "stale",
+        reason: str = "source_deleted",
+    ) -> DocumentRecord | None:
+        document = self.get_document(document_id)
+        if document is None:
+            return None
+        flags = {
+            **document.metadata_flags,
+            "source_deleted": source_deleted,
+            "retrieval_status": retrieval_status,
+            "stale_reason": reason,
+            "stale_at": datetime.now(UTC).isoformat(),
+        }
+        updated = replace(document, metadata_flags=flags, updated_at=datetime.now(UTC))
         self._documents[document_id] = updated
         return updated
 
@@ -183,11 +260,15 @@ class InMemoryDocumentRepository:
         self._review_items = {item_id: item for item_id, item in self._review_items.items() if item.doc_id != document_id}
         self._image_assets = {asset_id: asset for asset_id, asset in self._image_assets.items() if asset.doc_id != document_id}
         self._edges = {(old_id, new_id) for old_id, new_id in self._edges if old_id != document_id and new_id != document_id}
+        self._shares.pop(document_id, None)
         now = datetime.now(UTC)
         for related_id, related in list(self._documents.items()):
             if related.superseded_by == document_id:
                 self._documents[related_id] = replace(related, superseded_by=None, updated_at=now)
         return document
+
+    def _with_shares(self, document: DocumentRecord) -> DocumentRecord:
+        return replace(document, shared_group_paths=tuple(sorted(self._shares.get(document.id, set()))))
 
     def create_ingest_job(
         self,

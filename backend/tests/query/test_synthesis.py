@@ -5,7 +5,7 @@ from rag.query.qdrant import SearchHit
 from rag.query.routing_models import RoutePlan
 from rag.query.sources import sources_from_hits
 from rag.query.state import initial_state
-from rag.query.synthesis import prepare_synthesis_input
+from rag.query.synthesis import is_global_abstention, prepare_synthesis_input
 from rag.schemas.query import QueryRequest
 
 
@@ -51,3 +51,7 @@ def test_scoped_aggregation_synthesis_requires_document_coverage() -> None:
     assert "Report B.pdf" in prepared.question
     assert "Cover every scoped document represented in the evidence" in prepared.question
     assert any("Location: Document: Report A.pdf" in context for context in prepared.contexts)
+
+
+def test_documents_do_not_contain_information_is_global_abstention() -> None:
+    assert is_global_abstention("The documents do not contain information about soldiers or their activities.")

@@ -40,7 +40,11 @@ CREATE TABLE IF NOT EXISTS folder_ingest_schedules (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT folder_ingest_schedules_name_not_blank CHECK (length(btrim(name)) > 0),
-    CONSTRAINT folder_ingest_schedules_source_type_known CHECK (source_type IN ('snapshot', 'minio_prefix')),
+    CONSTRAINT folder_ingest_schedules_source_type_known CHECK (
+        source_type IN (
+            'snapshot', 'local_folder', 'minio_prefix'
+        )
+    ),
     CONSTRAINT folder_ingest_schedules_schedule_type_known CHECK (schedule_type IN ('one_time', 'recurring')),
     CONSTRAINT folder_ingest_schedules_status_known CHECK (status IN ('scheduled', 'active', 'paused', 'cancelled', 'complete', 'failed')),
     CONSTRAINT folder_ingest_schedules_recurrence_object CHECK (jsonb_typeof(recurrence) = 'object'),
@@ -102,6 +106,11 @@ CREATE INDEX IF NOT EXISTS folder_ingest_run_items_document_idx ON folder_ingest
 
 ALTER TABLE folder_ingest_schedules ALTER COLUMN effective_date DROP NOT NULL;
 ALTER TABLE folder_ingest_schedules ALTER COLUMN doc_type DROP NOT NULL;
+
+ALTER TABLE folder_ingest_schedules DROP CONSTRAINT IF EXISTS folder_ingest_schedules_source_type_known;
+ALTER TABLE folder_ingest_schedules ADD CONSTRAINT folder_ingest_schedules_source_type_known CHECK (
+    source_type IN ('snapshot', 'local_folder', 'minio_prefix')
+) NOT VALID;
 """
 
 

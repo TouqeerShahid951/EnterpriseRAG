@@ -15,6 +15,7 @@ class AuditEvent(ContractModel):
     target_id: str | None = None
     target_user_email: str | None = None
     target_user_name: str | None = None
+    target_document_title: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
 

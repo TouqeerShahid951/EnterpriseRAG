@@ -14,7 +14,11 @@ UploadJobStage = Literal[
     "queued",
     "reading_file",
     "parsing_document",
+    "docling_repair",
+    "vision_layout_repair",
+    "image_analysis",
     "generating_metadata",
+    "metadata_enrichment",
     "chunking_document",
     "embedding_chunks",
     "indexing_vectors",
@@ -26,7 +30,7 @@ UploadJobStage = Literal[
     "cancelled",
 ]
 UploadJobStepState = Literal["pending", "active", "complete", "failed", "needs_review", "cancelled"]
-UploadJobProgressUnit = Literal["pages", "chunks", "vectors", "files", "metadata"]
+UploadJobProgressUnit = Literal["pages", "chunks", "vectors", "files", "metadata", "images"]
 
 
 class UploadMetadata(ContractModel):

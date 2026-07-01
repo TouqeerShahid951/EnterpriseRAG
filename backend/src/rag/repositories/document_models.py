@@ -37,6 +37,25 @@ class DocumentRecord:
     deleted_at: datetime | None
     created_at: datetime | None
     updated_at: datetime | None
+    shared_group_paths: tuple[str, ...] = ()
+
+    @property
+    def owner_group_path(self) -> str:
+        return self.group_path
+
+    @property
+    def access_group_paths(self) -> tuple[str, ...]:
+        paths: list[str] = []
+        seen: set[str] = set()
+        for path in (self.group_path, *self.shared_group_paths):
+            if path not in seen:
+                seen.add(path)
+                paths.append(path)
+        return tuple(paths)
+
+    @property
+    def governance_owner(self) -> Literal["space", "system"]:
+        return "system" if self.shared_group_paths else "space"
 
 
 @dataclass(frozen=True)
@@ -150,7 +169,31 @@ class DocumentRepository(Protocol):
     def create_document(self, **kwargs: Any) -> DocumentRecord: ...
     def list_documents(self, *, state: Literal["active", "deleted"] = "active") -> list[DocumentRecord]: ...
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None: ...
+    def list_document_shares(self, document_id: str) -> list[str]: ...
+    def replace_document_shares(
+        self,
+        document_id: str,
+        *,
+        group_paths: list[str],
+        actor_id: str | None,
+    ) -> DocumentRecord | None: ...
+    def remove_document_share(self, document_id: str, group_path: str) -> DocumentRecord | None: ...
     def update_document_clearance(self, document_id: str, clearance_level: ClearanceLevel) -> DocumentRecord | None: ...
+    def update_document_topics(
+        self,
+        document_id: str,
+        *,
+        topics: list[str],
+        llm_topics: list[str],
+    ) -> DocumentRecord | None: ...
+    def mark_document_stale(
+        self,
+        document_id: str,
+        *,
+        source_deleted: bool = True,
+        retrieval_status: str = "stale",
+        reason: str = "source_deleted",
+    ) -> DocumentRecord | None: ...
     def save_document_metadata(
         self,
         *,

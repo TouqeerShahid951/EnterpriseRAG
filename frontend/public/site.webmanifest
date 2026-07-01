@@ -1,14 +1,14 @@
 {
-  "name": "Faham AI",
-  "short_name": "Faham AI",
+  "name": "Prudentia AI",
+  "short_name": "Prudentia AI",
   "icons": [
     {
-      "src": "/brand/faham-icon-192.png",
+      "src": "/brand/Prudentia-icon-192.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/brand/faham-icon-512.png",
+      "src": "/brand/Prudentia-icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
     }

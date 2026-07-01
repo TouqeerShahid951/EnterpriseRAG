@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import Field
 
@@ -8,6 +9,12 @@ from .common import ContractModel
 
 class RagConfigRequest(ContractModel):
     provider: str = "ollama"
+    embedding_provider: str = "fastembed"
+    reasoning_provider: str | None = None
+    routing_provider: str | None = None
+    faithfulness_provider: str | None = None
+    ingestion_provider: str | None = None
+    vision_provider: str | None = None
     host: str = Field(..., min_length=1)
     port: int = Field(default=11434, ge=1, le=65535)
     embedding_host: str | None = None
@@ -20,6 +27,8 @@ class RagConfigRequest(ContractModel):
     faithfulness_port: int | None = Field(default=None, ge=1, le=65535)
     ingestion_host: str | None = None
     ingestion_port: int | None = Field(default=None, ge=1, le=65535)
+    vision_host: str | None = None
+    vision_port: int | None = Field(default=None, ge=1, le=65535)
     chat_model: str = Field(..., min_length=1)
     embed_model: str = Field(..., min_length=1)
     reasoning_model: str | None = None
@@ -30,6 +39,7 @@ class RagConfigRequest(ContractModel):
     thinking_enabled: bool = False
     json_num_predict: int = Field(default=4096, ge=256, le=32768)
     retrieval_token_budget: int = Field(default=12000, ge=1000, le=200000)
+    query_planner_enabled: bool = True
     reranker_model: str = Field(default=DEFAULT_RERANKER_MODEL, min_length=1)
     chat_timeout_seconds: float = Field(default=180.0, gt=0)
     embed_timeout_seconds: float = Field(default=45.0, gt=0)
@@ -37,6 +47,12 @@ class RagConfigRequest(ContractModel):
 
 class RagModelDiscoveryRequest(ContractModel):
     provider: str = "ollama"
+    embedding_provider: str = "fastembed"
+    reasoning_provider: str | None = None
+    routing_provider: str | None = None
+    faithfulness_provider: str | None = None
+    ingestion_provider: str | None = None
+    vision_provider: str | None = None
     host: str = Field(..., min_length=1)
     port: int = Field(default=11434, ge=1, le=65535)
     embedding_host: str | None = None
@@ -49,6 +65,8 @@ class RagModelDiscoveryRequest(ContractModel):
     faithfulness_port: int | None = Field(default=None, ge=1, le=65535)
     ingestion_host: str | None = None
     ingestion_port: int | None = Field(default=None, ge=1, le=65535)
+    vision_host: str | None = None
+    vision_port: int | None = Field(default=None, ge=1, le=65535)
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
 
 
@@ -73,6 +91,12 @@ class RerankerModelsResponse(ContractModel):
 class RagConfigResponse(ContractModel):
     source: str
     provider: str
+    embedding_provider: str
+    reasoning_provider: str | None = None
+    routing_provider: str | None = None
+    faithfulness_provider: str | None = None
+    ingestion_provider: str | None = None
+    vision_provider: str | None = None
     base_url: str
     host: str
     port: int
@@ -91,6 +115,9 @@ class RagConfigResponse(ContractModel):
     ingestion_base_url: str | None = None
     ingestion_host: str | None = None
     ingestion_port: int | None = None
+    vision_base_url: str | None = None
+    vision_host: str | None = None
+    vision_port: int | None = None
     chat_model: str
     embed_model: str
     reasoning_model: str | None = None
@@ -101,6 +128,7 @@ class RagConfigResponse(ContractModel):
     thinking_enabled: bool
     json_num_predict: int
     retrieval_token_budget: int
+    query_planner_enabled: bool
     reranker_model: str
     chat_timeout_seconds: float
     embed_timeout_seconds: float
@@ -109,12 +137,19 @@ class RagConfigResponse(ContractModel):
 
 class RagConfigTestResponse(ContractModel):
     provider: str
+    embedding_provider: str
+    reasoning_provider: str | None = None
+    routing_provider: str | None = None
+    faithfulness_provider: str | None = None
+    ingestion_provider: str | None = None
+    vision_provider: str | None = None
     base_url: str
     embedding_base_url: str
     reasoning_base_url: str | None = None
     routing_base_url: str | None = None
     faithfulness_base_url: str | None = None
     ingestion_base_url: str | None = None
+    vision_base_url: str | None = None
     chat_models: list[str] = Field(default_factory=list)
     embedding_models: list[str] = Field(default_factory=list)
     reasoning_models: list[str] = Field(default_factory=list)
@@ -126,6 +161,7 @@ class RagConfigTestResponse(ContractModel):
     thinking_enabled: bool
     json_num_predict: int
     retrieval_token_budget: int
+    query_planner_enabled: bool
     reranker_model: str
     health: RagConfigHealth
 
@@ -138,10 +174,14 @@ class VllmServiceDeploymentLimits(ContractModel):
     kv_cache_memory_bytes: str | None = Field(default=None, min_length=1, max_length=32)
 
 
+VllmDeploymentService = Literal["text", "embeddings", "vision"]
+
+
 class VllmDeploymentConfigRequest(ContractModel):
     text: VllmServiceDeploymentLimits
     embeddings: VllmServiceDeploymentLimits
     vision: VllmServiceDeploymentLimits
+    services: list[VllmDeploymentService] | None = Field(default=None, min_length=1, max_length=3)
 
 
 class VllmDeploymentConfigResponse(ContractModel):
@@ -153,14 +193,29 @@ class VllmDeploymentConfigResponse(ContractModel):
     vision: VllmServiceDeploymentLimits
 
 
+class RagModelDiscoveryStatus(ContractModel):
+    status: str
+    provider: str
+    base_url: str
+    message: str
+    code: str | None = None
+
+
 class RagModelDiscoveryResponse(ContractModel):
     provider: str
+    embedding_provider: str
+    reasoning_provider: str | None = None
+    routing_provider: str | None = None
+    faithfulness_provider: str | None = None
+    ingestion_provider: str | None = None
+    vision_provider: str | None = None
     base_url: str
     embedding_base_url: str
     reasoning_base_url: str | None = None
     routing_base_url: str | None = None
     faithfulness_base_url: str | None = None
     ingestion_base_url: str | None = None
+    vision_base_url: str | None = None
     chat_models: list[str] = Field(default_factory=list)
     embedding_models: list[str] = Field(default_factory=list)
     reasoning_models: list[str] = Field(default_factory=list)
@@ -169,3 +224,4 @@ class RagModelDiscoveryResponse(ContractModel):
     ingestion_models: list[str] = Field(default_factory=list)
     vision_models: list[str] = Field(default_factory=list)
     available_models: list[str] = Field(default_factory=list)
+    model_statuses: dict[str, RagModelDiscoveryStatus] = Field(default_factory=dict)

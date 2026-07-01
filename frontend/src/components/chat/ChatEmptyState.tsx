@@ -1,11 +1,7 @@
 import { FileText, MessageSquare, Search, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 
-import type { Document } from "../../types/api";
-
-export function ChatEmptyState({ documents, hasCorpus, onQuestionChange }: Props) {
-  const prompts = promptsForDocuments(documents);
-
+export function ChatEmptyState({ hasCorpus }: Props) {
   return (
     <section className="rag-empty-state" aria-labelledby="rag-empty-title">
       <div className="rag-empty-copy">
@@ -22,21 +18,6 @@ export function ChatEmptyState({ documents, hasCorpus, onQuestionChange }: Props
           </p>
         </div>
       </div>
-
-      {hasCorpus ? (
-        <div className="rag-empty-actions">
-          {prompts.map((prompt) => (
-            <button
-              key={prompt}
-              type="button"
-              onClick={() => onQuestionChange(prompt)}
-              className="rag-empty-prompt"
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
-      ) : null}
 
       <div className="rag-empty-capabilities" aria-label="Answer safeguards">
         {hasCorpus ? null : <Capability icon={<FileText size={14} />} label="PDF, DOCX, JPG, PNG, and JSON ingestion is active" />}
@@ -56,24 +37,6 @@ function Capability({ icon, label }: { icon: ReactNode; label: string }) {
   );
 }
 
-function promptsForDocuments(documents: Document[]): string[] {
-  const titleText = documents.map((document) => document.title).join(" ").toLowerCase();
-  if (titleText.includes("fir")) {
-    return [
-      "Who is accused in the FIR?",
-      "Which offences or sections are mentioned?",
-      "Summarize the FIR with citations.",
-    ];
-  }
-  return [
-    "Summarize the key facts with citations.",
-    "What entities, dates, or obligations are mentioned?",
-    "Which source supports the main finding?",
-  ];
-}
-
 type Props = {
-  documents: Document[];
   hasCorpus: boolean;
-  onQuestionChange: (value: string) => void;
 };

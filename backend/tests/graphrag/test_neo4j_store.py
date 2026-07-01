@@ -96,3 +96,23 @@ def test_gds_projection_is_undirected_for_leiden() -> None:
     queries = "\n".join(query for query, _params in driver.calls)
     assert "gds.graph.project(" in queries
     assert "undirectedRelationshipTypes: ['*']" in queries
+
+
+def test_delete_document_graph_removes_graph_records_and_scrubs_entity_sources() -> None:
+    driver = FakeDriver()
+    store = Neo4jGraphStore(
+        config=Neo4jConfig(uri="bolt://neo4j:7687", user="neo4j", password="pw"),
+        driver=driver,
+    )
+
+    store.delete_document_graph("doc-1")
+
+    queries = "\n".join(query for query, _params in driver.calls)
+    assert "CREATE CONSTRAINT graph_document_id" in queries
+    assert "MATCH (doc:Document {id: $doc_id})" in queries
+    assert "RELATES_TO {doc_id: $doc_id}" in queries
+    assert "GraphClaim {doc_id: $doc_id}" in queries
+    assert "entity.source_doc_ids = [value IN coalesce(entity.source_doc_ids, []) WHERE value <> $doc_id]" in queries
+    assert "entity.source_chunk_ids = [" in queries
+    assert "entity.community_id = null" in queries
+    assert "DETACH DELETE entity" in queries

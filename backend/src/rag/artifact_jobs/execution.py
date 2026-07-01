@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -19,7 +18,6 @@ from ..repositories.generated_artifact_models import GeneratedArtifactRepository
 from ..repositories.identity_models import IdentityRepository, UserRecord
 from ..repositories.rag_config_models import RagConfigRecord
 from ..services.generated_artifact_storage import GeneratedArtifactStorage
-from .build_program import BUILD_PROGRAM_PROMPT_VERSION, generate_build_program
 from .composer import (
     COMPOSER_PROMPT_VERSION,
     FORMATTER_PROMPT_VERSION,
@@ -33,14 +31,10 @@ from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
 from .planner import PLANNER_PROMPT_VERSION, plan_document
 from .renderer import render_document
 from .retrieval import retrieve_document_evidence
-from .sandbox_contracts import ArtifactRenderPolicy, ArtifactSandboxRenderRequest, RenderedSandboxFile
-from .sandbox_runner import ArtifactSandboxRunner, HttpArtifactSandboxRunner
 from .validation import validate_document_bundle
 
 
 logger = logging.getLogger("rag.artifact_jobs")
-
-_FAST_PAGINATED_FORMATS = {"docx", "pdf", "pptx"}
 
 
 class ArtifactPermissionChanged(RuntimeError):
@@ -69,7 +63,6 @@ class ArtifactJobExecutor:
         qdrant: QdrantClient,
         model_name: str,
         rag_config: RagConfigRecord,
-        sandbox_runner: ArtifactSandboxRunner | None = None,
     ) -> None:
         self.config = config
         self.repo_factory = repo_factory
@@ -81,10 +74,6 @@ class ArtifactJobExecutor:
         self.qdrant = qdrant
         self.model_name = model_name
         self.rag_config = rag_config
-        self.sandbox_runner = sandbox_runner or HttpArtifactSandboxRunner(
-            base_url=config.artifact_sandbox_url,
-            timeout_seconds=config.artifact_sandbox_timeout_seconds,
-        )
 
     def execute(self, job_id: str) -> ArtifactJobRecord:
         repo = self.repo_factory()
@@ -104,13 +93,11 @@ class ArtifactJobExecutor:
                 "model_versions": {
                     "planner": self.model_name,
                     "composer": self.model_name,
-                    "build_program": self.model_name,
                 },
                 "prompt_versions": {
                     "planner": PLANNER_PROMPT_VERSION,
                     "composer": COMPOSER_PROMPT_VERSION,
                     "formatter": FORMATTER_PROMPT_VERSION,
-                    "build_program": BUILD_PROGRAM_PROMPT_VERSION,
                 },
                 "stage_progress": _progress("sections", 0, len(plan.sections), "Planning document structure"),
             })
@@ -221,7 +208,7 @@ class ArtifactJobExecutor:
             "stage_progress": _progress("formats", 0, len(job.requested_formats), "Preparing requested files"),
         })
         with self._stage_timer(job.id, "rendering"):
-            failures = self._render_formats(job, plan, evidence, bundle)
+            failures = self._render_formats(job, evidence, bundle)
         status = (
             "complete"
             if not failures
@@ -283,7 +270,7 @@ class ArtifactJobExecutor:
             "stage_progress": _progress("formats", 0, len(job.requested_formats), "Preparing requested files"),
         })
         with self._stage_timer(job.id, "rendering"):
-            failures = self._render_formats(job, plan, evidence, bundle)
+            failures = self._render_formats(job, evidence, bundle)
         status = (
             "complete"
             if not failures
@@ -302,32 +289,10 @@ class ArtifactJobExecutor:
     def _render_formats(
         self,
         job: ArtifactJobRecord,
-        plan: DocumentPlan,
         evidence: EvidenceManifest,
         bundle: ArtifactContentBundle,
     ) -> list[str]:
-        failures: list[str] = []
         source_doc_ids = list(dict.fromkeys(record.doc_id for record in evidence.records))
-        renderer_mode = self.config.artifact_renderer_mode.strip().lower()
-        if renderer_mode == "sandbox":
-            if self.config.artifact_fast_paginated_renderer:
-                fast_formats = [fmt for fmt in job.requested_formats if fmt in _FAST_PAGINATED_FORMATS]
-                sandbox_formats = [fmt for fmt in job.requested_formats if fmt not in _FAST_PAGINATED_FORMATS]
-                failures.extend(self._render_deterministic_formats(job, bundle, source_doc_ids, fast_formats))
-                if sandbox_formats:
-                    failures.extend(
-                        self._render_with_sandbox(
-                            job,
-                            plan,
-                            bundle,
-                            source_doc_ids,
-                            requested_formats=sandbox_formats,
-                        )
-                    )
-                return failures
-            return self._render_with_sandbox(job, plan, bundle, source_doc_ids)
-        if renderer_mode != "deterministic":
-            raise RuntimeError(f"unsupported artifact renderer mode: {self.config.artifact_renderer_mode}")
         return self._render_deterministic_formats(job, bundle, source_doc_ids, list(job.requested_formats))
 
     def _render_deterministic_formats(
@@ -368,94 +333,6 @@ class ArtifactJobExecutor:
                 failures.append(artifact_format)
                 self._record_format_error(job.id, artifact_format, exc)
         return failures
-
-    def _render_with_sandbox(
-        self,
-        job: ArtifactJobRecord,
-        plan: DocumentPlan,
-        bundle: ArtifactContentBundle,
-        source_doc_ids: list[str],
-        requested_formats: list[str] | None = None,
-    ) -> list[str]:
-        formats = list(job.requested_formats if requested_formats is None else requested_formats)
-        if not formats:
-            return []
-        try:
-            self._check_cancelled(job.id)
-            self._authorize(job)
-            self._update(job.id, {
-                "status": "rendering",
-                "stage": "rendering_sandbox",
-                "progress_pct": 82,
-                "stage_progress": _progress("formats", 0, len(formats), "Rendering files in sandbox"),
-            })
-            generated_at = datetime.now(UTC)
-            program = generate_build_program(
-                job,
-                plan,
-                bundle,
-                inference=self.inference,
-                model=self.model_name,
-                requested_formats=formats,
-            )
-            result = self.sandbox_runner.render(ArtifactSandboxRenderRequest(
-                job_id=job.id,
-                formats=formats,  # type: ignore[list-item]
-                generated_at=generated_at.isoformat(),
-                bundle=bundle,
-                program=program,
-                policy=ArtifactRenderPolicy(
-                    timeout_seconds=self.config.artifact_sandbox_timeout_seconds,
-                    max_file_mb=self.config.artifact_sandbox_max_file_mb,
-                    require_libreoffice=self.config.artifact_libreoffice_required,
-                ),
-            ))
-        except Exception as exc:
-            for artifact_format in formats:
-                self._record_format_error(job.id, artifact_format, exc)
-            return formats
-
-        failures: list[str] = []
-        by_format = {file.format: file for file in result.files}
-        for index, artifact_format in enumerate(formats, start=1):
-            self._record_render_format_progress(job.id, artifact_format, index, len(formats))
-            rendered = by_format.get(artifact_format)
-            if rendered is None:
-                failures.append(artifact_format)
-                self._record_format_error(job.id, artifact_format, RuntimeError("sandbox did not return format"))
-                continue
-            try:
-                self._store_sandbox_file(
-                    job,
-                    rendered,
-                    source_doc_ids,
-                    result.warnings,
-                    progress_pct=_format_complete_progress(index, len(formats)),
-                )
-            except Exception as exc:
-                failures.append(artifact_format)
-                self._record_format_error(job.id, artifact_format, exc)
-        return failures
-
-    def _store_sandbox_file(
-        self,
-        job: ArtifactJobRecord,
-        rendered: RenderedSandboxFile,
-        source_doc_ids: list[str],
-        render_warnings: list[str],
-        progress_pct: int,
-    ) -> None:
-        content = base64.b64decode(rendered.content_base64, validate=True)
-        self._store_rendered_file(
-            job=job,
-            filename=rendered.filename,
-            artifact_format=rendered.format,
-            content_type=rendered.content_type,
-            content=content,
-            source_doc_ids=source_doc_ids,
-            warnings=[*render_warnings, *rendered.warnings],
-            progress_pct=progress_pct,
-        )
 
     def _store_rendered_file(
         self,

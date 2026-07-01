@@ -23,6 +23,8 @@ export type ArtifactJobStatus =
   | "failed"
   | "cancelled";
 export type FaithfulnessStatus = "pending" | "checked" | "skipped" | "failed";
+export type QuerySourceMode = "auto" | "corpus_only" | "db_only" | "hybrid";
+export type QuerySourceKind = "connector_schema_catalog";
 
 export interface QueryRequest {
   query: string;
@@ -30,6 +32,26 @@ export interface QueryRequest {
   client_request_id?: string | null;
   group_path?: string | null;
   document_ids?: string[];
+  source_mode?: QuerySourceMode;
+  query_source_id?: string | null;
+  allow_source_expansion?: boolean;
+}
+
+export interface QuerySource {
+  id: string;
+  kind: QuerySourceKind;
+  name: string;
+  description: string | null;
+  connector_type: string;
+  scope: "database_scope";
+  group_path: string;
+  clearance_level: ClearanceLevel;
+}
+
+export interface SourceExpansion {
+  available: boolean;
+  reason: string;
+  suggested_source_mode: QuerySourceMode;
 }
 
 export interface HighlightRange {
@@ -130,6 +152,9 @@ export interface RAGResponse {
   node_timings?: QueryNodeTiming[];
   degraded: boolean;
   degraded_reason: string | null;
+  source_mode?: string | null;
+  source_decision_reason?: string | null;
+  source_expansion?: SourceExpansion | null;
 }
 
 export interface GeneratedArtifact {
@@ -155,8 +180,13 @@ export interface ArtifactJobSummary {
   artifacts: GeneratedArtifact[];
   error_code: string | null;
   error_message: string | null;
+  attempt_count?: number;
+  max_attempts?: number;
   created_at: ISODateString | null;
   updated_at: ISODateString | null;
+  started_at?: ISODateString | null;
+  completed_at?: ISODateString | null;
+  last_heartbeat_at?: ISODateString | null;
   expires_at: ISODateString | null;
 }
 

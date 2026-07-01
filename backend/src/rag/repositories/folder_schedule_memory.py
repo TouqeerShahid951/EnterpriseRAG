@@ -58,6 +58,19 @@ class InMemoryFolderScheduleRepository:
     def get_schedule(self, schedule_id: str) -> FolderScheduleRecord | None:
         return self._schedules.get(schedule_id)
 
+    def delete_schedule(self, schedule_id: str) -> FolderScheduleRecord | None:
+        schedule = self._schedules.pop(schedule_id, None)
+        if schedule is None:
+            return None
+        run_ids = {run.id for run in self._runs.values() if run.schedule_id == schedule_id}
+        self._runs = {run_id: run for run_id, run in self._runs.items() if run.schedule_id != schedule_id}
+        self._items = {
+            item_id: item
+            for item_id, item in self._items.items()
+            if item.schedule_id != schedule_id and item.run_id not in run_ids
+        }
+        return schedule
+
     def update_schedule_status(self, schedule_id: str, *, status: str) -> FolderScheduleRecord | None:
         schedule = self._schedules.get(schedule_id)
         if schedule is None:

@@ -83,7 +83,7 @@ function renderCitedChildren(
           className="rag-inline-citation"
           onClick={() => onSelectSource(withSourceDocumentTitle(citation.source, documents))}
           aria-label={`Open ${citation.displayLabel}, ${title}${page ? `, ${page}` : ""}`}
-          title={`${citation.displayLabel} · ${title}${page ? ` · ${page}` : ""} · ${part}`}
+          title={`${citation.displayLabel} - ${title}${page ? ` - ${page}` : ""} - ${part}`}
         >
           {citation.displayLabel}
         </button>

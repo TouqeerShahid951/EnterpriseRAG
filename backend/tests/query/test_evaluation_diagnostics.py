@@ -98,7 +98,16 @@ def test_evaluation_diagnostic_records_reranked_candidates(monkeypatch) -> None:
             cache_dir=cache_dir,
         )
         return [
-            hit("b", 0.6, "Doc B.pdf", _rerank_score=0.91, _rerank_status="scored"),
+            hit(
+                "b",
+                0.6,
+                "Doc B.pdf",
+                _rerank_score=0.91,
+                _rerank_adjusted_score=0.56,
+                _rerank_status="scored",
+                _low_value_penalty=0.35,
+                _low_value_reasons=["toc_or_index"],
+            ),
             hit("a", 0.4, "Doc A.pdf", _rerank_score=0.22, _rerank_status="scored"),
         ]
 
@@ -128,7 +137,10 @@ def test_evaluation_diagnostic_records_reranked_candidates(monkeypatch) -> None:
     assert diagnostic["retrieved_source_docs"] == ["Doc A.pdf", "Doc B.pdf"]
     assert diagnostic["reranked_source_docs"] == ["Doc B.pdf", "Doc A.pdf"]
     assert diagnostic["reranked_candidates"][0]["rerank_score"] == 0.91
+    assert diagnostic["reranked_candidates"][0]["rerank_adjusted_score"] == 0.56
     assert diagnostic["reranked_candidates"][0]["rerank_status"] == "scored"
+    assert diagnostic["reranked_candidates"][0]["low_value_penalty"] == 0.35
+    assert diagnostic["reranked_candidates"][0]["low_value_reasons"] == ["toc_or_index"]
     assert diagnostic["reranker_model"] == "BAAI/bge-reranker-base"
     assert reranker_calls == {
         "query": "What insulin pen needle length should be used?",

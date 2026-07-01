@@ -16,7 +16,13 @@ from rag.shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL
 from rag.shared.runtime_offline import apply_runtime_offline_defaults
 
 from .qdrant import SearchHit
-from .metadata_scoring import annotate_metadata_matches, metadata_score
+from .metadata_scoring import (
+    annotate_low_value_chunk,
+    annotate_metadata_matches,
+    low_value_penalty_score,
+    metadata_score,
+    topic_score,
+)
 
 _FIELD_LABEL_SEPARATOR_RE = re.compile(r"[|\n]")
 _LOG = logging.getLogger(__name__)
@@ -115,21 +121,30 @@ def _cross_encoder_rerank(
         )
         return _fallback_rank_hits(query, hits, top_k=top_k, error=exc)
     scored_hits = [
-        SearchHit(
-            point_id=hit.point_id,
-            score=hit.score,
-            payload={
-                **hit.payload,
-                "_rerank_score": score,
-                "_rerank_status": _RERANK_STATUS_SCORED,
-                "_rerank_candidate_count": len(hits),
-            },
+        annotate_low_value_chunk(
+            query,
+            SearchHit(
+                point_id=hit.point_id,
+                score=hit.score,
+                payload={
+                    **hit.payload,
+                    "_rerank_score": score,
+                    "_rerank_status": _RERANK_STATUS_SCORED,
+                    "_rerank_candidate_count": len(hits),
+                },
+            ),
+            rerank_score=score,
         )
         for hit, score in zip(hits, score_values, strict=True)
     ]
     ranked = sorted(
         enumerate(zip(scored_hits, score_values, strict=True)),
-        key=lambda item: (-item[1][1], -metadata_score(item[1][0]), item[0]),
+        key=lambda item: (
+            -_rerank_sort_score(item[1][0], item[1][1]),
+            -metadata_score(item[1][0]),
+            -topic_score(item[1][0]),
+            item[0],
+        ),
     )
     ranked = _promote_table_field_label_matches(query, ranked)
     return [hit for _, (hit, _) in ranked[:top_k]]
@@ -151,6 +166,7 @@ def _limit_rerank_candidates(
             _table_field_label_priority(query, item[1]),
             -len(query_tokens & _tokens(_searchable_text(item[1]))),
             -metadata_score(item[1]),
+            -topic_score(item[1]),
             _structured_origin_priority(item[1]),
             -item[1].score,
             item[0],
@@ -177,14 +193,17 @@ def _fallback_rank_hits(
     error: Exception,
 ) -> list[SearchHit]:
     query_tokens = _tokens(query)
+    annotated_hits = [annotate_low_value_chunk(query, hit) for hit in hits]
     ranked = sorted(
-        enumerate(hits),
+        enumerate(annotated_hits),
         key=lambda item: (
             _table_field_label_priority(query, item[1]),
             -len(query_tokens & _tokens(_searchable_text(item[1]))),
             -metadata_score(item[1]),
+            -topic_score(item[1]),
             _structured_origin_priority(item[1]),
             -item[1].score,
+            low_value_penalty_score(item[1]),
             item[0],
         ),
     )
@@ -209,6 +228,11 @@ def _fallback_rank_hits(
     ]
     fallback_ranked = _promote_table_field_label_matches(query, fallback_ranked)
     return [hit for _, (hit, _) in fallback_ranked[:top_k]]
+
+
+def _rerank_sort_score(hit: SearchHit, raw_score: float) -> float:
+    value = hit.payload.get("_rerank_adjusted_score")
+    return float(value) if isinstance(value, int | float) else raw_score
 
 
 def _unique_hits(hits: list[SearchHit]) -> list[SearchHit]:
@@ -280,15 +304,6 @@ def _searchable_text(hit: SearchHit) -> str:
     section_path = payload.get("section_path")
     if isinstance(section_path, list):
         parts.extend(str(part) for part in section_path)
-    topics = payload.get("topics")
-    if isinstance(topics, list):
-        parts.extend(str(topic) for topic in topics)
-    llm_topics = payload.get("llm_topics")
-    if isinstance(llm_topics, list):
-        parts.extend(str(topic) for topic in llm_topics)
-    metadata_terms = payload.get("metadata_terms")
-    if isinstance(metadata_terms, list):
-        parts.extend(str(term) for term in metadata_terms)
     return " ".join(parts)
 
 

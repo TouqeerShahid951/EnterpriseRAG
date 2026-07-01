@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from ...auth.dependencies import require_admin_user, require_csrf, require_current_user
 from ...auth.permissions import can_manage_spaces, can_manage_users
+from ...auth.refresh_sessions import RefreshSessionStore, get_refresh_session_store
 from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
 from ...schemas.admin import Group, GroupCreateRequest, GroupDeleteRequest, GroupListResponse, GroupUpdateRequest
 from ...schemas.common import ErrorResponse, StubResponse
@@ -19,10 +20,11 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 def list_groups(
     request: Request,
     repo: IdentityRepository = Depends(get_identity_repository),
+    sessions: RefreshSessionStore = Depends(get_refresh_session_store),
 ) -> GroupListResponse:
     if repo.count_users() == 0:
         return GroupListResponse(items=[group_to_schema(group) for group in repo.list_groups()])
-    user = require_current_user(request, repo)
+    user = require_current_user(request, repo, sessions)
     if not (can_manage_users(user) or can_manage_spaces(user) or user.account_type == "auditor"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -95,3 +95,58 @@ def test_docling_progress_label_names_selected_and_pdf_pages() -> None:
     )
 
     assert label == "Docling OCR repairing selected pages 9-12 of 40 (PDF pages 120-123)"
+
+
+def test_docling_progress_reporter_uses_docling_parse_band() -> None:
+    backend = FakeBackend()
+    deps = IngestDependencies(
+        backend=backend,
+        storage=None,
+        image_asset_writer=None,
+        ollama=None,
+        vision=None,
+        sparse_embedder=None,
+        qdrant=None,
+        min_chars_per_page=10,
+        chunk_target_tokens=512,
+        chunk_overlap_tokens=64,
+        parent_max_tokens=2048,
+    )
+
+    steps._docling_progress_reporter(deps, "job-1")({
+        "phase": "ocr_repair",
+        "status": "running",
+        "current": 20,
+        "total": 40,
+        "pages": (120, 121, 122, 123),
+    })
+
+    assert backend.updates[-1]["progress_pct"] == 32
+    assert backend.updates[-1]["stage_progress"]["label"].startswith("Docling OCR repairing")
+
+
+def test_vision_progress_reporter_reaches_parse_completion() -> None:
+    backend = FakeBackend()
+    deps = IngestDependencies(
+        backend=backend,
+        storage=None,
+        image_asset_writer=None,
+        ollama=None,
+        vision=None,
+        sparse_embedder=None,
+        qdrant=None,
+        min_chars_per_page=10,
+        chunk_target_tokens=512,
+        chunk_overlap_tokens=64,
+        parent_max_tokens=2048,
+    )
+
+    steps._vision_layout_progress_reporter(deps, "job-1")({
+        "status": "complete",
+        "current": 3,
+        "total": 3,
+        "page": 7,
+    })
+
+    assert backend.updates[-1]["progress_pct"] == 35
+    assert backend.updates[-1]["stage_progress"]["label"] == "Vision layout repaired page 3 of 3 (PDF page 7)"

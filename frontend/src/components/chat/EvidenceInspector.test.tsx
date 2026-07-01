@@ -26,6 +26,7 @@ describe("EvidenceInspector", () => {
     );
 
     expect(markup).toContain("Open original source");
+    expect(markup).toContain("1 source");
     expect(markup).toContain('href="/source-viewer?docId=doc-1&amp;chunkId=doc-1%3A7"');
     expect(markup).toContain('target="_blank"');
   });

@@ -5,9 +5,13 @@ FROM python:3.12-slim
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=120 \
     PIP_RETRIES=5 \
+    DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app:/app/src \
+    RAG_EMBEDDING_PROVIDER=fastembed \
+    RAG_FASTEMBED_MODEL=nomic-ai/nomic-embed-text-v1.5-Q \
+    RAG_DENSE_CACHE_DIR=/models/fastembed \
     RAG_SPARSE_MODEL=Qdrant/bm25 \
     RAG_SPARSE_CACHE_DIR=/models/fastembed \
     RAG_RERANKER_MODEL=jinaai/jina-reranker-v1-turbo-en \
@@ -25,9 +29,25 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
         libreoffice \
         poppler-utils \
         fonts-dejavu \
+        libgssapi-krb5-2 \
+        docker-cli \
+        docker-compose \
+    && . /etc/os-release \
+    && debian_version="${VERSION_ID%%.*}" \
+    && curl -fSL -o packages-microsoft-prod.deb "https://packages.microsoft.com/config/debian/${debian_version}/packages-microsoft-prod.deb" \
+    && dpkg -i packages-microsoft-prod.deb \
+    && rm packages-microsoft-prod.deb \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
+    && apt-get install -y --no-install-recommends \
+        unixodbc \
+        unixodbc-dev \
     && useradd --create-home --shell /usr/sbin/nologin appuser \
     && mkdir -p /models/fastembed /models/huggingface /work
 

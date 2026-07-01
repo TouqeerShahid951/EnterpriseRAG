@@ -11,6 +11,8 @@ import { sourceViewerHref } from "../../utils/sourceViewer";
 import { EvidenceWindows } from "./EvidenceWindows";
 
 export function EvidenceInspector({ onClose, source, sourceCount, sourceNumber }: Props) {
+  const sourceCountLabel = formatSourceCount(sourceCount);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -24,13 +26,13 @@ export function EvidenceInspector({ onClose, source, sourceCount, sourceNumber }
     <div className="rag-evidence-drawer-shell">
       <button type="button" className="rag-evidence-drawer-backdrop" onClick={onClose} aria-label="Close source evidence panel" />
       <aside className="rag-evidence-panel" aria-label="Source evidence" role="dialog" aria-modal="true">
-        <div className="mb-6 flex items-center justify-between">
+        <div className="rag-evidence-panel-header">
           <div>
             <p className="sv-eyebrow">Citation Inspector</p>
             <h2 className="text-headline-sm text-on-surface">Evidence</h2>
-            <span className="sv-pill mt-2">{sourceCount} sources</span>
+            <span className="sv-pill mt-2">{sourceCountLabel}</span>
           </div>
-          <button type="button" onClick={onClose} className="rounded-full p-2 text-secondary hover:bg-surface-container-high hover:text-on-surface" aria-label="Close evidence panel">
+          <button type="button" onClick={onClose} className="rag-evidence-close" aria-label="Close evidence panel">
             <X size={16} />
           </button>
         </div>
@@ -41,15 +43,17 @@ export function EvidenceInspector({ onClose, source, sourceCount, sourceNumber }
 }
 
 export function MobileEvidencePanel({ onClose, source, sourceCount, sourceNumber }: Props) {
+  const sourceCountLabel = formatSourceCount(sourceCount);
+
   return (
     <section className="rag-mobile-evidence-panel rounded-lg border border-surface-border bg-surface p-4" aria-label="Source evidence">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <p className="sv-eyebrow">Citation Inspector</p>
           <h2 className="text-headline-sm text-on-surface">Evidence</h2>
-          <span className="sv-pill mt-2">{sourceCount} sources</span>
+          <span className="sv-pill mt-2">{sourceCountLabel}</span>
         </div>
-        <button type="button" onClick={onClose} className="rounded-full p-2 text-secondary hover:bg-surface-container-high hover:text-on-surface" aria-label="Close evidence panel">
+        <button type="button" onClick={onClose} className="rag-evidence-close" aria-label="Close evidence panel">
           <X size={16} />
         </button>
       </div>
@@ -87,7 +91,7 @@ function SourceEvidence({ compact = false, source, sourceNumber }: { compact?: b
 
       <EvidenceWindows source={source} />
 
-      <dl className={`grid gap-3 text-body-md ${compact ? "md:grid-cols-3" : ""}`}>
+      <dl className={`rag-evidence-facts text-body-md ${compact ? "md:grid-cols-3" : ""}`}>
         <Fact label="Citation" value={sourceName} />
         <Fact label="Page Range" value={pageLabel || "Unknown"} />
         <Fact label="Effective" value={formatDate(source.effective_date)} />
@@ -96,6 +100,10 @@ function SourceEvidence({ compact = false, source, sourceNumber }: { compact?: b
       <span className="sr-only">{citationLabel}</span>
     </div>
   );
+}
+
+function formatSourceCount(count: number): string {
+  return count === 1 ? "1 source" : `${count} sources`;
 }
 
 function sourceEvidenceSummary(source: SourceAnchor, legacyMatchCount: number): string {

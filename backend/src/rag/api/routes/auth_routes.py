@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from ...auth.dependencies import clear_auth_cookies, current_user_from_token, require_csrf, require_current_user, set_auth_cookies, to_auth_user
 from ...auth.issued_tokens import REFRESH_TOKEN_TYPE, create_auth_tokens
 from ...auth.passwords import hash_password, verify_password
-from ...auth.refresh_sessions import RefreshSessionStore, get_refresh_session_store, refresh_ttl_seconds
+from ...auth.refresh_sessions import RefreshSessionStore, auth_idle_ttl_seconds, get_refresh_session_store
 from ...core.config import settings
 from ...repositories.documents import DocumentRepository, get_document_repository
 from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
@@ -140,7 +140,7 @@ def change_password(
 
 def issue_login(response: Response, user: UserRecord, sessions: RefreshSessionStore) -> str:
     access_token, refresh_token, csrf_token = create_auth_tokens(user)
-    sessions.remember(user_id=user.id, refresh_token=refresh_token, ttl_seconds=refresh_ttl_seconds())
+    sessions.remember(user_id=user.id, refresh_token=refresh_token, ttl_seconds=auth_idle_ttl_seconds())
     set_auth_cookies(response, access_token=access_token, refresh_token=refresh_token, csrf_token=csrf_token)
     return csrf_token
 
@@ -156,7 +156,7 @@ def issue_refresh(
         user_id=user.id,
         old_token=old_refresh_token,
         new_token=refresh_token,
-        ttl_seconds=refresh_ttl_seconds(),
+        ttl_seconds=auth_idle_ttl_seconds(),
     )
     if not rotated:
         clear_auth_cookies(response)

@@ -15,7 +15,7 @@ from rag.shared.thinking import (
     strip_thinking_content,
 )
 
-from ..errors import OllamaEmbeddingUnavailable
+from ..errors import EmbeddingUnavailable
 from .http import ServiceRequestError, request_json
 from .ollama import METADATA_NUM_PREDICT, _coerce_metadata, _metadata_fallback, is_transient_service_error
 
@@ -154,7 +154,7 @@ class OpenAICompatibleClient:
                 if expected_dimension is None:
                     expected_dimension = len(vector)
                 elif len(vector) != expected_dimension:
-                    raise OllamaEmbeddingUnavailable("Embedding service returned inconsistent dimensions.")
+                    raise EmbeddingUnavailable("Embedding service returned inconsistent dimensions.")
             vectors.extend(batch_vectors)
             if progress is not None:
                 progress(len(vectors), len(texts))
@@ -187,7 +187,7 @@ class OpenAICompatibleClient:
                 if not is_transient_service_error(exc) or attempt >= 2:
                     break
                 self._backoff(attempt)
-        raise OllamaEmbeddingUnavailable((last_error.message if last_error else "embedding request failed")[:500])
+        raise EmbeddingUnavailable((last_error.message if last_error else "embedding request failed")[:500])
 
     def _backoff(self, attempt: int) -> None:
         delay = self.retry_base_seconds * (2**attempt)

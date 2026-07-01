@@ -68,6 +68,61 @@ class FakeManualQdrant:
         ][:limit]
 
 
+class FakeBroadDocumentQdrant:
+    def prepare_for_query(self, _vector_size: int) -> bool:
+        return True
+
+    def search(self, _vector: list[float], *, limit: int, qdrant_filter: dict[str, object]) -> list[SearchHit]:
+        return [
+            hit(
+                "policy:table",
+                doc_id="policy",
+                doc_title="Policy.pdf",
+                text="A table about document review schedules.",
+                chunk_type="table",
+            ),
+            hit(
+                "image:0",
+                doc_id="image",
+                doc_title="images.jpg",
+                text=(
+                    "Image description:\n"
+                    "A soldier is kneeling and handling ammunition while another soldier operates artillery."
+                ),
+                doc_summary="Soldiers handling ammunition and operating artillery.",
+                topics=["soldier", "artillery"],
+            ),
+        ][:limit]
+
+    def retrieve_authorized_chunks(
+        self,
+        *,
+        qdrant_filter: dict[str, object],
+        structured_only: bool,
+        limit: int,
+    ) -> list[SearchHit]:
+        return [
+            hit("policy:table", doc_id="policy", doc_title="Policy.pdf", text="A table about document review schedules.", chunk_type="table"),
+            hit("climate:1", doc_id="climate", doc_title="Climate.pdf", text="Climate report summary."),
+            hit(
+                "image:0",
+                doc_id="image",
+                doc_title="images.jpg",
+                text=(
+                    "Image description:\n"
+                    "A soldier is kneeling and handling ammunition while another soldier operates artillery."
+                ),
+                doc_summary="Soldiers handling ammunition and operating artillery.",
+                topics=["soldier", "artillery"],
+            ),
+        ][:limit]
+
+
+class FakeBroadSummaryQdrant(FakeBroadDocumentQdrant):
+    def search(self, _vector: list[float], *, limit: int, qdrant_filter: dict[str, object]) -> list[SearchHit]:
+        return []
+
+
 def hit(point_id: str, *, doc_id: str, doc_title: str, text: str, **payload: object) -> SearchHit:
     return SearchHit(
         point_id=point_id,
@@ -131,4 +186,39 @@ def test_exhaustive_document_scope_is_doc_type_agnostic() -> None:
 
     doc_ids = {item.payload["doc_id"] for item in hits}
     assert doc_ids == {"manual-a", "manual-b"}
+    assert all(item.payload.get("exhaustive_scope_origin") == "document_class_scope" for item in hits)
+
+
+def test_broad_document_scope_focuses_on_subject_tokens() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="What are all the soldiers doing in all the documents?"),
+        user=UserContext(user_id="user", email="user@example.com", group_paths=("/admin",)),
+        started=0.0,
+    )
+    ctx["route_plan"] = route_plan(ctx["request"].query)
+
+    hits = retrieve_candidates(ctx, config=FakeConfig(), ollama=FakeEmbedder(), qdrant=FakeBroadDocumentQdrant())
+
+    doc_ids = {item.payload["doc_id"] for item in hits}
+    assert doc_ids == {"image"}
+    assert hits[0].payload.get("exhaustive_scope_origin") == "document_class_scope"
+    assert "soldier" in hits[0].payload["text"].lower()
+
+
+def test_broad_document_summary_scope_still_keeps_all_documents() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="Summarize all documents"),
+        user=UserContext(user_id="user", email="user@example.com", group_paths=("/admin",)),
+        started=0.0,
+    )
+    ctx["route_plan"] = route_plan(ctx["request"].query)
+
+    hits = retrieve_candidates(ctx, config=FakeConfig(), ollama=FakeEmbedder(), qdrant=FakeBroadSummaryQdrant())
+
+    doc_ids = {item.payload["doc_id"] for item in hits}
+    assert doc_ids == {"policy", "climate", "image"}
     assert all(item.payload.get("exhaustive_scope_origin") == "document_class_scope" for item in hits)

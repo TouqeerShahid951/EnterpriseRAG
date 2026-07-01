@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from http.client import HTTPException as HttpClientException
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
@@ -30,7 +31,7 @@ from ...query.rag_config_mapping import rag_config_response
 from ...query.rag_config_service import (
     RagConfigValidationError,
     checked_record,
-    list_ollama_models,
+    discover_runtime_models,
     list_runtime_models,
     validate_rag_config,
 )
@@ -49,8 +50,15 @@ from ...schemas.rag_config import (
     VllmServiceDeploymentLimits,
 )
 from ...shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL, SUPPORTED_RERANKER_MODELS, is_supported_reranker_model
+from ...shared.fastembed_dense import DEFAULT_FASTEMBED_DENSE_MODEL
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+VLLM_DEPLOYMENT_SERVICE_NAMES = {
+    "text": "vllm-text",
+    "embeddings": "vllm-embeddings",
+    "vision": "vllm-vision",
+}
 
 
 @router.get("/rag-config", response_model=RagConfigResponse, summary="Get workspace RAG model runtime config")
@@ -94,31 +102,31 @@ def list_workspace_rag_models(
 ) -> RagModelDiscoveryResponse:
     _ = user
     candidate = _record_from_discovery_request(payload)
-    try:
-        if candidate.provider == "ollama":
-            chat_models = list_ollama_models(candidate)
-            embedding_models = chat_models
-            role_models = {role: chat_models for role in ("reasoning", "routing", "faithfulness", "ingestion", "vision")}
-        else:
-            chat_models, embedding_models, role_models = list_runtime_models(candidate)
-    except RagConfigValidationError as exc:
-        raise _rag_config_http_error(exc) from exc
+    discovery = discover_runtime_models(candidate)
     return RagModelDiscoveryResponse(
         provider=candidate.provider,
+        embedding_provider=candidate.embedding_provider,
+        reasoning_provider=candidate.effective_reasoning_provider,
+        routing_provider=candidate.effective_routing_provider,
+        faithfulness_provider=candidate.effective_faithfulness_provider,
+        ingestion_provider=candidate.effective_ingestion_provider,
+        vision_provider=candidate.effective_vision_provider,
         base_url=candidate.base_url,
         embedding_base_url=candidate.embedding_base_url,
         reasoning_base_url=candidate.effective_reasoning_base_url,
         routing_base_url=candidate.effective_routing_base_url,
         faithfulness_base_url=candidate.effective_faithfulness_base_url,
         ingestion_base_url=candidate.effective_ingestion_base_url,
-        chat_models=chat_models,
-        embedding_models=embedding_models,
-        reasoning_models=role_models["reasoning"],
-        routing_models=role_models["routing"],
-        faithfulness_models=role_models["faithfulness"],
-        ingestion_models=role_models["ingestion"],
-        vision_models=role_models.get("vision", chat_models),
-        available_models=chat_models,
+        vision_base_url=candidate.effective_vision_base_url,
+        chat_models=discovery.chat_models,
+        embedding_models=discovery.embedding_models,
+        reasoning_models=discovery.role_models["reasoning"],
+        routing_models=discovery.role_models["routing"],
+        faithfulness_models=discovery.role_models["faithfulness"],
+        ingestion_models=discovery.role_models["ingestion"],
+        vision_models=discovery.role_models.get("vision", discovery.chat_models),
+        available_models=discovery.chat_models,
+        model_statuses={key: _model_status_payload(status) for key, status in discovery.statuses.items()},
     )
 
 
@@ -144,12 +152,19 @@ def test_workspace_rag_config(
         raise _rag_config_http_error(exc) from exc
     return RagConfigTestResponse(
         provider=candidate.provider,
+        embedding_provider=candidate.embedding_provider,
+        reasoning_provider=candidate.effective_reasoning_provider,
+        routing_provider=candidate.effective_routing_provider,
+        faithfulness_provider=candidate.effective_faithfulness_provider,
+        ingestion_provider=candidate.effective_ingestion_provider,
+        vision_provider=candidate.effective_vision_provider,
         base_url=candidate.base_url,
         embedding_base_url=candidate.embedding_base_url,
         reasoning_base_url=candidate.effective_reasoning_base_url,
         routing_base_url=candidate.effective_routing_base_url,
         faithfulness_base_url=candidate.effective_faithfulness_base_url,
         ingestion_base_url=candidate.effective_ingestion_base_url,
+        vision_base_url=candidate.effective_vision_base_url,
         chat_models=result.chat_models,
         embedding_models=result.embedding_models or result.chat_models,
         reasoning_models=result.reasoning_models or result.chat_models,
@@ -161,10 +176,14 @@ def test_workspace_rag_config(
         thinking_enabled=candidate.thinking_enabled,
         json_num_predict=candidate.json_num_predict,
         retrieval_token_budget=candidate.retrieval_token_budget,
+        query_planner_enabled=candidate.query_planner_enabled,
         reranker_model=candidate.reranker_model,
         health=RagConfigHealth(
             status="ok",
-            message=f"{'vLLM' if candidate.provider == 'vllm' else 'Ollama'} runtime validated successfully.",
+            message=(
+                "Configured inference roles and "
+                f"{_embedding_provider_display(candidate.embedding_provider)} embeddings validated successfully."
+            ),
             embedding_dimension=result.embedding_dimension,
             chat_latency_ms=result.chat_latency_ms,
             embed_latency_ms=result.embed_latency_ms,
@@ -224,7 +243,7 @@ def update_vllm_deployment_config(
         _vllm_record_from_request(
             payload,
             apply_status="restart_required",
-            message="Saved. Apply restart to recreate the vLLM containers with these limits.",
+            message="Saved. Restart the affected vLLM service when you want it to use these limits.",
             updated_by=user.id,
         )
     )
@@ -242,16 +261,18 @@ def apply_vllm_deployment_config(
     user: UserRecord = Depends(require_platform_admin_user),
     repo: VllmDeploymentConfigRepository = Depends(get_vllm_deployment_config_repository),
 ) -> VllmDeploymentConfigResponse:
+    requested_services = _deployment_services_from_request(payload)
+    service_message = _deployment_service_message(requested_services)
     applying = repo.save_active(
         _vllm_record_from_request(
             payload,
             apply_status="applying",
-            message="Deployment controller is recreating the vLLM containers.",
+            message=f"Deployment controller is recreating {service_message}.",
             updated_by=user.id,
         )
     )
     try:
-        controller_message = _call_deployment_controller(applying)
+        controller_message = _call_deployment_controller(applying, services=requested_services)
     except RuntimeError as exc:
         failed = repo.save_active(
             _vllm_record_from_request(
@@ -278,15 +299,18 @@ def apply_vllm_deployment_config(
 
 def _record_from_request(payload: RagConfigRequest) -> RagConfigRecord:
     provider = _provider(payload.provider)
+    reasoning_provider = _role_provider(payload.reasoning_provider, fallback=provider)
+    routing_provider = _role_provider(payload.routing_provider, fallback=reasoning_provider)
+    faithfulness_provider = _role_provider(payload.faithfulness_provider, fallback=provider)
+    ingestion_provider = _role_provider(payload.ingestion_provider, fallback=provider)
+    vision_provider = _role_provider(payload.vision_provider, fallback=ingestion_provider)
+    embedding_provider = _embedding_provider(payload.embedding_provider, provider=provider)
     base_url = _base_url_from_host_port(payload.host, payload.port, provider=provider)
-    embedding_base_url = (
-        base_url
-        if provider == "ollama"
-        else _base_url_from_host_port(
-            payload.embedding_host or "",
-            payload.embedding_port or 8000,
-            provider=provider,
-        )
+    embedding_base_url = _embedding_base_url(
+        payload.embedding_host,
+        payload.embedding_port,
+        embedding_provider=embedding_provider,
+        fallback=base_url if _embedding_matches_chat_provider(embedding_provider, provider) else "",
     )
     chat_model = payload.chat_model.strip()
     embed_model = payload.embed_model.strip()
@@ -309,31 +333,76 @@ def _record_from_request(payload: RagConfigRequest) -> RagConfigRecord:
                 "message": "Selected reranker model is not supported by this workspace.",
             },
         )
+    reasoning_base_url = _role_base_url(
+        payload.reasoning_host,
+        payload.reasoning_port,
+        fallback=base_url if reasoning_provider == provider else "",
+        provider=reasoning_provider,
+    )
+    routing_base_url = _role_base_url(
+        payload.routing_host,
+        payload.routing_port,
+        fallback=(
+            reasoning_base_url
+            if routing_provider == reasoning_provider
+            else base_url
+            if routing_provider == provider
+            else ""
+        ),
+        provider=routing_provider,
+    )
+    faithfulness_base_url = _role_base_url(
+        payload.faithfulness_host,
+        payload.faithfulness_port,
+        fallback=base_url if faithfulness_provider == provider else "",
+        provider=faithfulness_provider,
+    )
+    ingestion_base_url = _role_base_url(
+        payload.ingestion_host,
+        payload.ingestion_port,
+        fallback=base_url if ingestion_provider == provider else "",
+        provider=ingestion_provider,
+    )
+    vision_base_url = _role_base_url(
+        payload.vision_host,
+        payload.vision_port,
+        fallback=(
+            ingestion_base_url
+            if vision_provider == ingestion_provider
+            else base_url
+            if vision_provider == provider
+            else ""
+        ),
+        provider=vision_provider,
+    )
     return RagConfigRecord(
         provider=provider,
+        embedding_provider=embedding_provider,
+        reasoning_provider=reasoning_provider,
+        routing_provider=routing_provider,
+        faithfulness_provider=faithfulness_provider,
+        ingestion_provider=ingestion_provider,
+        vision_provider=vision_provider,
         base_url=base_url,
         embedding_base_url=embedding_base_url,
-        reasoning_base_url=_role_base_url(payload.reasoning_host, payload.reasoning_port, fallback=base_url, provider=provider),
-        routing_base_url=_role_base_url(
-            payload.routing_host,
-            payload.routing_port,
-            fallback=_role_base_url(payload.reasoning_host, payload.reasoning_port, fallback=base_url, provider=provider),
-            provider=provider,
-        ),
-        faithfulness_base_url=_role_base_url(payload.faithfulness_host, payload.faithfulness_port, fallback=base_url, provider=provider),
-        ingestion_base_url=_role_base_url(payload.ingestion_host, payload.ingestion_port, fallback=base_url, provider=provider),
+        reasoning_base_url=reasoning_base_url,
+        routing_base_url=routing_base_url,
+        faithfulness_base_url=faithfulness_base_url,
+        ingestion_base_url=ingestion_base_url,
+        vision_base_url=vision_base_url,
         chat_model=chat_model,
         embed_model=embed_model,
         faithfulness_model=faithfulness_model or None,
         chat_timeout_seconds=payload.chat_timeout_seconds,
         embed_timeout_seconds=payload.embed_timeout_seconds,
-        thinking_enabled=payload.thinking_enabled if provider == "ollama" else False,
+        thinking_enabled=payload.thinking_enabled,
         reasoning_model=reasoning_model or routing_model or None,
         routing_model=routing_model or None,
         ingestion_model=ingestion_model or None,
         vision_model=vision_model or None,
         json_num_predict=payload.json_num_predict,
         retrieval_token_budget=payload.retrieval_token_budget,
+        query_planner_enabled=payload.query_planner_enabled,
         reranker_model=reranker_model,
     )
 
@@ -386,11 +455,11 @@ def _service_limits_response(record: VllmServiceLimitsRecord) -> VllmServiceDepl
     )
 
 
-def _call_deployment_controller(record: VllmDeploymentConfigRecord) -> str:
+def _call_deployment_controller(record: VllmDeploymentConfigRecord, *, services: list[str]) -> str:
     url = settings.deployment_controller_url.rstrip("/") + "/v1/vllm/apply"
     request = urlrequest.Request(
         url,
-        data=json.dumps(_deployment_controller_payload(record)).encode("utf-8"),
+        data=json.dumps(_deployment_controller_payload(record, services=services)).encode("utf-8"),
         method="POST",
         headers={
             "Content-Type": "application/json",
@@ -405,6 +474,8 @@ def _call_deployment_controller(record: VllmDeploymentConfigRecord) -> str:
         raise RuntimeError(f"Deployment controller returned {exc.code}: {_truncate(error_body)}") from exc
     except urlerror.URLError as exc:
         raise RuntimeError(f"Deployment controller is unreachable: {exc.reason}") from exc
+    except (HttpClientException, OSError) as exc:
+        raise RuntimeError(f"Deployment controller connection failed: {exc}") from exc
     except TimeoutError as exc:
         raise RuntimeError("Deployment controller timed out while applying vLLM limits.") from exc
 
@@ -415,16 +486,34 @@ def _call_deployment_controller(record: VllmDeploymentConfigRecord) -> str:
     message = parsed.get("message")
     if isinstance(message, str) and message.strip():
         return message.strip()
-    return "vLLM services were recreated with the saved deployment limits."
+    return f"{_deployment_service_message(services)} recreated with the saved deployment limits."
 
 
-def _deployment_controller_payload(record: VllmDeploymentConfigRecord) -> dict[str, object]:
+def _deployment_controller_payload(record: VllmDeploymentConfigRecord, *, services: list[str]) -> dict[str, object]:
     return {
-        "services": ["vllm-text", "vllm-embeddings", "vllm-vision"],
+        "services": services,
         "text": _service_limits_payload(record.text),
         "embeddings": _service_limits_payload(record.embeddings),
         "vision": _service_limits_payload(record.vision),
     }
+
+
+def _deployment_services_from_request(payload: VllmDeploymentConfigRequest) -> list[str]:
+    requested = payload.services or ["text", "embeddings", "vision"]
+    services: list[str] = []
+    for key in requested:
+        service_name = VLLM_DEPLOYMENT_SERVICE_NAMES[key]
+        if service_name not in services:
+            services.append(service_name)
+    return services
+
+
+def _deployment_service_message(services: list[str]) -> str:
+    if len(services) == 1:
+        return services[0]
+    if len(services) == 2:
+        return f"{services[0]} and {services[1]}"
+    return ", ".join(services[:-1]) + f", and {services[-1]}"
 
 
 def _service_limits_payload(record: VllmServiceLimitsRecord) -> dict[str, object]:
@@ -439,6 +528,16 @@ def _service_limits_payload(record: VllmServiceLimitsRecord) -> dict[str, object
     return payload
 
 
+def _model_status_payload(status) -> dict[str, object]:
+    return {
+        "status": status.status,
+        "provider": status.provider,
+        "base_url": status.base_url,
+        "message": status.message,
+        "code": status.code,
+    }
+
+
 def _truncate(value: str, limit: int = 1200) -> str:
     clean = value.strip()
     return clean if len(clean) <= limit else f"{clean[:limit]}..."
@@ -446,30 +545,77 @@ def _truncate(value: str, limit: int = 1200) -> str:
 
 def _record_from_discovery_request(payload: RagModelDiscoveryRequest) -> RagConfigRecord:
     provider = _provider(payload.provider)
+    reasoning_provider = _role_provider(payload.reasoning_provider, fallback=provider)
+    routing_provider = _role_provider(payload.routing_provider, fallback=reasoning_provider)
+    faithfulness_provider = _role_provider(payload.faithfulness_provider, fallback=provider)
+    ingestion_provider = _role_provider(payload.ingestion_provider, fallback=provider)
+    vision_provider = _role_provider(payload.vision_provider, fallback=ingestion_provider)
+    embedding_provider = _embedding_provider(payload.embedding_provider, provider=provider)
     base_url = _base_url_from_host_port(payload.host, payload.port, provider=provider)
+    reasoning_base_url = _role_base_url(
+        payload.reasoning_host,
+        payload.reasoning_port,
+        fallback=base_url if reasoning_provider == provider else "",
+        provider=reasoning_provider,
+    )
+    routing_base_url = _role_base_url(
+        payload.routing_host,
+        payload.routing_port,
+        fallback=(
+            reasoning_base_url
+            if routing_provider == reasoning_provider
+            else base_url
+            if routing_provider == provider
+            else ""
+        ),
+        provider=routing_provider,
+    )
+    faithfulness_base_url = _role_base_url(
+        payload.faithfulness_host,
+        payload.faithfulness_port,
+        fallback=base_url if faithfulness_provider == provider else "",
+        provider=faithfulness_provider,
+    )
+    ingestion_base_url = _role_base_url(
+        payload.ingestion_host,
+        payload.ingestion_port,
+        fallback=base_url if ingestion_provider == provider else "",
+        provider=ingestion_provider,
+    )
+    vision_base_url = _role_base_url(
+        payload.vision_host,
+        payload.vision_port,
+        fallback=(
+            ingestion_base_url
+            if vision_provider == ingestion_provider
+            else base_url
+            if vision_provider == provider
+            else ""
+        ),
+        provider=vision_provider,
+    )
     return RagConfigRecord(
         provider=provider,
+        embedding_provider=embedding_provider,
+        reasoning_provider=reasoning_provider,
+        routing_provider=routing_provider,
+        faithfulness_provider=faithfulness_provider,
+        ingestion_provider=ingestion_provider,
+        vision_provider=vision_provider,
         base_url=base_url,
-        embedding_base_url=(
-            base_url
-            if provider == "ollama"
-            else _base_url_from_host_port(
-                payload.embedding_host or "",
-                payload.embedding_port or 8000,
-                provider=provider,
-            )
+        embedding_base_url=_embedding_base_url(
+            payload.embedding_host,
+            payload.embedding_port,
+            embedding_provider=embedding_provider,
+            fallback=base_url if _embedding_matches_chat_provider(embedding_provider, provider) else "",
         ),
-        reasoning_base_url=_role_base_url(payload.reasoning_host, payload.reasoning_port, fallback=base_url, provider=provider),
-        routing_base_url=_role_base_url(
-            payload.routing_host,
-            payload.routing_port,
-            fallback=_role_base_url(payload.reasoning_host, payload.reasoning_port, fallback=base_url, provider=provider),
-            provider=provider,
-        ),
-        faithfulness_base_url=_role_base_url(payload.faithfulness_host, payload.faithfulness_port, fallback=base_url, provider=provider),
-        ingestion_base_url=_role_base_url(payload.ingestion_host, payload.ingestion_port, fallback=base_url, provider=provider),
+        reasoning_base_url=reasoning_base_url,
+        routing_base_url=routing_base_url,
+        faithfulness_base_url=faithfulness_base_url,
+        ingestion_base_url=ingestion_base_url,
+        vision_base_url=vision_base_url,
         chat_model="",
-        embed_model="",
+        embed_model=DEFAULT_FASTEMBED_DENSE_MODEL if embedding_provider == "fastembed" else "",
         faithfulness_model=None,
         chat_timeout_seconds=payload.timeout_seconds,
         embed_timeout_seconds=payload.timeout_seconds,
@@ -496,9 +642,17 @@ def _base_url_from_host_port(host: str, port: int, *, provider: str) -> str:
 
 
 def _role_base_url(host: str | None, port: int | None, *, fallback: str, provider: str) -> str:
-    if provider == "ollama" or not host:
+    if not host:
+        if not fallback:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "invalid_inference_endpoint",
+                    "message": f"{_provider_display(provider)} role endpoint host is required when it differs from chat.",
+                },
+            )
         return fallback
-    return _base_url_from_host_port(host, port or 8000, provider=provider)
+    return _base_url_from_host_port(host, port or _default_port(provider), provider=provider)
 
 
 def _provider(value: str) -> str:
@@ -509,6 +663,71 @@ def _provider(value: str) -> str:
             detail={"code": "invalid_provider", "message": "Inference provider must be ollama or vllm."},
         )
     return provider
+
+
+def _embedding_provider(value: str, *, provider: str) -> str:
+    _ = provider
+    embedding_provider = value.strip().lower()
+    if embedding_provider not in {"ollama", "openai_compatible", "fastembed"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "invalid_embedding_provider",
+                "message": "Embedding provider must be ollama, openai_compatible, or fastembed.",
+            },
+        )
+    return embedding_provider
+
+
+def _role_provider(value: str | None, *, fallback: str) -> str:
+    return _provider(value) if value and value.strip() else fallback
+
+
+def _embedding_base_url(
+    host: str | None,
+    port: int | None,
+    *,
+    embedding_provider: str,
+    fallback: str,
+) -> str:
+    if embedding_provider == "fastembed":
+        return fallback
+    provider = "vllm" if embedding_provider == "openai_compatible" else "ollama"
+    if not host:
+        if fallback:
+            return fallback
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "invalid_embedding_endpoint",
+                "message": f"{_embedding_provider_display(embedding_provider)} embedding host is required when it differs from chat.",
+            },
+        )
+    return _base_url_from_host_port(host, port or _default_port(provider), provider=provider)
+
+
+def _embedding_matches_chat_provider(embedding_provider: str, provider: str) -> bool:
+    return (
+        embedding_provider == "fastembed"
+        or (embedding_provider == "ollama" and provider == "ollama")
+        or (embedding_provider == "openai_compatible" and provider == "vllm")
+    )
+
+
+def _default_port(provider: str) -> int:
+    return 8000 if provider == "vllm" else 11434
+
+
+def _provider_display(provider: str) -> str:
+    return "vLLM" if provider == "vllm" else "Ollama"
+
+
+def _embedding_provider_display(value: str) -> str:
+    if value == "fastembed":
+        return "FastEmbed local"
+    if value == "openai_compatible":
+        return "OpenAI-compatible"
+    return "Ollama"
 
 
 def _rag_config_http_error(exc: RagConfigValidationError) -> HTTPException:

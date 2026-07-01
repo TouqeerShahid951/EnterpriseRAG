@@ -70,6 +70,10 @@ class PostgresFolderScheduleRepository(PostgresConnectionMixin):
         row = self._execute_optional("SELECT * FROM folder_ingest_schedules WHERE id = %s", (schedule_id,))
         return schedule_from_row(row) if row else None
 
+    def delete_schedule(self, schedule_id: str) -> FolderScheduleRecord | None:
+        row = self._execute_optional("DELETE FROM folder_ingest_schedules WHERE id = %s RETURNING *", (schedule_id,))
+        return schedule_from_row(row) if row else None
+
     def update_schedule_status(self, schedule_id: str, *, status: str) -> FolderScheduleRecord | None:
         row = self._execute_optional(
             "UPDATE folder_ingest_schedules SET status = %s, updated_at = NOW() WHERE id = %s RETURNING *",

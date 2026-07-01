@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from rag.api.routes import admin_routes, artifact_job_routes, audit_routes, auth_routes, document_routes, evaluation_routes, folder_ingest_routes, ingest_job_routes, query_routes, review_routes, upload_routes
+from rag.api.routes import admin_routes, artifact_job_routes, audit_routes, auth_routes, connector_routes, document_routes, evaluation_routes, folder_ingest_routes, ingest_job_routes, query_routes, review_routes, upload_routes
 from rag.bootstrap.schema import ensure_postgres_schema
 from rag.core.config import settings
 from rag.internal import (
@@ -78,6 +78,7 @@ def create_app() -> FastAPI:
     for router in (
         auth_routes.router,
         upload_routes.router,
+        connector_routes.router,
         folder_ingest_routes.router,
         ingest_job_routes.router,
         document_routes.router,

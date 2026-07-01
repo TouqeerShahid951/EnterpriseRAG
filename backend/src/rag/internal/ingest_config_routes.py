@@ -25,6 +25,8 @@ async def get_internal_ingest_config(
     config = effective_ingest_config(repo=repo)
     return IngestRuntimeConfigResponse(
         worker_concurrency=config.worker_concurrency,
+        quality_preset=config.quality_preset,
         ocr_review_confidence_threshold=config.ocr_review_confidence_threshold,
+        vision_layout_repair_enabled=config.vision_layout_repair_enabled,
         source=config.source,
     )

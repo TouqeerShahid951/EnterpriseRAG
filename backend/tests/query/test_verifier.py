@@ -65,3 +65,35 @@ def test_verifier_does_not_prune_passing_aggregation_evidence() -> None:
     assert result["verifier_decision"] == "pass"
     assert [item.payload["doc_id"] for item in result["retrieved_hits"]] == ["fir-1", "fir-2", "manual"]
     assert result["evidence_quality"].in_scope_doc_ids == frozenset({"fir-1", "fir-2"})
+
+
+def test_evidence_builder_keeps_aggregation_rows_exact() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="list all crimes in all FIRs"),
+        user=UserContext(user_id="user", email="user@example.com", group_paths=("/admin",)),
+        started=perf_counter(),
+    )
+    ctx["route_plan"] = RoutePlan(
+        original_query=ctx["request"].query,
+        resolved_query=ctx["request"].query,
+        intent="aggregation",
+        public_intent="aggregation",
+        chunk_granularity="section",
+        top_k=24,
+    )
+    ctx["retrieved_hits"] = [
+        hit(
+            "fir-1:crime",
+            doc_id="fir-1",
+            doc_title="FIR_01.pdf",
+            text="Crime: robbery",
+            parent_text="A long parent section with unrelated rows.",
+            parent_page_start=1,
+        )
+    ]
+
+    result = QueryNodes.evidence_builder(object.__new__(QueryNodes), ctx)
+
+    assert result["retrieved_hits"][0].payload["text"] == "Crime: robbery"

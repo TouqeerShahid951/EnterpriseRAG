@@ -8,6 +8,7 @@ export { ApiClientError } from "./response";
 type JsonBody = object | unknown[] | string | number | boolean | null;
 
 export const AUTH_SESSION_EXPIRED_EVENT = "agenticrag:auth-session-expired";
+export const AUTH_SESSION_TOUCHED_EVENT = "agenticrag:auth-session-touched";
 
 export interface ApiClientOptions {
   baseUrl?: string;
@@ -26,6 +27,7 @@ export class ApiClient {
   private readonly loginPath: string;
   private readonly onSessionExpired?: () => void;
   private refreshPromise: Promise<boolean> | null = null;
+  private sessionExpiredNotified = false;
 
   constructor(options: ApiClientOptions = {}) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? getConfiguredBaseUrl());
@@ -106,6 +108,10 @@ export class ApiClient {
 
   private async fetchWithAuthRefresh(path: string, init: RequestInit): Promise<Response> {
     const response = await this.fetchOnce(path, init);
+    if (response.ok) {
+      this.sessionExpiredNotified = false;
+      this.notifySessionTouched();
+    }
     if (response.status !== 401 || !this.canRefreshFor(path)) {
       return response;
     }
@@ -148,7 +154,13 @@ export class ApiClient {
           [JSON_CONTENT_TYPE_HEADER]: JSON_CONTENT_TYPE,
         },
       })
-        .then((response) => response.ok)
+        .then((response) => {
+          if (response.ok) {
+            this.sessionExpiredNotified = false;
+            this.notifySessionTouched();
+          }
+          return response.ok;
+        })
         .catch(() => false)
         .finally(() => {
           this.refreshPromise = null;
@@ -190,7 +202,7 @@ export class ApiClient {
 
   private toUrl(path: string): string {
     if (/^https?:\/\//i.test(path)) {
-      throw new Error("ApiClient paths must be root-relative and use VITE_API_BASE_URL.");
+      throw new Error("ApiClient paths must be root-relative and use the configured API base URL.");
     }
 
     const relativePath = path.startsWith("/") ? path : `/${path}`;
@@ -202,12 +214,20 @@ export class ApiClient {
   }
 
   private notifySessionExpired(): void {
+    if (this.sessionExpiredNotified) return;
+    this.sessionExpiredNotified = true;
     if (this.onSessionExpired) {
       this.onSessionExpired();
       return;
     }
     if (typeof window !== "undefined") {
       window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED_EVENT));
+    }
+  }
+
+  private notifySessionTouched(): void {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event(AUTH_SESSION_TOUCHED_EVENT));
     }
   }
 }

@@ -60,7 +60,7 @@
   justify-items: center;
   gap: 1rem;
   border: 1px solid var(--color-surface-border);
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--color-surface-container-low) 82%, transparent), var(--color-surface-card)),
     var(--color-surface-card);
@@ -75,7 +75,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid color-mix(in srgb, var(--color-success-green) 26%, var(--color-surface-border));
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
   background: color-mix(in srgb, var(--color-success-green) 12%, var(--color-surface-container-low));
   color: var(--color-success-green);
 }
@@ -404,7 +404,7 @@
   align-content: center;
   gap: 0.35rem;
   border: 1px dashed var(--color-surface-border);
-  border-radius: 0.65rem;
+  border-radius: 0.5rem;
   background: color-mix(in srgb, var(--color-surface-container-low) 76%, transparent);
   padding: 1.2rem;
   color: var(--color-secondary);
@@ -442,7 +442,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--color-surface-border);
-  border-radius: 0.65rem;
+  border-radius: 0.5rem;
   background: var(--color-surface-container-low);
 }
 
@@ -595,9 +595,9 @@
 .review-helper-text,
 .review-correction-panel > .review-placeholder,
 .review-correction-panel > .rounded-lg,
-.review-correction-panel > .faham-error-banner,
-.review-correction-panel > .faham-success-banner,
-.review-correction-panel > .faham-planned-banner {
+.review-correction-panel > .Prudentia-error-banner,
+.review-correction-panel > .Prudentia-success-banner,
+.review-correction-panel > .Prudentia-planned-banner {
   margin-inline: 0.8rem;
 }
 

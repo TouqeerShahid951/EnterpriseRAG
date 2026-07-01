@@ -42,8 +42,16 @@ class TableRow:
     source_regions: list[dict[str, object]] = field(default_factory=list)
 
 
-def table_chunks(item: ParsedPdfItem, target_tokens: int, *, table_title_hint: str = "") -> list[TableRow]:
+def table_chunks(
+    item: ParsedPdfItem,
+    target_tokens: int,
+    *,
+    table_title_hint: str = "",
+    include_row_chunks: bool = True,
+) -> list[TableRow]:
     full_table_chunks = _full_table_chunks(item, target_tokens, table_title_hint=table_title_hint)
+    if not include_row_chunks:
+        return full_table_chunks
     return [*full_table_chunks, *_table_row_chunks(item, target_tokens, table_title_hint=table_title_hint)]
 
 

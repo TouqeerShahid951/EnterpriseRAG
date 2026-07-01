@@ -3,6 +3,7 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from rag.shared.fastembed_dense import DEFAULT_FASTEMBED_CACHE_DIR, DEFAULT_FASTEMBED_DENSE_MODEL
 from rag.shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL
 
 
@@ -35,8 +36,9 @@ class Settings(BaseSettings):
     deployment_controller_timeout_seconds: float = Field(default=600.0, gt=0, le=1800)
     jwt_secret_key: str = "replace-with-local-jwt-secret"
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 480
+    jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 7
+    auth_idle_timeout_minutes: int = 30
     access_cookie_name: str = "agenticrag_access_token"
     refresh_cookie_name: str = "agenticrag_refresh_token"
     csrf_cookie_name: str = "csrf_token"
@@ -61,6 +63,21 @@ class Settings(BaseSettings):
     graphrag_enabled: bool = False
     graphrag_community_collection: str = "graphrag_community_summaries"
     rag_model_provider: str = "ollama"
+    rag_embedding_provider: str = "fastembed"
+    rag_chat_provider: str | None = None
+    rag_reasoning_provider: str | None = None
+    rag_routing_provider: str | None = None
+    rag_faithfulness_provider: str | None = None
+    rag_ingestion_provider: str | None = None
+    rag_vision_provider: str | None = None
+    rag_chat_base_url: str | None = None
+    rag_reasoning_base_url: str | None = None
+    rag_routing_base_url: str | None = None
+    rag_faithfulness_base_url: str | None = None
+    rag_ingestion_base_url: str | None = None
+    rag_vision_base_url: str | None = None
+    rag_chat_model: str | None = None
+    rag_vision_model: str | None = None
     ollama_base_url: str = "http://host.docker.internal:11434"
     ollama_chat_model: str = "llama3.1:8b"
     ollama_embed_model: str = "nomic-embed-text:latest"
@@ -78,7 +95,9 @@ class Settings(BaseSettings):
     vllm_routing_base_url: str | None = None
     vllm_faithfulness_base_url: str | None = None
     vllm_ingestion_base_url: str | None = None
+    vllm_vision_base_url: str | None = None
     vllm_chat_model: str = "default"
+    vllm_vision_model_id: str = "vision"
     vllm_text_max_model_len: int = Field(default=4096, ge=256, le=262144)
     vllm_text_gpu_memory_utilization: float = Field(default=0.12, gt=0.0, le=1.0)
     vllm_text_kv_cache_memory_bytes: str = "2G"
@@ -95,6 +114,8 @@ class Settings(BaseSettings):
     vllm_vision_max_num_batched_tokens: int = Field(default=2048, ge=256, le=262144)
     embeddings_base_url: str = "http://host.docker.internal:8001"
     embedding_model_id: str = "default"
+    rag_fastembed_model: str = DEFAULT_FASTEMBED_DENSE_MODEL
+    rag_dense_cache_dir: str | None = DEFAULT_FASTEMBED_CACHE_DIR
     rag_top_k: int = 10
     rag_sparse_model: str = "Qdrant/bm25"
     rag_sparse_cache_dir: str | None = "/models/fastembed"
@@ -140,13 +161,31 @@ class Settings(BaseSettings):
     folder_snapshot_max_files: int = 100
     folder_snapshot_max_bytes: int = 5 * 1024 * 1024 * 1024
     folder_scheduler_interval_seconds: int = 60
+    folder_sources_root: str = "/folder-sources"
     ingest_queue_backend: str = "celery"
     ingest_queue_name: str = "ingest:jobs"
     ingest_task_name: str = "apps.ingestion.tasks.ingest_document"
+    graphrag_queue_name: str = "graphrag:jobs"
+    graphrag_index_task_name: str = "apps.ingestion.tasks.index_document_graphrag"
+    graphrag_partition_rebuild_task_name: str = "apps.ingestion.tasks.rebuild_graphrag_partition"
     ingest_worker_boot_concurrency: int = Field(default=1, ge=1, le=10)
+    ingestion_quality_preset: str = "fast"
     ocr_review_confidence_threshold: float = Field(default=0.9, ge=0.0, le=1.0)
     ingest_maintenance_interval_seconds: int = Field(default=30, ge=5)
     ingest_stale_after_seconds: int = Field(default=120, ge=60)
+    connector_secrets_key: str = "replace-with-local-connector-secrets-key"
+    connector_secrets_key_ring: str = ""
+    connector_default_batch_size: int = Field(default=500, ge=1, le=5000)
+    connector_default_row_limit: int = Field(default=5000, ge=1, le=1000000)
+    connector_include_stale_in_retrieval: bool = False
+    connector_live_sql_enabled: bool = True
+    connector_live_sql_max_rows: int = Field(default=100, ge=1, le=10000)
+    connector_live_sql_timeout_seconds: int = Field(default=15, ge=1, le=300)
+    connector_live_sql_max_scopes: int = Field(default=5, ge=1, le=50)
+    connector_live_sql_max_schedules: int = Field(default=5, ge=1, le=50)
+    connector_live_sql_max_repair_attempts: int = Field(default=2, ge=0, le=5)
+    connector_live_sql_result_verifier_enabled: bool = True
+    connector_live_sql_verifier_sample_rows: int = Field(default=5, ge=0, le=20)
     minio_endpoint: str = "minio:9000"
     minio_access_key: str = "agenticrag"
     minio_secret_key: str = "agenticrag-local-minio-password"

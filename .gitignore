@@ -17,6 +17,10 @@ dist/
 *.tsbuildinfo
 .vite/
 model-cache/
+tmp/
+folder-sources/*
+!folder-sources/.gitkeep
+frontend/*.log
 frontend/vite.config.js
 frontend/vite.config.d.ts
 out/

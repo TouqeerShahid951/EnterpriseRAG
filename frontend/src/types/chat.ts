@@ -1,4 +1,4 @@
-import type { ClearanceLevel, ParserProvenance, QueryRequest, QueryIntent, RAGResponse, SourceAnchor, UploadJobStage, UploadJobStageProgress, UploadJobState, UploadJobStep } from "./api";
+import type { ClearanceLevel, ParserProvenance, QueryRequest, QueryIntent, QuerySourceMode, RAGResponse, SourceAnchor, UploadJobStage, UploadJobStageProgress, UploadJobState, UploadJobStep } from "./api";
 
 export interface PdfUploadDraft {
   files: File[];
@@ -58,6 +58,8 @@ export interface AssistantTurn {
   createdAt: string;
   groupPath?: string | null;
   documentIds?: string[];
+  sourceMode?: QuerySourceMode;
+  querySourceId?: string | null;
   progress: QueryProgressItem[];
   response?: RAGResponse;
   streamText?: string;
@@ -88,6 +90,7 @@ export interface SavedChatSessionPage {
 export interface QueryRunVariables {
   assistantTurnId: string;
   request: QueryRequest;
+  sessionId: string;
   signal: AbortSignal;
 }
 

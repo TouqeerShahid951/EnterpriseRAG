@@ -175,6 +175,7 @@ class OpenAICompatibleClient:
         prompt: str,
         model: str | None,
         system: str,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
         return self._chat(
@@ -182,7 +183,7 @@ class OpenAICompatibleClient:
             model=model or self.chat_model,
             base_url=self.reasoning_base_url,
             system=system,
-            max_tokens=self.json_num_predict,
+            max_tokens=max_tokens or self.json_num_predict,
             temperature=0,
             json_response=True,
             cancellation_token=cancellation_token,

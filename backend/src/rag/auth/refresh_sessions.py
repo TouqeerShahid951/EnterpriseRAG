@@ -12,8 +12,10 @@ from ..core.config import settings
 
 class RefreshSessionStore(Protocol):
     def remember(self, *, user_id: str, refresh_token: str, ttl_seconds: int) -> None: ...
+    def touch(self, *, user_id: str, refresh_token: str, ttl_seconds: int) -> bool: ...
     def rotate(self, *, user_id: str, old_token: str, new_token: str, ttl_seconds: int) -> bool: ...
     def revoke(self, refresh_token: str) -> None: ...
+    def revoke_user(self, user_id: str) -> None: ...
 
 
 class InMemoryRefreshSessionStore:
@@ -22,6 +24,17 @@ class InMemoryRefreshSessionStore:
 
     def remember(self, *, user_id: str, refresh_token: str, ttl_seconds: int) -> None:
         self._sessions[_digest(refresh_token)] = (user_id, _expires_at(ttl_seconds))
+
+    def touch(self, *, user_id: str, refresh_token: str, ttl_seconds: int) -> bool:
+        key = _digest(refresh_token)
+        stored = self._sessions.get(key)
+        if stored is None:
+            return False
+        if stored[0] != user_id or stored[1] <= datetime.now(UTC):
+            self._sessions.pop(key, None)
+            return False
+        self._sessions[key] = (user_id, _expires_at(ttl_seconds))
+        return True
 
     def rotate(self, *, user_id: str, old_token: str, new_token: str, ttl_seconds: int) -> bool:
         old_key = _digest(old_token)
@@ -33,6 +46,11 @@ class InMemoryRefreshSessionStore:
 
     def revoke(self, refresh_token: str) -> None:
         self._sessions.pop(_digest(refresh_token), None)
+
+    def revoke_user(self, user_id: str) -> None:
+        for key, (session_user_id, _expires_at_value) in list(self._sessions.items()):
+            if session_user_id == user_id:
+                self._sessions.pop(key, None)
 
 
 class RedisRefreshSessionStore:
@@ -47,6 +65,12 @@ class RedisRefreshSessionStore:
     def remember(self, *, user_id: str, refresh_token: str, ttl_seconds: int) -> None:
         self._client.setex(self._key(refresh_token), ttl_seconds, user_id)
 
+    def touch(self, *, user_id: str, refresh_token: str, ttl_seconds: int) -> bool:
+        key = self._key(refresh_token)
+        if self._client.get(key) != user_id:
+            return False
+        return bool(self._client.expire(key, ttl_seconds))
+
     def rotate(self, *, user_id: str, old_token: str, new_token: str, ttl_seconds: int) -> bool:
         old_owner = self._client.getdel(self._key(old_token))
         if old_owner != user_id:
@@ -57,12 +81,26 @@ class RedisRefreshSessionStore:
     def revoke(self, refresh_token: str) -> None:
         self._client.delete(self._key(refresh_token))
 
+    def revoke_user(self, user_id: str) -> None:
+        cursor = 0
+        while True:
+            cursor, keys = self._client.scan(cursor=cursor, match=f"{self._prefix}:*", count=100)
+            owned_keys = [key for key in keys if self._client.get(key) == user_id]
+            if owned_keys:
+                self._client.delete(*owned_keys)
+            if cursor == 0:
+                break
+
     def _key(self, refresh_token: str) -> str:
         return f"{self._prefix}:{_digest(refresh_token)}"
 
 
 def refresh_ttl_seconds() -> int:
     return int(timedelta(days=settings.jwt_refresh_token_expire_days).total_seconds())
+
+
+def auth_idle_ttl_seconds() -> int:
+    return int(timedelta(minutes=settings.auth_idle_timeout_minutes).total_seconds())
 
 
 @lru_cache

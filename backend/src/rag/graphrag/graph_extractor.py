@@ -52,10 +52,99 @@ class GraphExtractor:
         self.model = model
 
     def extract(self, chunk: ChunkRecord) -> GraphExtractionResult:
+        seeded_result = self._extract_seeded(chunk)
         llm_result = self._extract_with_llm(chunk)
         if llm_result is not None and (llm_result.entities or llm_result.relationships or llm_result.claims):
-            return llm_result
-        return self._extract_deterministic(chunk)
+            return _merge_results(chunk, seeded_result, llm_result)
+        return _merge_results(chunk, seeded_result, self._extract_deterministic(chunk))
+
+    def _extract_seeded(self, chunk: ChunkRecord) -> GraphExtractionResult:
+        entities_by_key: dict[str, GraphEntity] = {}
+        for raw in chunk.named_entities:
+            name = _clean_entity(str(raw.get("text") or raw.get("name") or ""))
+            if not _is_useful_entity(name):
+                continue
+            entity = GraphEntity.from_name(
+                name=name,
+                entity_type=str(raw.get("type") or "entity"),
+                partition=chunk.partition_key,
+                confidence=0.72,
+            )
+            entities_by_key.setdefault(entity.normalized_name, entity)
+
+        claims: list[GraphClaim] = []
+        relationships: list[GraphRelationship] = []
+        for raw in chunk.claims[:_MAX_CLAIMS]:
+            entity_name = _clean_entity(str(raw.get("entity", "")))
+            attribute = _clean_entity(str(raw.get("attribute", "")))
+            value = _clean_entity(str(raw.get("value", "")))
+            if not entity_name or not attribute or not value:
+                continue
+            entity = entities_by_key.get(normalized_name(entity_name)) or GraphEntity.from_name(
+                name=entity_name,
+                entity_type="entity",
+                partition=chunk.partition_key,
+                confidence=0.7,
+            )
+            entities_by_key.setdefault(entity.normalized_name, entity)
+            evidence = _claim_evidence(chunk.text, entity_name, attribute, value)
+            claim_text = f"{attribute}: {value}"
+            claims.append(
+                GraphClaim(
+                    id=str(raw.get("id") or stable_id("graph-claim", chunk.chunk_id, entity.id, claim_text)),
+                    entity_id=entity.id,
+                    entity_name=entity.name,
+                    claim=claim_text,
+                    doc_id=chunk.doc_id,
+                    chunk_id=chunk.chunk_id,
+                    evidence_text=evidence,
+                    confidence=0.7,
+                )
+            )
+            if _is_relationship_target(value) and normalized_name(value) != entity.normalized_name:
+                target = entities_by_key.get(normalized_name(value)) or GraphEntity.from_name(
+                    name=value,
+                    entity_type="entity",
+                    partition=chunk.partition_key,
+                    confidence=0.55,
+                )
+                entities_by_key.setdefault(target.normalized_name, target)
+                rel_type = _relationship_type(attribute)
+                relationships.append(
+                    GraphRelationship(
+                        id=stable_id("graph-rel", chunk.chunk_id, entity.id, target.id, rel_type),
+                        source_entity_id=entity.id,
+                        target_entity_id=target.id,
+                        source_name=entity.name,
+                        target_name=target.name,
+                        type=rel_type,
+                        description=f"{entity.name} {attribute} {target.name}.",
+                        doc_id=chunk.doc_id,
+                        chunk_id=chunk.chunk_id,
+                        evidence_text=evidence,
+                        confidence=0.55,
+                        weight=0.55,
+                    )
+                )
+
+        entities = list(entities_by_key.values())
+        mentions = [
+            _mention_for_entity(
+                entity,
+                chunk=chunk,
+                evidence_text=_evidence_window(chunk.text, entity.name),
+                confidence=entity.confidence,
+            )
+            for entity in entities
+        ]
+        return GraphExtractionResult(
+            doc_id=chunk.doc_id,
+            chunk_id=chunk.chunk_id,
+            entities=entities,
+            mentions=mentions,
+            relationships=relationships,
+            claims=claims,
+        )
 
     def _extract_with_llm(self, chunk: ChunkRecord) -> GraphExtractionResult | None:
         generate_json = getattr(self.llm, "generate_json", None)
@@ -319,6 +408,74 @@ def _relationship_evidence(text: str, left: str, right: str) -> str:
     start = max(0, min(left_index, right_index) - 120)
     end = min(len(text), max(left_index + len(left), right_index + len(right)) + 120)
     return text[start:end].strip()
+
+
+def _claim_evidence(text: str, entity: str, attribute: str, value: str) -> str:
+    for needle in (value, entity, attribute):
+        if needle and needle.lower() in text.lower():
+            return _evidence_window(text, needle, radius=180)
+    return text.strip()[:360]
+
+
+def _is_relationship_target(value: str) -> bool:
+    if not _is_useful_entity(value):
+        return False
+    return any(ch.isalpha() for ch in value)
+
+
+def _merge_results(
+    chunk: ChunkRecord,
+    seeded: GraphExtractionResult,
+    extracted: GraphExtractionResult,
+) -> GraphExtractionResult:
+    entities_by_id: dict[str, GraphEntity] = {}
+    for entity in [*seeded.entities, *extracted.entities]:
+        existing = entities_by_id.get(entity.id)
+        if existing is None or entity.confidence > existing.confidence:
+            entities_by_id[entity.id] = entity
+    entities = list(entities_by_id.values())[:_MAX_ENTITIES]
+    entity_ids = {entity.id for entity in entities}
+    mentions = _unique_by_id(
+        [
+            mention
+            for mention in [*seeded.mentions, *extracted.mentions]
+            if mention.entity_id in entity_ids
+        ]
+    )
+    relationships = _unique_by_id(
+        [
+            relationship
+            for relationship in [*seeded.relationships, *extracted.relationships]
+            if relationship.source_entity_id in entity_ids and relationship.target_entity_id in entity_ids
+        ]
+    )
+    claims = _unique_by_id(
+        [
+            claim
+            for claim in [*seeded.claims, *extracted.claims]
+            if claim.entity_id in entity_ids
+        ]
+    )
+    return GraphExtractionResult(
+        doc_id=chunk.doc_id,
+        chunk_id=chunk.chunk_id,
+        entities=entities,
+        mentions=mentions,
+        relationships=relationships[:_MAX_RELATIONSHIPS],
+        claims=claims[:_MAX_CLAIMS],
+    )
+
+
+def _unique_by_id(items: list[Any]) -> list[Any]:
+    seen: set[str] = set()
+    unique: list[Any] = []
+    for item in items:
+        item_id = str(getattr(item, "id", ""))
+        if not item_id or item_id in seen:
+            continue
+        seen.add(item_id)
+        unique.append(item)
+    return unique
 
 
 def _float(value: object, default: float) -> float:

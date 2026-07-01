@@ -7,8 +7,9 @@ from fastapi import Depends, HTTPException, Request, Response, status
 from ..core.config import settings
 from ..repositories.identity import IdentityRepository, UserRecord, get_identity_repository
 from ..schemas.auth import AuthUser
-from .issued_tokens import ACCESS_TOKEN_TYPE
+from .issued_tokens import ACCESS_TOKEN_TYPE, REFRESH_TOKEN_TYPE
 from .permissions import can_manage_users, can_manage_workspace_config, can_review, is_global_admin
+from .refresh_sessions import RefreshSessionStore, auth_idle_ttl_seconds, get_refresh_session_store
 from .tokens import TokenError, decode_token
 
 
@@ -102,9 +103,42 @@ def current_user_from_token(
     return user
 
 
+def require_active_refresh_session(request: Request, user: UserRecord, sessions: RefreshSessionStore) -> None:
+    token = request.cookies.get(settings.refresh_cookie_name)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "refresh_required", "message": "Refresh session required."},
+        )
+
+    try:
+        payload = decode_token(token, secret_key=settings.jwt_secret_key, expected_type=REFRESH_TOKEN_TYPE)
+    except TokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "invalid_refresh_session", "message": "Refresh session is invalid or expired."},
+        ) from exc
+
+    if str(payload.get("sub", "")) != user.id or int(payload.get("permission_version", -1)) != user.permission_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "stale_permissions", "message": "User permissions changed. Log in again."},
+        )
+
+    if not sessions.touch(user_id=user.id, refresh_token=token, ttl_seconds=auth_idle_ttl_seconds()):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "session_idle_timeout",
+                "message": f"Session expired after {settings.auth_idle_timeout_minutes} minutes of inactivity. Log in again.",
+            },
+        )
+
+
 def require_current_user(
     request: Request,
     repo: IdentityRepository = Depends(get_identity_repository),
+    sessions: RefreshSessionStore = Depends(get_refresh_session_store),
 ) -> UserRecord:
     token = request.cookies.get(settings.access_cookie_name)
     if not token:
@@ -112,14 +146,17 @@ def require_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "auth_required", "message": "Authentication required."},
         )
-    return current_user_from_token(token, token_type=ACCESS_TOKEN_TYPE, repo=repo)
+    user = current_user_from_token(token, token_type=ACCESS_TOKEN_TYPE, repo=repo)
+    require_active_refresh_session(request, user, sessions)
+    return user
 
 
 def require_admin_user(
     request: Request,
     repo: IdentityRepository = Depends(get_identity_repository),
+    sessions: RefreshSessionStore = Depends(get_refresh_session_store),
 ) -> UserRecord:
-    user = require_current_user(request, repo)
+    user = require_current_user(request, repo, sessions)
     if not is_global_admin(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -132,8 +169,9 @@ def require_admin_user(
 def require_platform_admin_user(
     request: Request,
     repo: IdentityRepository = Depends(get_identity_repository),
+    sessions: RefreshSessionStore = Depends(get_refresh_session_store),
 ) -> UserRecord:
-    user = require_current_user(request, repo)
+    user = require_current_user(request, repo, sessions)
     if not can_manage_workspace_config(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -146,8 +184,9 @@ def require_platform_admin_user(
 def require_user_manager(
     request: Request,
     repo: IdentityRepository = Depends(get_identity_repository),
+    sessions: RefreshSessionStore = Depends(get_refresh_session_store),
 ) -> UserRecord:
-    user = require_current_user(request, repo)
+    user = require_current_user(request, repo, sessions)
     if not can_manage_users(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -160,8 +199,9 @@ def require_user_manager(
 def require_review_user(
     request: Request,
     repo: IdentityRepository = Depends(get_identity_repository),
+    sessions: RefreshSessionStore = Depends(get_refresh_session_store),
 ) -> UserRecord:
-    user = require_current_user(request, repo)
+    user = require_current_user(request, repo, sessions)
     if not can_review(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -65,6 +65,7 @@ class LocalRagService:
             ),
             faithfulness_model=self.rag_config.faithfulness_model or self.rag_config.chat_model,
             reranker_model=self.rag_config.reranker_model,
+            query_planner_enabled=self.rag_config.query_planner_enabled,
         )
         self.artifact_job_service = artifact_job_service or default_artifact_job_service()
         self.graph = QueryGraphRunner(self.nodes)

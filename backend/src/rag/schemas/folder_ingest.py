@@ -8,11 +8,29 @@ from .common import ContractModel
 from .upload import DocType
 
 
-FolderSourceType = Literal["snapshot", "minio_prefix"]
+FolderSourceType = Literal[
+    "snapshot",
+    "local_folder",
+    "minio_prefix",
+    "connector",
+    "sql_server",
+    "postgres",
+    "mysql",
+    "mariadb",
+    "mongodb",
+    "oracle",
+    "opensearch",
+    "elasticsearch",
+    "redis",
+    "cassandra",
+    "fake",
+]
 FolderScheduleType = Literal["one_time", "recurring"]
 FolderScheduleStatus = Literal["scheduled", "active", "paused", "cancelled", "complete", "failed"]
 FolderRunStatus = Literal["scheduled", "running", "complete", "failed", "cancelled"]
 FolderRunItemStatus = Literal["scheduled", "queued", "skipped", "failed"]
+ConnectorIngestionMode = Literal["json_snapshot", "direct_chunks"]
+ConnectorDeletionPolicy = Literal["keep_deleted_documents", "mark_as_stale", "archive_from_retrieval", "delete_from_index_after_review"]
 
 
 class RecurrenceWindow(ContractModel):
@@ -38,6 +56,33 @@ class FolderScheduleBase(ContractModel):
 class MinioPrefixScheduleCreateRequest(FolderScheduleBase):
     bucket: str = Field(..., min_length=1, max_length=255)
     prefix: str = Field(..., min_length=1, max_length=1024)
+
+
+class LocalFolderScheduleCreateRequest(FolderScheduleBase):
+    path: str = Field(..., min_length=1, max_length=2048)
+
+
+class LocalFolderDirectory(ContractModel):
+    name: str
+    path: str
+    has_children: bool = False
+
+
+class LocalFolderListResponse(ContractModel):
+    root_path: str
+    current_path: str
+    parent_path: str | None = None
+    items: list[LocalFolderDirectory] = Field(default_factory=list)
+
+
+class ConnectorScheduleCreateRequest(FolderScheduleBase):
+    connector_profile_id: str = Field(..., min_length=1)
+    selection: dict[str, object] = Field(default_factory=dict)
+    identity_fields: list[str] = Field(..., min_length=1, max_length=16)
+    ingestion_mode: ConnectorIngestionMode = "json_snapshot"
+    deletion_policy: ConnectorDeletionPolicy = "keep_deleted_documents"
+    batch_size: int = Field(default=500, ge=1, le=5000)
+    row_limit: int = Field(default=5000, ge=1, le=1000000)
 
 
 class FolderScheduleUpdateRequest(ContractModel):

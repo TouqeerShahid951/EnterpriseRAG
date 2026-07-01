@@ -99,19 +99,19 @@ export function useToast(): ToastContextValue {
 
 function ToastViewport({ dismiss, toasts }: { dismiss: (id: number) => void; toasts: ToastItem[] }) {
   return (
-    <section className="faham-toast-viewport" aria-label="Notifications">
+    <section className="Prudentia-toast-viewport" aria-label="Notifications">
       {toasts.map((toast) => (
         <article
-          className="faham-toast"
+          className="Prudentia-toast"
           data-closing={toast.closing || undefined}
           data-tone={toast.tone}
           key={toast.id}
           role={toast.tone === "error" ? "alert" : "status"}
         >
-          <span className="faham-toast-icon" aria-hidden="true">
+          <span className="Prudentia-toast-icon" aria-hidden="true">
             <ToastIcon tone={toast.tone} />
           </span>
-          <span className="faham-toast-copy">
+          <span className="Prudentia-toast-copy">
             <strong>{toast.title}</strong>
             {toast.description ? <span>{toast.description}</span> : null}
           </span>

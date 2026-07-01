@@ -25,11 +25,6 @@ class ArtifactJobDetail(ArtifactJobSummary):
     validation_results: dict[str, object] | None = None
     stage_timings: dict[str, ArtifactStageTiming] = Field(default_factory=dict)
     errors: list[dict[str, object]] = Field(default_factory=list)
-    attempt_count: int = 0
-    max_attempts: int = 3
-    started_at: str | None = None
-    completed_at: str | None = None
-    last_heartbeat_at: str | None = None
 
 
 class ArtifactClarificationRequest(ContractModel):

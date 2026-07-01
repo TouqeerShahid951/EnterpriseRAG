@@ -285,8 +285,11 @@ def _candidate_row(hit: SearchHit, *, rank: int) -> dict[str, Any]:
         "chunk_type": _optional_str(payload.get("chunk_type")),
         "structured_origin": _optional_str(payload.get("structured_origin")),
         "rerank_score": _optional_float(payload.get("_rerank_score")),
+        "rerank_adjusted_score": _optional_float(payload.get("_rerank_adjusted_score")),
         "rerank_status": _optional_str(payload.get("_rerank_status")),
         "rerank_error": _optional_str(payload.get("_rerank_error")),
+        "low_value_penalty": _optional_float(payload.get("_low_value_penalty")),
+        "low_value_reasons": _optional_str_list(payload.get("_low_value_reasons")),
     }
     return {key: value for key, value in row.items() if value is not None}
 
@@ -352,6 +355,12 @@ def _optional_float(value: object) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
+
+
+def _optional_str_list(value: object) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    return [str(item) for item in value if str(item).strip()]
 
 
 def default_evaluation_run_executor(config: Settings | None = None) -> EvaluationRunExecutor:

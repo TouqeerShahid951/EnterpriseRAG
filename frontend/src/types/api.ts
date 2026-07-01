@@ -16,14 +16,18 @@ export type ClearanceLevel =
   | "NATO_SECRET"
   | "COSMIC_TOP_SECRET";
 export type UploadJobState = "scheduled" | "queued" | "processing" | "complete" | "failed" | "human_review" | "cancelled";
-export type IngestJobOrigin = "upload" | "reingest" | "restore" | "folder" | "unknown";
+export type IngestJobOrigin = "upload" | "reingest" | "restore" | "folder" | "connector" | "unknown";
 export type DocumentIngestStatus = UploadJobState | "unknown";
 export type UploadJobStage =
   | "scheduled"
   | "queued"
   | "reading_file"
   | "parsing_document"
+  | "docling_repair"
+  | "vision_layout_repair"
+  | "image_analysis"
   | "generating_metadata"
+  | "metadata_enrichment"
   | "chunking_document"
   | "embedding_chunks"
   | "indexing_vectors"
@@ -34,13 +38,31 @@ export type UploadJobStage =
   | "human_review"
   | "cancelled";
 export type UploadJobStepState = "pending" | "active" | "complete" | "failed" | "needs_review" | "cancelled";
-export type UploadJobProgressUnit = "pages" | "chunks" | "vectors" | "files" | "metadata";
+export type UploadJobProgressUnit = "pages" | "chunks" | "vectors" | "files" | "metadata" | "images";
 export type ReviewStatus = "pending" | "approved" | "rejected";
-export type FolderSourceType = "snapshot" | "minio_prefix";
+export type FolderSourceType =
+  | "snapshot"
+  | "local_folder"
+  | "minio_prefix"
+  | "connector"
+  | "sql_server"
+  | "postgres"
+  | "mysql"
+  | "mariadb"
+  | "mongodb"
+  | "oracle"
+  | "opensearch"
+  | "elasticsearch"
+  | "redis"
+  | "cassandra"
+  | "fake";
 export type FolderScheduleType = "one_time" | "recurring";
 export type FolderScheduleStatus = "scheduled" | "active" | "paused" | "cancelled" | "complete" | "failed";
 export type FolderRunStatus = "scheduled" | "running" | "complete" | "failed" | "cancelled";
 export type FolderRunItemStatus = "scheduled" | "queued" | "skipped" | "failed";
+export type ConnectorType = "sql_server" | "postgres" | "mysql" | "mariadb" | "mongodb" | "oracle" | "opensearch" | "elasticsearch" | "redis" | "cassandra" | "fake";
+export type ConnectorIngestionMode = "json_snapshot" | "direct_chunks";
+export type ConnectorDeletionPolicy = "keep_deleted_documents" | "mark_as_stale" | "archive_from_retrieval" | "delete_from_index_after_review";
 export type EvaluationRunStatus = "queued" | "running" | "complete" | "partial" | "failed" | "cancelled";
 export type EvaluationFailureStage =
   | "dataset"
@@ -66,9 +88,13 @@ export type {
   HighlightRange,
   QueryIntent,
   QueryRequest,
+  QuerySource,
+  QuerySourceKind,
+  QuerySourceMode,
   RAGResponse,
   RagSseEvent,
   SourceAnchor,
+  SourceExpansion,
   SourceRegion,
   SseEventBase,
   SseEventType,
@@ -111,9 +137,58 @@ export interface IngestWorkerState {
   active_jobs: number;
 }
 
+export interface GraphRAGWorkerState {
+  name: string;
+  pool_size: number;
+  active_jobs: number;
+}
+
+export interface GraphRAGActiveTask {
+  task_id: string;
+  task_name: string;
+  worker: string;
+  job_id: string | null;
+  document_id: string | null;
+  started_at: ISODateString | null;
+  elapsed_seconds: number | null;
+}
+
+export interface GraphRAGQueuedTask {
+  task_id: string;
+  task_name: string;
+  job_id: string | null;
+  document_id: string | null;
+}
+
+export interface GraphRAGStatus {
+  enabled: boolean;
+  queue_name: string;
+  queued_jobs: number | null;
+  queue_error: string | null;
+  worker_online: boolean;
+  worker_error: string | null;
+  active_jobs: number;
+  observed_pool_size: number;
+  workers: GraphRAGWorkerState[];
+  active_tasks: GraphRAGActiveTask[];
+  queued_tasks: GraphRAGQueuedTask[];
+}
+
+export interface GraphRAGCancelResponse {
+  task_id: string;
+  job_id: string;
+  document_id: string;
+  status: "cancelled";
+  message: string;
+}
+
+export type IngestionQualityPreset = "fast" | "balanced" | "high_accuracy";
+
 export interface IngestConfig {
   worker_concurrency: number;
+  quality_preset: IngestionQualityPreset;
   ocr_review_confidence_threshold: number;
+  vision_layout_repair_enabled: boolean;
   recommended_concurrency: number;
   worker_online: boolean;
   active_jobs: number;
@@ -131,6 +206,8 @@ export interface VllmServiceDeploymentLimits {
   max_num_batched_tokens: number;
   kv_cache_memory_bytes?: string | null;
 }
+
+export type VllmDeploymentService = "text" | "embeddings" | "vision";
 
 export interface VllmDeploymentConfig {
   source: string;
@@ -150,6 +227,7 @@ export interface AuditEvent {
   target_id: string | null;
   target_user_email: string | null;
   target_user_name: string | null;
+  target_document_title: string | null;
   payload: Record<string, unknown>;
   created_at: ISODateString | null;
 }
@@ -177,6 +255,12 @@ export interface AuditEventListResponse {
 export interface RagConfig {
   source: "workspace" | "env" | string;
   provider: "ollama" | "vllm";
+  embedding_provider: "ollama" | "openai_compatible" | "fastembed";
+  reasoning_provider?: "ollama" | "vllm" | null;
+  routing_provider?: "ollama" | "vllm" | null;
+  faithfulness_provider?: "ollama" | "vllm" | null;
+  ingestion_provider?: "ollama" | "vllm" | null;
+  vision_provider?: "ollama" | "vllm" | null;
   base_url: string;
   host: string;
   port: number;
@@ -195,6 +279,9 @@ export interface RagConfig {
   ingestion_base_url?: string | null;
   ingestion_host?: string | null;
   ingestion_port?: number | null;
+  vision_base_url?: string | null;
+  vision_host?: string | null;
+  vision_port?: number | null;
   chat_model: string;
   embed_model: string;
   reasoning_model: string | null;
@@ -205,6 +292,7 @@ export interface RagConfig {
   thinking_enabled: boolean;
   json_num_predict: number;
   retrieval_token_budget: number;
+  query_planner_enabled: boolean;
   reranker_model: string;
   chat_timeout_seconds: number;
   embed_timeout_seconds: number;
@@ -213,12 +301,19 @@ export interface RagConfig {
 
 export interface RagConfigTestResult {
   provider: "ollama" | "vllm";
+  embedding_provider: "ollama" | "openai_compatible" | "fastembed";
+  reasoning_provider?: "ollama" | "vllm" | null;
+  routing_provider?: "ollama" | "vllm" | null;
+  faithfulness_provider?: "ollama" | "vllm" | null;
+  ingestion_provider?: "ollama" | "vllm" | null;
+  vision_provider?: "ollama" | "vllm" | null;
   base_url: string;
   embedding_base_url: string;
   reasoning_base_url?: string | null;
   routing_base_url?: string | null;
   faithfulness_base_url?: string | null;
   ingestion_base_url?: string | null;
+  vision_base_url?: string | null;
   chat_models: string[];
   embedding_models: string[];
   reasoning_models?: string[];
@@ -229,6 +324,7 @@ export interface RagConfigTestResult {
   thinking_enabled: boolean;
   json_num_predict: number;
   retrieval_token_budget: number;
+  query_planner_enabled: boolean;
   reranker_model: string;
   health: RagConfigHealth;
 }
@@ -244,12 +340,19 @@ export interface RerankerModelsResponse {
 
 export interface RagModelDiscoveryResult {
   provider: "ollama" | "vllm";
+  embedding_provider: "ollama" | "openai_compatible" | "fastembed";
+  reasoning_provider?: "ollama" | "vllm" | null;
+  routing_provider?: "ollama" | "vllm" | null;
+  faithfulness_provider?: "ollama" | "vllm" | null;
+  ingestion_provider?: "ollama" | "vllm" | null;
+  vision_provider?: "ollama" | "vllm" | null;
   base_url: string;
   embedding_base_url: string;
   reasoning_base_url?: string | null;
   routing_base_url?: string | null;
   faithfulness_base_url?: string | null;
   ingestion_base_url?: string | null;
+  vision_base_url?: string | null;
   chat_models: string[];
   embedding_models: string[];
   reasoning_models?: string[];
@@ -257,6 +360,15 @@ export interface RagModelDiscoveryResult {
   faithfulness_models?: string[];
   ingestion_models?: string[];
   vision_models?: string[];
+  model_statuses?: Record<string, RagModelDiscoveryStatus>;
+}
+
+export interface RagModelDiscoveryStatus {
+  status: "ok" | "empty" | "error" | string;
+  provider: "ollama" | "vllm" | "fastembed" | "openai_compatible" | string;
+  base_url: string;
+  message: string;
+  code?: string | null;
 }
 
 export interface LoginResponse {
@@ -407,6 +519,56 @@ export interface RecurrenceWindow {
   end_time: string;
 }
 
+export interface ConnectorProfile {
+  id: string;
+  name: string;
+  connector_type: ConnectorType | string;
+  public_config: Record<string, unknown>;
+  secrets_redacted: Record<string, string>;
+  created_by: string | null;
+  last_test_status: "ok" | "failed" | null;
+  last_test_message: string | null;
+  last_tested_at: ISODateString | null;
+  created_at: ISODateString | null;
+  updated_at: ISODateString | null;
+}
+
+export interface ConnectorTestResponse {
+  status: "ok" | "failed";
+  message: string;
+  detail: Record<string, unknown>;
+  profile: ConnectorProfile | null;
+}
+
+export interface ConnectorSchemaSnapshot {
+  id: string;
+  profile_id: string;
+  connector_type: string;
+  schema_json: Record<string, unknown>;
+  status: "ok" | "failed";
+  error_message: string | null;
+  created_at: ISODateString | null;
+}
+
+export type ConnectorSchemaCatalogStatus = "draft" | "reviewed" | "approved" | "disabled";
+
+export interface ConnectorSchemaCatalog {
+  id: string;
+  profile_id: string;
+  connector_type: string;
+  status: ConnectorSchemaCatalogStatus | string;
+  group_path: string;
+  owner_group_path?: string;
+  shared_group_paths: string[];
+  access_group_paths: string[];
+  clearance_level: ClearanceLevel | string;
+  catalog_json: Record<string, unknown>;
+  created_by: string | null;
+  approved_by: string | null;
+  created_at: ISODateString | null;
+  updated_at: ISODateString | null;
+}
+
 export interface FolderRunItem {
   id: string;
   run_id: string;
@@ -471,6 +633,10 @@ export interface Document {
   title: string;
   doc_type: DocType | null;
   group_path: string;
+  owner_group_path: string;
+  shared_group_paths: string[];
+  access_group_paths: string[];
+  governance_owner: "space" | "system";
   clearance_level: ClearanceLevel;
   effective_date: ISODateString | null;
   expiry_date: ISODateString | null;
@@ -535,6 +701,21 @@ export interface DocumentReingestResponse {
   document_id: string;
   job_id: string;
   status: "queued";
+}
+
+export interface DocumentGraphEnrichmentResponse {
+  document_id: string;
+  job_id: string;
+  status: "queued";
+  message: string;
+}
+
+export interface DocumentSharesResponse {
+  document_id: string;
+  owner_group_path: string;
+  shared_group_paths: string[];
+  access_group_paths: string[];
+  governance_owner: "space" | "system";
 }
 
 export interface Group {

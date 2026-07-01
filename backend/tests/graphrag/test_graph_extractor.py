@@ -64,3 +64,34 @@ def test_deterministic_extraction_creates_mentions_and_cooccurrence_edges() -> N
     assert len(result.mentions) == len(result.entities)
     assert result.relationships
     assert all(relationship.doc_id == "doc-1" for relationship in result.relationships)
+
+
+def test_seeded_chunk_claims_and_entities_are_preserved() -> None:
+    chunk = ChunkRecord(
+        doc_id="doc-1",
+        chunk_id="chunk-1",
+        text="Acme Corp operates Project Apollo in New York.",
+        doc_title="Doc",
+        group_path="/ops",
+        clearance_level="NATO_RESTRICTED",
+        clearance_rank=1,
+        claims=[
+            {
+                "id": "claim-1",
+                "entity": "Acme Corp",
+                "attribute": "operates",
+                "value": "Project Apollo",
+            }
+        ],
+        named_entities=[
+            {"text": "Acme Corp", "type": "organization"},
+            {"text": "New York", "type": "location"},
+        ],
+    )
+
+    result = GraphExtractor().extract(chunk)
+
+    entities_by_name = {entity.normalized_name: entity for entity in result.entities}
+    assert {"acme corp", "new york", "project apollo"}.issubset(entities_by_name)
+    assert any(claim.id == "claim-1" and claim.claim == "operates: Project Apollo" for claim in result.claims)
+    assert any(relationship.type == "operates" for relationship in result.relationships)

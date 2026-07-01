@@ -65,5 +65,9 @@ class UserUpdateRequest(ContractModel):
     is_active: bool | None = None
 
 
+class UserPasswordResetRequest(ContractModel):
+    temporary_password: str = Field(..., min_length=8)
+
+
 class UserGroupRequest(ContractModel):
     group_path: str

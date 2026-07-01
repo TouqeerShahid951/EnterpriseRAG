@@ -48,6 +48,42 @@ describe("audit formatting helpers", () => {
     expect(auditImpactSummary(upload)).toBe("Queued upload Budget.pdf in /finance");
     expect(payloadSummary({ alpha: "one", beta: 2, nested: { ok: true } })).toBe('alpha: one, beta: 2, nested: {"ok":true}');
   });
+
+  it("summarizes admin password reset events", () => {
+    const event = auditEvent({
+      event_type: "admin.user.password_reset",
+      target_type: "user",
+      target_id: "user-1",
+      target_user_email: "member@example.test",
+    });
+
+    expect(auditImpactSummary(event)).toBe("Reset password for member@example.test");
+  });
+
+  it("shows document titles for document targets", () => {
+    const event = auditEvent({
+      event_type: "documents.delete",
+      target_type: "document",
+      target_id: "doc-1",
+      target_document_title: "Budget.pdf",
+      payload: { group_path: "/finance" },
+    });
+
+    expect(targetDisplay(event)).toEqual({ label: "Budget.pdf", detail: "doc-1", unresolved: false });
+    expect(auditImpactSummary(event)).toBe("Moved Budget.pdf to Trash in /finance");
+  });
+
+  it("falls back to payload filenames for older document audit rows", () => {
+    const event = auditEvent({
+      event_type: "documents.permanent_delete",
+      target_type: "document",
+      target_id: "doc-1",
+      payload: { filename: "Legacy.pdf", group_path: "/legal" },
+    });
+
+    expect(targetDisplay(event)).toEqual({ label: "Legacy.pdf", detail: "doc-1", unresolved: false });
+    expect(auditImpactSummary(event)).toBe("Permanently deleted Legacy.pdf in /legal");
+  });
 });
 
 function auditEvent(overrides: Partial<AuditEvent>): AuditEvent {
@@ -60,6 +96,7 @@ function auditEvent(overrides: Partial<AuditEvent>): AuditEvent {
     target_id: null,
     target_user_email: null,
     target_user_name: null,
+    target_document_title: null,
     payload: {},
     created_at: "2026-06-18T12:00:00Z",
     ...overrides,

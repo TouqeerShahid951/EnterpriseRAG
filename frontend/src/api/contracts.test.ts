@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { adminApi, auditApi, documentsApi, ingestJobsApi, ragEvaluationsApi } from "./contracts";
+import { adminApi, auditApi, connectorApi, documentsApi, ingestJobsApi, queryApi, ragEvaluationsApi, uploadApi } from "./contracts";
 
 const legacyDocument = {
   id: "doc-1",
@@ -40,6 +40,10 @@ describe("documentsApi", () => {
     expect(response.items[0].ingest_status).toBe("unknown");
     expect(response.items[0].clearance_level).toBe("NATO_RESTRICTED");
     expect(response.items[0].deleted_at).toBeNull();
+    expect(response.items[0].owner_group_path).toBe("/finance");
+    expect(response.items[0].shared_group_paths).toEqual([]);
+    expect(response.items[0].access_group_paths).toEqual(["/finance"]);
+    expect(response.items[0].governance_owner).toBe("space");
   });
 
   it("builds backward-compatible document list filters", async () => {
@@ -70,6 +74,61 @@ describe("documentsApi", () => {
     expect(init.body).toBe(JSON.stringify({ clearance_level: "NATO_SECRET" }));
     expect(response.clearance_level).toBe("NATO_SECRET");
   });
+
+  it("updates document topics through a CSRF-protected patch", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ...legacyDocument, topics: ["OCR"], llm_topics: [], ingest_status: "complete" }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    const response = await documentsApi.updateTopics("doc/1", { topics: ["OCR"], llm_topics: [] });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/docs/doc%2F1/topics");
+    expect(init.method).toBe("PATCH");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({ topics: ["OCR"], llm_topics: [] }));
+    expect(response.topics).toEqual(["OCR"]);
+    expect(response.llm_topics).toEqual([]);
+  });
+
+  it("replaces document shares with CSRF protection", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      document_id: "doc-1",
+      owner_group_path: "/legal",
+      shared_group_paths: ["/finance"],
+      access_group_paths: ["/legal", "/finance"],
+      governance_owner: "system",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    const response = await documentsApi.updateShares("doc/1", { group_paths: ["/finance"] });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/docs/doc%2F1/shares");
+    expect(init.method).toBe("PUT");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({ group_paths: ["/finance"] }));
+    expect(response.governance_owner).toBe("system");
+  });
+
+  it("queues optional graph enrichment with CSRF protection", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      document_id: "doc/1",
+      job_id: "job-1",
+      status: "queued",
+      message: "Graph enrichment queued.",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await documentsApi.enrichGraph("doc/1");
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/docs/doc%2F1/graph-enrichment");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+  });
 });
 
 describe("adminApi", () => {
@@ -89,6 +148,82 @@ describe("adminApi", () => {
     expect(init.method).toBe("DELETE");
     expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
   });
+
+  it("loads an encoded user's chat activity", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({
+        items: [{ id: "session/1", title: "Budget question", created_at: "2026-06-18T10:00:00Z", updated_at: "2026-06-18T10:05:00Z", question_count: 1 }],
+        total: 1,
+        limit: 10,
+        offset: 20,
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        id: "session/1",
+        title: "Budget question",
+        created_at: "2026-06-18T10:00:00Z",
+        updated_at: "2026-06-18T10:05:00Z",
+        turns: [{ id: "user-1", role: "user", content: "What changed?", createdAt: "2026-06-18T10:00:00Z" }],
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const page = await adminApi.listUserChatActivity("user/1", { limit: 10, offset: 20 });
+    const session = await adminApi.getUserChatActivitySession("user/1", "session/1");
+
+    const calls = fetchMock.mock.calls as unknown as Array<[unknown]>;
+    expect(String(calls[0][0])).toContain("/api/v1/admin/users/user%2F1/chat-activity?limit=10&offset=20");
+    expect(String(calls[1][0])).toContain("/api/v1/admin/users/user%2F1/chat-activity/session%2F1");
+    expect(page.items[0].questionCount).toBe(1);
+    expect(session.turns).toHaveLength(1);
+  });
+
+  it("resets an encoded user's password with CSRF protection", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      id: "user/1",
+      email: "member@example.test",
+      name: "Member",
+      account_type: "member",
+      group_paths: [],
+      clearance_level: "NATO_RESTRICTED",
+      is_active: true,
+      permission_version: 1,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await adminApi.resetUserPassword("user/1", { temporary_password: "NewPass123!" });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/admin/users/user%2F1/reset-password");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({ temporary_password: "NewPass123!" }));
+  });
+});
+
+describe("uploadApi", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("omits ingestion quality from document uploads", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ job_id: "job-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await uploadApi.document({
+      file: new File(["%PDF-1.7"], "policy.pdf", { type: "application/pdf" }),
+      group_path: "/legal",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/upload");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    const body = init.body as FormData;
+    expect(body.has("quality_preset")).toBe(false);
+    expect(body.get("group_path")).toBe("/legal");
+  });
 });
 
 describe("ingestJobsApi", () => {
@@ -107,6 +242,262 @@ describe("ingestJobsApi", () => {
     expect(url).toContain("/api/v1/ingest-jobs/job%2F1/cancel");
     expect(init.method).toBe("POST");
     expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+  });
+
+  it("loads GraphRAG status from ingestion health", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      enabled: true,
+      queue_name: "graphrag:jobs",
+      queued_jobs: 2,
+      queue_error: null,
+      worker_online: true,
+      worker_error: null,
+      active_jobs: 1,
+      observed_pool_size: 1,
+      workers: [],
+      active_tasks: [],
+      queued_tasks: [],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await ingestJobsApi.graphragStatus();
+
+    const calls = fetchMock.mock.calls as unknown as Array<[unknown]>;
+    expect(String(calls[0][0])).toContain("/api/v1/ingest-jobs/graphrag-status");
+  });
+
+  it("cancels graph enrichment with its task id and CSRF protection", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      task_id: "graph/task-1",
+      job_id: "job/1",
+      document_id: "doc-1",
+      status: "cancelled",
+      message: "Running graph enrichment cancelled.",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await ingestJobsApi.cancelGraphEnrichment("job/1", "graph/task-1");
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/ingest-jobs/job%2F1/graph-enrichment/cancel");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({ task_id: "graph/task-1" }));
+  });
+});
+
+describe("connectorApi", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("creates PostgreSQL connector profiles through the connector contract", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      id: "profile-1",
+      name: "Postgres cases",
+      connector_type: "postgres",
+      public_config: { host: "postgres.internal", database: "cases", sslmode: "require" },
+      secrets_redacted: { username: "********", password: "********" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await connectorApi.createProfile({
+      name: "Postgres cases",
+      connector_type: "postgres",
+      public_config: { host: "postgres.internal", database: "cases", sslmode: "require" },
+      secrets: { username: "readonly", password: "secret" },
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/connectors/profiles");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({
+      name: "Postgres cases",
+      connector_type: "postgres",
+      public_config: { host: "postgres.internal", database: "cases", sslmode: "require" },
+      secrets: { username: "readonly", password: "secret" },
+    }));
+  });
+
+  it("updates connector profiles through the connector contract", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      id: "profile-1",
+      name: "Postgres reporting",
+      connector_type: "postgres",
+      public_config: { host: "db.internal", port: 5432, database: "cases", sslmode: "require" },
+      secrets_redacted: { username: "********", password: "********" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await connectorApi.updateProfile("profile-1", {
+      name: "Postgres reporting",
+      public_config: { host: "db.internal", port: 5432, database: "cases", sslmode: "require" },
+      secrets: { username: "readonly", password: "new-secret" },
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/connectors/profiles/profile-1");
+    expect(init.method).toBe("PUT");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({
+      name: "Postgres reporting",
+      public_config: { host: "db.internal", port: 5432, database: "cases", sslmode: "require" },
+      secrets: { username: "readonly", password: "new-secret" },
+    }));
+  });
+
+  it("deletes connector profiles through the connector contract", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await connectorApi.deleteProfile("profile-1");
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/connectors/profiles/profile-1");
+    expect(init.method).toBe("DELETE");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+  });
+
+  it("creates approved schema catalogs through the connector contract", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      id: "catalog-1",
+      profile_id: "profile-1",
+      connector_type: "postgres",
+      status: "approved",
+      group_path: "/ops",
+      clearance_level: "NATO_RESTRICTED",
+      catalog_json: { tables: [] },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await connectorApi.createSchemaCatalog("profile-1", {
+      status: "approved",
+      group_path: "/ops",
+      clearance_level: "NATO_RESTRICTED",
+      catalog_json: { tables: [] },
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/connectors/profiles/profile-1/schema-catalogs");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({
+      status: "approved",
+      group_path: "/ops",
+      clearance_level: "NATO_RESTRICTED",
+      catalog_json: { tables: [] },
+    }));
+  });
+
+  it("creates AI schema catalog drafts through the connector contract", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      id: "catalog-1",
+      profile_id: "profile-1",
+      connector_type: "postgres",
+      status: "draft",
+      group_path: "/ops",
+      clearance_level: "NATO_RESTRICTED",
+      catalog_json: { tables: [], ai_enrichment: { requires_admin_review: true } },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await connectorApi.createAiSchemaCatalogDraft("profile-1", {
+      group_path: "/ops",
+      clearance_level: "NATO_RESTRICTED",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/connectors/profiles/profile-1/schema-catalogs/ai-draft");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({
+      group_path: "/ops",
+      clearance_level: "NATO_RESTRICTED",
+    }));
+  });
+
+  it("enriches one schema catalog table through the connector contract", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      id: "catalog-1",
+      profile_id: "profile-1",
+      connector_type: "postgres",
+      status: "draft",
+      group_path: "/ops",
+      clearance_level: "NATO_RESTRICTED",
+      catalog_json: { tables: [], ai_enrichment: { status: "in_progress" } },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await connectorApi.enrichSchemaCatalogTable("profile-1", "catalog-1", { table_key: "public.cases" });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/connectors/profiles/profile-1/schema-catalogs/catalog-1/ai-enrich-table");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({ table_key: "public.cases" }));
+  });
+});
+
+describe("queryApi", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("loads visible query sources for the selected Knowledge Space", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      items: [{
+        id: "connector_catalog:catalog-1",
+        kind: "connector_schema_catalog",
+        name: "Cases approved database scope",
+        description: null,
+        connector_type: "postgres",
+        scope: "database_scope",
+        group_path: "/ops",
+        clearance_level: "NATO_RESTRICTED",
+      }],
+      total: 1,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await queryApi.sources({ group_path: " /ops " });
+
+    const calls = fetchMock.mock.calls as unknown as Array<[unknown]>;
+    expect(String(calls[0][0])).toContain("/api/v1/query/sources?group_path=%2Fops");
+    expect(response.items[0].id).toBe("connector_catalog:catalog-1");
+  });
+
+  it("sends explicit source controls in query requests", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(queryResponse()));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await queryApi.ask({
+      query: "Count cases",
+      session_id: "session-1",
+      source_mode: "db_only",
+      query_source_id: "connector_catalog:catalog-1",
+      allow_source_expansion: true,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/query");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({
+      query: "Count cases",
+      session_id: "session-1",
+      source_mode: "db_only",
+      query_source_id: "connector_catalog:catalog-1",
+      allow_source_expansion: true,
+    }));
   });
 });
 
@@ -147,6 +538,34 @@ describe("auditApi", () => {
     expect(url).toContain("created_to=2026-06-18T23%3A59%3A59Z");
     expect(url).toContain("limit=25");
     expect(url).toContain("offset=50");
+  });
+
+  it("builds filtered audit export queries without pagination", async () => {
+    const fetchMock = vi.fn(async () => new Response("id,event_type\n1,upload.queued\n", { status: 200, headers: { "Content-Type": "text/csv" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await auditApi.exportCsv({
+      search: "budget",
+      category: "document",
+      group_path: "/finance",
+      created_from: "2026-06-01T00:00:00Z",
+      created_to: "2026-06-18T23:59:59Z",
+      limit: 25,
+      offset: 50,
+      max_rows: 250,
+    });
+
+    const calls = fetchMock.mock.calls as unknown as Array<[unknown]>;
+    const url = String(calls[0][0]);
+    expect(url).toContain("/api/v1/audit-log/export?");
+    expect(url).toContain("search=budget");
+    expect(url).toContain("category=document");
+    expect(url).toContain("group_path=%2Ffinance");
+    expect(url).toContain("created_from=2026-06-01T00%3A00%3A00Z");
+    expect(url).toContain("created_to=2026-06-18T23%3A59%3A59Z");
+    expect(url).toContain("max_rows=250");
+    expect(url).not.toContain("limit=25");
+    expect(url).not.toContain("offset=50");
   });
 });
 
@@ -194,5 +613,29 @@ function auditSummary() {
     category_counts: {},
     target_type_counts: {},
     event_type_counts: {},
+  };
+}
+
+function queryResponse() {
+  return {
+    trace_id: "trace-1",
+    answer: "Done",
+    sources: [],
+    artifacts: [],
+    artifact_job: null,
+    conflict_flag: false,
+    conflict_detail: null,
+    faithfulness_score: 1,
+    faithfulness_status: "checked",
+    unfounded_claims: [],
+    intent: "aggregation",
+    session_id: "session-1",
+    latency_ms: 1,
+    node_timings: [],
+    degraded: false,
+    degraded_reason: null,
+    source_mode: "db_only",
+    source_decision_reason: "composer_selected_database",
+    source_expansion: null,
   };
 }

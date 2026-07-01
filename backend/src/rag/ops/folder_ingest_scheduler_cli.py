@@ -6,12 +6,15 @@ import argparse
 import time
 
 from rag.core.config import settings
+from rag.connectors.repositories import get_connector_profile_repository
+from rag.query.qdrant import QdrantClient
 from rag.repositories.documents import get_document_repository
 from rag.repositories.folder_schedules import get_folder_schedule_repository
 from rag.repositories.postgres import PostgresConnectionMixin
 from rag.services.folder_ingestion import dispatch_due_schedules
-from rag.services.folder_sources import get_minio_prefix_source
+from rag.services.folder_sources import get_local_folder_source, get_minio_prefix_source
 from rag.services.ingest_queue import get_ingest_queue
+from rag.services.upload_storage import get_upload_storage
 
 ADVISORY_LOCK_ID = 867530901
 
@@ -59,6 +62,14 @@ def _dispatch() -> list[str]:
         document_repo=get_document_repository(),
         queue=get_ingest_queue(),
         minio_source=get_minio_prefix_source(),
+        local_folder_source=get_local_folder_source(),
+        connector_profile_repo=get_connector_profile_repository(),
+        storage=get_upload_storage(),
+        qdrant=QdrantClient(
+            base_url=settings.qdrant_url,
+            collection=settings.qdrant_collection,
+            timeout_seconds=settings.rag_http_timeout_seconds,
+        ),
     )
 
 

@@ -1,10 +1,10 @@
-# Faham AI / AgenticRAG Design
+# Prudentia AI / AgenticRAG Design
 
 Last updated: 2026-06-18
 
 ## Purpose
 
-Faham AI, also called AgenticRAG in the codebase, is a local enterprise RAG
+Prudentia AI, also called AgenticRAG in the codebase, is a local enterprise RAG
 workspace for controlled document intake, retrieval-augmented question
 answering, evidence inspection, OCR review, auditability, answer evaluation,
 and grounded artifact generation.

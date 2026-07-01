@@ -48,6 +48,7 @@ from ..routing_logs import (
 )
 from ..routing_models import RoutePlan
 from ..sources import build_evidence_hits, sources_from_hits
+from ..source_resolution import resolve_query_source
 from ..synthesis import build_rag_response, synthesize_response
 from ...retrieval import RetrievalService
 
@@ -83,11 +84,13 @@ class QueryNodes:
         faithfulness_model: str | None = None,
         reranker_model: str | None = None,
         query_planner_enabled: bool | None = None,
+        schedule_repo: object | None = None,
+        connector_profile_repo: object | None = None,
+        connector_registry: object | None = None,
     ) -> None:
         self.config = config
         self.ollama = ollama
         self.qdrant = qdrant
-        self.retrieval_service = RetrievalService(config=config, embedder=ollama, vector_store=qdrant)
         self.session_store = session_store
         self.conflict_checker = conflict_checker
         self.artifact_service = artifact_service or generated_artifact_service_from_settings(config)
@@ -96,10 +99,38 @@ class QueryNodes:
         self.faithfulness_model = faithfulness_model or config.rag_faithfulness_model or config.ollama_chat_model
         self.reranker_model = reranker_model or config.rag_reranker_model
         self.query_planner_enabled = config.rag_query_planner_enabled if query_planner_enabled is None else query_planner_enabled
+        self.schedule_repo = schedule_repo
+        self.connector_profile_repo = connector_profile_repo
+        self.retrieval_service = RetrievalService(
+            config=config,
+            embedder=ollama,
+            vector_store=qdrant,
+            schedule_repo=schedule_repo,
+            connector_profile_repo=connector_profile_repo,
+            connector_registry=connector_registry,
+            reasoning_model=self.reasoning_model,
+        )
 
     def session_memory(self, ctx: QueryContext) -> QueryContext:
         _raise_if_cancelled(ctx)
         ctx["session_turns"] = self.session_store.load(user=ctx["user"], session_id=ctx["session_id"])
+        return ctx
+
+    def source_resolver(self, ctx: QueryContext) -> QueryContext:
+        _raise_if_cancelled(ctx)
+        decision = resolve_query_source(
+            ctx,
+            schedule_repo=self.schedule_repo,
+            connector_profile_repo=self.connector_profile_repo,
+        )
+        ctx["source_decision"] = decision
+        if decision.semantic_query and decision.semantic_query != ctx["request"].query:
+            ctx["request"] = ctx["request"].model_copy(update={"query": decision.semantic_query})
+        detail = (
+            f"{decision.resolved_mode}:{decision.reason}"
+            f",structured={decision.structured_score},corpus={decision.corpus_score},source={decision.source_match_score}"
+        )
+        _mark_execution(ctx, "source_resolver", "deterministic", detail)
         return ctx
 
     def intent_router(self, ctx: QueryContext) -> QueryContext:
@@ -222,6 +253,8 @@ class QueryNodes:
             ctx["degraded_reason"] = result.degraded_reason or "graphrag_unavailable"
             _mark_execution(ctx, "abac_retriever", "graphrag_fallback", ctx["degraded_reason"])
         ctx["retrieved_hits"] = self.retrieval_service.retrieve(ctx)
+        if "abac_retriever" not in ctx["execution_modes"]:
+            _mark_execution(ctx, "abac_retriever", *_retrieval_execution_summary(ctx))
         log_retrieval_summary(ctx, stage="retrieved")
         return ctx
 
@@ -436,7 +469,7 @@ class QueryNodes:
             ctx["retrieved_hits"],
             token_budget=ctx["token_budget"],
             limit=plan.top_k if plan else self.config.rag_top_k,
-            broader_table_context=bool(plan and plan.chunk_granularity in {"section", "document"}),
+            broader_table_context=_should_promote_parent_context(plan),
         )
         return ctx
 
@@ -740,6 +773,39 @@ def _requires_superseded_evidence(query: str) -> bool:
             "version",
         )
     )
+
+
+def _should_promote_parent_context(plan: RoutePlan | None) -> bool:
+    if plan is None or plan.chunk_granularity not in {"section", "document"}:
+        return False
+    return plan.intent in {
+        "summarization",
+        "procedural",
+        "troubleshooting",
+        "troubleshooting_procedure",
+        "document_navigation",
+        "comparison",
+        "temporal_comparison",
+        "comparative_summary",
+        "multi_hop",
+    }
+
+
+def _retrieval_execution_summary(ctx: QueryContext) -> tuple[str, str]:
+    live_mode = ctx["execution_modes"].get("live_sql_retriever")
+    live_detail = ctx["execution_details"].get("live_sql_retriever")
+    source_decision = ctx.get("source_decision")
+    source_mode = str(getattr(source_decision, "resolved_mode", "") or "")
+    mode = "ai_assisted" if live_mode == "ai_assisted" else "fallback" if live_mode == "fallback" else "deterministic"
+    detail_parts = []
+    if source_mode:
+        detail_parts.append(f"source={source_mode}")
+    if live_mode:
+        detail_parts.append(f"live_sql={live_mode}")
+    if live_detail:
+        detail_parts.append(live_detail)
+    detail_parts.append(f"hits={len(ctx['retrieved_hits'])}")
+    return mode, ",".join(detail_parts)
 
 
 def _artifact_generation_requested(ctx: QueryContext) -> bool:

@@ -57,6 +57,10 @@ class Neo4jGraphStore:
         for query in _SCHEMA_QUERIES:
             self._run(query)
 
+    def delete_document_graph(self, doc_id: str) -> None:
+        self.ensure_schema()
+        self._delete_document_graph(doc_id)
+
     def replace_document_extraction(
         self,
         *,
@@ -122,6 +126,18 @@ class Neo4jGraphStore:
             return 0
         return int(rows[0].get("communityCount") or 0)
 
+    def count_entities_for_partition(self, partition: str) -> int:
+        rows = self._run(
+            """
+            MATCH (entity:GraphEntity {partition_key: $partition_key})
+            RETURN count(entity) AS entity_count
+            """,
+            {"partition_key": partition},
+        )
+        if not rows:
+            return 0
+        return int(rows[0].get("entity_count") or 0)
+
     def communities_for_partition(self, partition: str) -> list[GraphCommunity]:
         rows = self._run(
             """
@@ -175,20 +191,7 @@ class Neo4jGraphStore:
         return communities
 
     def replace_partition_summaries(self, *, partition: str, summaries: list[CommunitySummary]) -> None:
-        self._run(
-            """
-            MATCH (summary:CommunitySummary {partition_key: $partition_key})
-            DETACH DELETE summary
-            """,
-            {"partition_key": partition},
-        )
-        self._run(
-            """
-            MATCH (community:Community {partition_key: $partition_key})
-            DETACH DELETE community
-            """,
-            {"partition_key": partition},
-        )
+        self.delete_partition_summaries(partition)
         for summary in summaries:
             self._run(
                 """
@@ -242,7 +245,50 @@ class Neo4jGraphStore:
                 },
             )
 
+    def delete_partition_summaries(self, partition: str) -> None:
+        self._run(
+            """
+            MATCH (summary:CommunitySummary {partition_key: $partition_key})
+            DETACH DELETE summary
+            """,
+            {"partition_key": partition},
+        )
+        self._run(
+            """
+            MATCH (community:Community {partition_key: $partition_key})
+            DETACH DELETE community
+            """,
+            {"partition_key": partition},
+        )
+
     def _delete_document_graph(self, doc_id: str) -> None:
+        rows = self._run(
+            """
+            MATCH (doc:Document {id: $doc_id})
+            OPTIONAL MATCH (doc)<-[:BELONGS_TO]-(chunk:Chunk)
+            RETURN collect(DISTINCT chunk.id) AS chunk_ids
+            """,
+            {"doc_id": doc_id},
+        )
+        chunk_ids = [
+            str(chunk_id)
+            for chunk_id in (rows[0].get("chunk_ids", []) if rows else [])
+            if str(chunk_id).strip()
+        ]
+        self._run(
+            """
+            MATCH ()-[rel:RELATES_TO {doc_id: $doc_id}]->()
+            DELETE rel
+            """,
+            {"doc_id": doc_id},
+        )
+        self._run(
+            """
+            MATCH (claim:GraphClaim {doc_id: $doc_id})
+            DETACH DELETE claim
+            """,
+            {"doc_id": doc_id},
+        )
         self._run(
             """
             MATCH (doc:Document {id: $doc_id})
@@ -250,16 +296,29 @@ class Neo4jGraphStore:
             OPTIONAL MATCH (entity:GraphEntity)-[mention:MENTIONED_IN]->(chunk)
             DELETE mention
             WITH doc, collect(chunk) AS chunks
-            OPTIONAL MATCH ()-[rel:RELATES_TO {doc_id: $doc_id}]->()
-            DELETE rel
-            WITH doc, chunks
-            OPTIONAL MATCH (claim:GraphClaim {doc_id: $doc_id})
-            DETACH DELETE claim
-            WITH doc, chunks
             FOREACH (chunk IN chunks | DETACH DELETE chunk)
             DETACH DELETE doc
             """,
             {"doc_id": doc_id},
+        )
+        self._run(
+            """
+            MATCH (entity:GraphEntity)
+            WHERE $doc_id IN coalesce(entity.source_doc_ids, [])
+               OR any(chunk_id IN $chunk_ids WHERE chunk_id IN coalesce(entity.source_chunk_ids, []))
+            SET entity.source_doc_ids = [value IN coalesce(entity.source_doc_ids, []) WHERE value <> $doc_id],
+                entity.source_chunk_ids = [
+                  value IN coalesce(entity.source_chunk_ids, [])
+                  WHERE none(chunk_id IN $chunk_ids WHERE chunk_id = value)
+                ],
+                entity.community_id = null,
+                entity.updated_at = datetime()
+            WITH entity
+            WHERE size(coalesce(entity.source_doc_ids, [])) = 0
+              AND NOT (entity)-[:MENTIONED_IN]->(:Chunk)
+            DETACH DELETE entity
+            """,
+            {"doc_id": doc_id, "chunk_ids": chunk_ids},
         )
 
     def _upsert_chunks(self, chunks: list[ChunkRecord]) -> None:

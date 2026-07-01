@@ -2,26 +2,31 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { queryApi } from "../api/contracts";
 import { isGlobalAdmin } from "../authz";
-import type { ArtifactJobSummary, RagSseEvent, RAGResponse, SourceAnchor, User } from "../types/api";
-import type { AssistantTurn, ChatTurn, QueryProgressItem, QueryRunVariables, SavedChatSession, SavedChatSessionPage } from "../types/chat";
+import type { ArtifactJobSummary, QuerySourceMode, RagSseEvent, RAGResponse, SourceAnchor, User } from "../types/api";
+import type { AssistantTurn, ChatTurn, QueryProgressItem, QueryRunVariables, SavedChatSession, SavedChatSessionPage, SavedChatSessionSummary } from "../types/chat";
 import { errorMessage, formatIntent } from "../utils/format";
 import { createId } from "./ids";
 
 const CHAT_HISTORY_PAGE_SIZE = 30;
 
 type ChatHistoryQueryData = InfiniteData<SavedChatSessionPage, number>;
+export type ChatSessionTurnCache = Record<string, ChatTurn[]>;
+export type ActiveGeneration = { assistantTurnId: string; sessionId: string };
 
 export function useChatSession(currentUser: User | null) {
   const queryClient = useQueryClient();
-  const sessionIdRef = useRef<string | null>(null);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
-  const activeAssistantTurnIdRef = useRef<string | null>(null);
+  const activeGenerationRef = useRef<ActiveGeneration | null>(null);
   const cancelledAssistantTurnIdsRef = useRef<Set<string>>(new Set());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeGeneration, setActiveGenerationState] = useState<ActiveGeneration | null>(null);
   const [question, setQuestion] = useState("");
-  const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
+  const [sessionTurnsById, setSessionTurnsById] = useState<ChatSessionTurnCache>({});
+  const [localSessionSummaries, setLocalSessionSummaries] = useState<SavedChatSessionSummary[]>([]);
   const [scopedDocumentIds, setScopedDocumentIds] = useState<string[]>([]);
   const [selectedSource, setSelectedSource] = useState<SourceAnchor | null>(null);
+  const [sourceMode, setSourceModeState] = useState<QuerySourceMode>("auto");
+  const [selectedQuerySourceId, setSelectedQuerySourceIdState] = useState("");
   const [activeSpacePath, setActiveSpacePath] = useState<string | null>(() => defaultSpacePath(currentUser));
   const chatHistoryQueryKey = useMemo(
     () => ["chat-sessions", currentUser?.user_id ?? "anonymous", currentUser?.permission_version ?? 0] as const,
@@ -39,36 +44,48 @@ export function useChatSession(currentUser: User | null) {
     },
     enabled: Boolean(currentUser),
   });
-  const savedSessions = useMemo(
+  const serverSavedSessions = useMemo(
     () => savedSessionsQuery.data?.pages.flatMap((page) => page.items) ?? [],
     [savedSessionsQuery.data],
   );
-  const savedSessionsTotal = savedSessionsQuery.data?.pages[0]?.total ?? savedSessions.length;
+  const savedSessions = useMemo(
+    () => mergeSavedSessionsWithLocal(serverSavedSessions, localSessionSummaries, activeGeneration?.sessionId ?? null),
+    [activeGeneration?.sessionId, localSessionSummaries, serverSavedSessions],
+  );
+  const savedSessionIds = useMemo(() => new Set(serverSavedSessions.map((session) => session.id)), [serverSavedSessions]);
+  const savedSessionsTotal = (savedSessionsQuery.data?.pages[0]?.total ?? serverSavedSessions.length)
+    + localSessionSummaries.filter((session) => !savedSessionIds.has(session.id)).length;
 
   const queryMutation = useMutation<RAGResponse, Error, QueryRunVariables>({
     mutationFn: (variables) =>
       runStreamingQuery(variables, (event) => {
-        setChatTurns((turns) => applyStreamEvent(turns, variables.assistantTurnId, event));
+        setSessionTurnsById((cache) =>
+          updateChatSessionTurns(cache, variables.sessionId, (turns) => applyStreamEvent(turns, variables.assistantTurnId, event)),
+        );
       }),
     onSuccess: (result, variables) => {
       if (cancelledAssistantTurnIdsRef.current.has(variables.assistantTurnId)) {
         return;
       }
-      sessionIdRef.current = result.session_id;
-      setActiveSessionId(result.session_id);
-      setChatTurns((turns) => replaceAssistantTurn(turns, variables.assistantTurnId, result));
+      setSessionTurnsById((cache) =>
+        updateChatSessionTurns(cache, variables.sessionId, (turns) => replaceAssistantTurn(turns, variables.assistantTurnId, result)),
+      );
       void queryClient.invalidateQueries({ queryKey: chatHistoryQueryKey });
     },
     onError: (error, variables) => {
       if (cancelledAssistantTurnIdsRef.current.has(variables.assistantTurnId) || isAbortError(error)) {
-        setChatTurns((turns) => markAssistantTurnCancelled(turns, variables.assistantTurnId));
+        setSessionTurnsById((cache) =>
+          updateChatSessionTurns(cache, variables.sessionId, (turns) => markAssistantTurnCancelled(turns, variables.assistantTurnId)),
+        );
         return;
       }
-      setChatTurns((turns) => markAssistantTurnErrored(turns, variables.assistantTurnId, errorMessage(error, "The query request failed.")));
+      setSessionTurnsById((cache) =>
+        updateChatSessionTurns(cache, variables.sessionId, (turns) => markAssistantTurnErrored(turns, variables.assistantTurnId, errorMessage(error, "The query request failed."))),
+      );
     },
     onSettled: (_result, _error, variables) => {
-      if (activeAssistantTurnIdRef.current === variables.assistantTurnId) {
-        activeAssistantTurnIdRef.current = null;
+      if (activeGenerationRef.current?.assistantTurnId === variables.assistantTurnId) {
+        updateActiveGeneration(null);
         activeAbortControllerRef.current = null;
       }
       cancelledAssistantTurnIdsRef.current.delete(variables.assistantTurnId);
@@ -78,11 +95,12 @@ export function useChatSession(currentUser: User | null) {
   const loadSessionMutation = useMutation<SavedChatSession, Error, string>({
     mutationFn: queryApi.getSession,
     onSuccess: (session) => {
-      sessionIdRef.current = session.id;
       setActiveSessionId(session.id);
-      setChatTurns(session.turns);
+      setSessionTurnsById((cache) => ({ ...cache, [session.id]: session.turns }));
       setScopedDocumentIds([]);
       setSelectedSource(null);
+      setSourceModeState("auto");
+      setSelectedQuerySourceIdState("");
       setQuestion("");
     },
   });
@@ -104,19 +122,23 @@ export function useChatSession(currentUser: User | null) {
     },
   });
 
+  const chatTurns = activeSessionId ? sessionTurnsById[activeSessionId] ?? [] : [];
   const latestResponse = useMemo(() => latestCompleteResponse(chatTurns), [chatTurns]);
-  const hasPendingTurn = chatTurns.some((turn) => turn.role === "assistant" && turn.status === "pending");
+  const activeSessionHasPendingTurn = chatTurns.some((turn) => turn.role === "assistant" && turn.status === "pending");
+  const hasPendingGeneration = Boolean(activeGeneration);
   const activeArtifactJobIds = useMemo(() => activeArtifactJobs(chatTurns), [chatTurns]);
   const activeArtifactJobKey = activeArtifactJobIds.join("|");
 
   useEffect(() => {
     abortActiveQuery();
     loadSessionMutation.reset();
-    sessionIdRef.current = null;
     setActiveSessionId(null);
-    setChatTurns([]);
+    setSessionTurnsById({});
+    setLocalSessionSummaries([]);
     setScopedDocumentIds([]);
     setSelectedSource(null);
+    setSourceModeState("auto");
+    setSelectedQuerySourceIdState("");
     setQuestion("");
     setActiveSpacePath(defaultActiveSpacePath);
   }, [defaultActiveSpacePath, chatHistoryQueryKey]);
@@ -133,10 +155,13 @@ export function useChatSession(currentUser: User | null) {
     async function pollArtifactJobs() {
       const results = await Promise.allSettled(jobIds.map((jobId) => queryApi.getArtifactJob(jobId)));
       if (cancelled) return;
-      setChatTurns((turns) =>
-        results.reduce(
-          (nextTurns, result) => (result.status === "fulfilled" ? mergeArtifactJobIntoTurns(nextTurns, result.value) : nextTurns),
-          turns,
+      if (!activeSessionId) return;
+      setSessionTurnsById((cache) =>
+        updateChatSessionTurns(cache, activeSessionId, (turns) =>
+          results.reduce(
+            (nextTurns, result) => (result.status === "fulfilled" ? mergeArtifactJobIntoTurns(nextTurns, result.value) : nextTurns),
+            turns,
+          ),
         ),
       );
     }
@@ -149,16 +174,15 @@ export function useChatSession(currentUser: User | null) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [activeArtifactJobKey, currentUser?.permission_version, currentUser?.user_id]);
+  }, [activeArtifactJobKey, activeSessionId, currentUser?.permission_version, currentUser?.user_id]);
 
   function resetChat() {
-    abortActiveQuery();
     loadSessionMutation.reset();
-    sessionIdRef.current = null;
     setActiveSessionId(null);
-    setChatTurns([]);
     setScopedDocumentIds([]);
     setSelectedSource(null);
+    setSourceModeState("auto");
+    setSelectedQuerySourceIdState("");
     setQuestion("");
   }
 
@@ -167,20 +191,39 @@ export function useChatSession(currentUser: User | null) {
     submitQuestion(question);
   }
 
-  function submitQuestion(rawQuestion: string) {
+  function submitQuestion(rawQuestion: string, override: SourceSubmitOverride = {}) {
     const nextQuestion = rawQuestion.trim();
-    if (!nextQuestion || !currentUser || hasPendingTurn) {
+    if (!nextQuestion || !currentUser || activeGenerationRef.current) {
       return;
     }
-    const queryDocumentIds = scopedDocumentIds;
-    const sessionId = sessionIdRef.current ?? createId("session");
-    sessionIdRef.current = sessionId;
+    const effectiveSourceMode = override.sourceMode ?? sourceMode;
+    const effectiveQuerySourceId = override.querySourceId ?? selectedQuerySourceId;
+    const queryDocumentIds = override.documentIds ?? (effectiveSourceMode === "db_only" ? [] : scopedDocumentIds);
+    const sessionId = activeSessionId ?? createId("session");
     setActiveSessionId(sessionId);
-    const assistantTurn = createAssistantTurn(nextQuestion, queryDocumentIds, activeSpacePath);
-    setChatTurns((turns) => [...turns, createUserTurn(nextQuestion), assistantTurn]);
+    const assistantTurn = createAssistantTurn(nextQuestion, queryDocumentIds, activeSpacePath, effectiveSourceMode, effectiveQuerySourceId || null);
+    const createdAt = new Date().toISOString();
+    const userTurn = createUserTurn(nextQuestion, createdAt);
+    const existingSummary = savedSessions.find((session) => session.id === sessionId)
+      ?? localSessionSummaries.find((session) => session.id === sessionId);
+    const nextQuestionCount = questionCountForTurns([...(sessionTurnsById[sessionId] ?? []), userTurn]);
+    setSessionTurnsById((cache) =>
+      updateChatSessionTurns(cache, sessionId, (turns) => [...turns, userTurn, assistantTurn]),
+    );
+    setLocalSessionSummaries((summaries) =>
+      upsertLocalSessionSummary(summaries, {
+        id: sessionId,
+        title: existingSummary?.title ?? compactSessionTitle(nextQuestion),
+        createdAt: existingSummary?.createdAt ?? createdAt,
+        updatedAt: createdAt,
+        questionCount: Math.max(existingSummary?.questionCount ?? 0, nextQuestionCount),
+      }),
+    );
     setSelectedSource(null);
     setQuestion("");
     setScopedDocumentIds([]);
+    setSourceModeState("auto");
+    setSelectedQuerySourceIdState("");
     startStreamingQuery({
       assistantTurnId: assistantTurn.id,
       request: {
@@ -189,34 +232,50 @@ export function useChatSession(currentUser: User | null) {
         client_request_id: assistantTurn.id,
         group_path: activeSpacePath,
         document_ids: queryDocumentIds.length ? queryDocumentIds : undefined,
+        source_mode: effectiveSourceMode,
+        query_source_id: effectiveSourceMode === "db_only" || effectiveSourceMode === "hybrid" ? effectiveQuerySourceId || undefined : undefined,
+        allow_source_expansion: override.allowSourceExpansion ?? false,
       },
+      sessionId,
     });
   }
 
   function cancelPendingTurn() {
-    const assistantTurnId = activeAssistantTurnIdRef.current ?? latestPendingAssistantTurnId(chatTurns);
-    if (!assistantTurnId) return;
+    const generation = activeGenerationRef.current;
+    if (!generation || generation.sessionId !== activeSessionId) return;
+    const assistantTurnId = generation.assistantTurnId;
     cancelledAssistantTurnIdsRef.current.add(assistantTurnId);
     activeAbortControllerRef.current?.abort();
-    setChatTurns((turns) => markAssistantTurnCancelled(turns, assistantTurnId));
+    updateActiveGeneration(null);
+    activeAbortControllerRef.current = null;
+    setSessionTurnsById((cache) =>
+      updateChatSessionTurns(cache, generation.sessionId, (turns) => markAssistantTurnCancelled(turns, assistantTurnId)),
+    );
   }
 
   function changeActiveSpacePath(groupPath: string | null) {
-    if (hasPendingTurn || !currentUser) return;
+    if (activeGenerationRef.current || !currentUser) return;
     if (groupPath === null) {
       if (!isGlobalAdmin(currentUser)) return;
       setActiveSpacePath(null);
       setScopedDocumentIds([]);
       setSelectedSource(null);
+      setSourceModeState("auto");
+      setSelectedQuerySourceIdState("");
       return;
     }
     if (!isGlobalAdmin(currentUser) && !currentUser.group_paths.includes(groupPath)) return;
     setActiveSpacePath(groupPath);
     setScopedDocumentIds([]);
     setSelectedSource(null);
+    setSourceModeState("auto");
+    setSelectedQuerySourceIdState("");
   }
 
   function addScopedDocument(documentId: string) {
+    if (sourceMode === "db_only") {
+      setSourceModeState("hybrid");
+    }
     setScopedDocumentIds((current) => (current.includes(documentId) ? current : [...current, documentId]));
   }
 
@@ -225,33 +284,46 @@ export function useChatSession(currentUser: User | null) {
   }
 
   function loadChatSession(sessionId: string) {
-    if (hasPendingTurn || loadSessionMutation.isPending) return;
+    if (loadSessionMutation.isPending) return;
+    if (sessionTurnsById[sessionId]) {
+      setActiveSessionId(sessionId);
+      setScopedDocumentIds([]);
+      setSelectedSource(null);
+      setSourceModeState("auto");
+      setSelectedQuerySourceIdState("");
+      setQuestion("");
+      return;
+    }
     loadSessionMutation.mutate(sessionId);
   }
 
   function deleteChatSession(sessionId: string) {
-    if (hasPendingTurn) return;
+    if (activeGenerationRef.current?.sessionId === sessionId) return;
     deleteSessionMutation.mutate(sessionId);
+    setSessionTurnsById((cache) => removeCachedSession(cache, sessionId));
+    setLocalSessionSummaries((summaries) => summaries.filter((session) => session.id !== sessionId));
     if (activeSessionId === sessionId) resetChat();
   }
 
   function handleRetry(assistantTurnId: string) {
     const turn = chatTurns.find((candidate) => candidate.id === assistantTurnId);
     const retrySpacePath = turn?.role === "assistant" ? turn.groupPath ?? activeSpacePath : null;
-    if (!turn || turn.role !== "assistant" || !currentUser || hasPendingTurn) {
+    if (!turn || turn.role !== "assistant" || !currentUser || activeGenerationRef.current || !activeSessionId) {
       return;
     }
-    setChatTurns((turns) =>
-      turns.map((candidate) =>
-        candidate.id === assistantTurnId && candidate.role === "assistant"
-          ? {
-              ...candidate,
-              status: "pending",
-              progress: initialProgressForQuestion(turn.question, "Replaying retrieval graph", turn.documentIds ?? [], retrySpacePath),
-              streamText: undefined,
-              errorMessage: undefined,
-            }
-          : candidate,
+    setSessionTurnsById((cache) =>
+      updateChatSessionTurns(cache, activeSessionId, (turns) =>
+        turns.map((candidate) =>
+          candidate.id === assistantTurnId && candidate.role === "assistant"
+            ? {
+                ...candidate,
+                status: "pending",
+                progress: initialProgressForQuestion(turn.question, "Replaying retrieval graph", turn.documentIds ?? [], retrySpacePath),
+                streamText: undefined,
+                errorMessage: undefined,
+              }
+            : candidate,
+        ),
       ),
     );
     setSelectedSource(null);
@@ -259,41 +331,83 @@ export function useChatSession(currentUser: User | null) {
       assistantTurnId,
       request: {
         query: turn.question,
-        session_id: sessionIdRef.current,
+        session_id: activeSessionId,
         client_request_id: createId("query"),
         group_path: retrySpacePath,
         document_ids: turn.documentIds?.length ? turn.documentIds : undefined,
+        source_mode: turn.sourceMode ?? "auto",
+        query_source_id: turn.querySourceId || undefined,
       },
+      sessionId: activeSessionId,
     });
+  }
+
+  function expandSourceSearch(assistantTurnId: string) {
+    const turn = chatTurns.find((candidate) => candidate.id === assistantTurnId);
+    if (!turn || turn.role !== "assistant" || !turn.response?.source_expansion?.available) return;
+    submitQuestion(turn.question, {
+      sourceMode: "hybrid",
+      querySourceId: null,
+      allowSourceExpansion: true,
+      documentIds: turn.documentIds ?? [],
+    });
+  }
+
+  function changeSourceMode(nextMode: QuerySourceMode) {
+    setSourceModeState(nextMode);
+    if (nextMode === "db_only") {
+      setScopedDocumentIds([]);
+    }
+    if (nextMode === "auto" || nextMode === "corpus_only") {
+      setSelectedQuerySourceIdState("");
+    }
+  }
+
+  function changeSelectedQuerySourceId(nextSourceId: string) {
+    setSelectedQuerySourceIdState(nextSourceId);
   }
 
   async function clarifyArtifactJob(jobId: string, answers: Record<string, string>) {
     const response = await queryApi.clarifyArtifactJob(jobId, answers);
-    setChatTurns((turns) => mergeArtifactJobIntoTurns(turns, response.job));
+    if (!activeSessionId) return;
+    setSessionTurnsById((cache) =>
+      updateChatSessionTurns(cache, activeSessionId, (turns) => mergeArtifactJobIntoTurns(turns, response.job)),
+    );
   }
 
   async function cancelArtifactJob(jobId: string) {
     const response = await queryApi.cancelArtifactJob(jobId);
-    setChatTurns((turns) => mergeArtifactJobIntoTurns(turns, response.job));
+    if (!activeSessionId) return;
+    setSessionTurnsById((cache) =>
+      updateChatSessionTurns(cache, activeSessionId, (turns) => mergeArtifactJobIntoTurns(turns, response.job)),
+    );
   }
 
   async function retryArtifactJob(jobId: string) {
     const response = await queryApi.retryArtifactJob(jobId);
-    setChatTurns((turns) => mergeArtifactJobIntoTurns(turns, response.job));
+    if (!activeSessionId) return;
+    setSessionTurnsById((cache) =>
+      updateChatSessionTurns(cache, activeSessionId, (turns) => mergeArtifactJobIntoTurns(turns, response.job)),
+    );
   }
 
   function startStreamingQuery(variables: Omit<QueryRunVariables, "signal">) {
-    abortActiveQuery();
+    if (activeGenerationRef.current) return;
     const abortController = new AbortController();
     activeAbortControllerRef.current = abortController;
-    activeAssistantTurnIdRef.current = variables.assistantTurnId;
+    updateActiveGeneration({ assistantTurnId: variables.assistantTurnId, sessionId: variables.sessionId });
     queryMutation.mutate({ ...variables, signal: abortController.signal });
   }
 
   function abortActiveQuery() {
     activeAbortControllerRef.current?.abort();
     activeAbortControllerRef.current = null;
-    activeAssistantTurnIdRef.current = null;
+    updateActiveGeneration(null);
+  }
+
+  function updateActiveGeneration(next: ActiveGeneration | null) {
+    activeGenerationRef.current = next;
+    setActiveGenerationState(next);
   }
 
   return {
@@ -306,8 +420,12 @@ export function useChatSession(currentUser: User | null) {
     cancelArtifactJob,
     handleQuestionSubmit,
     handleRetry,
+    expandSourceSearch,
     clarifyArtifactJob,
-    hasPendingTurn,
+    activeSessionHasPendingTurn,
+    generatingSessionId: activeGeneration?.sessionId ?? null,
+    hasPendingGeneration,
+    hasPendingTurn: activeSessionHasPendingTurn,
     latestResponse,
     loadChatSession,
     question,
@@ -316,6 +434,8 @@ export function useChatSession(currentUser: User | null) {
     removeScopedDocument,
     retryArtifactJob,
     scopedDocumentIds,
+    sourceMode,
+    selectedQuerySourceId,
     savedSessions,
     savedSessionsError: savedSessionsQuery.isError ? errorMessage(savedSessionsQuery.error, "Chat history could not be loaded.") : null,
     savedSessionLoadError: loadSessionMutation.isError ? errorMessage(loadSessionMutation.error, "Chat session could not be loaded.") : null,
@@ -330,13 +450,56 @@ export function useChatSession(currentUser: User | null) {
     },
     loadingSessionId: loadSessionMutation.isPending ? loadSessionMutation.variables ?? null : null,
     selectedSource,
+    setSourceMode: changeSourceMode,
+    setSelectedQuerySourceId: changeSelectedQuerySourceId,
     setQuestion,
     setSelectedSource,
   };
 }
 
-function createUserTurn(content: string): ChatTurn {
-  return { id: createId("user"), role: "user", content, createdAt: new Date().toISOString() };
+export function mergeSavedSessionsWithLocal(savedSessions: SavedChatSessionSummary[], localSessions: SavedChatSessionSummary[], generatingSessionId: string | null = null): SavedChatSessionSummary[] {
+  const savedIds = new Set(savedSessions.map((session) => session.id));
+  const visibleLocalSessions = localSessions.filter((session) => session.id === generatingSessionId || !savedIds.has(session.id));
+  const seen = new Set<string>();
+  return [...visibleLocalSessions, ...savedSessions]
+    .filter((session) => {
+      if (seen.has(session.id)) return false;
+      seen.add(session.id);
+      return true;
+    })
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+}
+
+export function updateChatSessionTurns(cache: ChatSessionTurnCache, sessionId: string, updater: (turns: ChatTurn[]) => ChatTurn[]): ChatSessionTurnCache {
+  return { ...cache, [sessionId]: updater(cache[sessionId] ?? []) };
+}
+
+export function removeCachedSession(cache: ChatSessionTurnCache, sessionId: string): ChatSessionTurnCache {
+  if (!(sessionId in cache)) return cache;
+  const { [sessionId]: _removed, ...remaining } = cache;
+  return remaining;
+}
+
+export function isGeneratingSession(sessionId: string, generation: ActiveGeneration | null): boolean {
+  return generation?.sessionId === sessionId;
+}
+
+function upsertLocalSessionSummary(summaries: SavedChatSessionSummary[], summary: SavedChatSessionSummary): SavedChatSessionSummary[] {
+  const next = summaries.filter((session) => session.id !== summary.id);
+  return [summary, ...next];
+}
+
+function questionCountForTurns(turns: ChatTurn[]): number {
+  return turns.filter((turn) => turn.role === "user").length;
+}
+
+function compactSessionTitle(value: string): string {
+  const trimmed = value.trim() || "New chat";
+  return trimmed.length > 52 ? `${trimmed.slice(0, 49).trimEnd()}...` : trimmed;
+}
+
+function createUserTurn(content: string, createdAt = new Date().toISOString()): ChatTurn {
+  return { id: createId("user"), role: "user", content, createdAt };
 }
 
 function removeSessionFromPages(current: ChatHistoryQueryData | undefined, sessionId: string): ChatHistoryQueryData | undefined {
@@ -353,7 +516,13 @@ function removeSessionFromPages(current: ChatHistoryQueryData | undefined, sessi
   };
 }
 
-function createAssistantTurn(question: string, documentIds: string[] = [], groupPath: string | null = null): AssistantTurn {
+function createAssistantTurn(
+  question: string,
+  documentIds: string[] = [],
+  groupPath: string | null = null,
+  sourceMode: QuerySourceMode = "auto",
+  querySourceId: string | null = null,
+): AssistantTurn {
   return {
     id: createId("assistant"),
     role: "assistant",
@@ -361,10 +530,19 @@ function createAssistantTurn(question: string, documentIds: string[] = [], group
     question,
     groupPath,
     documentIds,
+    sourceMode,
+    querySourceId,
     progress: initialProgressForQuestion(question, "Opening retrieval graph", documentIds, groupPath),
     createdAt: new Date().toISOString(),
   };
 }
+
+type SourceSubmitOverride = {
+  sourceMode?: QuerySourceMode;
+  querySourceId?: string | null;
+  allowSourceExpansion?: boolean;
+  documentIds?: string[];
+};
 
 function initialProgressForQuestion(question: string, graphLabel = "Opening retrieval graph", documentIds: string[] = [], groupPath: string | null = null): QueryProgressItem[] {
   return [
@@ -492,21 +670,11 @@ function markAssistantTurnCancelled(turns: ChatTurn[], assistantTurnId: string):
   });
 }
 
-function latestPendingAssistantTurnId(turns: ChatTurn[]): string | null {
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index];
-    if (turn.role === "assistant" && turn.status === "pending") {
-      return turn.id;
-    }
-  }
-  return null;
-}
-
 function isAbortError(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "name" in error && error.name === "AbortError");
 }
 
-function applyStreamEvent(turns: ChatTurn[], assistantTurnId: string, event: RagSseEvent): ChatTurn[] {
+export function applyStreamEvent(turns: ChatTurn[], assistantTurnId: string, event: RagSseEvent): ChatTurn[] {
   return turns.map((turn) => {
     if (turn.id !== assistantTurnId || turn.role !== "assistant") return turn;
     if (event.event === "token") return { ...turn, streamText: appendText(turn.streamText, event.data.text) };
@@ -600,6 +768,7 @@ function executionDetail(mode?: string, detail?: string | null): string | null {
 function progressForNode(node: string): Pick<QueryProgressItem, "label" | "detail"> {
   const labels: Record<string, Pick<QueryProgressItem, "label" | "detail">> = {
     session_memory: { label: "Checking chat context", detail: "Looking for prior session hints" },
+    source_resolver: { label: "Resolving source mode", detail: "Applying composer and source hints" },
     intent_router: { label: "Classifying question", detail: "Choosing the retrieval route" },
     query_planner: { label: "Planning retrieval path", detail: "Breaking the question into evidence targets" },
     abac_retriever: { label: "Searching permitted documents", detail: "Applying access filters first" },

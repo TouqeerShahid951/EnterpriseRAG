@@ -25,6 +25,7 @@ _QUERY_STOPWORDS = {
     "could",
     "describe",
     "does",
+    "doing",
     "each",
     "document",
     "documents",
@@ -113,6 +114,7 @@ class EvidenceQuality:
     structured_hit_count: int = 0
     metadata_hit_count: int = 0
     document_class_match_count: int = 0
+    exhaustive_scope_match_count: int = 0
     in_scope_doc_ids: frozenset[str] = frozenset()
 
     @property
@@ -149,7 +151,9 @@ def assess_evidence_quality(query: str, hits: list[SearchHit], *, route_plan: ob
     structured_hit_count = sum(1 for hit in hits if _is_structured_hit(hit))
     metadata_hit_count = sum(1 for hit in hits if _has_source_metadata(hit))
     in_scope_doc_ids = _document_class_doc_ids(query_tokens, hits)
+    exhaustive_scope_doc_ids = _exhaustive_scope_doc_ids(query_tokens, hits)
     document_class_match_count = len(in_scope_doc_ids)
+    exhaustive_scope_match_count = len(exhaustive_scope_doc_ids)
 
     reasons: list[str] = []
     if max_retrieval_score >= STRONG_RETRIEVAL_SCORE:
@@ -171,6 +175,7 @@ def assess_evidence_quality(query: str, hits: list[SearchHit], *, route_plan: ob
         structured_hit_count=structured_hit_count,
         metadata_hit_count=metadata_hit_count,
         document_class_match_count=document_class_match_count,
+        exhaustive_scope_match_count=exhaustive_scope_match_count,
     )
     outcome = _evidence_outcome(
         route_intent=route_intent,
@@ -181,8 +186,17 @@ def assess_evidence_quality(query: str, hits: list[SearchHit], *, route_plan: ob
         structured_hit_count=structured_hit_count,
         metadata_hit_count=metadata_hit_count,
         document_class_match_count=document_class_match_count,
+        exhaustive_scope_match_count=exhaustive_scope_match_count,
     )
-    reasons.extend(_score_reasons(route_intent, score, outcome, structured_hit_count, metadata_hit_count, document_class_match_count))
+    reasons.extend(_score_reasons(
+        route_intent,
+        score,
+        outcome,
+        structured_hit_count,
+        metadata_hit_count,
+        document_class_match_count,
+        exhaustive_scope_match_count,
+    ))
     quality = "supported" if outcome == "pass" else "partial" if outcome == "partial" else "weak"
     return EvidenceQuality(
         quality=quality,
@@ -197,7 +211,8 @@ def assess_evidence_quality(query: str, hits: list[SearchHit], *, route_plan: ob
         structured_hit_count=structured_hit_count,
         metadata_hit_count=metadata_hit_count,
         document_class_match_count=document_class_match_count,
-        in_scope_doc_ids=frozenset(in_scope_doc_ids),
+        exhaustive_scope_match_count=exhaustive_scope_match_count,
+        in_scope_doc_ids=frozenset(in_scope_doc_ids | exhaustive_scope_doc_ids),
     )
 
 
@@ -238,6 +253,7 @@ def _combined_evidence_score(
     structured_hit_count: int,
     metadata_hit_count: int,
     document_class_match_count: int,
+    exhaustive_scope_match_count: int,
 ) -> float:
     features = {
         "retrieval": _clamp(max_retrieval_score / STRONG_RETRIEVAL_SCORE),
@@ -246,7 +262,7 @@ def _combined_evidence_score(
         "breadth": _clamp(distinct_doc_count / 4),
         "structured": _clamp(structured_hit_count / 6),
         "metadata": _clamp(metadata_hit_count / 6),
-        "doc_class": _clamp(document_class_match_count / 3),
+        "doc_class": _clamp((document_class_match_count + exhaustive_scope_match_count) / 3),
     }
     weights = _route_weights(route_intent)
     return round(sum(features[name] * weight for name, weight in weights.items()), 3)
@@ -262,8 +278,13 @@ def _evidence_outcome(
     structured_hit_count: int,
     metadata_hit_count: int,
     document_class_match_count: int,
+    exhaustive_scope_match_count: int,
 ) -> str:
     if route_intent in _AGGREGATION_INTENTS:
+        if exhaustive_scope_match_count > 0 and query_token_coverage >= SUPPORTED_TOKEN_COVERAGE:
+            return "pass"
+        if exhaustive_scope_match_count > 0 and query_token_coverage >= PARTIAL_TOKEN_COVERAGE:
+            return "partial"
         has_aggregate_support = (
             document_class_match_count > 0
             or structured_hit_count > 0
@@ -353,6 +374,7 @@ def _score_reasons(
     structured_hit_count: int,
     metadata_hit_count: int,
     document_class_match_count: int,
+    exhaustive_scope_match_count: int,
 ) -> list[str]:
     reasons = [f"evidence_score_{score:.2f}", f"verifier_outcome_{outcome}"]
     if route_intent:
@@ -363,6 +385,8 @@ def _score_reasons(
         reasons.append("source_metadata_present")
     if document_class_match_count:
         reasons.append("document_class_match")
+    if exhaustive_scope_match_count:
+        reasons.append("exhaustive_scope_match")
     return reasons
 
 
@@ -374,6 +398,18 @@ def _document_class_doc_ids(query_tokens: set[str], hits: list[SearchHit]) -> se
         doc_id = str(hit.payload.get("doc_id", hit.point_id))
         if query_tokens & _document_class_tokens(hit):
             matched.add(doc_id)
+    return matched
+
+
+def _exhaustive_scope_doc_ids(query_tokens: set[str], hits: list[SearchHit]) -> set[str]:
+    if not query_tokens:
+        return set()
+    matched: set[str] = set()
+    for hit in hits:
+        if str(hit.payload.get("exhaustive_scope_origin", "")) != "document_class_scope":
+            continue
+        if query_tokens & _hit_tokens(hit):
+            matched.add(str(hit.payload.get("doc_id", hit.point_id)))
     return matched
 
 

@@ -25,7 +25,6 @@ def embedding_text_for_chunk(*, title: str, chunk: TextChunk, metadata: dict[str
 def metadata_prefix(*, title: str, chunk: TextChunk, metadata: dict[str, Any]) -> str:
     lines: list[str] = []
     doc_type = _doc_type(metadata)
-    topics = _string_list(metadata.get("topics")) + _string_list(metadata.get("llm_topics"))
     entities = _entity_texts(metadata.get("named_entities"))[:8]
     summary = compact_summary(metadata.get("summary"))
     section = " / ".join([*chunk.section_path, chunk.section_title or ""]).strip(" /")
@@ -33,8 +32,6 @@ def metadata_prefix(*, title: str, chunk: TextChunk, metadata: dict[str, Any]) -
         lines.append(f"Document title: {title}")
     if doc_type:
         lines.append(f"Document type: {doc_type}")
-    if topics:
-        lines.append(f"Topics: {', '.join(_unique(topics)[:8])}")
     if entities:
         lines.append(f"Key entities: {', '.join(entities)}")
     if section:
@@ -56,8 +53,6 @@ def metadata_terms_for_chunk(*, title: str, chunk: TextChunk, metadata: dict[str
         chunk.table_row_label,
         *chunk.section_path,
         *chunk.structured_field_names,
-        *_string_list(metadata.get("topics")),
-        *_string_list(metadata.get("llm_topics")),
         *_entity_texts(metadata.get("named_entities")),
     ]
     return _unique([term for value in values for term in _terms(value)])[:96]

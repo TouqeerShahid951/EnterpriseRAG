@@ -8,7 +8,7 @@ export function CorpusRail({
   activeSessionId,
   collapsed,
   errorMessage,
-  hasPendingTurn,
+  generatingSessionId,
   loadErrorMessage,
   loading,
   loadingSessionId,
@@ -80,8 +80,17 @@ export function CorpusRail({
         <aside className="rag-corpus-rail rag-corpus-rail-collapsed" aria-label="Conversations">
           <button
             type="button"
+            onClick={() => onCollapsedChange(false)}
+            className="rag-history-rail-expand"
+            aria-label="Expand chat history panel"
+            title="Expand chat history"
+          >
+            <ChevronRight size={17} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
             onClick={handleReset}
-            disabled={hasPendingTurn || Boolean(loadingSessionId)}
+            disabled={Boolean(loadingSessionId)}
             className="rag-history-rail-action"
             aria-label="New chat"
             title="New chat"
@@ -100,15 +109,6 @@ export function CorpusRail({
           >
             <MessageSquare size={17} aria-hidden="true" />
             <span>{savedSessionsTotal > 99 ? "99+" : savedSessionsTotal}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onCollapsedChange(false)}
-            className="rag-history-rail-action"
-            aria-label="Expand chat history"
-            title="Expand chat history"
-          >
-            <ChevronRight size={17} aria-hidden="true" />
           </button>
         </aside>
 
@@ -135,7 +135,7 @@ export function CorpusRail({
             <CorpusRailContent
               activeSessionId={activeSessionId}
               errorMessage={errorMessage}
-              hasPendingTurn={hasPendingTurn}
+              generatingSessionId={generatingSessionId}
               loadErrorMessage={loadErrorMessage}
               loading={loading}
               loadingSessionId={loadingSessionId}
@@ -159,7 +159,7 @@ export function CorpusRail({
       <CorpusRailContent
         activeSessionId={activeSessionId}
         errorMessage={errorMessage}
-        hasPendingTurn={hasPendingTurn}
+        generatingSessionId={generatingSessionId}
         loadErrorMessage={loadErrorMessage}
         loading={loading}
         loadingSessionId={loadingSessionId}
@@ -209,7 +209,7 @@ function CorpusRailHeader({ closeRef, count, onClose, onCollapse }: CorpusRailHe
 function CorpusRailContent({
   activeSessionId,
   errorMessage,
-  hasPendingTurn,
+  generatingSessionId,
   loadErrorMessage,
   loading,
   loadingSessionId,
@@ -221,7 +221,7 @@ function CorpusRailContent({
   savedSessionsFetchingMore,
   savedSessionsHasMore,
 }: ContentProps) {
-  const historyLocked = hasPendingTurn || Boolean(loadingSessionId);
+  const historyLocked = Boolean(loadingSessionId);
   return (
     <>
       <button type="button" onClick={onReset} disabled={historyLocked} className="rag-secondary-action w-full">
@@ -252,7 +252,9 @@ function CorpusRailContent({
         {!loading && !errorMessage ? savedSessions.map((session) => (
           <ChatHistoryItem
             active={activeSessionId === session.id}
-            disabled={historyLocked}
+            deleteDisabled={historyLocked || generatingSessionId === session.id}
+            generating={generatingSessionId === session.id}
+            openDisabled={historyLocked}
             key={session.id}
             loading={loadingSessionId === session.id}
             onDelete={() => onDeleteSession(session.id)}
@@ -301,25 +303,30 @@ function ChatHistorySkeleton({ count = 3 }: { count?: number }) {
   );
 }
 
-function ChatHistoryItem({ active, disabled, loading, onDelete, onLoad, session }: ChatHistoryItemProps) {
-  const openIcon = loading ? <Loader2 className="animate-spin" size={16} /> : <MessageSquare size={16} />;
+function ChatHistoryItem({ active, deleteDisabled, generating, loading, onDelete, onLoad, openDisabled, session }: ChatHistoryItemProps) {
+  const openIcon = loading || generating ? <Loader2 className="animate-spin" size={16} /> : <MessageSquare size={16} />;
   return (
-    <div className={`rag-chat-history-item ${active ? "is-active" : ""}`} role="listitem">
+    <div className={`rag-chat-history-item ${active ? "is-active" : ""} ${generating ? "is-generating" : ""}`} role="listitem">
       <button
         type="button"
-        disabled={disabled}
+        disabled={openDisabled}
         onClick={onLoad}
         className="rag-chat-history-open"
+        aria-label={`Open ${session.title}`}
         aria-current={active ? "page" : undefined}
-        aria-busy={loading ? "true" : undefined}
+        aria-busy={loading || generating ? "true" : undefined}
       >
         {openIcon}
         <span>
           <strong>{session.title}</strong>
-          <small>{session.questionCount} question{session.questionCount === 1 ? "" : "s"} - {formatSessionTime(session.updatedAt)}</small>
+          <small>
+            {generating ? <span className="rag-chat-history-status">Generating</span> : null}
+            {generating ? " " : null}
+            {session.questionCount} question{session.questionCount === 1 ? "" : "s"} - {formatSessionTime(session.updatedAt)}
+          </small>
         </span>
       </button>
-      <button type="button" disabled={disabled} onClick={onDelete} className="rag-chat-history-delete" aria-label={`Delete ${session.title}`}>
+      <button type="button" disabled={deleteDisabled} onClick={onDelete} className="rag-chat-history-delete" aria-label={`Delete ${session.title}`}>
         <Trash2 size={14} />
       </button>
     </div>
@@ -336,7 +343,7 @@ type Props = {
   activeSessionId: string | null;
   collapsed: boolean;
   errorMessage: string | null;
-  hasPendingTurn: boolean;
+  generatingSessionId: string | null;
   loadErrorMessage: string | null;
   loading: boolean;
   loadingSessionId: string | null;
@@ -362,9 +369,11 @@ type CorpusRailHeaderProps = {
 
 type ChatHistoryItemProps = {
   active: boolean;
-  disabled: boolean;
+  deleteDisabled: boolean;
+  generating: boolean;
   loading: boolean;
   onDelete: () => void;
   onLoad: () => void;
+  openDisabled: boolean;
   session: SavedChatSessionSummary;
 };

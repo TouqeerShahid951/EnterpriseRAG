@@ -167,15 +167,15 @@ class PostgresIdentityRepository(PostgresConnectionMixin):
             result = conn.execute("DELETE FROM users WHERE id = %s", (user_id,))
             return result.rowcount > 0
 
-    def set_user_password(self, user_id: str, password_hash: str) -> UserRecord | None:
+    def set_user_password(self, user_id: str, password_hash: str, *, must_change_password: bool = False) -> UserRecord | None:
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE users
-                SET password_hash = %s, must_change_password = FALSE, updated_at = NOW()
+                SET password_hash = %s, must_change_password = %s, updated_at = NOW()
                 WHERE id = %s
                 """,
-                (password_hash, user_id),
+                (password_hash, must_change_password, user_id),
             )
         return self.get_user_by_id(user_id)
 

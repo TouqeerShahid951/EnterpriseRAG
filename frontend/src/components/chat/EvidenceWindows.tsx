@@ -92,9 +92,9 @@ function EvidenceWindowView({ window }: { window: EvidenceWindow }) {
         <EvidenceTable fields={window.fields} tableTitle={window.table_title} verified={verified} />
       ) : (
         <p className="rag-evidence-excerpt">
-          {window.truncated_start ? <span aria-hidden="true">… </span> : null}
+          {window.truncated_start ? <span aria-hidden="true">... </span> : null}
           <HighlightedExcerpt excerpt={window.passage} ranges={verified ? window.highlight_ranges : []} />
-          {window.truncated_end ? <span aria-hidden="true"> …</span> : null}
+          {window.truncated_end ? <span aria-hidden="true"> ...</span> : null}
         </p>
       )}
     </article>
@@ -141,7 +141,7 @@ function RetrievedContext({ expanded, source }: { expanded: boolean; source: Sou
       </div>
       <p className="rag-evidence-excerpt">
         {preview}
-        {!expanded && preview.length < source.excerpt.length ? <span aria-hidden="true"> …</span> : null}
+        {!expanded && preview.length < source.excerpt.length ? <span aria-hidden="true"> ...</span> : null}
       </p>
       <p className="rag-evidence-context-note">
         {pending

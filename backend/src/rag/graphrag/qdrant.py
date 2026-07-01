@@ -140,6 +140,9 @@ class QdrantGraphRAGClient:
                 {"points": points},
             )
 
+    def delete_partition_summaries(self, partition_key: str) -> None:
+        self._delete_partition(partition_key)
+
     def search_summaries(
         self,
         *,
@@ -251,6 +254,28 @@ def _chunk_from_payload(payload: object) -> ChunkRecord:
         page=_optional_int(payload.get("page")),
         page_start=_optional_int(payload.get("page_start")),
         page_end=_optional_int(payload.get("page_end")),
+        chunk_type=str(payload.get("chunk_type") or ""),
+        quality_flags=[str(item) for item in payload.get("quality_flags", []) if str(item).strip()]
+        if isinstance(payload.get("quality_flags"), list)
+        else [],
+        text_hash=str(payload.get("text_hash") or payload.get("chunk_content_hash") or ""),
+        claim_ids=[str(item) for item in payload.get("claim_ids", []) if str(item).strip()]
+        if isinstance(payload.get("claim_ids"), list)
+        else [],
+        claims=[
+            {str(key): str(value) for key, value in item.items()}
+            for item in payload.get("claims", [])
+            if isinstance(item, dict)
+        ]
+        if isinstance(payload.get("claims"), list)
+        else [],
+        named_entities=[
+            dict(item)
+            for item in payload.get("named_entities", [])
+            if isinstance(item, dict)
+        ]
+        if isinstance(payload.get("named_entities"), list)
+        else [],
     )
 
 

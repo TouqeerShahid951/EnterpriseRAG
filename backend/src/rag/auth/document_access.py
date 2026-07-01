@@ -16,7 +16,7 @@ def can_read_document(user: UserRecord, document: DocumentRecord) -> bool:
         return False
     if is_global_admin(user):
         return can_access_clearance(user.clearance_level, document.clearance_level)
-    return can_read_group_path(user.group_paths, document.group_path) and can_access_clearance(
+    return can_read_any_group_path(user.group_paths, document.access_group_paths) and can_access_clearance(
         user.clearance_level,
         document.clearance_level,
     )
@@ -27,7 +27,13 @@ def can_read_group_path(user_group_paths: Sequence[str], document_group_path: st
     return any(normalize_group_path(group_path) == doc_group for group_path in user_group_paths)
 
 
+def can_read_any_group_path(user_group_paths: Sequence[str], document_group_paths: Sequence[str]) -> bool:
+    return any(can_read_group_path(user_group_paths, group_path) for group_path in document_group_paths)
+
+
 def can_write_document(user: UserRecord, document: DocumentRecord) -> bool:
+    if document.shared_group_paths and not is_global_admin(user):
+        return False
     return can_write_document_scope(user, document.group_path) and can_access_clearance(
         user.clearance_level,
         document.clearance_level,

@@ -39,6 +39,14 @@ export function targetDisplay(event: AuditEvent): AuditIdentityDisplay {
     }
     return { label: "Deleted user", detail: event.target_id ?? undefined, unresolved: true };
   }
+  if (event.target_type === "document") {
+    const title = documentDisplayName(event);
+    return {
+      label: title ?? "Document",
+      detail: event.target_id ?? undefined,
+      unresolved: !title,
+    };
+  }
   return {
     label: event.target_type ? labelize(event.target_type) : "Target",
     detail: event.target_id ?? undefined,
@@ -46,24 +54,29 @@ export function targetDisplay(event: AuditEvent): AuditIdentityDisplay {
 }
 
 export function auditImpactSummary(event: AuditEvent): string {
+  const documentName = documentDisplayName(event);
   const filename = stringPayload(event, "filename");
   const groupPath = stringPayload(event, "group_path");
   const jobId = stringPayload(event, "job_id");
   const target = targetDisplay(event).label;
-  if (event.event_type === "upload.queued") return compactSentence(["Queued upload", filename, groupPath && `in ${groupPath}`]);
-  if (event.event_type === "documents.delete") return compactSentence(["Moved document to Trash", groupPath && `in ${groupPath}`]);
-  if (event.event_type === "documents.permanent_delete") return compactSentence(["Permanently deleted document", groupPath && `in ${groupPath}`]);
-  if (event.event_type === "documents.restore") return compactSentence(["Restored document", jobId && `job ${jobId}`]);
-  if (event.event_type === "documents.reingest") return compactSentence(["Queued document reingestion", jobId && `job ${jobId}`]);
-  if (event.event_type === "documents.clearance_update") return compactSentence(["Updated document clearance", stringPayload(event, "clearance_level")]);
+  if (event.event_type === "upload.queued") return compactSentence(["Queued upload", filename ?? documentName, groupPath && `in ${groupPath}`]);
+  if (event.event_type === "documents.delete") return compactSentence(["Moved", documentName ?? "document", "to Trash", groupPath && `in ${groupPath}`]);
+  if (event.event_type === "documents.permanent_delete") return compactSentence(["Permanently deleted", documentName ?? "document", groupPath && `in ${groupPath}`]);
+  if (event.event_type === "documents.restore") return compactSentence(["Restored", documentName ?? "document", jobId && `job ${jobId}`]);
+  if (event.event_type === "documents.reingest") return compactSentence(["Queued reingestion for", documentName ?? "document", jobId && `job ${jobId}`]);
+  if (event.event_type === "documents.clearance_update") return compactSentence(["Updated clearance for", documentName ?? "document", stringPayload(event, "clearance_level")]);
   if (event.event_type === "documents.supersede") return "Updated document supersession chain";
-  if (event.event_type === "ingest.cancelled") return compactSentence(["Cancelled ingestion job", jobId ?? event.target_id ?? undefined]);
-  if (event.event_type === "admin.ingest.requeued") return compactSentence(["Requeued ingestion job", jobId ?? event.target_id ?? undefined]);
-  if (event.event_type.startsWith("internal.ingest.")) return compactSentence(["Worker ingestion event", jobId ?? event.target_id ?? undefined]);
+  if (event.event_type === "ingest.cancelled") return compactSentence(["Cancelled ingestion job", jobId ?? event.target_id ?? undefined, documentName && `for ${documentName}`]);
+  if (event.event_type === "admin.ingest.requeued") return compactSentence(["Requeued ingestion job", jobId ?? event.target_id ?? undefined, documentName && `for ${documentName}`]);
+  if (event.event_type.startsWith("internal.ingest.")) return compactSentence(["Worker ingestion event", jobId ?? event.target_id ?? undefined, documentName && `for ${documentName}`]);
   if (event.event_type === "auth.login") return compactSentence(["User signed in", actorDisplay(event).label]);
   if (event.event_type === "auth.logout") return "Session signed out";
   if (event.event_type === "auth.refresh") return compactSentence(["Session refreshed", actorDisplay(event).label]);
   if (event.event_type === "admin.user.deleted") return compactSentence(["Deleted user account", target]);
+  if (event.event_type === "admin.user.password_reset") return compactSentence(["Reset password for", target]);
+  if (event.event_type === "admin.user.chat_activity_viewed") return compactSentence(["Viewed chat activity for", target]);
+  if (event.event_type === "admin.user.chat_session_viewed") return compactSentence(["Viewed chat transcript for", target]);
+  if (event.event_type === "audit.exported") return compactSentence(["Exported audit log CSV", numericPayload(event, "row_count")]);
   if (event.event_type === "review.approved") return "Approved extraction review item";
   if (event.event_type === "review.rejected") return "Rejected extraction review item";
   if (event.event_type === "review.resume_skipped") return "Skipped review resume because job was cancelled";
@@ -71,6 +84,15 @@ export function auditImpactSummary(event: AuditEvent): string {
   if (event.event_type === "query.artifact_failed") return compactSentence(["Artifact generation failed", stringPayload(event, "type")]);
   if (event.event_type === "query.artifact_downloaded") return "Downloaded generated artifact";
   return payloadSummary(event.payload);
+}
+
+export function documentDisplayName(event: AuditEvent): string | undefined {
+  return textValue(event.target_document_title)
+    ?? stringPayload(event, "target_document_title")
+    ?? stringPayload(event, "document_title")
+    ?? stringPayload(event, "document_name")
+    ?? stringPayload(event, "title")
+    ?? stringPayload(event, "filename");
 }
 
 export function payloadSummary(payload: Record<string, unknown>, limit = 4): string {
@@ -92,11 +114,20 @@ export function labelize(value: string): string {
 
 function stringPayload(event: AuditEvent, key: string): string | undefined {
   const value = event.payload[key];
-  return typeof value === "string" && value.trim() ? value : undefined;
+  return textValue(value);
+}
+
+function numericPayload(event: AuditEvent, key: string): string | undefined {
+  const value = event.payload[key];
+  return typeof value === "number" ? `${value} rows` : undefined;
 }
 
 function compactSentence(parts: Array<string | undefined | false>): string {
   return parts.filter(Boolean).join(" ");
+}
+
+function textValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 export type AuditIdentityDisplay = {
