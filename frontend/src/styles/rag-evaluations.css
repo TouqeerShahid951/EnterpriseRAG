@@ -366,7 +366,7 @@
 
 .rag-eval-main-grid {
   display: grid;
-  grid-template-columns: minmax(17rem, 20rem) minmax(0, 1fr);
+  grid-template-columns: 1fr;
   gap: 1rem;
   align-items: start;
 }
@@ -389,6 +389,17 @@
   display: grid;
 }
 
+.rag-eval-main-grid > .rag-eval-history .rag-eval-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.rag-eval-main-grid > .rag-eval-history .rag-eval-run-list {
+  grid-template-columns: repeat(auto-fit, minmax(12.5rem, 1fr));
+}
+
 .rag-eval-run-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -400,6 +411,16 @@
   padding: 0.9rem 1rem;
   color: inherit;
   text-align: left;
+}
+
+.rag-eval-main-grid > .rag-eval-history .rag-eval-run-row {
+  align-content: space-between;
+  min-height: 6.25rem;
+  border-right: 1px solid var(--color-surface-border);
+}
+
+.rag-eval-main-grid > .rag-eval-history .rag-eval-run-row:last-child {
+  border-right: 0;
 }
 
 .rag-eval-run-row:hover,
