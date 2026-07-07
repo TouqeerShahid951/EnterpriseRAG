@@ -16,8 +16,8 @@ def generate_metadata_v2(
     parsed_items: list[Any],
     generate_metadata: Callable[[str], dict[str, Any]],
     *,
-    max_windows: int = 4,
-    max_window_chars: int = 4000,
+    max_windows: int = 3,
+    max_window_chars: int = 2500,
 ) -> dict[str, Any]:
     windows = _metadata_windows(parsed_items, max_windows=max_windows, max_window_chars=max_window_chars)
     warnings: list[str] = []
@@ -31,6 +31,19 @@ def generate_metadata_v2(
             candidates.append(candidate)
     if not candidates:
         return _fallback(warnings, window_count=len(windows), metadata_errors=metadata_errors)
+
+    if len(windows) == 1:
+        metadata = _fill_missing(candidates[0], _merge_candidates(candidates))
+        metadata["_warnings"] = _unique(warnings)
+        if metadata_errors:
+            metadata["_metadata_errors"] = metadata_errors[:5]
+        metadata["_metadata_extraction"] = {
+            "version": METADATA_VERSION,
+            "mode": "llm_single_window",
+            "window_count": len(windows),
+            "candidate_count": len(candidates),
+        }
+        return metadata
 
     final = _safe_generate(generate_metadata, _consolidation_prompt(candidates, windows))
     warnings.extend(_pop_warnings(final))
@@ -118,12 +131,19 @@ def _has_metadata_signal(metadata: dict[str, Any]) -> bool:
 
 def _consolidation_prompt(candidates: list[dict[str, Any]], windows: list[str]) -> str:
     return (
-        "Consolidate these section-level metadata candidates into one document-level metadata object. "
-        "Prefer repeated facts, remove duplicates, keep the summary to exactly two factual sentences, "
-        "infer a concise freeform doc_type from the content, and return summary, llm_topics, doc_type, and claims.\n\n"
-        f"Candidates:\n{json.dumps(candidates, ensure_ascii=True)[:4200]}\n\n"
-        f"Representative text:\n{chr(10).join(windows[:2])[:1600]}"
+        "Merge metadata. JSON only: summary, llm_topics, doc_type. "
+        "Prefer repeated facts; summary<=2 sentences; topics=3-5.\n\n"
+        f"Candidates:\n{json.dumps([_prompt_candidate(candidate) for candidate in candidates], ensure_ascii=True)[:1600]}\n\n"
+        f"Text:\n{chr(10).join(windows[:2])[:600]}"
     )
+
+
+def _prompt_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: candidate[key]
+        for key in ("summary", "llm_topics", "topics", "doc_type")
+        if candidate.get(key) not in (None, "", [])
+    }
 
 
 def _merge_candidates(candidates: list[dict[str, Any]]) -> dict[str, Any]:

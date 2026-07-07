@@ -65,6 +65,11 @@ class RetrievalService:
                 return live_hits
             return self._retrieve_vector(ctx)
         if mode == "hybrid":
+            preferred = str(getattr(decision, "preferred_source", "") or "")
+            if preferred == "corpus":
+                vector_hits = self._retrieve_vector(ctx)
+                live_hits = self._retrieve_live_sql(ctx)
+                return dedupe_hits([*vector_hits, *live_hits])
             live_hits = self._retrieve_live_sql(ctx)
             vector_hits = self._retrieve_vector(ctx)
             return dedupe_hits([*live_hits, *vector_hits])

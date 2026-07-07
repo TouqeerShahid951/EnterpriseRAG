@@ -3,6 +3,7 @@ import type { ClearanceLevel, ParserProvenance, QueryRequest, QueryIntent, Query
 export interface PdfUploadDraft {
   files: File[];
   groupPath: string;
+  sharedGroupPaths: string[];
   clearanceLevel: ClearanceLevel;
   effectiveDate: string;
   expiryDate: string;
@@ -12,6 +13,8 @@ export interface PdfUploadDraft {
 
 export interface UploadJobView {
   jobId: string;
+  documentId: string | null;
+  retryOfJobId: string | null;
   status: UploadJobState;
   progressPct: number;
   stage: UploadJobStage;
@@ -34,7 +37,7 @@ export interface UploadJobView {
 export interface UploadBatchItemView {
   id: string;
   fileName: string;
-  fileSize: number;
+  fileSize: number | null;
   groupPath: string;
   clearanceLevel: ClearanceLevel;
   requestState: "uploading" | "accepted" | "failed";

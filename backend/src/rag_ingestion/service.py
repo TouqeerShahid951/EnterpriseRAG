@@ -29,7 +29,10 @@ def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
     backend = _build_backend(config)
     attempt = _start_attempt(task, backend, job.job_id)
     if not attempt.accepted:
-        return _handle_rejected_attempt(backend, job, attempt)
+        resume_attempt = _resume_exhausted_review_attempt(backend, job, attempt)
+        if resume_attempt is None:
+            return _handle_rejected_attempt(backend, job, attempt)
+        attempt = resume_attempt
 
     deps: IngestDependencies | None = None
     try:
@@ -140,6 +143,40 @@ def _handle_rejected_attempt(
         {"attempt_count": attempt.attempt_count, "max_attempts": attempt.max_attempts},
     )
     return {"job_id": job.job_id, "doc_id": job.doc_id, "status": "failed", "error_code": "retry_exhausted"}
+
+
+def _resume_exhausted_review_attempt(
+    backend: BackendInternalClient,
+    job: IngestJobPayload,
+    attempt: IngestAttempt,
+) -> IngestAttempt | None:
+    if not (job.review_batch_id or job.image_review_batch_id):
+        return None
+    if attempt.disposition != "exhausted" or attempt.job_status != "queued" or attempt.attempt_count < attempt.max_attempts:
+        return None
+    updated = _update_job_best_effort(
+        backend,
+        job_id=job.job_id,
+        status="processing",
+        progress_pct=5,
+        error_code=None,
+        error_message_safe=None,
+    )
+    if not updated:
+        return None
+    _record_event(
+        backend,
+        job.job_id,
+        "review_resume_after_retry_limit",
+        {"attempt_count": attempt.attempt_count, "max_attempts": attempt.max_attempts},
+    )
+    return IngestAttempt(
+        accepted=True,
+        disposition="review_resume",
+        attempt_count=attempt.attempt_count,
+        max_attempts=attempt.max_attempts,
+        job_status="processing",
+    )
 
 
 def _start_attempt(task: Any, backend: BackendInternalClient, job_id: str) -> IngestAttempt:
@@ -372,6 +409,7 @@ def _build_dependencies(
         layered_docling_batch_pages=config.layered_docling_batch_pages,
         pdf_image_analysis_max_images=config.pdf_image_analysis_max_images,
         pdf_image_analysis_max_full_page_fallbacks=config.pdf_image_analysis_max_full_page_fallbacks,
+        pdf_image_review_threshold=ingest_config.pdf_image_review_threshold,
         scanned_visual_region_enabled=config.scanned_visual_region_enabled,
         scanned_visual_min_area_ratio=config.scanned_visual_min_area_ratio,
         scanned_visual_max_regions_per_page=config.scanned_visual_max_regions_per_page,

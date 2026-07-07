@@ -7,7 +7,7 @@ import pytest
 from rag_ingestion.infrastructure.backend import IngestAttempt
 from rag_ingestion.infrastructure.http import ServiceRequestError
 from rag_ingestion.messages import IngestJobPayload
-from rag_ingestion.service import _retry_or_fail
+from rag_ingestion.service import _resume_exhausted_review_attempt, _retry_or_fail
 
 
 class RetryScheduled(Exception):
@@ -93,7 +93,23 @@ def test_retry_waits_for_stale_window_when_backend_requeue_update_fails() -> Non
     }
 
 
-def _job() -> IngestJobPayload:
+def test_review_resume_can_continue_at_retry_limit() -> None:
+    backend = FakeBackend()
+    resumed = _resume_exhausted_review_attempt(
+        backend,  # type: ignore[arg-type]
+        _job(image_review_batch_id="batch-1"),
+        IngestAttempt(accepted=False, disposition="exhausted", attempt_count=3, max_attempts=3, job_status="queued"),
+    )
+
+    assert resumed is not None
+    assert resumed.accepted is True
+    assert resumed.disposition == "review_resume"
+    assert resumed.attempt_count == 3
+    assert backend.updates[0]["status"] == "processing"
+    assert backend.events[0]["event_type"] == "review_resume_after_retry_limit"
+
+
+def _job(*, image_review_batch_id: str | None = None) -> IngestJobPayload:
     return IngestJobPayload(
         job_id="job-1",
         doc_id="doc-1",
@@ -102,4 +118,5 @@ def _job() -> IngestJobPayload:
         effective_date=None,
         supersedes=[],
         content_type="application/pdf",
+        image_review_batch_id=image_review_batch_id,
     )

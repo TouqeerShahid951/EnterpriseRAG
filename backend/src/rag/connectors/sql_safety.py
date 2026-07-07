@@ -310,11 +310,17 @@ def _validate_catalog_columns(expression: object, catalog: _Catalog, references:
         column_name = normalize_identifier(column_expr.name)
         table_key = _resolve_column_table_key(column_expr, catalog, references, referenced_keys)
         if table_key is None:
-            raise SqlValidationError("Live connector SQL references an unapproved or ambiguous column.")
+            column_label = _column_label(column_expr)
+            raise SqlValidationError(f"Live connector SQL references an unapproved or ambiguous column: {column_label}.")
         table = catalog.tables[table_key]
         column = table.columns.get(column_name)
         if column is None or not column.allowed or column.sensitive:
-            raise SqlValidationError("Live connector SQL references an unapproved or sensitive column.")
+            column_label = _column_label(column_expr)
+            allowed_excerpt = _approved_column_excerpt(table)
+            hint = f" Approved columns for {table.key}: {allowed_excerpt}." if allowed_excerpt else ""
+            raise SqlValidationError(
+                f"Live connector SQL references an unapproved or sensitive column: {column_label} on {table.key}.{hint}"
+            )
 
 
 def _validate_catalog_joins(expression: object, catalog: _Catalog, references: dict[str, _TableReference]) -> None:
@@ -355,6 +361,23 @@ def _resolve_column_table_key(column_expr: object, catalog: _Catalog, references
     column_name = normalize_identifier(getattr(column_expr, "name", ""))
     matches = [key for key in referenced_keys if column_name in catalog.tables[key].columns]
     return matches[0] if len(matches) == 1 else None
+
+
+def _column_label(column_expr: object) -> str:
+    name = normalize_identifier(getattr(column_expr, "name", ""))
+    qualifier = normalize_identifier(getattr(column_expr, "table", ""))
+    schema = normalize_identifier(getattr(column_expr, "db", ""))
+    parts = [part for part in (schema, qualifier, name) if part]
+    return ".".join(parts) if parts else "<unknown>"
+
+
+def _approved_column_excerpt(table: _CatalogTable, *, limit: int = 12) -> str:
+    names = [column.name for column in table.columns.values() if column.allowed and not column.sensitive]
+    if not names:
+        return ""
+    shown = names[:limit]
+    suffix = ", ..." if len(names) > limit else ""
+    return ", ".join(shown) + suffix
 
 
 def _ensure_row_limit(expression: object, statement: str, *, connector_type: str, row_limit: int) -> str:

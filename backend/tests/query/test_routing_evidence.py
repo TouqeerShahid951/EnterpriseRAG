@@ -38,6 +38,23 @@ def test_aggregation_keeps_exhaustive_plain_text_evidence() -> None:
     assert inspection.should_reroute is False
 
 
+def test_aggregation_keeps_live_sql_structured_rows() -> None:
+    inspection = inspect_evidence_for_reroute(
+        aggregation_plan(),
+        [
+            hit(
+                "live-sql:0",
+                source_type="connector_live_sql_database_scope",
+                structured_kind="kv_record",
+                structured_fields=[{"label": "status", "value": "Open"}, {"label": "total", "value": "2"}],
+            )
+        ],
+        reroute_count=0,
+    )
+
+    assert inspection.should_reroute is False
+
+
 def test_aggregation_without_structured_or_scope_evidence_reroutes() -> None:
     inspection = inspect_evidence_for_reroute(
         aggregation_plan(),

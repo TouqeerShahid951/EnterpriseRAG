@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from .runtime_offline import apply_runtime_offline_defaults
@@ -15,18 +16,57 @@ class FastEmbedDenseError(RuntimeError):
     """Raised when local dense FastEmbed vectors cannot be generated."""
 
 
-def list_supported_dense_models() -> list[str]:
+def list_supported_dense_models(*, cache_dir: str | None = None, cached_only: bool = False) -> list[str]:
     try:
         from fastembed import TextEmbedding
     except ImportError as exc:
         raise FastEmbedDenseError("`fastembed` is required for local dense embeddings") from exc
-    return sorted(
-        {
-            str(model.get("model", "")).strip()
-            for model in TextEmbedding.list_supported_models()
-            if isinstance(model, dict) and str(model.get("model", "")).strip()
+    models = _supported_model_sources(TextEmbedding.list_supported_models())
+    if cached_only:
+        models = {
+            model: source
+            for model, source in models.items()
+            if has_fastembed_model_cache(cache_dir or DEFAULT_FASTEMBED_CACHE_DIR, source)
         }
-    )
+    return sorted(models)
+
+
+def has_fastembed_model_cache(cache_dir: str | None, model_name: str) -> bool:
+    if not cache_dir or not model_name.strip():
+        return False
+    root = Path(cache_dir)
+    return any(_has_snapshot(root / cache_name) for cache_name in _huggingface_cache_dir_names(model_name))
+
+
+def _supported_model_sources(models: list[dict[str, Any]]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        name = str(model.get("model", "")).strip()
+        if not name:
+            continue
+        sources = model.get("sources")
+        hf_source = sources.get("hf") if isinstance(sources, dict) else None
+        result[name] = str(hf_source or name).strip()
+    return result
+
+
+def _huggingface_cache_dir_names(model_name: str) -> list[str]:
+    normalized = model_name.strip()
+    names = [_huggingface_cache_dir_name(normalized)]
+    if normalized.endswith("-Q"):
+        names.append(_huggingface_cache_dir_name(normalized.removesuffix("-Q")))
+    return names
+
+
+def _huggingface_cache_dir_name(model_name: str) -> str:
+    return "models--" + model_name.replace("/", "--")
+
+
+def _has_snapshot(path: Path) -> bool:
+    snapshots = path / "snapshots"
+    return path.is_dir() and snapshots.is_dir() and any(snapshots.iterdir())
 
 
 def embed_dense_texts(

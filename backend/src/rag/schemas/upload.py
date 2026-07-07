@@ -35,6 +35,7 @@ UploadJobProgressUnit = Literal["pages", "chunks", "vectors", "files", "metadata
 
 class UploadMetadata(ContractModel):
     group_path: str = Field(..., min_length=1)
+    shared_group_paths: list[str] = Field(default_factory=list)
     clearance_level: ClearanceLevel = DEFAULT_CLEARANCE_LEVEL
     effective_date: date | None = None
     expiry_date: date | None = None

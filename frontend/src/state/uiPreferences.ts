@@ -4,6 +4,11 @@ type NumericPreferenceOptions = {
   min: number;
 };
 
+type StringPreferenceOptions<T extends string> = {
+  allowed: readonly T[];
+  fallback: T;
+};
+
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 
 export function readStoredBoolean(key: string, fallback: boolean, storage: StorageLike | null = browserLocalStorage()): boolean {
@@ -40,6 +45,24 @@ export function readStoredNumber(key: string, options: NumericPreferenceOptions,
 export function writeStoredNumber(key: string, value: number, storage: StorageLike | null = browserLocalStorage()): void {
   try {
     storage?.setItem(key, String(value));
+  } catch {
+    // Preference persistence is optional; the UI should keep working without it.
+  }
+}
+
+export function readStoredString<T extends string>(key: string, options: StringPreferenceOptions<T>, storage: StorageLike | null = browserLocalStorage()): T {
+  try {
+    const value = storage?.getItem(key);
+    if (value && (options.allowed as readonly string[]).includes(value)) return value as T;
+    return options.fallback;
+  } catch {
+    return options.fallback;
+  }
+}
+
+export function writeStoredString(key: string, value: string, storage: StorageLike | null = browserLocalStorage()): void {
+  try {
+    storage?.setItem(key, value);
   } catch {
     // Preference persistence is optional; the UI should keep working without it.
   }

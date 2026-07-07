@@ -6,10 +6,10 @@ import {
   modelPlaceholderForStatus,
   modelOptionsFromDiscovery,
   providerDefaults,
+  pdfImageReviewThresholdLabel,
   requestFromVllmForm,
   requestFromForm,
   rerankerOptionsFromCatalog,
-  SUPPORTED_RERANKER_MODELS,
   stackTemplateFromForm,
   thresholdFromPercent,
   thresholdPercentFromConfig,
@@ -286,11 +286,11 @@ describe("inference settings helpers", () => {
     expect(request.vision_model).toBe("llava:latest");
   });
 
-  it("keeps the full supported reranker catalog before the API response arrives", () => {
-    expect(rerankerOptionsFromCatalog(undefined)).toEqual([...SUPPORTED_RERANKER_MODELS]);
+  it("does not show reranker options before the cached catalog arrives", () => {
+    expect(rerankerOptionsFromCatalog(undefined)).toEqual([]);
   });
 
-  it("merges API reranker models with the built-in fallback catalog", () => {
+  it("uses the cached reranker models returned by the API", () => {
     const options = rerankerOptionsFromCatalog({
       models: [
         { model: "jinaai/jina-reranker-v1-turbo-en" },
@@ -300,14 +300,19 @@ describe("inference settings helpers", () => {
 
     expect(options[0]).toBe("jinaai/jina-reranker-v1-turbo-en");
     expect(options).toContain("custom/local-reranker");
-    expect(options).toContain("BAAI/bge-reranker-base");
-    expect(options).toContain("Xenova/ms-marco-MiniLM-L-12-v2");
+    expect(options).not.toContain("BAAI/bge-reranker-base");
+    expect(options).not.toContain("Xenova/ms-marco-MiniLM-L-12-v2");
   });
 
   it("converts OCR review threshold between config fraction and UI percent", () => {
     expect(thresholdPercentFromConfig(0.9)).toBe(90);
     expect(thresholdFromPercent(90)).toBe(0.9);
     expect(thresholdFromPercent(89)).toBe(0.89);
+  });
+
+  it("labels the PDF image review threshold, including disabled review", () => {
+    expect(pdfImageReviewThresholdLabel(64)).toBe("Above 64 images");
+    expect(pdfImageReviewThresholdLabel(0)).toBe("Off");
   });
 
   it("targets one vLLM service when applying launch limits", () => {

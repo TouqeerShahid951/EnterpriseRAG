@@ -109,7 +109,7 @@ export function PrudentiaAuditPage({ onLogout, onNavigate, user }: Props) {
   return (
     <PrudentiaWorkspace activeRoute="activity-log" onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page" id="main-content">
-        <div className="sv-page-inner max-w-none">
+        <div className="sv-page-inner sv-page-inner-workbench max-w-none">
           <header className="sv-page-header">
             <div>
               <p className="sv-eyebrow">Govern</p>

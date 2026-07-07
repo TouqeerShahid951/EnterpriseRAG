@@ -522,6 +522,8 @@ function ComposerGraphEnrichmentChip({ chip }: { chip: GraphEnrichmentChipShape 
 
 const localComposerUploadJob: UploadJobView = {
   jobId: "",
+  documentId: null,
+  retryOfJobId: null,
   status: "queued",
   progressPct: 8,
   stage: "queued",
@@ -548,6 +550,8 @@ const localComposerUploadJob: UploadJobView = {
 function failedComposerUploadJob(message: string): UploadJobView {
   return {
     jobId: "",
+    documentId: null,
+    retryOfJobId: null,
     status: "failed",
     progressPct: 0,
     stage: "failed",

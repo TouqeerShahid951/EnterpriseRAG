@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+import hashlib
 import threading
 import time
+from uuid import uuid4
 
 from ..chunking import chunk_items
 from ..errors import HumanReviewRequired, IngestJobCancelled
@@ -13,8 +15,9 @@ from ..indexing.claims import build_claim_records
 from ..indexing.metadata_text import build_embedding_texts
 from ..indexing.payloads import build_qdrant_points
 from ..metadata import build_metadata_bundle, generate_metadata_v2
-from ..parsers import parse_document
-from ..parsers.models import ParsedPdfItem, parsed_image_asset_to_dict, parsed_item_from_dict, parsed_item_to_dict
+from ..parsers import PdfImageReviewRequired, parse_document, resume_pdf_image_review
+from ..parsers.images import ImageSource, image_dimensions, image_source_candidate_key
+from ..parsers.models import BBox, ParsedPdfItem, parsed_image_asset_to_dict, parsed_item_from_dict, parsed_item_to_dict
 from .state import IngestDependencies, IngestState
 
 METADATA_PROGRESS_INTERVAL_SECONDS = 15.0
@@ -41,6 +44,26 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
     if payload.review_batch_id:
         approved_items = deps.backend.get_review_batch_parsed_items(review_batch_id=payload.review_batch_id)
         state["parsed_items"] = [parsed_item_from_dict(item) for item in approved_items]
+    elif payload.image_review_batch_id:
+        parsed_items, approved_sources, candidate_count = _image_review_resume_inputs(payload.image_review_batch_id, deps)
+        parsed = resume_pdf_image_review(
+            parsed_items,
+            approved_sources,
+            doc_id=payload.doc_id,
+            image_asset_store=deps.image_asset_writer,
+            image_analyzer=deps.vision,
+            candidate_count=candidate_count,
+            image_progress_callback=_image_progress_reporter(deps, payload.job_id),
+        )
+        state["parser_provenance"] = parsed.provenance
+        deps.backend.record_parser_provenance(job_id=payload.job_id, provenance=parsed.provenance)
+        if parsed.assets:
+            deps.backend.replace_document_image_assets(
+                doc_id=payload.doc_id,
+                job_id=payload.job_id,
+                assets=[parsed_image_asset_to_dict(asset) for asset in parsed.assets],
+            )
+        state["parsed_items"] = parsed.items
     else:
         try:
             parsed_items = parse_document(
@@ -61,6 +84,7 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
                 image_progress_callback=_image_progress_reporter(deps, payload.job_id),
                 pdf_image_analysis_max_images=deps.pdf_image_analysis_max_images,
                 pdf_image_analysis_max_full_page_fallbacks=deps.pdf_image_analysis_max_full_page_fallbacks,
+                pdf_image_review_threshold=deps.pdf_image_review_threshold,
                 scanned_visual_region_enabled=deps.scanned_visual_region_enabled,
                 scanned_visual_min_area_ratio=deps.scanned_visual_min_area_ratio,
                 scanned_visual_max_regions_per_page=deps.scanned_visual_max_regions_per_page,
@@ -70,6 +94,36 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
                 image_asset_store=deps.image_asset_writer,
                 image_analyzer=deps.vision,
             )
+        except PdfImageReviewRequired as exc:
+            provenance = _image_review_required_provenance(exc)
+            state["parser_provenance"] = provenance
+            deps.backend.record_parser_provenance(job_id=payload.job_id, provenance=provenance)
+            if exc.parsed.assets:
+                deps.backend.replace_document_image_assets(
+                    doc_id=payload.doc_id,
+                    job_id=payload.job_id,
+                    assets=[parsed_image_asset_to_dict(asset) for asset in exc.parsed.assets],
+                )
+            candidates = _image_review_candidates(exc, deps=deps, doc_id=payload.doc_id)
+            image_review_batch_id = deps.backend.create_image_review_batch(
+                job_id=payload.job_id,
+                doc_id=payload.doc_id,
+                parsed_items=[parsed_item_to_dict(item) for item in exc.parsed.items],
+                resume_payload=payload.to_dict(),
+                candidates=candidates,
+            )
+            deps.backend.update_job(
+                job_id=payload.job_id,
+                status="human_review",
+                progress_pct=IMAGE_PROGRESS_START,
+                stage_progress=_items_progress(
+                    "images",
+                    0,
+                    len(candidates),
+                    f"Image analysis needs review for {len(candidates)} candidates",
+                ),
+            )
+            raise HumanReviewRequired(review_batch_id=image_review_batch_id)
         except Exception as exc:
             deps.backend.record_parser_provenance(
                 job_id=payload.job_id,
@@ -352,6 +406,84 @@ def _items_progress(unit: str, current: int, total: int, label: str) -> dict[str
     return {"unit": unit, "current": max(0, current), "total": max(0, total), "label": label}
 
 
+def _image_review_resume_inputs(image_review_batch_id: str, deps: IngestDependencies) -> tuple[list[ParsedPdfItem], list[ImageSource], int]:
+    resume = deps.backend.get_image_review_resume(image_review_batch_id=image_review_batch_id)
+    parsed_items = [parsed_item_from_dict(item) for item in resume["parsed_items"]]
+    sources = [_image_source_from_review_candidate(candidate, deps) for candidate in resume["candidates"]]
+    return parsed_items, sources, int(resume.get("candidate_count") or len(sources))
+
+
+def _image_source_from_review_candidate(candidate: dict[str, object], deps: IngestDependencies) -> ImageSource:
+    object_path = str(candidate["object_path"])
+    return ImageSource(
+        content=deps.storage.read(object_path),
+        content_type=str(candidate.get("content_type") or "image/png"),
+        filename=str(candidate.get("filename") or "image.png"),
+        source_kind=str(candidate.get("source_kind") or "pdf_image"),
+        quality_flags=sorted({*_string_list(candidate.get("quality_flags")), "image_review_approved"}),
+        page=_positive_int_or_none(candidate.get("page")),
+        bbox=_bbox_tuple(candidate.get("bbox")),
+        page_area_ratio=_float_or_none(candidate.get("page_area_ratio")),
+    )
+
+
+def _image_review_candidates(exc: PdfImageReviewRequired, *, deps: IngestDependencies, doc_id: str) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for source in exc.image_selection.sources:
+        candidate_key = image_source_candidate_key(source)
+        asset_id = str(uuid4())
+        object_path = deps.image_asset_writer.put_image_asset(
+            doc_id=doc_id,
+            asset_id=asset_id,
+            filename=source.filename,
+            content=source.content,
+            content_type=source.content_type,
+        )
+        try:
+            width, height = image_dimensions(source.content)
+        except Exception:
+            width, height = None, None
+        candidates.append({
+            "candidate_key": candidate_key,
+            "filename": source.filename,
+            "source_kind": source.source_kind,
+            "page": source.page,
+            "bbox": list(source.bbox) if source.bbox is not None else None,
+            "page_area_ratio": source.page_area_ratio,
+            "object_path": object_path,
+            "content_type": source.content_type,
+            "width": width,
+            "height": height,
+            "content_hash": hashlib.sha256(source.content).hexdigest(),
+            "quality_flags": sorted({*source.quality_flags, "image_review_candidate"}),
+            "score": exc.image_selection.source_scores.get(candidate_key, 0),
+            "recommended": True,
+        })
+    return candidates
+
+
+def _image_review_required_provenance(exc: PdfImageReviewRequired) -> dict[str, object]:
+    selection = exc.image_selection
+    visual_sources = exc.visual_sources
+    scanned = visual_sources.scanned_visual_regions
+    return {
+        **exc.parsed.provenance,
+        "image_analysis_review_required": True,
+        "image_analysis_candidate_count": visual_sources.image_candidate_count,
+        "image_analysis_selected_count": len(selection.sources),
+        "image_analysis_pending_review_count": len(selection.sources),
+        "image_analysis_skipped_count": selection.skipped_count + visual_sources.skipped_unnecessary_count,
+        "image_analysis_skipped_unnecessary_count": selection.skipped_unnecessary_count + visual_sources.skipped_unnecessary_count,
+        "image_analysis_skipped_duplicate_count": selection.skipped_duplicate_count,
+        "image_analysis_skipped_limit_count": selection.skipped_limit_count,
+        "image_analysis_skipped_full_page_fallback_count": selection.skipped_full_page_fallback_count,
+        "scanned_page_class_counts": scanned.page_class_counts,
+        "scanned_visual_candidate_count": scanned.candidate_count,
+        "scanned_visual_selected_count": scanned.selected_count,
+        "scanned_visual_whole_page_fallback_count": scanned.whole_page_fallback_count,
+    }
+
+
 @contextmanager
 def _metadata_progress_reporter(
     deps: IngestDependencies,
@@ -559,6 +691,29 @@ def _int_tuple(value: object) -> tuple[int, ...]:
 
 def _int_value(value: object) -> int:
     return value if isinstance(value, int) else 0
+
+
+def _positive_int_or_none(value: object) -> int | None:
+    if isinstance(value, int) and value > 0:
+        return value
+    return None
+
+
+def _float_or_none(value: object) -> float | None:
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _bbox_tuple(value: object) -> BBox | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    try:
+        return (float(value[0]), float(value[1]), float(value[2]), float(value[3]))
+    except (TypeError, ValueError):
+        return None
+
+
+def _string_list(value: object) -> list[str]:
+    return [str(item) for item in value] if isinstance(value, list) else []
 
 
 def _parser_failure_provenance(deps: IngestDependencies, content_type: str | None, file_path: str, exc: Exception) -> dict[str, object]:

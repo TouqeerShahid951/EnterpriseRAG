@@ -11,7 +11,7 @@ from rag.schemas.query import QueryRequest
 
 
 class UncitedAnswerModel:
-    def answer(self, *, question, contexts, cancellation_token=None):
+    def answer(self, *, question, contexts, profile=None, cancellation_token=None):
         return "The corpus shows an operational coordination pattern."
 
 

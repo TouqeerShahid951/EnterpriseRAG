@@ -9,11 +9,63 @@ from .cancellation import QueryCancellationToken
 from .http import ServiceRequestError, request_json, stream_json_lines
 
 
-ANSWER_NUM_PREDICT = 2048
+ANSWER_NUM_PREDICT = 1024
+LONG_ANSWER_NUM_PREDICT = 2048
+SYNTHESIS_PROMPT_HEADROOM_TOKENS = 512
 FAITHFULNESS_NUM_PREDICT = 1024
 ROUTE_VERIFIER_NUM_PREDICT = 512
 REASONING_NUM_PREDICT = 512
 JSON_NUM_PREDICT = 4096
+_LONG_ANSWER_PROFILES = {
+    "aggregation",
+    "comparison",
+    "comparative_summary",
+    "conflict_check",
+    "document_navigation",
+    "graphrag_global",
+    "legacy",
+    "multi_hop",
+    "summarization",
+    "temporal_comparison",
+}
+_BASE_ANSWER_PREFIX = (
+    "Use only evidence. Cite factual claims with the exact bracket label from the supporting block.",
+    "Ignore unrelated evidence. Do not invent labels or use ordinal source names.",
+)
+_BASE_ANSWER_SUFFIX = (
+    "If evidence lacks the answer, say the indexed sources do not contain enough information.",
+)
+_LIST_ANSWER_INSTRUCTIONS = (
+    "For lists, include all directly supported matching items and stop after the direct answer.",
+)
+_TABLE_ANSWER_INSTRUCTIONS = (
+    "For table Row/Value evidence, preserve full Value unless asked narrower; include requested fields or say absent.",
+    "For highest/lowest/max/min, cite the deciding value; do not verify a superlative from one candidate row.",
+    "Preserve slash-paired X/Y cells exactly.",
+    "Treat named table rows as candidate answers; include software, embedded, or system-board entries unless excluded.",
+)
+_LEGACY_ANSWER_INSTRUCTIONS = (
+    *_BASE_ANSWER_PREFIX,
+    *_LIST_ANSWER_INSTRUCTIONS,
+    *_TABLE_ANSWER_INSTRUCTIONS,
+    *_BASE_ANSWER_SUFFIX,
+)
+_LIST_ANSWER_PROFILES = {
+    "aggregation",
+    "comparison",
+    "comparative_summary",
+    "document_navigation",
+    "multi_hop",
+    "summarization",
+    "temporal_comparison",
+}
+_TABLE_ANSWER_PROFILES = {
+    "aggregation",
+    "comparison",
+    "comparative_summary",
+    "document_navigation",
+    "temporal_comparison",
+}
 
 
 class OllamaClient:
@@ -74,9 +126,10 @@ class OllamaClient:
         *,
         question: str,
         contexts: list[str],
+        profile: str | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
-        prompt = build_answer_prompt(question=question, contexts=contexts)
+        prompt = build_answer_prompt(question=question, contexts=contexts, profile=profile)
         payload = request_json(
             self.base_url,
             "/api/chat",
@@ -88,6 +141,7 @@ class OllamaClient:
                 stream=False,
                 thinking_enabled=self.thinking_enabled,
                 num_ctx=self.num_ctx,
+                num_predict=answer_num_predict_for_profile(profile),
             ),
             timeout_seconds=self.chat_timeout_seconds,
             cancellation_token=cancellation_token,
@@ -99,9 +153,10 @@ class OllamaClient:
         *,
         question: str,
         contexts: list[str],
+        profile: str | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> Iterator[str]:
-        prompt = build_answer_prompt(question=question, contexts=contexts)
+        prompt = build_answer_prompt(question=question, contexts=contexts, profile=profile)
         chunks = stream_json_lines(
             self.base_url,
             "/api/chat",
@@ -113,6 +168,7 @@ class OllamaClient:
                 stream=True,
                 thinking_enabled=self.thinking_enabled,
                 num_ctx=self.num_ctx,
+                num_predict=answer_num_predict_for_profile(profile),
             ),
             timeout_seconds=self.chat_timeout_seconds,
             cancellation_token=cancellation_token,
@@ -278,26 +334,36 @@ class OllamaClient:
         return _message_content(payload, empty_message)
 
 
-def build_answer_prompt(*, question: str, contexts: list[str]) -> str:
+def build_answer_prompt(*, question: str, contexts: list[str], profile: str | None = None) -> str:
     context_block = "\n\n".join(contexts)
-    return (
-        "Answer the question directly using only the provided evidence. "
-        "Each evidence block starts with its required citation label in square brackets. "
-        "Cite every factual claim with the exact label of a source that directly supports that claim. "
-        "Do not invent citation labels or cite an unrelated source. "
-        "Do not refer to evidence blocks as Source 1, Source 2, or similar ordinal names. "
-        "Ignore evidence that is unrelated to the question. "
-        "For list questions, include every supported item found in directly relevant evidence. "
-        "If a table row directly answers the question and uses Row/Value fields, preserve the full Value content unless the question asks for a narrower subset. "
-        "For option, list, or supported-item questions, answer from the directly matching row or section and do not add related rows, comparison rows, or examples after the direct answer is complete. "
-        "If the question asks for named fields, include each requested field when it appears in evidence; if a requested field is not present, say it is not present in the evidence. "
-        "For highest, lowest, maximum, or minimum questions over table evidence, include the deciding table value as well as the requested fields, but do not verify a superlative from only one candidate row. "
-        "When a table header or cell uses slash-paired labels such as X/Y, preserve the paired cell exactly and do not reinterpret the second value as the first label. "
-        "When relevant evidence is a table, treat each named row as a candidate answer and do not stop after examples. "
-        "Include software, embedded, or system-board entries unless the question explicitly excludes them. "
-        "If the sources do not contain the answer, say that the indexed sources do not contain enough information.\n\n"
-        f"Evidence:\n{context_block}\n\nQuestion: {question}"
-    )
+    instructions = " ".join(_answer_instructions(profile=profile, contexts=contexts))
+    return f"{instructions}\n\nEvidence:\n{context_block}\n\nQuestion: {question}"
+
+
+def estimate_answer_prompt_tokens(*, question: str, contexts: list[str], profile: str | None = None) -> int:
+    return max(1, len(build_answer_prompt(question=question, contexts=contexts, profile=profile)) // 4)
+
+
+def answer_num_predict_for_profile(profile: str | None) -> int:
+    normalized_profile = (profile or "legacy").strip().lower()
+    return LONG_ANSWER_NUM_PREDICT if normalized_profile in _LONG_ANSWER_PROFILES else ANSWER_NUM_PREDICT
+
+
+def _answer_instructions(*, profile: str | None, contexts: list[str]) -> tuple[str, ...]:
+    normalized_profile = (profile or "legacy").strip().lower()
+    if normalized_profile == "legacy":
+        return _LEGACY_ANSWER_INSTRUCTIONS
+    instructions = [*_BASE_ANSWER_PREFIX]
+    if normalized_profile in _LIST_ANSWER_PROFILES:
+        instructions.extend(_LIST_ANSWER_INSTRUCTIONS)
+    if normalized_profile in _TABLE_ANSWER_PROFILES or _has_table_context(contexts):
+        instructions.extend(_TABLE_ANSWER_INSTRUCTIONS)
+    instructions.extend(_BASE_ANSWER_SUFFIX)
+    return tuple(instructions)
+
+
+def _has_table_context(contexts: list[str]) -> bool:
+    return any("[Columns:" in context and "Value:" in context for context in contexts)
 
 
 def _answer_payload(
@@ -307,12 +373,13 @@ def _answer_payload(
     stream: bool,
     thinking_enabled: bool,
     num_ctx: int | None,
+    num_predict: int,
 ) -> dict[str, Any]:
     return {
         "model": model,
         "stream": stream,
         "think": thinking_enabled,
-        "options": _ollama_options(temperature=0.1, num_predict=ANSWER_NUM_PREDICT, num_ctx=num_ctx),
+        "options": _ollama_options(temperature=0.1, num_predict=num_predict, num_ctx=num_ctx),
         "messages": [
             {"role": "system", "content": "You are a concise enterprise RAG assistant."},
             {"role": "user", "content": prompt},

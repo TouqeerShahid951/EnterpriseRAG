@@ -23,6 +23,13 @@ def add_effective_date_scope(qdrant_filter: dict[str, object], target_date: str 
         return qdrant_filter
     scoped = dict(qdrant_filter)
     must = list(scoped.get("must", []))
-    must.append({"key": "effective_date", "range": {"lte": target_date}})
+    must.append(
+        {
+            "should": [
+                {"key": "effective_date", "range": {"lte": target_date}},
+                {"is_empty": {"key": "effective_date"}},
+            ]
+        }
+    )
     scoped["must"] = must
     return scoped

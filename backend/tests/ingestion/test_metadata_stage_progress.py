@@ -72,8 +72,9 @@ def test_generate_metadata_reports_active_progress_and_degraded_reason(monkeypat
         for update in backend.updates
         if isinstance(update.get("stage_progress"), dict)
     ]
-    assert 36 in progress_values
+    assert steps.METADATA_PROGRESS_START in progress_values
     assert any(37 <= value <= 49 for value in progress_values)
+    assert steps.METADATA_PROGRESS_END in progress_values
     assert 50 in progress_values
     assert "Requesting metadata from metadata model slow-metadata-model" in progress_labels
     assert any(label.startswith("Waiting on metadata model slow-metadata-model for ") for label in progress_labels)

@@ -16,10 +16,10 @@ from rag.shared.thinking import (
 from .cancellation import QueryCancellationToken
 from .http import ServiceRequestError, request_json, stream_sse_json
 from .ollama import (
-    ANSWER_NUM_PREDICT,
     FAITHFULNESS_NUM_PREDICT,
     REASONING_NUM_PREDICT,
     ROUTE_VERIFIER_NUM_PREDICT,
+    answer_num_predict_for_profile,
     build_answer_prompt,
 )
 
@@ -73,13 +73,14 @@ class OpenAICompatibleClient:
         *,
         question: str,
         contexts: list[str],
+        profile: str | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
         return self._chat(
-            prompt=build_answer_prompt(question=question, contexts=contexts),
+            prompt=build_answer_prompt(question=question, contexts=contexts, profile=profile),
             model=self.chat_model,
             system="You are a concise enterprise RAG assistant.",
-            max_tokens=ANSWER_NUM_PREDICT,
+            max_tokens=answer_num_predict_for_profile(profile),
             temperature=0.1,
             json_response=False,
             cancellation_token=cancellation_token,
@@ -90,6 +91,7 @@ class OpenAICompatibleClient:
         *,
         question: str,
         contexts: list[str],
+        profile: str | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> Iterator[str]:
         chunks = stream_sse_json(
@@ -99,9 +101,9 @@ class OpenAICompatibleClient:
             method="POST",
             payload=_chat_payload(
                 model=self.chat_model,
-                prompt=build_answer_prompt(question=question, contexts=contexts),
+                prompt=build_answer_prompt(question=question, contexts=contexts, profile=profile),
                 system="You are a concise enterprise RAG assistant.",
-                max_tokens=ANSWER_NUM_PREDICT,
+                max_tokens=answer_num_predict_for_profile(profile),
                 temperature=0.1,
                 stream=True,
                 json_response=False,

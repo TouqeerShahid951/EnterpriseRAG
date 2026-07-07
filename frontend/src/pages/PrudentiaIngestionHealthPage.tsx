@@ -64,7 +64,7 @@ export function PrudentiaIngestionHealthPage({ onLogout, onNavigate, user }: Pro
   return (
     <PrudentiaWorkspace activeRoute="ingestion-health" onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page" id="main-content">
-        <div className="sv-page-inner max-w-6xl">
+        <div className="sv-page-inner sv-page-inner-dashboard max-w-6xl">
           <header className="sv-page-header">
             <div>
               <p className="sv-eyebrow">System Overview</p>

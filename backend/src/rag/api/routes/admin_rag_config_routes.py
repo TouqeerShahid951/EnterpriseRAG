@@ -50,7 +50,7 @@ from ...schemas.rag_config import (
     VllmServiceDeploymentLimits,
 )
 from ...shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL, SUPPORTED_RERANKER_MODELS, is_supported_reranker_model
-from ...shared.fastembed_dense import DEFAULT_FASTEMBED_DENSE_MODEL
+from ...shared.fastembed_dense import DEFAULT_FASTEMBED_DENSE_MODEL, has_fastembed_model_cache
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -73,7 +73,7 @@ def get_workspace_rag_config(
 @router.get(
     "/rag-config/rerankers",
     response_model=RerankerModelsResponse,
-    summary="List supported local cross-encoder reranker models",
+    summary="List cached local cross-encoder reranker models",
 )
 def list_workspace_reranker_models(
     user: UserRecord = Depends(require_platform_admin_user),
@@ -83,6 +83,7 @@ def list_workspace_reranker_models(
         models=[
             RerankerModelOption(model=model, default=model == DEFAULT_RERANKER_MODEL)
             for model in SUPPORTED_RERANKER_MODELS
+            if has_fastembed_model_cache(settings.rag_reranker_cache_dir, model)
         ]
     )
 

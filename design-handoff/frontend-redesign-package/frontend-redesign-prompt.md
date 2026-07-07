@@ -6,7 +6,7 @@ You are a senior product designer and frontend engineer. I am giving you screens
 
 Prudentia AI is a local enterprise RAG workspace for controlled document intake, retrieval-augmented Q&A, evidence inspection, OCR review, auditability, answer evaluation, and grounded artifact generation. It is used in deployments where data locality, role-aware access, clearance boundaries, and offline model execution matter.
 
-Primary users include platform admins, system admins, space admins, contributors, reviewers, auditors, and members. The interface must feel calm, secure, operational, and efficient. It should not feel like a marketing site or generic AI dashboard.
+Primary users include platform admins, system admins, space admins, Document Contributors, Chat Members, and Audit Viewers. The interface must feel calm, secure, operational, and efficient. It should not feel like a marketing site or generic AI dashboard.
 
 ## Current Stack And Constraints
 

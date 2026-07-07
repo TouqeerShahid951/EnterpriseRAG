@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readStoredBoolean, readStoredNumber, writeStoredBoolean, writeStoredNumber } from "./uiPreferences";
+import { readStoredBoolean, readStoredNumber, readStoredString, writeStoredBoolean, writeStoredNumber, writeStoredString } from "./uiPreferences";
 
 describe("ui preference storage", () => {
   it("reads booleans with fallbacks for missing and invalid values", () => {
@@ -22,6 +22,17 @@ describe("ui preference storage", () => {
     expect(storage.getItem("history")).toBe("false");
   });
 
+  it("reads and writes validated string preferences", () => {
+    const storage = new MemoryStorage();
+    const options = { allowed: ["auto", "corpus_only", "db_only", "hybrid"] as const, fallback: "auto" as const };
+
+    expect(readStoredString("source-mode", options, storage)).toBe("auto");
+    writeStoredString("source-mode", "hybrid", storage);
+    expect(readStoredString("source-mode", options, storage)).toBe("hybrid");
+    storage.setItem("source-mode", "invalid");
+    expect(readStoredString("source-mode", options, storage)).toBe("auto");
+  });
+
   it("clamps numeric preferences and falls back safely", () => {
     const storage = new MemoryStorage();
 
@@ -39,8 +50,10 @@ describe("ui preference storage", () => {
 
     expect(readStoredBoolean("sidebar", false, storage)).toBe(false);
     expect(readStoredNumber("width", { fallback: 280, min: 240, max: 400 }, storage)).toBe(280);
+    expect(readStoredString("source-mode", { allowed: ["auto", "hybrid"] as const, fallback: "auto" }, storage)).toBe("auto");
     expect(() => writeStoredBoolean("sidebar", true, storage)).not.toThrow();
     expect(() => writeStoredNumber("width", 320, storage)).not.toThrow();
+    expect(() => writeStoredString("source-mode", "hybrid", storage)).not.toThrow();
   });
 });
 

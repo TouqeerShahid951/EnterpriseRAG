@@ -217,6 +217,18 @@ def test_live_sql_validation_allows_only_approved_catalog_scope() -> None:
         with pytest.raises(SqlValidationError):
             validate_live_sql_for_approved_catalog(query, catalog_json=catalog, connector_type="postgres", row_limit=10)
 
+    with pytest.raises(SqlValidationError) as excinfo:
+        validate_live_sql_for_approved_catalog(
+            "SELECT c.missing_id FROM public.cases c LIMIT 5",
+            catalog_json=catalog,
+            connector_type="postgres",
+            row_limit=10,
+        )
+    message = str(excinfo.value)
+    assert "c.missing_id" in message
+    assert "public.cases" in message
+    assert "status" in message
+
 
 def test_connector_registry_exposes_sql_server_and_postgres() -> None:
     registry = default_connector_registry()

@@ -7,6 +7,7 @@ from rag.ops.migrate_folder_ingest_cli import MIGRATION_SQL as FOLDER_INGEST_MIG
 from rag.ops.migrate_ingest_job_origin_cli import MIGRATION_SQL as INGEST_JOB_ORIGIN_MIGRATION_SQL
 from rag.ops.migrate_ingest_progress_cli import DDL as INGEST_PROGRESS_DDL
 from rag.ops.migrate_ingest_resilience_cli import DDL as INGEST_RESILIENCE_DDL
+from rag.ops.migrate_image_review_cli import DDL as IMAGE_REVIEW_DDL
 from rag.ops.migrate_ocr_review_cli import DDL as OCR_REVIEW_DDL
 from rag.ops.migrate_parser_provenance_cli import DDL as PARSER_PROVENANCE_DDL
 from rag.ops.migrate_user_deletion_cli import MIGRATION_SQL as USER_DELETION_MIGRATION_SQL
@@ -44,6 +45,7 @@ def ensure_postgres_schema(config: Settings = settings) -> None:
         conn.execute(PARSER_PROVENANCE_DDL)
         conn.execute(INGEST_RESILIENCE_DDL)
         conn.execute(OCR_REVIEW_DDL)
+        conn.execute(IMAGE_REVIEW_DDL)
         conn.execute(USER_DELETION_MIGRATION_SQL)
         conn.execute(CLAIM_SCHEMA_SQL)
         conn.execute(DOCUMENT_IMAGE_ASSET_SCHEMA_SQL)
@@ -177,6 +179,7 @@ CREATE INDEX IF NOT EXISTS document_shares_group_path_idx ON document_shares (gr
 CREATE TABLE IF NOT EXISTS ingest_jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     doc_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    retry_of_job_id UUID NULL REFERENCES ingest_jobs(id) ON DELETE SET NULL,
     origin TEXT NOT NULL DEFAULT 'unknown',
     status TEXT NOT NULL DEFAULT 'queued',
     progress_pct INTEGER NOT NULL DEFAULT 0,
@@ -208,6 +211,7 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS ingest_jobs_doc_created_idx ON ingest_jobs (doc_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ingest_jobs_retry_of_idx ON ingest_jobs (retry_of_job_id);
 CREATE UNIQUE INDEX IF NOT EXISTS ingest_jobs_one_active_per_doc_uidx
     ON ingest_jobs (doc_id)
     WHERE status IN ('scheduled', 'queued', 'processing', 'human_review');
@@ -356,6 +360,8 @@ ALTER TABLE ingest_jobs DROP CONSTRAINT IF EXISTS ingest_jobs_origin_known;
 ALTER TABLE ingest_jobs ADD CONSTRAINT ingest_jobs_origin_known CHECK (
     origin IN ('upload', 'reingest', 'restore', 'folder', 'connector', 'unknown')
 );
+ALTER TABLE ingest_jobs ADD COLUMN IF NOT EXISTS retry_of_job_id UUID NULL REFERENCES ingest_jobs(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS ingest_jobs_retry_of_idx ON ingest_jobs (retry_of_job_id);
 """
 
 

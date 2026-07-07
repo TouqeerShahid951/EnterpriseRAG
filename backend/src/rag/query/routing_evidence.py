@@ -84,7 +84,15 @@ def _general_rag_reroute(plan: RoutePlan) -> RoutePlan:
 
 def _has_table_evidence(hit: SearchHit) -> bool:
     table_json = hit.payload.get("table_json")
-    return isinstance(table_json, dict) and bool(table_json)
+    if isinstance(table_json, dict) and bool(table_json):
+        return True
+    if hit.payload.get("chunk_type") in {"table", "table_row", "kv_record"}:
+        return True
+    structured_kind = hit.payload.get("structured_kind")
+    if isinstance(structured_kind, str) and structured_kind.strip():
+        return True
+    structured_fields = hit.payload.get("structured_fields")
+    return isinstance(structured_fields, list) and bool(structured_fields)
 
 
 def _has_exhaustive_scope_evidence(hit: SearchHit) -> bool:

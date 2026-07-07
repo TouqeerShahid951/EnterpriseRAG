@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, CalendarClock, CheckCircle2, ChevronDown, ChevronRight, FileText, FolderOpen, KeyRound, Loader2, Network, PauseCircle, Pencil, PlayCircle, Plus, Save, Search, ShieldAlert, Sparkles, Trash2, X } from "lucide-react";
+import { Ban, CalendarClock, CheckCircle2, ChevronDown, ChevronRight, Eye, EyeOff, FileText, FolderOpen, KeyRound, Loader2, MoreHorizontal, Network, PauseCircle, Pencil, PlayCircle, Plus, Save, Search, ShieldAlert, Sparkles, Trash2, X } from "lucide-react";
 
 import { connectorApi, folderIngestApi, type UpdateConnectorProfileRequest, type UpdateConnectorSchemaCatalogRequest } from "../../api/contracts";
 import { clearanceLevelDescription, clearanceLevelLabel, clearanceLevelsAssignableBy } from "../../authz";
@@ -418,19 +418,19 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
   }
 
   return (
-    <section className="sv-panel p-5" aria-labelledby="folder-ingest-title">
+    <section className={isConnectorPanel ? "sv-panel connector-page-panel p-5" : "sv-panel p-5"} aria-labelledby={isConnectorPanel ? "database-connectors-workspace-title" : "folder-ingest-title"}>
+      {!isConnectorPanel ? (
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4 border-b border-surface-border pb-4">
         <div>
-          <p className="sv-eyebrow">{isConnectorPanel ? "Database Connectors" : "Scheduled Folder Sources"}</p>
-          <h2 id="folder-ingest-title" className="sv-section-title">{isConnectorPanel ? "Prepare live database access" : "Stage local folder snapshots for indexing"}</h2>
+          <p className="sv-eyebrow">Scheduled Folder Sources</p>
+          <h2 id="folder-ingest-title" className="sv-section-title">Stage local folder snapshots for indexing</h2>
           <p className="mt-1 text-body-md text-on-surface-variant">
-            {isConnectorPanel
-          ? "Create encrypted database connections, inspect schemas, and choose the tables, columns, and joins Live DB may use."
-              : "Choose a folder from this browser, review the staged files, then queue a one-time snapshot for parsing, embedding, and indexing."}
+            Choose a folder from this browser, review the staged files, then queue a one-time snapshot for parsing, embedding, and indexing.
           </p>
         </div>
         <span className="sv-pill">Timezone: {WORKSPACE_TIMEZONE}</span>
       </div>
+      ) : null}
 
       {isConnectorPanel ? (
         <ConnectorOverview
@@ -566,7 +566,7 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
             icon={<KeyRound size={18} />}
             onClose={closeConnectorSetup}
             open={connectorSetupOpen}
-            size="lg"
+            size="md"
             title="Add Connection"
           >
             <ConnectorProfileSetup
@@ -695,6 +695,7 @@ function ConnectorOverview({
   });
   const catalogs = catalogEntries.map(({ catalog }) => catalog);
   const approvedCatalogCount = catalogs.filter((catalog) => catalog.status === "approved").length;
+  const pendingReviewCount = Math.max(connectorProfiles.length - catalogEntries.length, 0);
   const needsReviewCount = connectorProfiles.length - approvedCatalogCount;
   const failedTestCount = connectorProfiles.filter((profile) => profile.last_test_status === "failed").length;
   const latestCatalog = catalogs
@@ -705,26 +706,42 @@ function ConnectorOverview({
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4 rounded-lg border border-surface-border bg-surface-container-low p-4">
-        <div className="max-w-3xl">
-          <p className="sv-label">Connector workspace</p>
-          <p className="mt-1 text-body-md text-on-surface-variant">
-            Add a read-only database connection, read its schema, review tables and joins, then enable Live DB access.
-          </p>
+      <div className="connector-workflow-bar">
+        <div className="connector-workflow-copy">
+          <p className="sv-label">Connector workflow</p>
+          <h2 id="database-connectors-workspace-title" className="sv-section-title">Connect, review, enable</h2>
+          <p className="mt-1 text-body-md text-on-surface-variant">Add read-only credentials, read the schema, choose allowed tables and joins, then make the review available to Live DB answers.</p>
+          <p className="connector-workflow-path">Connect / Review schema / Enable Live DB</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => onStartSetup("connection")} className="sv-action-secondary">
+        <div className="connector-workflow-actions">
+          <button type="button" onClick={() => onStartSetup("connection")} className="sv-action-primary">
             <Plus size={16} />
             Add Connection
           </button>
+          <span className="connector-timezone-note">Timezone: {WORKSPACE_TIMEZONE}</span>
         </div>
       </div>
 
-      <dl className="grid gap-3 md:grid-cols-4">
-        <ConnectorOverviewMetric label="Connections" value={isProfilesLoading ? "Loading" : connectorProfiles.length.toString()} detail="Encrypted SQL Server and PostgreSQL credentials" />
-        <ConnectorOverviewMetric label="Schema Reviews" value={catalogsLoading ? "Loading" : catalogEntries.length.toString()} detail={catalogEntries.length ? `${needsReviewCount} connection${needsReviewCount === 1 ? "" : "s"} not live yet` : "Prepare a review after reading schema"} />
-        <ConnectorOverviewMetric label="Live Access" value={catalogsLoading ? "Loading" : approvedCatalogCount.toString()} detail={approvedCatalogCount > 0 ? "Available to Live DB answers" : "No connector is enabled yet"} />
-        <ConnectorOverviewMetric label="Diagnostics" value={failedTestCount > 0 ? `${failedTestCount} issue${failedTestCount === 1 ? "" : "s"}` : "Clear"} detail={latestCatalog ? `Latest review ${formatDateTime(latestCatalog)}` : "Run tests and schema reads from Connections"} />
+      <dl className="connector-overview-grid">
+        <ConnectorOverviewMetric label="Connections" value={isProfilesLoading ? "Loading" : `${connectorProfiles.length} configured`} detail="Encrypted SQL Server and PostgreSQL credentials" />
+        <ConnectorOverviewMetric
+          detail={pendingReviewCount > 0 ? `${pendingReviewCount} connection${pendingReviewCount === 1 ? "" : "s"} need review` : "All saved connections have a review"}
+          label="Schema Review"
+          tone={pendingReviewCount > 0 ? "warning" : "success"}
+          value={catalogsLoading ? "Loading" : `${catalogEntries.length} ready`}
+        />
+        <ConnectorOverviewMetric
+          detail={needsReviewCount > 0 ? `${needsReviewCount} connection${needsReviewCount === 1 ? "" : "s"} not live yet` : "Available to Live DB answers"}
+          label="Live DB"
+          tone={approvedCatalogCount > 0 ? "success" : "neutral"}
+          value={catalogsLoading ? "Loading" : `${approvedCatalogCount} enabled`}
+        />
+        <ConnectorOverviewMetric
+          detail={latestCatalog ? `Latest review ${formatDateTime(latestCatalog)}` : "Run tests and schema reads from Connections"}
+          label="Diagnostics"
+          tone={failedTestCount > 0 ? "danger" : "success"}
+          value={failedTestCount > 0 ? `${failedTestCount} issue${failedTestCount === 1 ? "" : "s"}` : "Clear"}
+        />
       </dl>
 
       <ConnectorWorkspaceTabs
@@ -739,7 +756,7 @@ function ConnectorOverview({
       />
 
       {activeTab === "connections" ? (
-        <section className="rounded-lg border border-surface-border bg-surface-container-low p-4">
+        <section className="connector-table-section">
           <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="sv-section-title">Connections</h3>
             <p className="text-label-md text-secondary">{connectorProfiles.length} saved</p>
@@ -880,9 +897,9 @@ function ConnectorSchemaEnrichmentProgress({ progress }: { progress: AiDraftProg
   );
 }
 
-function ConnectorOverviewMetric({ detail, label, value }: ConnectorOverviewMetricProps) {
+function ConnectorOverviewMetric({ detail, label, tone = "neutral", value }: ConnectorOverviewMetricProps) {
   return (
-    <div className="rounded-lg border border-surface-border bg-surface-container-low p-4">
+    <div className={`connector-overview-metric connector-overview-metric-${tone}`}>
       <dt className="text-label-md font-bold uppercase tracking-wide text-secondary">{label}</dt>
       <dd className="mt-2 text-body-lg font-extrabold text-on-surface">{value}</dd>
       <p className="mt-1 text-label-md text-on-surface-variant">{detail}</p>
@@ -902,7 +919,8 @@ function ConnectorWorkspaceTabs({ counts, onChange, value }: ConnectorWorkspaceT
           className={value === tab.id ? "knowledge-inspector-tab-active" : "knowledge-inspector-tab"}
           onClick={() => onChange(tab.id)}
         >
-          {tab.label}
+          <span>{tab.label}</span>
+          <span className="connector-tab-count" aria-hidden="true">{connectorWorkspaceTabCount(tab.id, counts)}</span>
           <span className="sr-only">, {connectorWorkspaceTabDetail(tab.id, counts)}</span>
         </button>
       ))}
@@ -1253,6 +1271,10 @@ function ConnectorProfilePanel({
   profiles,
   showExisting = true,
 }: ConnectorProfilePanelProps) {
+  const passwordInputId = useId();
+  const [showPassword, setShowPassword] = useState(false);
+  const passwordToggleLabel = showPassword ? "Hide password" : "Show password";
+
   return (
     <div className="mb-5 rounded-lg border border-surface-border bg-surface-container-low p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -1262,7 +1284,10 @@ function ConnectorProfilePanel({
         </div>
         {showExisting ? <span className="sv-pill">{profiles.length} connection{profiles.length === 1 ? "" : "s"}</span> : null}
       </div>
-      <form onSubmit={onSubmit} className="grid items-end gap-3 lg:grid-cols-2 xl:grid-cols-[0.8fr_1fr_1fr_0.7fr_1fr_1fr_1fr_auto]">
+      <form
+        onSubmit={onSubmit}
+        className={`connector-profile-form ${showExisting ? "connector-profile-form-overview" : "connector-profile-form-compact"}`}
+      >
         <label className="sv-field">
           <span className="sv-label">Type <span className="font-normal text-secondary">(required)</span></span>
           <select
@@ -1294,15 +1319,20 @@ function ConnectorProfilePanel({
           <span className="sv-label">User <span className="font-normal text-secondary">(required)</span></span>
           <input value={draft.username} onChange={(event) => onChange({ username: event.target.value })} placeholder="readonly_user" className="sv-input" />
         </label>
-        <label className="sv-field">
-          <span className="sv-label">Password <span className="font-normal text-secondary">(required)</span></span>
-          <input type="password" value={draft.password} onChange={(event) => onChange({ password: event.target.value })} className="sv-input" />
-        </label>
-        <button type="submit" disabled={isCreating} className="sv-action-secondary">
+        <div className="sv-field">
+          <label htmlFor={passwordInputId} className="sv-label">Password <span className="font-normal text-secondary">(required)</span></label>
+          <div className="flex gap-2">
+            <input id={passwordInputId} autoComplete="off" type={showPassword ? "text" : "password"} value={draft.password} onChange={(event) => onChange({ password: event.target.value })} className="sv-input min-w-0 flex-1" />
+            <button type="button" onClick={() => setShowPassword((value) => !value)} className="sv-action-secondary min-h-11 shrink-0 px-3" aria-label={passwordToggleLabel} aria-pressed={showPassword} title={passwordToggleLabel}>
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </div>
+        <button type="submit" disabled={isCreating} className="connector-profile-save sv-action-secondary">
           {isCreating ? <Loader2 className="animate-spin" size={16} /> : <KeyRound size={16} />}
           Save Connection
         </button>
-        <details className="rounded-md border border-surface-border bg-surface px-3 py-2 lg:col-span-2 xl:col-span-8">
+        <details className="connector-profile-advanced rounded-md border border-surface-border bg-surface px-3 py-2">
           <summary className="cursor-pointer text-label-md font-bold text-on-surface">Advanced connection settings</summary>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             {draft.connectorType === "sql_server" ? (
@@ -1367,6 +1397,10 @@ function ConnectorProfilePanel({
 }
 
 function ConnectorProfileEditor({ draft, error, isSaving, mutationError, onCancel, onChange, onSubmit, profile }: ConnectorProfileEditorProps) {
+  const passwordInputId = useId();
+  const [showPassword, setShowPassword] = useState(false);
+  const passwordToggleLabel = showPassword ? "Hide replacement password" : "Show replacement password";
+
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -1414,10 +1448,15 @@ function ConnectorProfileEditor({ draft, error, isSaving, mutationError, onCance
             <span className="sv-label">Replacement User</span>
             <input value={draft.username} onChange={(event) => onChange({ username: event.target.value })} placeholder="Leave blank to keep current user" className="sv-input" />
           </label>
-          <label className="sv-field">
-            <span className="sv-label">Replacement Password</span>
-            <input type="password" value={draft.password} onChange={(event) => onChange({ password: event.target.value })} placeholder="Leave blank to keep current password" className="sv-input" />
-          </label>
+          <div className="sv-field">
+            <label htmlFor={passwordInputId} className="sv-label">Replacement Password</label>
+            <div className="flex gap-2">
+              <input id={passwordInputId} autoComplete="off" type={showPassword ? "text" : "password"} value={draft.password} onChange={(event) => onChange({ password: event.target.value })} placeholder="Leave blank to keep current password" className="sv-input min-w-0 flex-1" />
+              <button type="button" onClick={() => setShowPassword((value) => !value)} className="sv-action-secondary min-h-11 shrink-0 px-3" aria-label={passwordToggleLabel} aria-pressed={showPassword} title={passwordToggleLabel}>
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
           {draft.connectorType === "sql_server" ? (
             <>
               <label className="sv-field">
@@ -1472,16 +1511,15 @@ function ConnectorProfileCards({ catalogsByProfile = {}, emptyMessage, isLoading
     ) : null;
   }
   return (
-    <div className="sv-table-wrap mt-3">
+    <div className="sv-table-wrap connector-profile-table-wrap mt-3">
       <table className="sv-table connector-profile-table">
         <thead>
           <tr>
             <th>Connection</th>
-            <th>Type</th>
             <th>Health</th>
             <th>Schema Review</th>
-            <th>Live Access</th>
-            <th>Actions</th>
+            <th>Live DB</th>
+            <th className="connector-actions-column">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -1490,10 +1528,12 @@ function ConnectorProfileCards({ catalogsByProfile = {}, emptyMessage, isLoading
             return (
               <tr key={profile.id} className="sv-table-row">
                 <td className="align-top">
-                  <strong className="block text-on-surface">{profile.name}</strong>
-                  <small className="text-secondary">{profileEndpointSummary(profile)}</small>
+                  <div className="connector-identity-cell">
+                    <strong className="block text-on-surface">{profile.name}</strong>
+                    <span className="text-label-md font-bold text-on-surface-variant">{connectorTypeLabel(profile.connector_type)}</span>
+                    <small className="text-secondary">{profileEndpointSummary(profile)}</small>
+                  </div>
                 </td>
-                <td className="align-top">{connectorTypeLabel(profile.connector_type)}</td>
                 <td className="align-top">
                   <div className="connector-status-stack">
                     <ConnectorStatusPill className={profileHealthPillClass(profile)} label={profileHealthLabel(profile)} minWidth="7.25rem" />
@@ -1502,12 +1542,12 @@ function ConnectorProfileCards({ catalogsByProfile = {}, emptyMessage, isLoading
                 </td>
                 <td className="align-top">
                   {currentCatalog ? (
-                    <div className="connector-status-stack">
-                      <ConnectorStatusPill className={catalogReviewPillClass(currentCatalog.status)} label={catalogReviewLabel(currentCatalog.status)} minWidth="9.75rem" />
-                      <small className="block text-secondary">{connectorSchemaAccessSummary(currentCatalog)}</small>
-                    </div>
+                    <ConnectorSchemaProgress catalog={currentCatalog} />
                   ) : (
-                    <ConnectorStatusPill className="sv-pill sv-pill-warning" label="Needs review" minWidth="9.75rem" />
+                    <div className="connector-status-stack">
+                      <ConnectorStatusPill className="sv-pill sv-pill-warning" label="Needs review" minWidth="8.5rem" />
+                      <small className="block text-secondary">Read schema, then prepare review</small>
+                    </div>
                   )}
                 </td>
                 <td className="align-top">
@@ -1516,36 +1556,114 @@ function ConnectorProfileCards({ catalogsByProfile = {}, emptyMessage, isLoading
                     <small className="block text-secondary">{catalogAccessStateHint(currentCatalog?.status ?? "draft")}</small>
                   </div>
                 </td>
-                <td className="align-top">
-                  <span className="flex flex-wrap items-start gap-2">
-                    <button type="button" onClick={() => onEditProfile(profile)} className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-on-surface hover:border-primary">
-                      <span className="inline-flex items-center gap-1"><Pencil size={14} />Edit</span>
-                    </button>
-                    <button type="button" disabled={pendingActionId === profile.id} onClick={() => onProfileAction("test", profile.id)} className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-on-surface hover:border-primary disabled:opacity-50">
-                      {pendingActionId === profile.id && pendingActionType === "test" ? "Testing" : "Test"}
-                    </button>
-                    <button type="button" disabled={pendingActionId === profile.id} onClick={() => onProfileAction("introspect", profile.id)} className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-on-surface hover:border-primary disabled:opacity-50">
-                      {pendingActionId === profile.id && pendingActionType === "introspect" ? "Reading" : "Read Schema"}
-                    </button>
-                    <button type="button" disabled={pendingAiDraftProfileId !== null || (!currentCatalog && writableSpacePaths.length === 0)} onClick={() => currentCatalog ? onOpenCatalog(profile, currentCatalog) : onCreateAiDraft(profile)} className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-on-surface hover:border-primary disabled:opacity-50">
-                      <span className="inline-flex items-center gap-1">
-                        {pendingAiDraftProfileId === profile.id ? <Loader2 className="animate-spin" size={14} /> : currentCatalog ? <CheckCircle2 size={14} /> : <Sparkles size={14} />}
-                        {pendingAiDraftProfileId === profile.id ? "Preparing" : currentCatalog ? "Review Access" : "Prepare Review"}
-                      </span>
-                    </button>
-                    <button type="button" disabled={pendingDeleteProfileId === profile.id} onClick={() => onDeleteProfile(profile)} className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-error-red hover:border-error-red disabled:opacity-50">
-                      <span className="inline-flex items-center gap-1">
-                        {pendingDeleteProfileId === profile.id ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
-                        {pendingDeleteProfileId === profile.id ? "Deleting" : "Delete"}
-                      </span>
-                    </button>
-                  </span>
+                <td className="connector-actions-cell align-top">
+                  <ConnectorRowActions
+                    catalog={currentCatalog}
+                    onCreateAiDraft={onCreateAiDraft}
+                    onDeleteProfile={onDeleteProfile}
+                    onEditProfile={onEditProfile}
+                    onOpenCatalog={onOpenCatalog}
+                    onProfileAction={onProfileAction}
+                    pendingActionId={pendingActionId}
+                    pendingActionType={pendingActionType}
+                    pendingAiDraftProfileId={pendingAiDraftProfileId}
+                    pendingDeleteProfileId={pendingDeleteProfileId}
+                    profile={profile}
+                    writableSpacePaths={writableSpacePaths}
+                  />
                 </td>
               </tr>
             );
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function ConnectorSchemaProgress({ catalog }: { catalog: ConnectorSchemaCatalog }) {
+  const catalogJson = normalizeCatalogJson(catalog.catalog_json);
+  const stats = schemaCatalogReviewStats(catalogJson);
+  const relationships = catalogJson.relationships ?? [];
+  const allowedRelationships = schemaCatalogAllowedRelationships(relationships);
+  const totalItems = stats.totalTables + stats.totalColumns + relationships.length;
+  const allowedItems = stats.allowedTables + stats.allowedColumns + allowedRelationships;
+  const percent = totalItems === 0 ? 0 : Math.round((allowedItems / totalItems) * 100);
+
+  return (
+    <div className="connector-schema-progress">
+      <div className="connector-schema-progress-header">
+        <ConnectorStatusPill className={catalogReviewPillClass(catalog.status)} label={catalogReviewLabel(catalog.status)} minWidth="8.5rem" />
+        <span className="text-label-md font-bold text-on-surface">{percent}% allowed</span>
+      </div>
+      <div
+        aria-label={`Schema access coverage ${percent}%`}
+        aria-valuemax={100}
+        aria-valuemin={0}
+        aria-valuenow={percent}
+        className="connector-schema-progress-track"
+        role="progressbar"
+      >
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <small className="block text-secondary">{connectorSchemaAccessSummary(catalog)}</small>
+    </div>
+  );
+}
+
+function ConnectorRowActions({
+  catalog,
+  onCreateAiDraft,
+  onDeleteProfile,
+  onEditProfile,
+  onOpenCatalog,
+  onProfileAction,
+  pendingActionId,
+  pendingActionType,
+  pendingAiDraftProfileId,
+  pendingDeleteProfileId,
+  profile,
+  writableSpacePaths,
+}: ConnectorRowActionsProps) {
+  const profileActionPending = pendingActionId === profile.id;
+  const primaryPending = pendingAiDraftProfileId === profile.id;
+  const primaryDisabled = pendingAiDraftProfileId !== null || (!catalog && writableSpacePaths.length === 0);
+  const primaryLabel = primaryPending ? "Preparing" : catalog ? "Review" : "Prepare Review";
+
+  return (
+    <div className="connector-row-actions">
+      <button
+        type="button"
+        disabled={primaryDisabled}
+        onClick={() => catalog ? onOpenCatalog(profile, catalog) : onCreateAiDraft(profile)}
+        className="sv-action-secondary connector-row-primary-action"
+      >
+        {primaryPending ? <Loader2 className="animate-spin" size={14} /> : catalog ? <CheckCircle2 size={14} /> : <Sparkles size={14} />}
+        {primaryLabel}
+      </button>
+      <details className="connector-row-menu">
+        <summary aria-label={`More actions for ${profile.name}`} title="More actions">
+          <MoreHorizontal size={16} />
+        </summary>
+        <div className="connector-row-menu-items">
+          <button type="button" onClick={() => onEditProfile(profile)}>
+            <Pencil size={14} />
+            Edit
+          </button>
+          <button type="button" disabled={profileActionPending} onClick={() => onProfileAction("test", profile.id)}>
+            {profileActionPending && pendingActionType === "test" ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
+            {profileActionPending && pendingActionType === "test" ? "Testing" : "Test"}
+          </button>
+          <button type="button" disabled={profileActionPending} onClick={() => onProfileAction("introspect", profile.id)}>
+            {profileActionPending && pendingActionType === "introspect" ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />}
+            {profileActionPending && pendingActionType === "introspect" ? "Reading" : "Read Schema"}
+          </button>
+          <button type="button" disabled={pendingDeleteProfileId === profile.id} onClick={() => onDeleteProfile(profile)} className="connector-row-menu-danger">
+            {pendingDeleteProfileId === profile.id ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
+            {pendingDeleteProfileId === profile.id ? "Deleting" : "Delete"}
+          </button>
+        </div>
+      </details>
     </div>
   );
 }
@@ -3060,6 +3178,13 @@ function connectorWorkspaceTabDetail(tab: ConnectorWorkspaceTab, counts: Connect
   return counts.diagnostics > 0 ? `${counts.diagnostics} issue${counts.diagnostics === 1 ? "" : "s"}` : "clear";
 }
 
+function connectorWorkspaceTabCount(tab: ConnectorWorkspaceTab, counts: ConnectorWorkspaceTabsProps["counts"]): string {
+  if (tab === "connections") return counts.connections.toString();
+  if (tab === "schema_reviews") return counts.schemaReviews.toString();
+  if (tab === "live_access") return counts.liveAccess.toString();
+  return counts.diagnostics.toString();
+}
+
 function profileEndpointSummary(profile: ConnectorProfile): string {
   const host = profile.connector_type === "postgres"
     ? stringConfig(profile.public_config.host)
@@ -3266,6 +3391,7 @@ type Props = {
 
 type ConnectorSetupStep = "connection" | "selection" | "schedule";
 type ConnectorWorkspaceTab = "connections" | "schema_reviews" | "live_access" | "diagnostics";
+type ConnectorMetricTone = "neutral" | "success" | "warning" | "danger";
 type ConnectorReviewTab = "summary" | "tables" | "joins" | "access" | "raw_schema";
 
 type ConnectorProfileDraft = {
@@ -3375,6 +3501,7 @@ type ConnectorOverviewProps = {
 type ConnectorOverviewMetricProps = {
   detail: string;
   label: string;
+  tone?: ConnectorMetricTone;
   value: string;
 };
 
@@ -3469,6 +3596,21 @@ type ConnectorProfileCardsProps = {
   pendingActionId: string | null;
   pendingActionType: "test" | "introspect" | null;
   profiles: ConnectorProfile[];
+  writableSpacePaths: string[];
+};
+
+type ConnectorRowActionsProps = {
+  catalog: ConnectorSchemaCatalog | null;
+  onCreateAiDraft: (profile: ConnectorProfile) => void;
+  onDeleteProfile: (profile: ConnectorProfile) => void;
+  onEditProfile: (profile: ConnectorProfile) => void;
+  onOpenCatalog: (profile: ConnectorProfile, catalog: ConnectorSchemaCatalog) => void;
+  onProfileAction: (action: "test" | "introspect", id: string) => void;
+  pendingActionId: string | null;
+  pendingActionType: "test" | "introspect" | null;
+  pendingAiDraftProfileId: string | null;
+  pendingDeleteProfileId: string | null;
+  profile: ConnectorProfile;
   writableSpacePaths: string[];
 };
 

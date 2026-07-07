@@ -14,7 +14,7 @@ import { CitedAnswer } from "./CitedAnswer";
 
 export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArtifactJob, onExpandSourceSearch, onRetryArtifactJob, onSelectSource, selectedSource, turn }: Props) {
   if (turn.status === "pending") return <PendingAssistant documents={documents} onSelectSource={onSelectSource} selectedSource={selectedSource} turn={turn} />;
-  if (turn.status === "cancelled") return <StoppedAssistant turn={turn} />;
+  if (turn.status === "cancelled") return <StoppedAssistant documents={documents} onSelectSource={onSelectSource} turn={turn} />;
   if (turn.status === "error" || !turn.response) return <ErrorAssistant message={turn.errorMessage} />;
 
   const response = turn.response;
@@ -482,9 +482,7 @@ function PendingAssistant({ documents, onSelectSource, selectedSource, turn }: P
           <div className="rag-stream-preview">
             <p className="rag-live-section-label">Drafting cited answer</p>
             <div className="rag-stream-text">
-              {turn.streamText.split(/\n{2,}/).map((paragraph, index) => (
-                <p key={`${paragraph.slice(0, 18)}-${index}`}>{paragraph}</p>
-              ))}
+              <CitedAnswer answer={turn.streamText} documents={documents} onSelectSource={onSelectSource} sources={pendingSources} />
             </div>
           </div>
         ) : (
@@ -495,7 +493,9 @@ function PendingAssistant({ documents, onSelectSource, selectedSource, turn }: P
   );
 }
 
-function StoppedAssistant({ turn }: { turn: Extract<ChatTurn, { role: "assistant" }> }) {
+function StoppedAssistant({ documents, onSelectSource, turn }: StoppedAssistantProps) {
+  const partialSources = useMemo(() => uniqueProgressSources(turn.progress), [turn.progress]);
+
   return (
     <div className="rag-assistant-turn rag-assistant-turn-stopped">
       <div className="flex flex-wrap items-center gap-3">
@@ -519,9 +519,7 @@ function StoppedAssistant({ turn }: { turn: Extract<ChatTurn, { role: "assistant
           <div className="rag-stream-preview">
             <p className="rag-live-section-label">Partial draft</p>
             <div className="rag-stream-text">
-              {turn.streamText.split(/\n{2,}/).map((paragraph, index) => (
-                <p key={`${paragraph.slice(0, 18)}-${index}`}>{paragraph}</p>
-              ))}
+              <CitedAnswer answer={turn.streamText} documents={documents} onSelectSource={onSelectSource} sources={partialSources} />
             </div>
           </div>
         ) : null}
@@ -708,6 +706,12 @@ type Props = {
   onRetryArtifactJob?: (jobId: string) => Promise<void>;
   onSelectSource: (source: SourceAnchor | null) => void;
   selectedSource: SourceAnchor | null;
+  turn: Extract<ChatTurn, { role: "assistant" }>;
+};
+
+type StoppedAssistantProps = {
+  documents: Document[];
+  onSelectSource: (source: SourceAnchor | null) => void;
   turn: Extract<ChatTurn, { role: "assistant" }>;
 };
 

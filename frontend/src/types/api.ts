@@ -40,6 +40,7 @@ export type UploadJobStage =
 export type UploadJobStepState = "pending" | "active" | "complete" | "failed" | "needs_review" | "cancelled";
 export type UploadJobProgressUnit = "pages" | "chunks" | "vectors" | "files" | "metadata" | "images";
 export type ReviewStatus = "pending" | "approved" | "rejected";
+export type ImageReviewCandidateStatus = "pending" | "approved" | "skipped";
 export type FolderSourceType =
   | "snapshot"
   | "local_folder"
@@ -188,7 +189,9 @@ export interface IngestConfig {
   worker_concurrency: number;
   quality_preset: IngestionQualityPreset;
   ocr_review_confidence_threshold: number;
+  pdf_image_review_threshold: number;
   vision_layout_repair_enabled: boolean;
+  graph_enrichment_enabled: boolean;
   recommended_concurrency: number;
   worker_online: boolean;
   active_jobs: number;
@@ -442,9 +445,11 @@ export interface ParserPageEntry {
 export interface IngestJob extends JobStatus {
   document_id: string;
   document_title: string;
+  retry_of_job_id: string | null;
   group_path: string;
   clearance_level: ClearanceLevel;
   origin: IngestJobOrigin;
+  uploaded_by: string | null;
   created_at: ISODateString | null;
   updated_at: ISODateString | null;
   completed_at: ISODateString | null;
@@ -460,6 +465,7 @@ export interface IngestJobListResponse {
 export interface IngestJobSummary {
   total: number;
   active: number;
+  needs_attention: number;
   status_counts: Record<string, number>;
   stage_counts: Record<string, number>;
   origin_counts: Record<string, number>;
@@ -703,6 +709,10 @@ export interface DocumentReingestResponse {
   status: "queued";
 }
 
+export interface DocumentReingestRequest {
+  retry_of_job_id?: string | null;
+}
+
 export interface DocumentGraphEnrichmentResponse {
   document_id: string;
   job_id: string;
@@ -750,6 +760,62 @@ export interface ReviewDecisionResponse {
   batch_id: string;
   batch_status: ReviewStatus;
   batch_complete: boolean;
+}
+
+export interface ImageReviewCandidate {
+  id: string;
+  batch_id: string;
+  doc_id: string;
+  doc_title: string;
+  candidate_key: string;
+  filename: string;
+  source_kind: string;
+  page: number | null;
+  bbox: number[] | null;
+  page_area_ratio: number | null;
+  content_url: string;
+  content_type: string;
+  width: number | null;
+  height: number | null;
+  quality_flags: string[];
+  score: number;
+  recommended: boolean;
+  status: ImageReviewCandidateStatus;
+  assigned_to: string | null;
+  skip_reason: string | null;
+  created_at: ISODateString | null;
+  updated_at: ISODateString | null;
+}
+
+export interface ImageReviewBatch {
+  id: string;
+  job_id: string;
+  doc_id: string;
+  doc_title: string;
+  status: ReviewStatus;
+  candidate_count: number;
+  recommended_count: number;
+  pending_count: number;
+  approved_count: number;
+  skipped_count: number;
+  candidates: ImageReviewCandidate[];
+  created_at: ISODateString | null;
+  updated_at: ISODateString | null;
+}
+
+export interface ImageReviewQueueResponse {
+  batches: ImageReviewBatch[];
+  total: number;
+  candidate_total: number;
+}
+
+export interface ImageReviewDecisionResponse {
+  batch_id: string;
+  batch_status: ReviewStatus;
+  batch_complete: boolean;
+  approved_count: number;
+  skipped_count: number;
+  pending_count: number;
 }
 
 export interface EvaluationCase {

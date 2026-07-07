@@ -50,7 +50,16 @@ def _truncate_corpus_rows() -> list[str]:
                 """,
                 (settings.qdrant_collection,),
             )
-    return ["documents", "ingest_jobs", "claims", "conflicts", "supersession_edges", "human_review_queue"]
+    return [
+        "documents",
+        "ingest_jobs",
+        "claims",
+        "conflicts",
+        "supersession_edges",
+        "human_review_queue",
+        "image_review_candidates",
+        "image_review_batches",
+    ]
 
 
 def _connect():

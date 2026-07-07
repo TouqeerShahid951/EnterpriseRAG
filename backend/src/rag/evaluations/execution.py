@@ -20,6 +20,8 @@ from ..repositories.document_models import DocumentRepository
 from ..repositories.evaluations import EvaluationRepository, EvaluationRunRecord
 from ..schemas.evaluations import EvaluationCase
 from ..schemas.query import QueryRequest, RAGResponse
+from ..shared.evaluation.answer_checks import LiteralCheckResult
+from .answer_verifier import verify_answer_content_with_llm
 from .scoring import score_case_result, summarize_results
 
 
@@ -59,6 +61,7 @@ class EvaluationRunExecutor:
         service = self.rag_service_factory()
         document_repo = self.document_repo_factory()
         user = _user_context(run)
+        answer_content_judge = self._answer_content_judge(service)
         summary_rows: list[dict[str, Any]] = []
         passed_count = 0
         failed_count = 0
@@ -75,7 +78,13 @@ class EvaluationRunExecutor:
                 )
             except Exception as exc:  # noqa: BLE001 - evaluation records per-case runtime failures
                 error_message = f"{type(exc).__name__}: {exc}"
-            scored = score_case_result(case, response=response, diagnostic=diagnostic, error_message=error_message)
+            scored = score_case_result(
+                case,
+                response=response,
+                diagnostic=diagnostic,
+                error_message=error_message,
+                answer_content_judge=answer_content_judge,
+            )
             latency_ms = response.latency_ms if response else 0
             status = "error" if error_message else "ok"
             repo.add_case_result(
@@ -219,6 +228,29 @@ class EvaluationRunExecutor:
         run = self.repo_factory().get_run(run_id)
         if run is None or run.cancellation_requested or run.status == "cancelled":
             raise EvaluationRunCancelled("evaluation run was cancelled")
+
+    def _answer_content_judge(self, service: LocalRagService):
+        if not self.config.evaluation_answer_llm_verifier_enabled:
+            return None
+        llm = service.ollama
+        if getattr(llm, "generate_json", None) is None:
+            return None
+        model = (
+            self.config.evaluation_answer_llm_verifier_model
+            or service.rag_config.effective_reasoning_model
+            or service.rag_config.chat_model
+        )
+
+        def judge(case: EvaluationCase, response: RAGResponse, literal: LiteralCheckResult) -> dict[str, object]:
+            return verify_answer_content_with_llm(
+                llm,
+                case=case,
+                response=response,
+                literal=literal,
+                model=model,
+            )
+
+        return judge
 
     def _fail(self, run_id: str, *, code: str, message: str) -> EvaluationRunRecord:
         run = self.repo_factory().update_run(run_id, {

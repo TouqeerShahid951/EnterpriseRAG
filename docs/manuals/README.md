@@ -1,6 +1,6 @@
 # Prudentia AI Manuals
 
-Last updated: 2026-06-30
+Last updated: 2026-07-07
 
 This folder contains the standalone manuals for a Prudentia AI deployment. Use
 these manuals together when there is no project team available to explain the
@@ -10,8 +10,8 @@ system.
 
 | Manual | Audience | Use it when |
 | --- | --- | --- |
-| [End User Manual](end-user-manual.md) | Members, contributors, reviewers, and auditors | You need to sign in, ask questions, inspect evidence, upload files, review OCR, or use the document library. |
-| [Administrator Manual](administrator-manual.md) | Platform Admins, System Admins, User Managers, and Space Admins | You need to create users, manage Knowledge Spaces, govern documents, approve database scopes, configure models, or audit activity. |
+| [End User Manual](end-user-manual.md) | Chat Members, Document Contributors, Audit Viewers, and scoped admins | You need to sign in, ask questions, inspect evidence, upload files, resolve Review Queue items, or use the document library. |
+| [Administrator Manual](administrator-manual.md) | Platform Admins, System Admins, and Space Admins | You need to create users, manage Knowledge Spaces, govern documents, approve database scopes, configure models, or audit activity. |
 | [Operator Manual](operator-manual.md) | The person responsible for running the local deployment | You need to start, stop, update, verify, back up, restore, or troubleshoot the Docker/Ollama runtime. |
 
 ## Generated Files

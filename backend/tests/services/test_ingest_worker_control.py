@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from rag.services.ingest_worker_control import IngestWorkerControl
+from rag.services.ingest_worker_control import INSPECT_TIMEOUT_SECONDS, IngestWorkerControl
 
 
 def test_snapshot_tracks_only_workers_subscribed_to_ingest_queue() -> None:
@@ -52,8 +52,8 @@ class _FakeControl:
         self.grow_calls: list[tuple[int, tuple[str, ...]]] = []
         self.shrink_calls: list[tuple[int, tuple[str, ...]]] = []
 
-    def inspect(self, *, timeout: int):
-        assert timeout == 2
+    def inspect(self, *, timeout: float):
+        assert timeout == INSPECT_TIMEOUT_SECONDS
         return self.inspector
 
     def pool_grow(self, difference: int, *, reply: bool, destination: list[str]) -> None:

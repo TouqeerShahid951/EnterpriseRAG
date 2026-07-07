@@ -65,8 +65,10 @@ class IngestAttempt:
 class IngestRuntimeConfig:
     worker_concurrency: int
     ocr_review_confidence_threshold: float
+    pdf_image_review_threshold: int = 64
     quality_preset: str = "fast"
     vision_layout_repair_enabled: bool = False
+    graph_enrichment_enabled: bool = False
     source: str = "workspace"
 
 
@@ -289,6 +291,59 @@ class BackendInternalClient:
         items = payload.get("parsed_items")
         return [dict(item) for item in items if isinstance(item, dict)] if isinstance(items, list) else []
 
+    def create_image_review_batch(
+        self,
+        *,
+        job_id: str,
+        doc_id: str,
+        parsed_items: list[dict[str, Any]],
+        resume_payload: dict[str, Any],
+        candidates: list[dict[str, Any]],
+    ) -> str:
+        payload = request_json(
+            self.base_url,
+            "/internal/image-review-batches",
+            service="backend",
+            method="POST",
+            payload={
+                "job_id": job_id,
+                "doc_id": doc_id,
+                "parsed_items": parsed_items,
+                "resume_payload": resume_payload,
+                "candidates": candidates,
+            },
+            headers={"X-Service-Token": self.service_token},
+            timeout_seconds=self.timeout_seconds,
+        )
+        return str(payload["image_review_batch_id"])
+
+    def get_image_review_approved_keys(self, *, image_review_batch_id: str) -> list[str]:
+        payload = request_json(
+            self.base_url,
+            f"/internal/image-review-batches/{image_review_batch_id}/approved-keys",
+            service="backend",
+            headers={"X-Service-Token": self.service_token},
+            timeout_seconds=self.timeout_seconds,
+        )
+        keys = payload.get("candidate_keys")
+        return [str(key) for key in keys] if isinstance(keys, list) else []
+
+    def get_image_review_resume(self, *, image_review_batch_id: str) -> dict[str, Any]:
+        payload = request_json(
+            self.base_url,
+            f"/internal/image-review-batches/{image_review_batch_id}/resume",
+            service="backend",
+            headers={"X-Service-Token": self.service_token},
+            timeout_seconds=self.timeout_seconds,
+        )
+        parsed_items = payload.get("parsed_items")
+        candidates = payload.get("candidates")
+        return {
+            "parsed_items": [dict(item) for item in parsed_items if isinstance(item, dict)] if isinstance(parsed_items, list) else [],
+            "candidates": [dict(item) for item in candidates if isinstance(item, dict)] if isinstance(candidates, list) else [],
+            "candidate_count": int(payload.get("candidate_count") or 0),
+        }
+
     def get_rag_config(self) -> InferenceRuntimeConfig:
         payload = request_json(
             self.base_url,
@@ -311,7 +366,9 @@ class BackendInternalClient:
             worker_concurrency=int(payload.get("worker_concurrency", 1)),
             quality_preset=str(payload.get("quality_preset") or "fast"),
             ocr_review_confidence_threshold=float(payload["ocr_review_confidence_threshold"]),
+            pdf_image_review_threshold=int(payload.get("pdf_image_review_threshold", 64)),
             vision_layout_repair_enabled=bool(payload.get("vision_layout_repair_enabled", False)),
+            graph_enrichment_enabled=bool(payload.get("graph_enrichment_enabled", False)),
             source=str(payload.get("source") or "workspace"),
         )
 

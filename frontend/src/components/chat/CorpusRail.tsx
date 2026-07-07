@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, RefObject } from "react";
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Loader2, MessageSquare, Plus, Trash2, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, Loader2, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Trash2, X } from "lucide-react";
 
 import type { SavedChatSessionSummary } from "../../types/chat";
 
@@ -85,7 +85,7 @@ export function CorpusRail({
             aria-label="Expand chat history panel"
             title="Expand chat history"
           >
-            <ChevronRight size={17} aria-hidden="true" />
+            <PanelLeftOpen size={16} aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -194,7 +194,7 @@ function CorpusRailHeader({ closeRef, count, onClose, onCollapse }: CorpusRailHe
           aria-label={drawer ? "Expand chat history rail" : "Collapse chat history"}
           title={drawer ? "Expand rail" : "Collapse history"}
         >
-          {drawer ? <ChevronRight size={16} aria-hidden="true" /> : <ChevronLeft size={16} aria-hidden="true" />}
+          {drawer ? <PanelLeftOpen size={16} aria-hidden="true" /> : <PanelLeftClose size={16} aria-hidden="true" />}
         </button>
         {onClose ? (
           <button ref={closeRef} type="button" onClick={onClose} className="rag-history-header-action" aria-label="Close chat history" title="Close">

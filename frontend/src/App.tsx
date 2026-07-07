@@ -42,7 +42,7 @@ function App() {
   const auth = useAuthSession();
   const chat = useChatSession(auth.currentUser);
   const inventory = useDocumentInventory(auth.currentUser);
-  const pdfUpload = usePdfUpload();
+  const pdfUpload = usePdfUpload(auth.currentUser);
   const sidebarSpaceOptions = useMemo(() => knowledgeSpaceOptions(auth.currentUser, inventory.documents), [auth.currentUser, inventory.documents]);
   const sidebarDocumentCount = useMemo(
     () => documentsInActiveSpace(inventory.documents, chat.activeSpacePath).length,
@@ -197,7 +197,7 @@ function App() {
         {activeRoute === "document-overview" ? <PrudentiaDocumentOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} /> : null}
         {activeRoute === "documents" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="documents" /> : null}
         {activeRoute === "document-trash" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="trash" /> : null}
-        {activeRoute === "upload" ? <PrudentiaUploadPage batchItems={pdfUpload.batchItems} cancelingJobId={pdfUpload.cancelingJobId} currentDocuments={inventory.documents} currentUser={user} onCancelIngestJob={pdfUpload.cancelJob} onLogout={handleLogout} onNavigate={navigate} onPdfDraftChange={pdfUpload.updatePdfDraft} onPdfSubmit={pdfUpload.onPdfSubmit} pdfDraft={pdfUpload.pdfDraft} selectionError={pdfUpload.selectionError} uploadPending={pdfUpload.uploadMutation.isPending} /> : null}
+        {activeRoute === "upload" ? <PrudentiaUploadPage batchItems={pdfUpload.batchItems} cancelingJobId={pdfUpload.cancelingJobId} currentDocuments={inventory.documents} currentUser={user} onCancelIngestJob={pdfUpload.cancelJob} onClearUploadJobs={pdfUpload.clearUploadJobs} onLogout={handleLogout} onNavigate={navigate} onPdfDraftChange={pdfUpload.updatePdfDraft} onPdfSubmit={pdfUpload.onPdfSubmit} pdfDraft={pdfUpload.pdfDraft} selectionError={pdfUpload.selectionError} uploadPending={pdfUpload.uploadMutation.isPending} /> : null}
         {activeRoute === "document-extraction" ? <PrudentiaFolderSourcesPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
         {activeRoute === "database-connectors" ? <PrudentiaDatabaseConnectorsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
         {activeRoute === "ingestion-jobs" ? <PrudentiaIngestionJobsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
@@ -234,7 +234,7 @@ function documentsInActiveSpace(documents: Document[], activeSpacePath: string |
 
 function knowledgeSpaceOptions(user: AuthUser | null, documents: Document[]): ChatSpaceOption[] {
   if (!user) return [];
-  const paths = isGlobalAdmin(user) ? Array.from(new Set(documents.map((document) => document.group_path))).sort() : user.group_paths;
+  const paths = isGlobalAdmin(user) ? Array.from(new Set(documents.map((document) => document.group_path))).sort() : user.group_paths ?? [];
   return userSpacesFromPaths(paths).map((space) => ({
     documentCount: documents.filter((document) => isDocumentInSpace(document.group_path, space.path)).length,
     name: space.name,

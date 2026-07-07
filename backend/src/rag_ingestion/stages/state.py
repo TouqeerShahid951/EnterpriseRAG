@@ -54,9 +54,10 @@ class IngestDependencies:
     layered_docling_batch_pages: int = 4
     pdf_image_analysis_max_images: int = -1
     pdf_image_analysis_max_full_page_fallbacks: int = -1
+    pdf_image_review_threshold: int = 64
     scanned_visual_region_enabled: bool = True
     scanned_visual_min_area_ratio: float = 0.03
-    scanned_visual_max_regions_per_page: int = 4
+    scanned_visual_max_regions_per_page: int = -1
     scanned_visual_text_mask_padding_px: int = 8
     ocr_review_confidence_threshold: float = 0.9
     vision_layout_repair_enabled: bool = False

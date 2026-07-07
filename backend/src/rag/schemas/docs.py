@@ -80,6 +80,10 @@ class DocumentSharesUpdateRequest(ContractModel):
     group_paths: list[str] = Field(default_factory=list, max_length=128)
 
 
+class DocumentOwnerUpdateRequest(ContractModel):
+    group_path: str = Field(..., min_length=1)
+
+
 class DocumentUnshareRequest(ContractModel):
     group_path: str = Field(..., min_length=1)
 
@@ -117,6 +121,10 @@ class DocumentReingestResponse(ContractModel):
     document_id: str
     job_id: str
     status: Literal["queued"] = "queued"
+
+
+class DocumentReingestRequest(ContractModel):
+    retry_of_job_id: str | None = None
 
 
 class DocumentGraphEnrichmentResponse(ContractModel):

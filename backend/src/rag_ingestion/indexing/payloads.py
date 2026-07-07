@@ -37,9 +37,9 @@ def build_qdrant_points(
     content_hash = hashlib.sha256(file_bytes).hexdigest()
     title = title_from_path(job.file_path)
     topics = metadata.get("topics", [])
-    normalized_topics = [str(item) for item in topics] if isinstance(topics, list) else []
+    normalized_topics = _unique([str(item) for item in topics] if isinstance(topics, list) else [])
     llm_topics = metadata.get("llm_topics", [])
-    normalized_topics = _unique([*normalized_topics, *([str(item) for item in llm_topics] if isinstance(llm_topics, list) else [])])
+    normalized_llm_topics = _unique([str(item) for item in llm_topics] if isinstance(llm_topics, list) else [])
     conflicted = set(conflicted_claim_ids or [])
     is_expired = _is_expired(job.expiry_date)
     indexed_doc_type = _derived_doc_type(metadata) or job.doc_type
@@ -108,6 +108,7 @@ def build_qdrant_points(
                     "page_end": chunk.page_end,
                     "language": str(metadata.get("language", "unknown") or "unknown"),
                     "topics": normalized_topics,
+                    "llm_topics": normalized_llm_topics,
                     "doc_summary": doc_summary,
                     "metadata_terms": metadata_terms_for_chunk(title=title, chunk=chunk, metadata=metadata),
                     "metadata_version": metadata_version(metadata),

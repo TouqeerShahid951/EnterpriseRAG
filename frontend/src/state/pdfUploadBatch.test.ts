@@ -15,6 +15,7 @@ describe("PDF upload batches", () => {
     const draft: PdfUploadDraft = {
       files,
       groupPath: "/finance",
+      sharedGroupPaths: ["/legal", "/ops"],
       clearanceLevel: "NATO_SECRET",
       effectiveDate: "2026-06-09",
       expiryDate: "2026-12-31",
@@ -27,6 +28,7 @@ describe("PDF upload batches", () => {
     expect(requests).toHaveLength(2);
     expect(requests.map((request) => request.file)).toEqual(files);
     expect(requests.every((request) => request.group_path === "/finance")).toBe(true);
+    expect(requests.every((request) => request.shared_group_paths?.join(",") === "/legal,/ops")).toBe(true);
     expect(requests.every((request) => request.clearance_level === "NATO_SECRET")).toBe(true);
     expect(requests.every((request) => !("quality_preset" in request))).toBe(true);
     expect(requests.every((request) => request.description === "Shared batch context")).toBe(true);
@@ -39,6 +41,7 @@ describe("PDF upload batches", () => {
     const requests = toUploadRequests({
       files: [file],
       groupPath: "/legal",
+      sharedGroupPaths: [],
       clearanceLevel: "NATO_RESTRICTED",
       effectiveDate: "2026-06-09",
       expiryDate: "",
@@ -53,6 +56,7 @@ describe("PDF upload batches", () => {
     const requests = toUploadRequests({
       files: [new File(["pdf"], "report.pdf", { type: "application/pdf" })],
       groupPath: "/finance",
+      sharedGroupPaths: [],
       clearanceLevel: "NATO_RESTRICTED",
       effectiveDate: "",
       expiryDate: "",

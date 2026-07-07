@@ -1,10 +1,18 @@
 from rag.core.config import Settings
+from rag.query.http import ServiceRequestError
 from rag.query.intent_router import route_query
+from rag.query.routing_signals import extract_query_signals
+from rag.query.routing_verifier import build_route_verifier_prompt
 
 
 class FailingRouteVerifier:
     def verify_route(self, **kwargs):
         raise AssertionError("deterministic exhaustive summary route should not call verifier")
+
+
+class ServiceErrorRouteVerifier:
+    def verify_route(self, **kwargs):
+        raise ServiceRequestError("vllm", "context length exceeded", 400)
 
 
 def test_default_top_k_is_ten() -> None:
@@ -73,6 +81,19 @@ def test_exact_collection_lists_stay_on_aggregation_route() -> None:
     assert plan.use_structured_query is True
 
 
+def test_most_assigned_cases_routes_to_aggregation() -> None:
+    plan, _signals = route_query(
+        "Which officer has the most assigned cases?",
+        turns=[],
+        base_top_k=10,
+        verifier_enabled=False,
+    )
+
+    assert plan.intent == "aggregation"
+    assert plan.retrieval_strategy == "structured_table_metadata_first"
+    assert plan.use_structured_query is True
+
+
 def test_query_planner_can_be_disabled_globally() -> None:
     plan, _signals = route_query(
         "compare FIR_04_cybercrime.pdf and FIR_05_narcotics.pdf",
@@ -84,3 +105,26 @@ def test_query_planner_can_be_disabled_globally() -> None:
 
     assert plan.intent == "comparison"
     assert plan.use_query_planner is False
+
+
+def test_route_verifier_prompt_trims_oversized_queries() -> None:
+    query = "compare all documents. " + "preserve exact evidence and table values. " * 1000
+    signals = extract_query_signals(query, [])
+    prompt = build_route_verifier_prompt(signals, {"aggregation": 0.7, "comparison": 0.6})
+
+    assert len(prompt) < 7000
+    assert "chars omitted" in prompt
+    assert "Resolved query:\n<same as original query>" in prompt
+
+
+def test_route_verifier_service_error_falls_back() -> None:
+    plan, _signals = route_query(
+        "compare every document",
+        turns=[],
+        base_top_k=10,
+        llm_verifier=ServiceErrorRouteVerifier(),
+        verifier_enabled=True,
+    )
+
+    assert plan.route_method == "fallback"
+    assert any(penalty.reason == "llm_verifier_failed" for penalty in plan.penalties)

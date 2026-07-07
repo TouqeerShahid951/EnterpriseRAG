@@ -5,12 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 import hashlib
+import math
 import re
 from typing import Callable, Protocol
 from uuid import uuid4
 import zipfile
 
 from ..errors import UnsupportedDocumentError, WorkerStepError
+from .layout import prepare_page_layout
 from .models import BBox, DocumentParseResult, ParsedImageAsset, ParsedPdfItem
 from .provenance import base_report
 
@@ -32,6 +34,10 @@ PDF_IMAGE_WEAK_TEXT_CHARS = 120
 PDF_IMAGE_FULL_PAGE_AREA_RATIO = 0.75
 PDF_IMAGE_MIN_FIGURE_AREA_RATIO = 0.08
 PDF_IMAGE_MIN_WEAK_PAGE_AREA_RATIO = 0.02
+VISION_ANALYSIS_MAX_LONG_EDGE = 2048
+VISION_ANALYSIS_OCR_MAX_LONG_EDGE = 2048
+VISION_RETRY_MIN_CONFIDENCE = 0.5
+LAYOUT_VISUAL_LABELS = {"figure", "image", "picture"}
 
 
 @dataclass(frozen=True)
@@ -63,6 +69,19 @@ class ImageSource:
     page: int | None = None
     bbox: BBox | None = None
     page_area_ratio: float | None = None
+
+
+def image_source_candidate_key(source: ImageSource) -> str:
+    bbox = ",".join(f"{value:.3f}" for value in source.bbox) if source.bbox is not None else ""
+    digest = hashlib.sha256(source.content).hexdigest()
+    parts = [
+        source.source_kind,
+        str(source.page or ""),
+        bbox,
+        source.filename,
+        digest,
+    ]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -287,7 +306,7 @@ def pdf_visual_sources(
                         visual_cue_bboxes=visual_cues.get(page_no, []),
                         domain_visual_cue=page_no in domain_visual_cue_pages,
                         min_area_ratio=max(0.0, scanned_visual_min_area_ratio),
-                        max_regions=max(0, scanned_visual_max_regions_per_page),
+                        max_regions=scanned_visual_max_regions_per_page,
                         text_mask_padding_px=max(0, scanned_visual_text_mask_padding_px),
                     )
                 except Exception:
@@ -408,7 +427,7 @@ def pdf_scanned_visual_region_sources(
                         visual_cue_bboxes=visual_cues.get(page_no, []),
                         domain_visual_cue=page_no in domain_visual_cue_pages,
                         min_area_ratio=max(0.0, min_area_ratio),
-                        max_regions=max(0, max_regions_per_page),
+                        max_regions=max_regions_per_page,
                         text_mask_padding_px=max(0, text_mask_padding_px),
                     )
                 except Exception:
@@ -519,7 +538,7 @@ def image_sources_to_items(
         )
         width, height = image_dimensions(source.content)
         effective_bbox = source.bbox or _standalone_image_bbox(source, width, height)
-        analysis = analyzer.analyze_image(content=source.content, content_type=source.content_type)
+        analysis = _analyze_image_source(source, analyzer)
         extracted_text = _clean_text(analysis.extracted_text)
         caption = _clean_text(analysis.caption)
         flags = sorted(
@@ -604,6 +623,97 @@ def image_dimensions(content: bytes) -> tuple[int | None, int | None]:
             return int(width), int(height)
     except Exception as exc:
         raise WorkerStepError("image_parse_failed", "Image metadata could not be read.") from exc
+
+
+def _analyze_image_source(source: ImageSource, analyzer: ImageAnalyzer) -> ImageAnalysisResult:
+    analysis_content, analysis_content_type, analysis_flags = _vision_analysis_payload(source)
+    analysis = analyzer.analyze_image(content=analysis_content, content_type=analysis_content_type)
+    if "vision_input_resized" not in analysis_flags or not _analysis_needs_original_retry(source, analysis):
+        return _with_analysis_flags(analysis, analysis_flags)
+    original_analysis = analyzer.analyze_image(content=source.content, content_type=source.content_type)
+    retry_flags = ["vision_retry_original"]
+    if not _analysis_needs_original_retry(source, original_analysis) or _analysis_signal_score(original_analysis) >= _analysis_signal_score(analysis):
+        return _with_analysis_flags(original_analysis, retry_flags)
+    return _with_analysis_flags(analysis, [*analysis_flags, "vision_retry_original_no_improvement"])
+
+
+def _vision_analysis_payload(source: ImageSource) -> tuple[bytes, str, list[str]]:
+    max_long_edge = _vision_analysis_max_long_edge(source)
+    if max_long_edge <= 0:
+        return source.content, source.content_type, []
+    try:
+        from PIL import Image, ImageOps
+    except ImportError as exc:
+        raise WorkerStepError("image_dependency_missing", "Pillow dependency is not installed.") from exc
+    try:
+        with Image.open(BytesIO(source.content)) as image:
+            image = ImageOps.exif_transpose(image)
+            width, height = image.size
+            long_edge = max(width, height)
+            if long_edge <= max_long_edge:
+                return source.content, source.content_type, []
+            scale = max_long_edge / long_edge
+            target_size = (max(1, round(width * scale)), max(1, round(height * scale)))
+            resized = image.resize(target_size, Image.Resampling.LANCZOS)
+            output = BytesIO()
+            if source.content_type == PNG_CONTENT_TYPE:
+                resized.save(output, format="PNG", optimize=True)
+            else:
+                if resized.mode not in {"RGB", "L"}:
+                    resized = resized.convert("RGB")
+                resized.save(output, format="JPEG", quality=90, optimize=True)
+            return output.getvalue(), source.content_type, ["vision_input_resized"]
+    except Exception:
+        return source.content, source.content_type, []
+
+
+def _vision_analysis_max_long_edge(source: ImageSource) -> int:
+    flags = set(source.quality_flags)
+    if source.source_kind in {"pdf_page_image", "pdf_scanned_visual_region", "standalone_image"}:
+        return VISION_ANALYSIS_OCR_MAX_LONG_EDGE
+    if flags.intersection({"scanned_or_handwritten_candidate", "vision_layout_repair_candidate", "visual_region_crop"}):
+        return VISION_ANALYSIS_OCR_MAX_LONG_EDGE
+    return VISION_ANALYSIS_MAX_LONG_EDGE
+
+
+def _analysis_needs_original_retry(source: ImageSource, analysis: ImageAnalysisResult) -> bool:
+    flags = set(analysis.quality_flags or [])
+    if any(flag.startswith("vision_failed") for flag in flags) or flags.intersection({"vision_empty_response"}):
+        return True
+    if analysis.confidence is not None and analysis.confidence < VISION_RETRY_MIN_CONFIDENCE:
+        return True
+    extracted_text = _clean_text(analysis.extracted_text)
+    caption = _clean_text(analysis.caption)
+    if not extracted_text and not caption:
+        return True
+    return _source_expects_readable_text(source) and not extracted_text
+
+
+def _source_expects_readable_text(source: ImageSource) -> bool:
+    flags = set(source.quality_flags)
+    return source.source_kind in {"pdf_page_image", "pdf_scanned_visual_region", "standalone_image"} or bool(
+        flags.intersection({"scanned_or_handwritten_candidate", "vision_layout_repair_candidate"})
+    )
+
+
+def _analysis_signal_score(analysis: ImageAnalysisResult) -> float:
+    score = float(len(_clean_text(analysis.extracted_text)) * 2 + len(_clean_text(analysis.caption)))
+    if analysis.confidence is not None:
+        score += analysis.confidence * 50
+    if any(str(flag).startswith("vision_failed") for flag in (analysis.quality_flags or [])):
+        score -= 100
+    return score
+
+
+def _with_analysis_flags(analysis: ImageAnalysisResult, extra_flags: list[str]) -> ImageAnalysisResult:
+    if not extra_flags:
+        return analysis
+    return ImageAnalysisResult(
+        extracted_text=analysis.extracted_text,
+        caption=analysis.caption,
+        confidence=analysis.confidence,
+        quality_flags=sorted({*(analysis.quality_flags or []), *extra_flags}),
+    )
 
 
 def _standalone_image_bbox(source: ImageSource, width: int | None, height: int | None) -> BBox | None:
@@ -945,8 +1055,9 @@ def _scanned_visual_regions_for_page(
     max_regions: int,
     text_mask_padding_px: int,
 ) -> tuple[list[_VisualRegion], int, bool, int, int]:
-    if max_regions <= 0:
+    if max_regions == 0:
         return [], 0, False, 0, 0
+    unlimited = max_regions < 0
     try:
         from PIL import Image, ImageDraw, ImageFilter
     except ImportError as exc:
@@ -958,6 +1069,16 @@ def _scanned_visual_regions_for_page(
     page_rect = getattr(page, "rect", None)
     page_width = float(getattr(page_rect, "width", width) or width)
     page_height = float(getattr(page_rect, "height", height) or height)
+    layout_regions = _layout_visual_regions_for_page(
+        page,
+        rendered=rendered,
+        page_width=page_width,
+        page_height=page_height,
+        min_area_ratio=min_area_ratio,
+        max_regions=max_regions,
+    )
+    if layout_regions:
+        return layout_regions, 0, False, 0, 0
     max_mask_dim = 640
     scale = min(1.0, max_mask_dim / max(width, height))
     mask_width = max(1, int(width * scale))
@@ -1013,7 +1134,7 @@ def _scanned_visual_regions_for_page(
             continue
         regions.append(region)
 
-    if cue_mode and len(regions) < max_regions:
+    if cue_mode and (unlimited or len(regions) < max_regions):
         context_regions = _visual_cue_context_regions(
             rendered,
             components,
@@ -1030,10 +1151,10 @@ def _scanned_visual_regions_for_page(
                 continue
             regions.append(region)
             cue_region_count += 1
-            if len(regions) >= max_regions:
+            if not unlimited and len(regions) >= max_regions:
                 break
     regions.sort(key=lambda region: (0 if "visual_cue_context_crop" in region.quality_flags else 1, -region.page_area_ratio))
-    return regions[:max_regions], tiny_count, ambiguous, cue_region_count, small_region_count
+    return (regions if unlimited else regions[:max_regions]), tiny_count, ambiguous, cue_region_count, small_region_count
 
 
 def _visual_region_from_mask_bbox(
@@ -1051,6 +1172,93 @@ def _visual_region_from_mask_bbox(
     crop_top = max(0, int(top / scale) - 4)
     crop_right = min(width, int(right / scale) + 4)
     crop_bottom = min(height, int(bottom / scale) + 4)
+    return _visual_region_from_pixel_bbox(
+        rendered,
+        pixel_bbox=(crop_left, crop_top, crop_right, crop_bottom),
+        page_width=page_width,
+        page_height=page_height,
+        quality_flags=quality_flags,
+    )
+
+
+def _layout_visual_regions_for_page(
+    page: object,
+    *,
+    rendered: object,
+    page_width: float,
+    page_height: float,
+    min_area_ratio: float,
+    max_regions: int,
+) -> list[_VisualRegion]:
+    if max_regions == 0:
+        return []
+    page_area = max(1.0, page_width * page_height)
+    min_layout_area_ratio = max(0.005, min_area_ratio * 0.25)
+    regions: list[_VisualRegion] = []
+    try:
+        layout_rows = prepare_page_layout(page)
+    except WorkerStepError:
+        return []
+    for row in layout_rows:
+        if not isinstance(row, (list, tuple)) or len(row) < 5:
+            continue
+        label = str(row[4]).strip().lower()
+        if label not in LAYOUT_VISUAL_LABELS:
+            continue
+        bbox = _bbox(row[:4])
+        if bbox is None:
+            continue
+        area_ratio = _bbox_area(bbox) / page_area
+        if area_ratio < min_layout_area_ratio:
+            continue
+        region = _visual_region_from_pdf_bbox(
+            rendered,
+            pdf_bbox=bbox,
+            page_width=page_width,
+            page_height=page_height,
+            quality_flags=("layout_model_region_crop",),
+        )
+        if region is not None:
+            regions.append(region)
+    regions.sort(key=lambda region: (region.bbox[1], region.bbox[0], -region.page_area_ratio))
+    return regions if max_regions < 0 else regions[:max_regions]
+
+
+def _visual_region_from_pdf_bbox(
+    rendered: object,
+    *,
+    pdf_bbox: BBox,
+    page_width: float,
+    page_height: float,
+    quality_flags: tuple[str, ...] = (),
+) -> _VisualRegion | None:
+    width, height = rendered.size
+    left, top, right, bottom = pdf_bbox
+    pixel_bbox = (
+        max(0, math.floor(left / page_width * width) - 8),
+        max(0, math.floor(top / page_height * height) - 8),
+        min(width, math.ceil(right / page_width * width) + 8),
+        min(height, math.ceil(bottom / page_height * height) + 8),
+    )
+    return _visual_region_from_pixel_bbox(
+        rendered,
+        pixel_bbox=pixel_bbox,
+        page_width=page_width,
+        page_height=page_height,
+        quality_flags=quality_flags,
+    )
+
+
+def _visual_region_from_pixel_bbox(
+    rendered: object,
+    *,
+    pixel_bbox: tuple[int, int, int, int],
+    page_width: float,
+    page_height: float,
+    quality_flags: tuple[str, ...] = (),
+) -> _VisualRegion | None:
+    width, height = rendered.size
+    crop_left, crop_top, crop_right, crop_bottom = pixel_bbox
     if crop_right <= crop_left or crop_bottom <= crop_top:
         return None
     crop = rendered.crop((crop_left, crop_top, crop_right, crop_bottom))

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Activity, AlertTriangle, CheckCircle2, Clock3, CloudUpload, FileClock, FileSearch, FileText, Loader2, ShieldCheck, TimerReset, X, XCircle } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Activity, AlertTriangle, CheckCircle2, Clock3, CloudUpload, FileClock, FileSearch, FileText, Loader2, Plus, RotateCw, Share2, ShieldCheck, TimerReset, X, XCircle } from "lucide-react";
 
-import { adminApi, ingestJobsApi } from "../api/contracts";
-import { canManageSpaces, canUploadToSpace, canWriteDocument, clearanceLevelDescription, clearanceLevelLabel, clearanceLevelsAssignableBy } from "../authz";
+import { adminApi, documentsApi, ingestJobsApi } from "../api/contracts";
+import { canManageSpaces, canUploadToSpace, canWriteDocument, clearanceLevelDescription, clearanceLevelLabel, clearanceLevelsAssignableBy, hasExactGroupScope, isGlobalAdmin } from "../authz";
+import { useToast } from "../components/feedback/ToastProvider";
 import { InlineMessage } from "../components/layout/Common";
 import { PrudentiaWorkspace } from "../components/layout/PrudentiaWorkspace";
 import type { RouteId } from "../routes";
@@ -12,21 +13,35 @@ import type { ClearanceLevel, Document, GraphRAGStatus, UploadJobStep, User as A
 import type { PdfUploadDraft, UploadBatchItemView, UploadJobView } from "../types/chat";
 import { errorMessage } from "../utils/format";
 import { flattenGroups, userSpacesFromPaths } from "../utils/groups";
-import { formatSecondaryStageProgress, formatUploadWarning, graphEnrichmentForJob, isUploadCancellableStatus, type GraphEnrichmentChip as GraphEnrichmentChipShape } from "../state/uploadJobProgress";
+import { formatIngestRunLabel, formatSecondaryStageProgress, formatUploadWarning, graphEnrichmentForJob, isUploadCancellableStatus, isUploadTerminalStatus, type GraphEnrichmentChip as GraphEnrichmentChipShape } from "../state/uploadJobProgress";
 
-export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocuments, currentUser, onCancelIngestJob, onLogout, onNavigate, onPdfDraftChange, onPdfSubmit, pdfDraft, selectionError, uploadPending }: Props) {
+export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocuments, currentUser, onCancelIngestJob, onClearUploadJobs, onLogout, onNavigate, onPdfDraftChange, onPdfSubmit, pdfDraft, selectionError, uploadPending }: Props) {
+  const queryClient = useQueryClient();
+  const { notify } = useToast();
   const canLoadSpaceDirectory = canManageSpaces(currentUser);
   const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.listGroups, retry: false, enabled: canLoadSpaceDirectory });
   const uploadSpaceOptions = useMemo(
     () => (canLoadSpaceDirectory ? flattenGroups(groupsQuery.data?.items ?? []) : userSpacesFromPaths(currentUser.group_paths)),
     [canLoadSpaceDirectory, currentUser.group_paths, groupsQuery.data?.items],
   );
-  const writableSpacePaths = uploadSpaceOptions
-    .filter((space) => canUploadToSpace(currentUser, space.path))
-    .map((space) => space.path);
+  const writableSpacePaths = useMemo(
+    () => uploadSpaceOptions
+      .filter((space) => canUploadToSpace(currentUser, space.path))
+      .map((space) => space.path),
+    [currentUser, uploadSpaceOptions],
+  );
+  const eligibleSharedSpacePaths = useMemo(
+    () => uploadShareTargetPaths(currentUser, pdfDraft.groupPath, uploadSpaceOptions),
+    [currentUser, pdfDraft.groupPath, uploadSpaceOptions],
+  );
+  const sharedSpaceOptions = useMemo(
+    () => eligibleSharedSpacePaths.filter((path) => !pdfDraft.sharedGroupPaths.includes(path)),
+    [eligibleSharedSpacePaths, pdfDraft.sharedGroupPaths],
+  );
   const clearanceOptions = useMemo(() => clearanceLevelsAssignableBy(currentUser), [currentUser]);
   const writableCurrentDocuments = currentDocuments.filter((document) => canWriteDocument(currentUser, document.group_path, document.clearance_level));
   const selectedSpaceIsWritable = Boolean(pdfDraft.groupPath && canUploadToSpace(currentUser, pdfDraft.groupPath));
+  const selectedSharedSpacesAreValid = pdfDraft.sharedGroupPaths.every((path) => eligibleSharedSpacePaths.includes(path));
   const shouldPollGraphStatus = batchItems.some((item) => item.job?.status === "complete");
   const graphStatusQuery = useQuery({
     queryKey: ["ingest-jobs", "graphrag-status", "upload-batch"],
@@ -37,12 +52,37 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
     retry: false,
   });
   const graphStatusError = graphStatusQuery.isError ? errorMessage(graphStatusQuery.error, "Unable to load graph enrichment status.") : null;
+  const retryMutation = useMutation({
+    mutationFn: (item: UploadBatchItemView) => {
+      if (!item.job?.documentId) throw new Error("This upload has no document to retry.");
+      return documentsApi.reingest(item.job.documentId, { retry_of_job_id: item.job.jobId });
+    },
+    onSuccess: async (response, item) => {
+      onClearUploadJobs([item.id]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["documents"] }),
+        queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] }),
+        queryClient.invalidateQueries({ queryKey: ["upload"] }),
+      ]);
+      notify({ title: "Retry queued", description: `${item.fileName} queued as job ${response.job_id}.`, tone: "success" });
+    },
+    onError: (error) => notify({
+      title: "Retry failed",
+      description: errorMessage(error, "Unable to retry this upload."),
+      tone: "error",
+    }),
+  });
 
   useEffect(() => {
     if (pdfDraft.groupPath && !writableSpacePaths.includes(pdfDraft.groupPath)) {
-      onPdfDraftChange({ groupPath: "", supersedesText: "" });
+      onPdfDraftChange({ groupPath: "", sharedGroupPaths: [], supersedesText: "" });
+      return;
     }
-  }, [onPdfDraftChange, pdfDraft.groupPath, writableSpacePaths]);
+    const nextShared = pdfDraft.sharedGroupPaths.filter((path) => eligibleSharedSpacePaths.includes(path));
+    if (nextShared.length !== pdfDraft.sharedGroupPaths.length) {
+      onPdfDraftChange({ sharedGroupPaths: nextShared });
+    }
+  }, [eligibleSharedSpacePaths, onPdfDraftChange, pdfDraft.groupPath, pdfDraft.sharedGroupPaths, writableSpacePaths]);
 
   function handleFilesSelected(files: FileList | null) {
     if (!files) return;
@@ -52,7 +92,7 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
   return (
     <PrudentiaWorkspace activeRoute="upload" onLogout={onLogout} onNavigate={onNavigate} user={currentUser}>
       <main className="sv-page" id="main-content">
-        <div className="sv-page-inner max-w-6xl">
+        <div className="sv-page-inner sv-page-inner-workbench max-w-6xl">
           <header className="sv-page-header">
             <div>
               <p className="sv-eyebrow">Document Intake</p>
@@ -71,7 +111,7 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
             </div>
           </header>
 
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
             <form onSubmit={onPdfSubmit} className="sv-panel p-5">
               <div className="mb-5 flex items-start justify-between gap-4 border-b border-surface-border pb-4">
                 <div>
@@ -118,8 +158,17 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
               ) : null}
               {selectionError ? <InlineMessage tone="warning">{selectionError}</InlineMessage> : null}
               <div className="mt-5 grid items-start gap-4 md:grid-cols-2">
-                <SelectField disabled={uploadPending} label="Knowledge Space" value={pdfDraft.groupPath} onChange={(value) => onPdfDraftChange({ groupPath: value })} options={["", ...writableSpacePaths]} emptyLabel={groupsQuery.isLoading && canLoadSpaceDirectory ? "Loading spaces" : "Select upload space"} helper="Documents inherit this space for retrieval filtering." />
+                <SelectField disabled={uploadPending} label="Owner Knowledge Space" value={pdfDraft.groupPath} onChange={(value) => onPdfDraftChange({ groupPath: value, sharedGroupPaths: pdfDraft.sharedGroupPaths.filter((path) => path !== value) })} options={["", ...writableSpacePaths]} emptyLabel={groupsQuery.isLoading && canLoadSpaceDirectory ? "Loading spaces" : "Select upload space"} helper="Primary owner space for governance and retrieval filtering." />
                 <ClearanceSelect disabled={uploadPending} value={pdfDraft.clearanceLevel} onChange={(clearanceLevel) => onPdfDraftChange({ clearanceLevel })} options={clearanceOptions} />
+                {canShareUploadAcrossSpaces(currentUser, pdfDraft.groupPath) ? (
+                  <SharedSpacesField
+                    disabled={uploadPending}
+                    onAdd={(path) => onPdfDraftChange({ sharedGroupPaths: [...pdfDraft.sharedGroupPaths, path].sort((a, b) => a.localeCompare(b)) })}
+                    onRemove={(path) => onPdfDraftChange({ sharedGroupPaths: pdfDraft.sharedGroupPaths.filter((value) => value !== path) })}
+                    options={sharedSpaceOptions}
+                    values={pdfDraft.sharedGroupPaths}
+                  />
+                ) : null}
                 <label className="sv-field">
                   <span className="sv-label">Effective Date <span className="font-normal text-secondary">(optional)</span></span>
                   <input disabled={uploadPending} type="date" value={pdfDraft.effectiveDate} onChange={(event) => onPdfDraftChange({ effectiveDate: event.target.value })} className="sv-input" />
@@ -144,7 +193,7 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
               </label>
               {groupsQuery.isError && canLoadSpaceDirectory ? <InlineMessage tone="error">{errorMessage(groupsQuery.error, "Unable to load writable Knowledge Spaces.")}</InlineMessage> : null}
               {!groupsQuery.isLoading && writableSpacePaths.length === 0 ? <InlineMessage tone="warning">No writable Knowledge Spaces are available for this account.</InlineMessage> : null}
-              <button type="submit" disabled={uploadPending || pdfDraft.files.length === 0 || !selectedSpaceIsWritable} className="sv-action-primary mt-5 w-full">
+              <button type="submit" disabled={uploadPending || pdfDraft.files.length === 0 || !selectedSpaceIsWritable || !selectedSharedSpacesAreValid} className="sv-action-primary mt-5 w-full">
                 {uploadPending ? <Loader2 className="animate-spin" size={18} /> : <CloudUpload size={18} />}
                 {uploadPending
                   ? "Queueing selected documents"
@@ -160,6 +209,9 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
                   graphStatusError={graphStatusError}
                   items={batchItems}
                   onCancelIngestJob={onCancelIngestJob}
+                  onClearUploadJobs={onClearUploadJobs}
+                  onRetryIngestJob={(item) => retryMutation.mutate(item)}
+                  retryingJobId={retryMutation.isPending ? retryMutation.variables?.job?.jobId ?? null : null}
                 />
               ) : null}
             </form>
@@ -168,7 +220,7 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
               <section className="sv-panel p-5">
                 <h2 className="sv-section-title">Ingestion guardrails</h2>
                 <div className="mt-4 space-y-3">
-                  <Guardrail icon={<CheckCircle2 size={16} />} title="Access scope" detail="Documents inherit the selected Knowledge Space for retrieval filtering." />
+                  <Guardrail icon={<CheckCircle2 size={16} />} title="Access scope" detail="Documents inherit the owner space and optional shared spaces for retrieval filtering." />
                   <Guardrail icon={<ShieldCheck size={16} />} title="Version hygiene" detail="Supersession metadata keeps prior files auditable without mixing current state." />
                   <Guardrail icon={<TimerReset size={16} />} title="Batch status" detail="Every selected file is queued separately and reports its own ingestion progress." />
                 </div>
@@ -214,14 +266,68 @@ function ClearanceSelect({ disabled, onChange, options, value }: ClearanceSelect
   );
 }
 
-function BatchUploadStatus({ cancelingJobId, currentUser, graphStatus, graphStatusError, items, onCancelIngestJob }: { cancelingJobId: string | null; currentUser: AuthUser; graphStatus: GraphRAGStatus | undefined; graphStatusError: string | null; items: UploadBatchItemView[]; onCancelIngestJob: (jobId: string) => void }) {
+function SharedSpacesField({ disabled, onAdd, onRemove, options, values }: SharedSpacesFieldProps) {
+  const [candidate, setCandidate] = useState("");
+  const canAdd = Boolean(candidate) && !disabled;
+
+  useEffect(() => {
+    if (candidate && !options.includes(candidate)) setCandidate("");
+  }, [candidate, options]);
+
+  function addCandidate() {
+    if (!canAdd) return;
+    onAdd(candidate);
+    setCandidate("");
+  }
+
+  return (
+    <div className="sv-field md:col-span-2">
+      <span className="sv-label">Shared Knowledge Spaces <span className="font-normal text-secondary">(optional)</span></span>
+      {values.length ? (
+        <div className="knowledge-topic-chips">
+          {values.map((path) => (
+            <span key={path} className="sv-pill knowledge-topic-pill">
+              {path}
+              <button type="button" onClick={() => onRemove(path)} disabled={disabled} aria-label={`Remove ${path}`}>
+                <X size={13} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="knowledge-topic-form">
+        <select
+          className="sv-select"
+          disabled={disabled || options.length === 0}
+          onChange={(event) => setCandidate(event.target.value)}
+          value={candidate}
+        >
+          <option value="">{options.length ? "Select shared space" : "No eligible shared spaces"}</option>
+          {options.map((path) => <option key={path} value={path}>{path}</option>)}
+        </select>
+        <button type="button" className="sv-action-secondary" disabled={!canAdd} onClick={addCandidate}>
+          <Plus size={15} /> Add
+        </button>
+      </div>
+      <small className="text-secondary"><Share2 size={12} className="inline align-[-2px]" /> Selected spaces receive read access when the document is indexed.</small>
+    </div>
+  );
+}
+
+function BatchUploadStatus({ cancelingJobId, currentUser, graphStatus, graphStatusError, items, onCancelIngestJob, onClearUploadJobs, onRetryIngestJob, retryingJobId }: BatchUploadStatusProps) {
   const completeCount = items.filter((item) => item.job?.status === "complete").length;
   const attentionCount = items.filter((item) => item.requestState === "failed" || item.job?.status === "failed" || item.job?.status === "human_review" || item.job?.status === "cancelled").length;
+  const clearableIds = items.filter(isClearableUploadItem).map((item) => item.id);
   return (
     <section className="mt-6 border-t border-surface-border pt-5" aria-label="Document batch progress" aria-live="polite">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="sv-section-title">Recent upload jobs</h2>
-        <p className="text-label-md text-secondary">{completeCount} complete{attentionCount > 0 ? ` · ${attentionCount} need attention` : ""}</p>
+        <div>
+          <h2 className="sv-section-title">Recent upload jobs</h2>
+          <p className="text-label-md text-secondary">{completeCount} complete{attentionCount > 0 ? ` · ${attentionCount} need attention` : ""}</p>
+        </div>
+        <button type="button" className="sv-action-secondary" disabled={clearableIds.length === 0} onClick={() => onClearUploadJobs(clearableIds)}>
+          <X size={14} /> Clear finished
+        </button>
       </div>
       <ol className="mt-3 grid gap-3">
         {items.map((item) => (
@@ -233,6 +339,9 @@ function BatchUploadStatus({ cancelingJobId, currentUser, graphStatus, graphStat
             item={item}
             key={item.id}
             onCancelIngestJob={onCancelIngestJob}
+            onClearUploadJobs={onClearUploadJobs}
+            onRetryIngestJob={onRetryIngestJob}
+            retryingJobId={retryingJobId}
           />
         ))}
       </ol>
@@ -240,13 +349,14 @@ function BatchUploadStatus({ cancelingJobId, currentUser, graphStatus, graphStat
   );
 }
 
-function BatchUploadRow({ cancelingJobId, currentUser, graphStatus, graphStatusError, item, onCancelIngestJob }: { cancelingJobId: string | null; currentUser: AuthUser; graphStatus: GraphRAGStatus | undefined; graphStatusError: string | null; item: UploadBatchItemView; onCancelIngestJob: (jobId: string) => void }) {
-  const [confirmCancel, setConfirmCancel] = useState(false);
+function BatchUploadRow({ cancelingJobId, currentUser, graphStatus, graphStatusError, item, onCancelIngestJob, onClearUploadJobs, onRetryIngestJob, retryingJobId }: BatchUploadRowProps) {
   const job = item.job;
   const progressPct = job ? Math.max(0, Math.min(100, job.progressPct)) : item.requestState === "uploading" ? 8 : 0;
   const rowStatus = item.requestState === "failed" ? "failed" : job?.status ?? "processing";
   const canCancel = Boolean(job && isUploadCancellableStatus(job.status) && canWriteDocument(currentUser, item.groupPath, item.clearanceLevel));
+  const canRetry = Boolean(job?.documentId && (job.status === "failed" || job.status === "cancelled") && canWriteDocument(currentUser, item.groupPath, item.clearanceLevel));
   const canceling = Boolean(job && cancelingJobId === job.jobId);
+  const retrying = Boolean(job && retryingJobId === job.jobId);
   const stageProgress = formatSecondaryStageProgress(job?.stageProgress, job?.stageDetail);
   const graphChip = job ? graphEnrichmentForJob(job, graphStatus, graphStatusError) : null;
   const error = item.uploadError
@@ -265,21 +375,27 @@ function BatchUploadRow({ cancelingJobId, currentUser, graphStatus, graphStatusE
             <h3 className="min-w-0 truncate text-body-md font-extrabold text-on-surface">{item.fileName}</h3>
             <strong className={`text-label-md ${progressTextClass(rowStatus)}`}>{progressPct}%</strong>
           </div>
-          <p className="mt-0.5 text-label-md text-secondary">{formatFileSize(item.fileSize)} · {item.groupPath} · {clearanceLevelLabel(item.clearanceLevel)}{job ? ` · Job ${job.jobId.slice(0, 8)}` : ""}</p>
+          <p className="mt-0.5 text-label-md text-secondary">
+            {[item.fileSize === null ? null : formatFileSize(item.fileSize), item.groupPath, clearanceLevelLabel(item.clearanceLevel), job ? `Job ${job.jobId.slice(0, 8)}` : null].filter(Boolean).join(" · ")}
+          </p>
           <p className="mt-1 text-body-md text-on-surface-variant">
             {item.requestState === "uploading" ? "Validating, scanning, and queueing this document." : item.requestState === "failed" ? "The document was not queued." : job?.stageDetail}
           </p>
           {stageProgress ? <p className="mt-1 text-label-md font-extrabold text-primary">{stageProgress}</p> : null}
           {job ? <UploadJobRuntimeDetail job={job} stageProgress={stageProgress} /> : null}
           {graphChip ? <GraphEnrichmentChip chip={graphChip} /> : null}
-          {canCancel && job ? (
-            <CancelIngestControl
-              confirming={confirmCancel}
-              disabled={canceling}
-              onCancel={() => onCancelIngestJob(job.jobId)}
-              onConfirmingChange={setConfirmCancel}
-            />
-          ) : null}
+          <UploadRowActions
+            canCancel={canCancel}
+            canRetry={canRetry}
+            canceling={canceling}
+            item={item}
+            onCancel={() => {
+              if (job) onCancelIngestJob(job.jobId);
+            }}
+            onClear={() => onClearUploadJobs([item.id])}
+            onRetry={() => onRetryIngestJob(item)}
+            retrying={retrying}
+          />
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface">
             <div
               aria-label={`${item.fileName} ingestion progress`}
@@ -338,7 +454,7 @@ function UploadJobRuntimeDetail({ job, stageProgress }: { job: UploadJobView; st
             {durationLabel}
           </span>
         ) : null}
-        <span>Attempt {Math.max(1, job.attemptCount || 1)} of {job.maxAttempts || 3}</span>
+        <span>{formatIngestRunLabel(job)}</span>
       </div>
       {currentStep ? (
         <p className="mt-2 text-label-md text-on-surface-variant">
@@ -370,10 +486,48 @@ function UploadJobRuntimeDetail({ job, stageProgress }: { job: UploadJobView; st
   );
 }
 
+function UploadRowActions({ canCancel, canRetry, canceling, item, onCancel, onClear, onRetry, retrying }: UploadRowActionsProps) {
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const clearable = isClearableUploadItem(item);
+  if (!canCancel && !canRetry && !clearable) return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 text-label-md">
+      {canRetry ? (
+        <button
+          className="inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 font-bold text-secondary hover:bg-surface hover:text-primary disabled:opacity-50"
+          disabled={retrying}
+          onClick={onRetry}
+          type="button"
+        >
+          {retrying ? <Loader2 className="animate-spin" size={13} /> : <RotateCw size={13} />}
+          {retrying ? "Queueing" : "Retry"}
+        </button>
+      ) : null}
+      {canCancel ? (
+        <CancelIngestControl
+          confirming={confirmCancel}
+          disabled={canceling}
+          onCancel={onCancel}
+          onConfirmingChange={setConfirmCancel}
+        />
+      ) : null}
+      {clearable ? (
+        <button
+          className="inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 font-bold text-secondary hover:bg-surface hover:text-on-surface"
+          onClick={onClear}
+          type="button"
+        >
+          <X size={13} /> Clear
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function CancelIngestControl({ confirming, disabled, onCancel, onConfirmingChange }: { confirming: boolean; disabled: boolean; onCancel: () => void; onConfirmingChange: (value: boolean) => void }) {
   if (confirming) {
     return (
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-label-md">
+      <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold text-error-red">Cancel this ingestion job?</span>
         <button
           className="rounded-md border border-error-red/30 px-2 py-1 font-bold text-error-red hover:bg-error-container disabled:opacity-50"
@@ -394,7 +548,7 @@ function CancelIngestControl({ confirming, disabled, onCancel, onConfirmingChang
   }
   return (
     <button
-      className="mt-2 inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface hover:text-error-red disabled:opacity-50"
+      className="inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 font-bold text-secondary hover:bg-surface hover:text-error-red disabled:opacity-50"
       disabled={disabled}
       onClick={() => onConfirmingChange(true)}
       type="button"
@@ -403,6 +557,10 @@ function CancelIngestControl({ confirming, disabled, onCancel, onConfirmingChang
       {disabled ? "Cancelling" : "Cancel job"}
     </button>
   );
+}
+
+function isClearableUploadItem(item: UploadBatchItemView) {
+  return item.requestState === "failed" || isUploadTerminalStatus(item.job?.status);
 }
 
 function Guardrail({ detail, icon, title }: { detail: string; icon: JSX.Element; title: string }) {
@@ -414,13 +572,29 @@ function Guardrail({ detail, icon, title }: { detail: string; icon: JSX.Element;
   );
 }
 
+export function canShareUploadAcrossSpaces(user: AuthUser, ownerGroupPath: string) {
+  if (!ownerGroupPath) return false;
+  return isGlobalAdmin(user) || (user.account_type === "space_admin" && hasExactGroupScope(user, ownerGroupPath));
+}
+
+export function uploadShareTargetPaths(user: AuthUser, ownerGroupPath: string, spaces: Array<{ path: string }>) {
+  if (!ownerGroupPath || !canShareUploadAcrossSpaces(user, ownerGroupPath)) return [];
+  const targets = spaces.filter((space) => space.path !== ownerGroupPath);
+  if (isGlobalAdmin(user)) return targets.map((space) => space.path);
+  return targets.filter((space) => hasExactGroupScope(user, space.path)).map((space) => space.path);
+}
+
 type SelectProps = { disabled?: boolean; emptyLabel?: string; helper?: string; label: string; onChange: (value: string) => void; options: string[]; value: string };
 type ClearanceSelectProps = { disabled?: boolean; onChange: (value: ClearanceLevel) => void; options: ClearanceLevel[]; value: ClearanceLevel };
+type SharedSpacesFieldProps = { disabled?: boolean; onAdd: (path: string) => void; onRemove: (path: string) => void; options: string[]; values: string[] };
 type Props = {
   batchItems: UploadBatchItemView[]; cancelingJobId: string | null; currentDocuments: Document[]; currentUser: AuthUser;
-  onCancelIngestJob: (jobId: string) => void; onLogout: () => void; onNavigate: (route: RouteId) => void; onPdfDraftChange: (patch: Partial<PdfUploadDraft>) => void;
+  onCancelIngestJob: (jobId: string) => void; onClearUploadJobs: (itemIds: string[]) => void; onLogout: () => void; onNavigate: (route: RouteId) => void; onPdfDraftChange: (patch: Partial<PdfUploadDraft>) => void;
   onPdfSubmit: (event: FormEvent<HTMLFormElement>) => void; pdfDraft: PdfUploadDraft; selectionError: string | null; uploadPending: boolean;
 };
+type BatchUploadStatusProps = { cancelingJobId: string | null; currentUser: AuthUser; graphStatus: GraphRAGStatus | undefined; graphStatusError: string | null; items: UploadBatchItemView[]; onCancelIngestJob: (jobId: string) => void; onClearUploadJobs: (itemIds: string[]) => void; onRetryIngestJob: (item: UploadBatchItemView) => void; retryingJobId: string | null };
+type BatchUploadRowProps = Omit<BatchUploadStatusProps, "items"> & { item: UploadBatchItemView };
+type UploadRowActionsProps = { canCancel: boolean; canRetry: boolean; canceling: boolean; item: UploadBatchItemView; onCancel: () => void; onClear: () => void; onRetry: () => void; retrying: boolean };
 
 function stageIcon(job: UploadJobView) {
   if (job.status === "complete") return <CheckCircle2 aria-hidden="true" size={18} />;

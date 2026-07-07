@@ -123,6 +123,71 @@ class FakeBroadSummaryQdrant(FakeBroadDocumentQdrant):
         return []
 
 
+class RecallEmbedder:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def embed(self, query: str) -> list[float]:
+        self.queries.append(query)
+        return [float(len(self.queries) - 1)]
+
+
+class FakeDefinitionQdrant:
+    def prepare_for_query(self, _vector_size: int) -> bool:
+        return True
+
+    def search(self, vector: list[float], *, limit: int, qdrant_filter: dict[str, object]) -> list[SearchHit]:
+        query_index = int(vector[0])
+        if query_index == 0:
+            return [
+                hit(
+                    "ztmm:100",
+                    doc_id="ztmm",
+                    doc_title="ztmm.pdf",
+                    text="Table 3 lists functions in the Devices Pillar.",
+                    page=16,
+                )
+            ][:limit]
+        return [
+            hit(
+                "ztmm:98",
+                doc_id="ztmm",
+                doc_title="ztmm.pdf",
+                text="A device refers to any asset, including hardware, software, and firmware, that can connect to a network.",
+                page=16,
+            )
+        ][:limit]
+
+
+class FakeDefinitionAlreadyFoundQdrant(FakeDefinitionQdrant):
+    def search(self, vector: list[float], *, limit: int, qdrant_filter: dict[str, object]) -> list[SearchHit]:
+        return [
+            hit(
+                "ztmm:98",
+                doc_id="ztmm",
+                doc_title="ztmm.pdf",
+                text="A device refers to any asset, including hardware, software, and firmware, that can connect to a network.",
+                page=16,
+            )
+        ][:limit]
+
+
+class FakeDefinitionFalsePositiveQdrant(FakeDefinitionQdrant):
+    def search(self, vector: list[float], *, limit: int, qdrant_filter: dict[str, object]) -> list[SearchHit]:
+        query_index = int(vector[0])
+        if query_index == 0:
+            return [
+                hit(
+                    "ztmm:45",
+                    doc_id="ztmm",
+                    doc_title="ztmm.pdf",
+                    text="The Zero Trust Maturity Model is a maturity model. Its pillars include Identity, Devices, Networks, Applications, and Data.",
+                    page=6,
+                )
+            ][:limit]
+        return super().search(vector, limit=limit, qdrant_filter=qdrant_filter)
+
+
 def hit(point_id: str, *, doc_id: str, doc_title: str, text: str, **payload: object) -> SearchHit:
     return SearchHit(
         point_id=point_id,
@@ -147,6 +212,16 @@ def route_plan(query: str) -> RoutePlan:
         use_structured_query=True,
         search_mode="structured_first",
         top_k=24,
+    )
+
+
+def definition_plan(query: str) -> RoutePlan:
+    return RoutePlan(
+        original_query=query,
+        resolved_query=query,
+        intent="factual_simple",
+        public_intent="factual_simple",
+        top_k=4,
     )
 
 
@@ -222,3 +297,58 @@ def test_broad_document_summary_scope_still_keeps_all_documents() -> None:
     doc_ids = {item.payload["doc_id"] for item in hits}
     assert doc_ids == {"policy", "climate", "image"}
     assert all(item.payload.get("exhaustive_scope_origin") == "document_class_scope" for item in hits)
+
+
+def test_definition_query_runs_bounded_recall_expansion_when_top_evidence_is_incomplete() -> None:
+    query = "How does ZTMM define devices?"
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query=query),
+        user=UserContext(user_id="user", email="user@example.com", group_paths=("/admin",)),
+        started=0.0,
+    )
+    ctx["route_plan"] = definition_plan(query)
+    embedder = RecallEmbedder()
+
+    hits = retrieve_candidates(ctx, config=FakeConfig(), ollama=embedder, qdrant=FakeDefinitionQdrant())
+
+    assert [item.payload["chunk_id"] for item in hits[:2]] == ["ztmm:98", "ztmm:100"]
+    assert hits[0].payload["recall_origin"] == "answer_type_expansion"
+    assert embedder.queries[:2] == [query, "ztmm devices definition"]
+
+
+def test_definition_query_skips_recall_expansion_when_definition_is_already_present() -> None:
+    query = "How does ZTMM define devices?"
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query=query),
+        user=UserContext(user_id="user", email="user@example.com", group_paths=("/admin",)),
+        started=0.0,
+    )
+    ctx["route_plan"] = definition_plan(query)
+    embedder = RecallEmbedder()
+
+    hits = retrieve_candidates(ctx, config=FakeConfig(), ollama=embedder, qdrant=FakeDefinitionAlreadyFoundQdrant())
+
+    assert [item.payload["chunk_id"] for item in hits] == ["ztmm:98"]
+    assert embedder.queries == [query]
+
+
+def test_definition_recall_ignores_generic_overview_cues() -> None:
+    query = "How does the Zero Trust Maturity Model define a device?"
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query=query),
+        user=UserContext(user_id="user", email="user@example.com", group_paths=("/admin",)),
+        started=0.0,
+    )
+    ctx["route_plan"] = definition_plan(query)
+    embedder = RecallEmbedder()
+
+    hits = retrieve_candidates(ctx, config=FakeConfig(), ollama=embedder, qdrant=FakeDefinitionFalsePositiveQdrant())
+
+    assert [item.payload["chunk_id"] for item in hits[:2]] == ["ztmm:98", "ztmm:45"]
+    assert embedder.queries[:2] == [query, "zero trust device definition"]

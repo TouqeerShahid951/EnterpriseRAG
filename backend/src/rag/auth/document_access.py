@@ -8,7 +8,7 @@ from ..repositories.document_models import DocumentRecord
 from ..repositories.identity import UserRecord
 from ..shared.contracts.clearance import can_access_clearance
 from .abac import normalize_group_path
-from .permissions import can_read_document_metadata, can_write_document_scope, is_global_admin
+from .permissions import can_manage_group_path, can_read_document_metadata, can_write_document_scope, is_global_admin
 
 
 def can_read_document(user: UserRecord, document: DocumentRecord) -> bool:
@@ -38,3 +38,9 @@ def can_write_document(user: UserRecord, document: DocumentRecord) -> bool:
         user.clearance_level,
         document.clearance_level,
     )
+
+
+def can_manage_document_ingestion(user: UserRecord, document: DocumentRecord) -> bool:
+    if not can_read_document(user, document):
+        return False
+    return document.uploaded_by == user.id or can_manage_group_path(user, document.group_path)

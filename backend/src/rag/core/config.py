@@ -129,6 +129,9 @@ class Settings(BaseSettings):
     rag_faithfulness_policy: str = "high_risk"
     rag_defer_faithfulness: bool = True
     rag_faithfulness_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    rag_source_router_llm_enabled: bool = True
+    rag_source_router_llm_min_confidence: float = Field(default=0.60, ge=0.0, le=1.0)
+    rag_hybrid_disagreement_detector_enabled: bool = True
     rag_intent_router_version: str = "v1"
     rag_route_llm_verifier_enabled: bool = True
     rag_route_llm_verifier_model: str | None = None
@@ -149,6 +152,8 @@ class Settings(BaseSettings):
     evaluation_retention_days: int = Field(default=30, ge=1, le=365)
     evaluation_worker_timeout_seconds: float = Field(default=3600.0, ge=30.0)
     evaluation_diagnostic_top_k: int = Field(default=10, ge=1, le=100)
+    evaluation_answer_llm_verifier_enabled: bool = True
+    evaluation_answer_llm_verifier_model: str | None = None
     rag_chunk_max_chars: int = 1200
     rag_chunk_overlap_chars: int = 160
     rag_session_store: str = "redis"
@@ -171,6 +176,7 @@ class Settings(BaseSettings):
     ingest_worker_boot_concurrency: int = Field(default=1, ge=1, le=10)
     ingestion_quality_preset: str = "fast"
     ocr_review_confidence_threshold: float = Field(default=0.9, ge=0.0, le=1.0)
+    pdf_image_review_threshold: int = Field(default=64, ge=0, le=10000)
     ingest_maintenance_interval_seconds: int = Field(default=30, ge=5)
     ingest_stale_after_seconds: int = Field(default=120, ge=60)
     connector_secrets_key: str = "replace-with-local-connector-secrets-key"

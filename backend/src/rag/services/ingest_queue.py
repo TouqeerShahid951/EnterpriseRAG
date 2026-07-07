@@ -27,6 +27,7 @@ class IngestQueueMessage:
     content_type: str | None = None
     quality_preset: str | None = None
     review_batch_id: str | None = None
+    image_review_batch_id: str | None = None
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "IngestQueueMessage":
@@ -49,6 +50,7 @@ class IngestQueueMessage:
             content_type=str(payload["content_type"]) if payload.get("content_type") else None,
             quality_preset=normalize_ingestion_quality_preset(payload.get("quality_preset")) if payload.get("quality_preset") else None,
             review_batch_id=str(payload["review_batch_id"]) if payload.get("review_batch_id") else None,
+            image_review_batch_id=str(payload["image_review_batch_id"]) if payload.get("image_review_batch_id") else None,
         )
 
 
@@ -148,4 +150,6 @@ def _message_payload(message: IngestQueueMessage) -> dict[str, Any]:
         payload["quality_preset"] = message.quality_preset
     if message.review_batch_id:
         payload["review_batch_id"] = message.review_batch_id
+    if message.image_review_batch_id:
+        payload["image_review_batch_id"] = message.image_review_batch_id
     return payload

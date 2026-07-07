@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from ..schemas.evaluations import EvaluationCase, EvaluationFailureStage
 from ..schemas.query import RAGResponse
-from ..shared.evaluation.answer_checks import evaluate_literal_checks
+from ..shared.evaluation.answer_checks import LiteralCheckResult, evaluate_literal_checks
 
 
 FAILURE_STAGE_PRIORITY: tuple[EvaluationFailureStage, ...] = (
@@ -24,6 +25,7 @@ FAILURE_STAGE_PRIORITY: tuple[EvaluationFailureStage, ...] = (
 )
 
 _CITATION_RE = re.compile(r"\[[^\[\]\r\n]{1,200}:\d+\]")
+AnswerContentJudge = Callable[[EvaluationCase, RAGResponse, LiteralCheckResult], dict[str, object]]
 
 
 def score_case_result(
@@ -32,6 +34,7 @@ def score_case_result(
     response: RAGResponse | None,
     diagnostic: dict[str, Any],
     error_message: str | None = None,
+    answer_content_judge: AnswerContentJudge | None = None,
 ) -> dict[str, Any]:
     checks = _base_checks(case, diagnostic)
     failure_stages: list[EvaluationFailureStage] = []
@@ -58,8 +61,17 @@ def score_case_result(
         }
 
     literal = evaluate_literal_checks(response.answer, case.must_include, case.must_not_include)
-    answer_content_passed = literal.passed
-    final_source_passed, final_source_titles = _source_doc_pass(case.expected_source_docs, [source.model_dump() for source in response.sources])
+    llm_verifier = _llm_answer_content_verdict(
+        case,
+        response,
+        literal,
+        answer_content_judge=answer_content_judge,
+    )
+    answer_content_passed = literal.passed or _llm_answer_content_passed(llm_verifier)
+    final_source_passed, final_source_titles = _source_doc_pass(
+        case.expected_source_docs,
+        [source.model_dump() for source in response.sources],
+    )
     min_sources_passed = len(response.sources) >= case.min_sources
     reranking_passed = (
         True
@@ -75,8 +87,11 @@ def score_case_result(
         {
             "answer_content": {
                 "passed": answer_content_passed,
-                "missing_must_include": list(literal.missing_must_include),
+                "missing_must_include": [] if answer_content_passed else list(literal.missing_must_include),
                 "present_must_not_include": list(literal.present_must_not_include),
+                "literal_passed": literal.passed,
+                "literal_missing_must_include": list(literal.missing_must_include),
+                "llm_verifier": llm_verifier,
             },
             "final_sources": {
                 "passed": final_source_passed and min_sources_passed,
@@ -141,6 +156,37 @@ def score_case_result(
         "failure_stages": ordered,
         "checks": checks,
     }
+
+
+def _llm_answer_content_verdict(
+    case: EvaluationCase,
+    response: RAGResponse,
+    literal: LiteralCheckResult,
+    *,
+    answer_content_judge: AnswerContentJudge | None,
+) -> dict[str, object] | None:
+    if (
+        answer_content_judge is None
+        or literal.passed
+        or not literal.missing_must_include
+        or literal.present_must_not_include
+    ):
+        return None
+    try:
+        return answer_content_judge(case, response, literal)
+    except Exception as exc:  # noqa: BLE001 - scoring should record judge errors, not fail the run
+        return {
+            "used": True,
+            "status": "error",
+            "passed": False,
+            "error_type": type(exc).__name__,
+        }
+
+
+def _llm_answer_content_passed(verdict: dict[str, object] | None) -> bool:
+    if verdict is None or verdict.get("passed") is not True:
+        return False
+    return not verdict.get("missing_must_include") and not verdict.get("present_must_not_include")
 
 
 def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:

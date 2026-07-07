@@ -33,7 +33,9 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
   const [activeVllmApplyService, setActiveVllmApplyService] = useState<VllmDeploymentService | null>(null);
   const [workerConcurrency, setWorkerConcurrency] = useState(1);
   const [ocrReviewThresholdPercent, setOcrReviewThresholdPercent] = useState(90);
+  const [pdfImageReviewThreshold, setPdfImageReviewThreshold] = useState(64);
   const [visionLayoutRepairEnabled, setVisionLayoutRepairEnabled] = useState(false);
+  const [graphEnrichmentEnabled, setGraphEnrichmentEnabled] = useState(false);
   const [highConcurrencyConfirmed, setHighConcurrencyConfirmed] = useState(false);
   const ragEndpoints = endpointsFromForm(ragDraft);
   const canFetchRagModels = isAdmin && Object.values(ragEndpoints).every(canFetchModelsForEndpoint);
@@ -100,8 +102,8 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
       });
     },
     onError: (error) => notify({
-      title: "Model config test failed",
-      description: errorMessage(error, "Model config test failed."),
+      title: "Model routing test failed",
+      description: errorMessage(error, "Model routing test failed."),
       tone: "error",
     }),
   });
@@ -110,11 +112,11 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
     onSuccess: (config) => {
       setRagDraft(formFromConfig(config));
       queryClient.setQueryData(["admin", "rag-config"], config);
-      notify({ title: "Model config saved", description: "The runtime configuration is now active.", tone: "success" });
+      notify({ title: "Model routing saved", description: "The model routing is now active.", tone: "success" });
     },
     onError: (error) => notify({
-      title: "Model config save failed",
-      description: errorMessage(error, "Model config save failed."),
+      title: "Model routing save failed",
+      description: errorMessage(error, "Model routing save failed."),
       tone: "error",
     }),
   });
@@ -123,20 +125,22 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
     onSuccess: (config) => {
       setWorkerConcurrency(safeWorkerConcurrency(config.worker_concurrency));
       setOcrReviewThresholdPercent(thresholdPercentFromConfig(config.ocr_review_confidence_threshold));
+      setPdfImageReviewThreshold(safePdfImageReviewThreshold(config.pdf_image_review_threshold));
       setVisionLayoutRepairEnabled(config.vision_layout_repair_enabled);
+      setGraphEnrichmentEnabled(config.graph_enrichment_enabled);
       setHighConcurrencyConfirmed(false);
       queryClient.setQueryData(["admin", "ingest-config"], config);
       notify({
-        title: config.apply_status === "applied" ? "Ingestion config applied" : "Ingestion config saved",
+        title: config.apply_status === "applied" ? "Ingestion controls applied" : "Ingestion controls saved",
         description: config.apply_status === "applied"
-          ? "The online worker picked up the saved capacity. New jobs will use the selected OCR and vision settings."
-          : "The capacity value will apply when a worker is online. New jobs will use the selected OCR and vision settings.",
+          ? "The online worker picked up the saved capacity. New jobs will use the selected OCR, vision, and graph settings."
+          : "The capacity value will apply when a worker is online. New jobs will use the selected OCR, vision, and graph settings.",
         tone: config.apply_status === "applied" ? "success" : "warning",
       });
     },
     onError: (error) => notify({
-      title: "Worker capacity update failed",
-      description: errorMessage(error, "Unable to apply worker capacity."),
+      title: "Ingestion controls update failed",
+      description: errorMessage(error, "Unable to apply ingestion controls."),
       tone: "error",
     }),
   });
@@ -147,14 +151,14 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
       setVllmRestartConfirmed(DEFAULT_VLLM_RESTART_CONFIRMATIONS);
       queryClient.setQueryData(["admin", "vllm-deployment-config"], config);
       notify({
-        title: "vLLM limits saved",
+        title: "vLLM service limits saved",
         description: config.message ?? "Restart is required before the containers use the saved limits.",
         tone: "warning",
       });
     },
     onError: (error) => notify({
-      title: "vLLM limit save failed",
-      description: errorMessage(error, "Unable to save vLLM deployment limits."),
+      title: "vLLM service limit save failed",
+      description: errorMessage(error, "Unable to save vLLM service limits."),
       tone: "error",
     }),
   });
@@ -168,14 +172,14 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
       setVllmRestartConfirmed(DEFAULT_VLLM_RESTART_CONFIRMATIONS);
       queryClient.setQueryData(["admin", "vllm-deployment-config"], config);
       notify({
-        title: "vLLM restart launched",
+        title: "vLLM service restart launched",
         description: config.message ?? "The vLLM containers were recreated with the saved limits.",
         tone: "success",
       });
     },
     onError: (error) => notify({
-      title: "vLLM restart failed",
-      description: errorMessage(error, "Unable to apply vLLM deployment limits."),
+      title: "vLLM service restart failed",
+      description: errorMessage(error, "Unable to apply vLLM service limits."),
       tone: "error",
     }),
     onSettled: () => setActiveVllmApplyService(null),
@@ -189,7 +193,9 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
     if (ingestConfigQuery.data) {
       setWorkerConcurrency(safeWorkerConcurrency(ingestConfigQuery.data.worker_concurrency));
       setOcrReviewThresholdPercent(thresholdPercentFromConfig(ingestConfigQuery.data.ocr_review_confidence_threshold));
+      setPdfImageReviewThreshold(safePdfImageReviewThreshold(ingestConfigQuery.data.pdf_image_review_threshold));
       setVisionLayoutRepairEnabled(ingestConfigQuery.data.vision_layout_repair_enabled);
+      setGraphEnrichmentEnabled(ingestConfigQuery.data.graph_enrichment_enabled);
     }
   }, [ingestConfigQuery.data]);
   useEffect(() => {
@@ -248,15 +254,15 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
   const activeVllmRequest = vllmDeploymentQuery.data ? requestFromVllmForm(vllmFormFromConfig(vllmDeploymentQuery.data)) : null;
   const vllmDraftIsDirty = activeVllmRequest !== null && JSON.stringify(activeVllmRequest) !== JSON.stringify(vllmRequest);
   const vllmFormIsValid = canSubmitVllmDeploymentConfig(vllmDraft);
-  const ingestConfigIsValid = isValidWorkerConcurrency(workerConcurrency) && isValidThresholdPercent(ocrReviewThresholdPercent);
+  const ingestConfigIsValid = isValidWorkerConcurrency(workerConcurrency) && isValidThresholdPercent(ocrReviewThresholdPercent) && isValidPdfImageReviewThreshold(pdfImageReviewThreshold);
 
   return (
     <PrudentiaBasicPage
       activeRoute="settings"
       onLogout={onLogout}
       onNavigate={onNavigate}
-      title="System Configuration"
-      subtitle="Configure inference roles, model endpoints, vLLM launch limits, and ingestion worker capacity."
+      title="Runtime Settings"
+      subtitle="Configure model routing, inference services, and ingestion behavior for this deployment."
       user={currentUser}
     >
       <div className="grid gap-4">
@@ -323,7 +329,7 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
           <section className="sv-card p-4">
             <div className="flex items-center gap-2">
               <Cpu size={18} className="text-primary" />
-              <h2 className="text-headline-sm">Ingestion Worker</h2>
+              <h2 className="text-headline-sm">Ingestion Controls</h2>
             </div>
             <p className="mt-2 text-body-md text-secondary">
               Capacity is per worker replica. One is recommended for this 8 GB Docker environment.
@@ -359,6 +365,21 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
                   OCR blocks below this confidence percentage pause for review. Current target: below {ocrReviewThresholdPercent || 0}%.
                 </span>
               </label>
+              <label className="sv-field">
+                <span className="sv-label">PDF image review threshold</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={10000}
+                  step={1}
+                  value={pdfImageReviewThreshold}
+                  onChange={(event) => setPdfImageReviewThreshold(Number(event.target.value))}
+                  className="sv-input"
+                />
+                <span className="text-body-md text-secondary">
+                  Pause for review when selected PDF image candidates exceed this count. Set 0 to skip this review gate.
+                </span>
+              </label>
               <label className="flex items-start gap-3 rounded border border-subtle bg-surface-muted/40 p-3 text-body-md">
                 <input
                   type="checkbox"
@@ -373,6 +394,20 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
                   </span>
                 </span>
               </label>
+              <label className="flex items-start gap-3 rounded border border-subtle bg-surface-muted/40 p-3 text-body-md">
+                <input
+                  type="checkbox"
+                  checked={graphEnrichmentEnabled}
+                  onChange={(event) => setGraphEnrichmentEnabled(event.target.checked)}
+                  className="mt-1"
+                />
+                <span>
+                  <span className="block text-label-md">Graph enrichment</span>
+                  <span className="block text-secondary">
+                    Show the Enrich graph action for completed documents. Keep off for faster bulk ingestion.
+                  </span>
+                </span>
+              </label>
               {ingestConfigQuery.data ? (
                 <dl className="grid grid-cols-2 gap-3">
                   <Fact label="Worker" value={ingestConfigQuery.data.worker_online ? "Online" : "Offline"} />
@@ -380,13 +415,15 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
                   <Fact label="Observed pool" value={String(ingestConfigQuery.data.observed_pool_size)} />
                   <Fact label="Active jobs" value={String(ingestConfigQuery.data.active_jobs)} />
                   <Fact label="OCR review" value={`Below ${thresholdPercentFromConfig(ingestConfigQuery.data.ocr_review_confidence_threshold)}%`} />
+                  <Fact label="PDF image review" value={pdfImageReviewThresholdLabel(ingestConfigQuery.data.pdf_image_review_threshold)} />
                   <Fact label="Vision repair" value={ingestConfigQuery.data.vision_layout_repair_enabled ? "On" : "Off"} />
+                  <Fact label="Graph enrichment" value={ingestConfigQuery.data.graph_enrichment_enabled ? "On" : "Off"} />
                 </dl>
               ) : null}
             </div>
             {!ingestConfigIsValid ? (
               <InlineMessage tone="error">
-                Worker concurrency must be 1-10 and OCR review threshold must be 0-100%.
+                Worker concurrency must be 1-10, OCR review threshold must be 0-100%, and PDF image review threshold must be 0-10000.
               </InlineMessage>
             ) : null}
             {workerConcurrency > 2 ? (
@@ -417,14 +454,16 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
                   worker_concurrency: workerConcurrency,
                   quality_preset: ingestConfigQuery.data?.quality_preset ?? "fast",
                   ocr_review_confidence_threshold: thresholdFromPercent(ocrReviewThresholdPercent),
+                  pdf_image_review_threshold: pdfImageReviewThreshold,
                   vision_layout_repair_enabled: visionLayoutRepairEnabled,
+                  graph_enrichment_enabled: graphEnrichmentEnabled,
                 })}
               >
                 <Save size={16} />
-                {saveIngestConfigMutation.isPending ? "Applying" : "Save ingestion config"}
+                {saveIngestConfigMutation.isPending ? "Applying" : "Save ingestion controls"}
               </button>
             </div>
-            {ingestConfigQuery.isError ? <InlineMessage tone="error">{errorMessage(ingestConfigQuery.error, "Unable to load worker config.")}</InlineMessage> : null}
+            {ingestConfigQuery.isError ? <InlineMessage tone="error">{errorMessage(ingestConfigQuery.error, "Unable to load ingestion controls.")}</InlineMessage> : null}
           </section>
         ) : null}
       </div>
@@ -449,26 +488,26 @@ function ConfigPanelTabs({ onChange, value }: { value: ConfigPanel; onChange: (v
   }> = [
     {
       id: "models",
-      label: "Models & Roles",
-      description: "Choose the stack, assign models, test the draft, and activate it.",
+      label: "Model Routing",
+      description: "Choose the stack, assign role models, test the draft, and activate it.",
       icon: <ServerCog size={18} />,
     },
     {
       id: "services",
-      label: "Inference Services",
+      label: "vLLM Services",
       description: "Check provider availability, tune vLLM limits, and restart one service at a time.",
       icon: <Boxes size={18} />,
     },
     {
       id: "workers",
-      label: "Ingestion Worker Capacity",
-      description: "Ingestion worker capacity and observed processing state.",
+      label: "Ingestion Controls",
+      description: "Tune ingestion capacity, OCR review gates, and enrichment behavior.",
       icon: <Cpu size={18} />,
     },
   ];
 
   return (
-    <nav aria-label="Configuration sections" className="grid gap-2 lg:grid-cols-3">
+    <nav aria-label="Runtime Settings sections" className="grid gap-2 lg:grid-cols-3">
       {items.map((item) => {
         const active = value === item.id;
         return (
@@ -506,10 +545,10 @@ function RuntimeStatusStrip({
 }: RuntimeStatusStripProps) {
   const discoveryState = discoveryHealthLabel(discoveryResult, discoveryLoading, discoveryError);
   return (
-    <section className="rounded border border-surface-border bg-surface-container-low p-3" aria-label="Configuration status">
+    <section className="rounded border border-surface-border bg-surface-container-low p-3" aria-label="Runtime Settings status">
       <dl className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <Fact label="Active stack" value={config ? activeStackLabel(config) : "Loading"} />
-        <Fact label="Draft state" value={draftIsDirty ? "Unsaved changes" : "Matches active config"} />
+        <Fact label="Draft state" value={draftIsDirty ? "Unsaved changes" : "Matches active routing"} />
         <Fact label="Model discovery" value={discoveryState} />
         <Fact
           label="Restart requirement"
@@ -559,16 +598,16 @@ function ModelsAndRolesPanel({
   const servicesSummary = discoveryHealthLabel({ model_statuses: modelStatuses } as RagModelDiscoveryResult, discoveryLoading, discoveryFailed ? discoveryError : null);
   const rolesSummary = roleAssignmentSummary(draft);
   const behaviorSummary = behaviorSummaryFromForm(draft);
-  const activationSummary = canSubmit ? (draftIsDirty ? "Ready to test or save" : "Active config is current") : "Needs models or endpoints";
+  const activationSummary = canSubmit ? (draftIsDirty ? "Ready to test or save" : "Active model routing is current") : "Needs models or endpoints";
   return (
     <section className="sv-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-2">
           <ServerCog size={18} className="text-primary" />
           <div>
-            <h2 className="text-headline-sm">Models & Roles</h2>
+            <h2 className="text-headline-sm">Model Routing</h2>
             <p className="mt-1 text-body-md text-secondary">
-              Build a draft runtime, check the services it depends on, then activate it after validation.
+              Build draft model routing, check the services it depends on, then activate it after validation.
             </p>
           </div>
         </div>
@@ -636,7 +675,7 @@ function ModelsAndRolesPanel({
           number={5}
           title="Test and activate"
           controls="Test validates the draft. Save validates again and makes it active."
-          impact="No container restarts happen here. vLLM restarts live in Inference Services."
+          impact="No container restarts happen here. vLLM restarts live in vLLM Services."
           summary={activationSummary}
         >
           <div className="flex flex-wrap gap-3">
@@ -665,7 +704,7 @@ function ModelsAndRolesPanel({
         </GuidedStep>
       </div>
 
-      {configFailed ? <InlineMessage tone="error">{errorMessage(configError, "Unable to load model config.")}</InlineMessage> : null}
+      {configFailed ? <InlineMessage tone="error">{errorMessage(configError, "Unable to load model routing.")}</InlineMessage> : null}
       {discoveryFailed ? <InlineMessage tone="error">{errorMessage(discoveryError, "Unable to fetch inference models.")}</InlineMessage> : null}
       {rerankerFailed ? <InlineMessage tone="error">{errorMessage(rerankerError, "Unable to load reranker models.")}</InlineMessage> : null}
       {config ? <CurrentRagStatus config={config} /> : null}
@@ -893,7 +932,7 @@ function InferenceServicesPanel({
         <div className="flex items-center gap-2">
           <Boxes size={18} className="text-primary" />
           <div>
-            <h2 className="text-headline-sm">Inference Services</h2>
+            <h2 className="text-headline-sm">vLLM Services</h2>
             <p className="mt-1 text-body-md text-secondary">
               Inspect service availability, tune bundled vLLM limits, and restart one vLLM container at a time.
             </p>
@@ -1364,7 +1403,7 @@ export function rerankerOptionsFromCatalog(
   catalog: { models?: Array<{ model?: string | null }> } | undefined,
 ): string[] {
   const apiModels = catalog?.models?.map((option) => option.model?.trim()).filter((model): model is string => Boolean(model)) ?? [];
-  return uniqueStrings([...apiModels, ...SUPPORTED_RERANKER_MODELS]);
+  return uniqueStrings(apiModels);
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -1724,7 +1763,7 @@ function CurrentRagStatus({ config }: { config: RagConfig }) {
   return (
     <section className="mt-4 border-t border-surface-border pt-4" aria-labelledby="active-rag-config-title">
       <div>
-        <h3 id="active-rag-config-title" className="text-title-md">Active configuration</h3>
+        <h3 id="active-rag-config-title" className="text-title-md">Active model routing</h3>
         <p className="mt-1 text-body-md text-secondary">This is the saved runtime currently used by queries and ingestion.</p>
       </div>
       <dl className="mt-3 grid gap-2 md:grid-cols-4">
@@ -1788,7 +1827,7 @@ function VllmDeploymentSection({
           <div>
             <h3 id="vllm-launch-limits-title" className="text-title-md">vLLM launch limits</h3>
             <p className="mt-1 text-body-md text-secondary">
-              Advanced limits for the bundled vLLM services. Each service is saved in one workspace config, then restarted
+              Advanced limits for the bundled vLLM services. Each service is saved in Runtime Settings, then restarted
               independently when you choose its apply action.
             </p>
           </div>
@@ -2050,7 +2089,7 @@ function InferenceRoleMatrix({
           {providerName(form.provider)} synthesis
         </span>
       </div>
-      <div className="hidden border-b border-surface-border bg-surface-container-low px-3 py-2 text-label-sm text-secondary lg:grid lg:grid-cols-[minmax(12rem,1fr)_8rem_minmax(17rem,1.3fr)_minmax(14rem,1fr)] lg:gap-2">
+      <div className="hidden border-b border-surface-border bg-surface-container-low px-3 py-2 text-label-sm text-secondary lg:grid lg:grid-cols-[minmax(10rem,1fr)_6.5rem_minmax(13rem,1.2fr)_minmax(11rem,1fr)] lg:gap-2">
         <span>Role</span>
         <span>Provider</span>
         <span>Endpoint</span>
@@ -2198,7 +2237,7 @@ function LanguageRoleRow({
   const modelValue = languageRoleModel(form, role);
   const status = statusTone(modelStatus);
   return (
-    <div className="grid gap-2 p-3 lg:grid-cols-[minmax(12rem,1fr)_8rem_minmax(17rem,1.3fr)_minmax(14rem,1fr)] lg:items-start">
+    <div className="grid gap-2 p-3 lg:grid-cols-[minmax(10rem,1fr)_6.5rem_minmax(13rem,1.2fr)_minmax(11rem,1fr)] lg:items-start">
       <div>
         <div className="text-body-md font-bold text-on-surface">{title}</div>
         <div className="mt-1 text-body-md text-secondary">{description}</div>
@@ -2247,7 +2286,7 @@ function EmbeddingRoleRow({ form, modelOptions, modelPlaceholder, modelSelectDis
   const provider = embeddingRuntimeProvider(form.embedding_provider);
   const status = statusTone(modelStatus);
   return (
-    <div className="grid gap-2 p-3 lg:grid-cols-[minmax(12rem,1fr)_8rem_minmax(17rem,1.3fr)_minmax(14rem,1fr)] lg:items-start">
+    <div className="grid gap-2 p-3 lg:grid-cols-[minmax(10rem,1fr)_6.5rem_minmax(13rem,1.2fr)_minmax(11rem,1fr)] lg:items-start">
       <div>
         <div className="text-body-md font-bold text-on-surface">Embeddings</div>
         <div className="mt-1 text-body-md text-secondary">Vectors for chunks and queries. Changing this requires reindexing documents.</div>
@@ -2293,7 +2332,7 @@ type EmbeddingRoleRowProps = {
 
 function RerankerRoleRow({ form, modelOptions, modelPlaceholder, modelSelectDisabled, onChange }: RerankerRoleRowProps) {
   return (
-    <div className="grid gap-2 p-3 lg:grid-cols-[minmax(12rem,1fr)_8rem_minmax(17rem,1.3fr)_minmax(14rem,1fr)] lg:items-start">
+    <div className="grid gap-2 p-3 lg:grid-cols-[minmax(10rem,1fr)_6.5rem_minmax(13rem,1.2fr)_minmax(11rem,1fr)] lg:items-start">
       <div>
         <div className="text-body-md font-bold text-on-surface">Reranker</div>
         <div className="mt-1 text-body-md text-secondary">Reorders retrieved chunks before source selection and synthesis.</div>
@@ -2817,6 +2856,19 @@ function isValidWorkerConcurrency(value: number) {
 
 function isValidThresholdPercent(value: number) {
   return Number.isFinite(value) && value >= 0 && value <= 100;
+}
+
+function safePdfImageReviewThreshold(value: number | null | undefined) {
+  return Number.isFinite(value) ? Number(value) : 64;
+}
+
+function isValidPdfImageReviewThreshold(value: number) {
+  return Number.isInteger(value) && value >= 0 && value <= 10000;
+}
+
+export function pdfImageReviewThresholdLabel(value: number | null | undefined): string {
+  const threshold = safePdfImageReviewThreshold(value);
+  return threshold > 0 ? `Above ${threshold} images` : "Off";
 }
 
 export function thresholdPercentFromConfig(value: number | null | undefined): number {

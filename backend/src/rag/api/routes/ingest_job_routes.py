@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from ...auth.abac import normalize_group_path
 from ...auth.dependencies import require_admin_user, require_csrf, require_current_user
-from ...auth.document_access import can_read_document, can_write_document
+from ...auth.document_access import can_manage_document_ingestion, can_read_document
 from ...auth.permissions import can_read_document_metadata, is_global_admin
 from ...core.config import settings
 from ...query.http import ServiceRequestError
@@ -60,6 +60,7 @@ router = APIRouter(prefix="/ingest-jobs", tags=["ingest-jobs"])
 JOB_STATUSES = {"scheduled", "queued", "processing", "complete", "failed", "human_review", "cancelled"}
 JOB_ORIGINS = {"upload", "reingest", "restore", "folder", "connector", "unknown"}
 ACTIVE_JOB_STATUSES = {"scheduled", "queued", "processing", "human_review"}
+ATTENTION_JOB_STATUSES = {*ACTIVE_JOB_STATUSES, "failed"}
 CANCELLABLE_JOB_STATUSES = {"scheduled", "queued", "processing", "human_review"}
 
 
@@ -71,6 +72,7 @@ async def list_ingest_jobs(
     search: str | None = Query(default=None, max_length=200),
     created_from: datetime | None = Query(default=None),
     created_to: datetime | None = Query(default=None),
+    uploaded_by_me: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     user: UserRecord = Depends(require_current_user),
@@ -88,6 +90,7 @@ async def list_ingest_jobs(
         search=search,
         created_from=created_from,
         created_to=created_to,
+        uploaded_by_user_id=user.id if uploaded_by_me else None,
         limit=limit,
         offset=offset,
     )
@@ -102,6 +105,7 @@ async def list_ingest_jobs(
         search=search,
         created_from=created_from,
         created_to=created_to,
+        uploaded_by_user_id=user.id if uploaded_by_me else None,
     )
     return IngestJobListResponse(items=items[offset:offset + limit], total=len(items), limit=limit, offset=offset)
 
@@ -136,6 +140,7 @@ async def summarize_ingest_jobs(
     return IngestJobSummaryResponse(
         total=len(items),
         active=sum(status_counts.get(value, 0) for value in ACTIVE_JOB_STATUSES),
+        needs_attention=_latest_attention_count(items),
         status_counts=status_counts,
         stage_counts=_count_by(items, "stage"),
         origin_counts=_count_by(items, "origin"),
@@ -150,18 +155,20 @@ async def summarize_ingest_jobs(
 async def get_graphrag_status(
     user: UserRecord = Depends(require_current_user),
     control: IngestWorkerControl = Depends(get_graphrag_worker_control),
+    config_repo: IngestConfigRepository = Depends(get_ingest_config_repository),
 ) -> GraphRAGStatusResponse:
     if not can_read_document_metadata(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "graphrag_status_forbidden", "message": "User cannot view ingestion health."},
         )
+    config = effective_ingest_config(repo=config_repo)
     snapshot, worker_error = _graphrag_worker_snapshot(control)
     queued_jobs, queue_error = _redis_queue_length(settings.graphrag_queue_name)
     queued_tasks = _redis_queued_graphrag_tasks(settings.graphrag_queue_name)
     now = datetime.now(timezone.utc)
     return GraphRAGStatusResponse(
-        enabled=settings.graphrag_enabled,
+        enabled=settings.graphrag_enabled and config.graph_enrichment_enabled,
         queue_name=settings.graphrag_queue_name,
         queued_jobs=queued_jobs,
         queue_error=queue_error,
@@ -215,10 +222,10 @@ async def cancel_graph_enrichment(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "document_not_found", "message": "Ingested document was not found."},
         )
-    if not can_write_document(user, document):
+    if not can_manage_document_ingestion(user, document):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "graphrag_cancel_forbidden", "message": "User cannot cancel graph enrichment for this document."},
+            detail={"code": "graphrag_cancel_forbidden", "message": "Only the uploader or a scoped admin can cancel graph enrichment for this document."},
         )
     snapshot, worker_error = _graphrag_worker_snapshot(control)
     active_tasks = [
@@ -293,10 +300,10 @@ async def cancel_ingest_job(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "document_not_found", "message": "Ingested document was not found."},
         )
-    if not can_write_document(user, document):
+    if not can_manage_document_ingestion(user, document):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "ingest_cancel_forbidden", "message": "User cannot cancel this ingestion job."},
+            detail={"code": "ingest_cancel_forbidden", "message": "Only the uploader or a scoped admin can cancel this ingestion job."},
         )
     if job.status not in CANCELLABLE_JOB_STATUSES:
         return IngestJobCancelResponse(
@@ -449,7 +456,7 @@ def _postgres_ingest_job_summary(
 
     rows = repo._execute_all(
         f"""
-        SELECT job.status, job.progress_pct, job.stage_progress, COALESCE(job.origin, 'unknown') AS origin, document.clearance_level
+        SELECT job.id, job.doc_id, job.status, job.progress_pct, job.stage_progress, job.created_at, job.updated_at, COALESCE(job.origin, 'unknown') AS origin, document.clearance_level
         FROM ingest_jobs job
         JOIN documents document ON document.id = job.doc_id
         WHERE {where_sql}
@@ -459,6 +466,7 @@ def _postgres_ingest_job_summary(
     status_counts: dict[str, int] = {}
     stage_counts: dict[str, int] = {}
     origin_counts: dict[str, int] = {}
+    latest_by_doc: dict[str, tuple[datetime | None, str, str]] = {}
     total = 0
     for row in rows:
         status_value = str(row["status"])
@@ -473,10 +481,16 @@ def _postgres_ingest_job_summary(
         status_counts[status_value] = status_counts.get(status_value, 0) + 1
         stage_counts[stage_value] = stage_counts.get(stage_value, 0) + 1
         origin_counts[origin_value] = origin_counts.get(origin_value, 0) + 1
+        doc_id = str(row["doc_id"])
+        candidate = (_latest_timestamp(row.get("created_at"), row.get("updated_at")), str(row["id"]), status_value)
+        current = latest_by_doc.get(doc_id)
+        if current is None or _latest_row_key(candidate) > _latest_row_key(current):
+            latest_by_doc[doc_id] = candidate
 
     return IngestJobSummaryResponse(
         total=total,
         active=sum(status_counts.get(value, 0) for value in ACTIVE_JOB_STATUSES),
+        needs_attention=sum(1 for _, _, status_value in latest_by_doc.values() if status_value in ATTENTION_JOB_STATUSES),
         status_counts=status_counts,
         stage_counts=stage_counts,
         origin_counts=origin_counts,
@@ -495,6 +509,7 @@ def _postgres_visible_job_response(
     created_to: datetime | None = None,
     limit: int,
     offset: int,
+    uploaded_by_user_id: str | None = None,
 ) -> IngestJobListResponse | None:
     if not isinstance(repo, PostgresDocumentRepository):
         return None
@@ -508,6 +523,7 @@ def _postgres_visible_job_response(
         search=search,
         created_from=created_from,
         created_to=created_to,
+        uploaded_by_user_id=uploaded_by_user_id,
     )
     if filter_result is None:
         return IngestJobListResponse(items=[], total=0, limit=limit, offset=offset)
@@ -526,6 +542,7 @@ def _postgres_visible_job_response(
         SELECT
             job.id::text AS id,
             job.doc_id::text AS doc_id,
+            job.retry_of_job_id::text AS retry_of_job_id,
             COALESCE(job.origin, 'unknown') AS origin,
             job.status,
             job.progress_pct,
@@ -541,7 +558,8 @@ def _postgres_visible_job_response(
             job.completed_at,
             COALESCE(document.title, document.id::text) AS document_title,
             document.group_path,
-            document.clearance_level
+            document.clearance_level,
+            document.uploaded_by
         FROM ingest_jobs job
         JOIN documents document ON document.id = job.doc_id
         WHERE {where_sql}
@@ -567,6 +585,7 @@ def _postgres_ingest_job_filters(
     search: str | None,
     created_from: datetime | None,
     created_to: datetime | None,
+    uploaded_by_user_id: str | None = None,
 ) -> tuple[str, list[object]] | None:
     clauses = ["document.clearance_level = ANY(%s::text[])"]
     params: list[object] = [list(clearance_levels_at_or_below(user.clearance_level))]
@@ -617,6 +636,9 @@ def _postgres_ingest_job_filters(
     if created_to:
         clauses.append("job.created_at <= %s")
         params.append(created_to)
+    if uploaded_by_user_id:
+        clauses.append("document.uploaded_by = %s")
+        params.append(uploaded_by_user_id)
     return " AND ".join(f"({clause})" for clause in clauses), params
 
 
@@ -627,8 +649,10 @@ def _ingest_job_item_from_postgres_row(row: dict[str, object]) -> IngestJobItem:
         **status_payload.model_dump(),
         document_id=job.doc_id,
         document_title=str(row.get("document_title") or job.doc_id),
+        retry_of_job_id=job.retry_of_job_id,
         group_path=str(row["group_path"]),
         clearance_level=cast(ClearanceLevel, row["clearance_level"]),
+        uploaded_by=str(row["uploaded_by"]) if row.get("uploaded_by") else None,
         origin=cast(IngestJobOrigin, job.origin if job.origin in JOB_ORIGINS else "unknown"),
     )
 
@@ -643,12 +667,15 @@ def _visible_job_items(
     search: str | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
+    uploaded_by_user_id: str | None = None,
 ) -> list[IngestJobItem]:
     query = (search or "").strip().lower()
     items: list[IngestJobItem] = []
     for job in repo.list_ingest_jobs():
         document = repo.get_document(job.doc_id, include_deleted=True)
         if document is None or not can_read_document(user, document):
+            continue
+        if uploaded_by_user_id and document.uploaded_by != uploaded_by_user_id:
             continue
         if status_filter and job.status != status_filter:
             continue
@@ -668,8 +695,10 @@ def _visible_job_items(
                 **status_payload.model_dump(),
                 document_id=document.id,
                 document_title=document.title or document.id,
+                retry_of_job_id=job.retry_of_job_id,
                 group_path=document.group_path,
                 clearance_level=document.clearance_level,
+                uploaded_by=document.uploaded_by,
                 origin=cast(IngestJobOrigin, job.origin if job.origin in JOB_ORIGINS else "unknown"),
             )
         )
@@ -709,6 +738,23 @@ def _count_by(items: list[IngestJobItem], field: Literal["status", "stage", "ori
         value = str(getattr(item, field))
         counts[value] = counts.get(value, 0) + 1
     return counts
+
+
+def _latest_attention_count(items: list[IngestJobItem]) -> int:
+    latest_by_doc: dict[str, IngestJobItem] = {}
+    for item in sorted(items, key=lambda value: (_latest_timestamp(value.created_at, value.updated_at), value.job_id), reverse=True):
+        latest_by_doc.setdefault(item.document_id, item)
+    return sum(1 for item in latest_by_doc.values() if item.status in ATTENTION_JOB_STATUSES)
+
+
+def _latest_row_key(value: tuple[datetime | None, str, str]) -> tuple[datetime, str]:
+    created_at, job_id, _ = value
+    return created_at or datetime.min.replace(tzinfo=timezone.utc), job_id
+
+
+def _latest_timestamp(*values: object) -> datetime | None:
+    datetimes = [value for value in values if isinstance(value, datetime)]
+    return max(datetimes) if datetimes else None
 
 
 def _worker_snapshot(control: IngestWorkerControl, desired_concurrency: int) -> WorkerControlResult:

@@ -8,12 +8,14 @@ import unicodedata
 from collections.abc import Sequence
 
 
-LITERAL_CHECK_VERSION = "v2"
+LITERAL_CHECK_VERSION = "v3"
 
 _CITATION_RE = re.compile(r"\[[^\[\]\r\n]{1,200}:\d+\]")
 _DIMENSION_QUOTE_RE = re.compile(r'(?<=\d)["\u201d\u2033]')
 _TOKEN_RE = re.compile(r"\d+(?:\.\d+)?|[a-z]+|[+/]")
 _RATIO_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s*$")
+_KG_UNITS = {"kg", "kilogram"}
+_LB_UNITS = {"lb", "lbs", "pound"}
 _CONTRACTIONS = {
     "can't": "cannot",
     "cannot": "cannot",
@@ -187,9 +189,14 @@ def _required_content_is_present(answer_tokens: tuple[str, ...], requirement: st
     if ratio and _nearby_numeric_pair_is_present(answer_tokens, ratio.group(1), ratio.group(2)):
         return True
 
+    if _numeric_requirement_is_present(answer_tokens, expected_tokens):
+        return True
+
     if expected_tokens == ("no",):
         return _has_bare_negative_answer(answer_tokens)
     if expected_tokens == ("not", "supported"):
+        return _has_bare_negative_answer(answer_tokens)
+    if expected_tokens == ("not", "provided"):
         return _has_bare_negative_answer(answer_tokens)
     return False
 
@@ -225,3 +232,55 @@ def _has_bare_negative_answer(answer_tokens: tuple[str, ...]) -> bool:
         for index, token in enumerate(answer_tokens[:-1])
         if token in {"are", "do", "does", "is", "was", "were", "will"}
     )
+
+
+def _numeric_requirement_is_present(
+    answer_tokens: tuple[str, ...],
+    expected_tokens: tuple[str, ...],
+) -> bool:
+    expected_numbers = [float(token) for token in expected_tokens if _is_number(token)]
+    if len(expected_numbers) != 1:
+        return False
+    expected = expected_numbers[0]
+    expected_units = {_singular(token) for token in expected_tokens if not _is_number(token)}
+    for index, token in enumerate(answer_tokens):
+        if not _is_number(token):
+            continue
+        value = float(token)
+        if _numbers_close(value, expected):
+            return True
+        if expected_units & _KG_UNITS and _near_unit(answer_tokens, index, _LB_UNITS):
+            if _numbers_close(value * 0.45359237, expected, relative_tolerance=0.05):
+                return True
+        if expected_units & _LB_UNITS and _near_unit(answer_tokens, index, _KG_UNITS):
+            if _numbers_close(value * 2.20462262, expected, relative_tolerance=0.05):
+                return True
+    return False
+
+
+def _is_number(token: str) -> bool:
+    try:
+        float(token)
+    except ValueError:
+        return False
+    return True
+
+
+def _numbers_close(
+    left: float,
+    right: float,
+    *,
+    relative_tolerance: float | None = None,
+) -> bool:
+    tolerance = (
+        0.5
+        if relative_tolerance is None
+        else max(0.5, abs(right) * relative_tolerance)
+    )
+    return abs(left - right) <= tolerance
+
+
+def _near_unit(tokens: tuple[str, ...], index: int, units: set[str]) -> bool:
+    start = max(0, index - 1)
+    stop = min(len(tokens), index + 4)
+    return any(_singular(token) in units for token in tokens[start:stop])

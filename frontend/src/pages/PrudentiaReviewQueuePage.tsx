@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, ExternalLink, FileText, Loader2, RefreshCw, ScanSearch, Upload, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CheckSquare, ExternalLink, FileText, ImageIcon, Loader2, RefreshCw, ScanSearch, Square, Upload, XCircle } from "lucide-react";
 
 import { reviewApi, documentsApi } from "../api/contracts";
 import { DocumentRegionViewer, type DocumentRegion } from "../components/document/DocumentRegionViewer";
@@ -8,21 +8,27 @@ import { useToast } from "../components/feedback/ToastProvider";
 import { EmptyPanel, InlineMessage, Skeleton } from "../components/layout/Common";
 import { PrudentiaWorkspace } from "../components/layout/PrudentiaWorkspace";
 import type { RouteId } from "../routes";
-import type { ReviewItem, User as AuthUser } from "../types/api";
+import type { ImageReviewBatch, ImageReviewCandidate, ReviewItem, User as AuthUser } from "../types/api";
 import { errorMessage } from "../utils/format";
 
 export function PrudentiaReviewQueuePage({ onLogout, onNavigate, user }: Props) {
+  const [activeTab, setActiveTab] = useState<ReviewTab>("ocr");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const reviewQuery = useQuery({ queryKey: ["review-queue"], queryFn: reviewApi.list, retry: false });
+  const imageReviewQuery = useQuery({ queryKey: ["review-queue", "image-batches"], queryFn: reviewApi.listImageBatches, retry: false });
   const previewItems = useMemo(() => devReviewPreviewItems(), []);
   const previewMode = previewItems !== null;
   const items = previewItems ?? reviewQuery.data?.items ?? [];
+  const imageBatches = imageReviewQuery.data?.batches ?? [];
+  const imageCandidateTotal = imageReviewQuery.data?.candidate_total ?? imageBatches.reduce((total, batch) => total + batch.candidates.length, 0);
   const groups = useMemo(() => groupReviewItemsByDocument(items), [items]);
   const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null;
-  const queueIsClear = !previewMode && !reviewQuery.isLoading && !reviewQuery.isError && items.length === 0;
+  const ocrQueueIsClear = !previewMode && !reviewQuery.isLoading && !reviewQuery.isError && items.length === 0;
+  const imageQueueIsClear = !imageReviewQuery.isLoading && !imageReviewQuery.isError && imageBatches.length === 0;
   const handleRefresh = () => {
     if (previewMode) return;
     void reviewQuery.refetch();
+    void imageReviewQuery.refetch();
   };
 
   useEffect(() => {
@@ -42,32 +48,48 @@ export function PrudentiaReviewQueuePage({ onLogout, onNavigate, user }: Props) 
   return (
     <PrudentiaWorkspace activeRoute="review" onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page review-workspace" id="main-content">
-        <div className="sv-page-inner review-page-inner">
+        <div className="sv-page-inner sv-page-inner-workbench review-page-inner">
           <header className="sv-page-header review-page-header">
             <div>
               <p className="sv-eyebrow">Prudentia AI</p>
-              <h1 className="sv-page-title">OCR Review</h1>
-              <p className="sv-page-subtitle">Resolve low-confidence extraction blocks before the document is indexed for grounded answers.</p>
+              <h1 className="sv-page-title">Review Queue</h1>
+              <p className="sv-page-subtitle">Resolve extraction blocks and PDF image-analysis holds before documents continue into the searchable library.</p>
             </div>
             <div className="review-header-tools">
               <div className="review-summary" aria-label="Review queue summary">
                 <ReviewSummaryMetric label="Pending blocks" value={String(items.length)} loading={!previewMode && reviewQuery.isLoading} />
-                <ReviewSummaryMetric label="Documents" value={String(groups.length)} loading={!previewMode && reviewQuery.isLoading} />
-                <ReviewSummaryMetric label="Lowest confidence" value={lowestConfidenceLabel(items)} loading={!previewMode && reviewQuery.isLoading} />
+                <ReviewSummaryMetric label="Image candidates" value={String(imageCandidateTotal)} loading={imageReviewQuery.isLoading} />
+                <ReviewSummaryMetric label="Documents" value={String(groups.length + imageBatches.length)} loading={(!previewMode && reviewQuery.isLoading) || imageReviewQuery.isLoading} />
               </div>
-              <button type="button" onClick={handleRefresh} disabled={previewMode || reviewQuery.isFetching} className="sv-action-secondary review-refresh-action">
-                {!previewMode && reviewQuery.isFetching ? <Loader2 aria-hidden="true" className="animate-spin" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
+              <button type="button" onClick={handleRefresh} disabled={previewMode || reviewQuery.isFetching || imageReviewQuery.isFetching} className="sv-action-secondary review-refresh-action">
+                {!previewMode && (reviewQuery.isFetching || imageReviewQuery.isFetching) ? <Loader2 aria-hidden="true" className="animate-spin" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
                 Refresh
               </button>
             </div>
           </header>
 
+          <div className="review-tabs" role="tablist" aria-label="Review queue type">
+            <button type="button" role="tab" aria-selected={activeTab === "ocr"} onClick={() => setActiveTab("ocr")}>
+              <FileText aria-hidden="true" size={15} />
+              OCR blocks
+              <span>{items.length}</span>
+            </button>
+            <button type="button" role="tab" aria-selected={activeTab === "images"} onClick={() => setActiveTab("images")}>
+              <ImageIcon aria-hidden="true" size={15} />
+              PDF images
+              <span>{imageCandidateTotal}</span>
+            </button>
+          </div>
+
           {previewMode ? <InlineMessage tone="warning">Preview mode: sample review items are shown without changing the database.</InlineMessage> : null}
           {!previewMode && reviewQuery.isError ? <InlineMessage tone="error">{errorMessage(reviewQuery.error, "Unable to load review queue.")}</InlineMessage> : null}
+          {imageReviewQuery.isError ? <InlineMessage tone="error">{errorMessage(imageReviewQuery.error, "Unable to load PDF image review queue.")}</InlineMessage> : null}
 
-          {queueIsClear ? (
+          {activeTab === "ocr" && ocrQueueIsClear ? (
             <ReviewQueueClearState onNavigate={onNavigate} onRefresh={handleRefresh} refreshing={reviewQuery.isFetching} />
-          ) : (
+          ) : null}
+
+          {activeTab === "ocr" && !ocrQueueIsClear ? (
             <div className="review-layout">
               <ReviewQueuePanel
                 groups={groups}
@@ -78,7 +100,19 @@ export function PrudentiaReviewQueuePage({ onLogout, onNavigate, user }: Props) 
               <ReviewDocumentPreview item={selected} previewMode={previewMode} />
               <ReviewCorrectionPanel item={selected} onReviewed={handleReviewed} previewMode={previewMode} />
             </div>
-          )}
+          ) : null}
+
+          {activeTab === "images" && imageQueueIsClear ? (
+            <ReviewImageClearState onNavigate={onNavigate} onRefresh={handleRefresh} refreshing={imageReviewQuery.isFetching} />
+          ) : null}
+
+          {activeTab === "images" && !imageQueueIsClear ? (
+            <ImageReviewWorkspace
+              batches={imageBatches}
+              isLoading={imageReviewQuery.isLoading}
+              previewMode={previewMode}
+            />
+          ) : null}
         </div>
       </main>
     </PrudentiaWorkspace>
@@ -119,11 +153,275 @@ function ReviewQueueClearState({ onNavigate, onRefresh, refreshing }: { onNaviga
   );
 }
 
+function ReviewImageClearState({ onNavigate, onRefresh, refreshing }: { onNavigate: (route: RouteId) => void; onRefresh: () => void; refreshing: boolean }) {
+  return (
+    <section className="review-clear-state" aria-label="PDF image review queue is clear">
+      <div className="review-clear-symbol">
+        <CheckCircle2 aria-hidden="true" size={30} />
+      </div>
+      <div className="review-clear-copy">
+        <p className="sv-eyebrow">Queue clear</p>
+        <h2>No PDF images need review</h2>
+        <p>Large image-analysis batches will pause here so reviewers can choose which images are analyzed or skipped.</p>
+      </div>
+      <div className="review-clear-actions">
+        <button type="button" onClick={onRefresh} disabled={refreshing} className="sv-action-primary">
+          {refreshing ? <Loader2 aria-hidden="true" className="animate-spin" size={16} /> : <RefreshCw aria-hidden="true" size={16} />}
+          Refresh queue
+        </button>
+        <button type="button" onClick={() => onNavigate("upload")} className="sv-action-secondary">
+          <Upload aria-hidden="true" size={16} />
+          Add documents
+        </button>
+        <button type="button" onClick={() => onNavigate("document-overview")} className="sv-action-secondary">
+          <ScanSearch aria-hidden="true" size={16} />
+          Open library
+        </button>
+      </div>
+      <div className="review-clear-strip" aria-label="Review status">
+        <ReviewClearFact label="Status" value="Ready" />
+        <ReviewClearFact label="Indexing hold" value="None" />
+        <ReviewClearFact label="Next queue source" value="PDF image batches" />
+      </div>
+    </section>
+  );
+}
+
 function ReviewClearFact({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ImageReviewWorkspace({
+  batches,
+  isLoading,
+  previewMode,
+}: {
+  batches: ImageReviewBatch[];
+  isLoading: boolean;
+  previewMode: boolean;
+}) {
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(() => new Set());
+  const selectedBatch = batches.find((batch) => batch.id === selectedBatchId) ?? batches[0] ?? null;
+  const pendingCandidates = selectedBatch?.candidates.filter((candidate) => candidate.status === "pending") ?? [];
+  const selectedPendingIds = pendingCandidates.filter((candidate) => selectedCandidateIds.has(candidate.id)).map((candidate) => candidate.id);
+  const queryClient = useQueryClient();
+  const { notify } = useToast();
+
+  useEffect(() => {
+    if (batches.length === 0) {
+      if (selectedBatchId !== null) setSelectedBatchId(null);
+      return;
+    }
+    if (!selectedBatchId || !batches.some((batch) => batch.id === selectedBatchId)) setSelectedBatchId(batches[0].id);
+  }, [batches, selectedBatchId]);
+
+  useEffect(() => {
+    if (!selectedBatch) {
+      setSelectedCandidateIds(new Set());
+      return;
+    }
+    setSelectedCandidateIds(new Set(selectedBatch.candidates.filter((candidate) => candidate.status === "pending" && candidate.recommended).map((candidate) => candidate.id)));
+  }, [selectedBatch?.id, selectedBatch?.pending_count, selectedBatch?.recommended_count]);
+
+  const decisionMutation = useMutation({
+    mutationFn: (request: Parameters<typeof reviewApi.decideImageBatch>[1]) => reviewApi.decideImageBatch(selectedBatch?.id ?? "", request),
+    onSuccess: (response) => {
+      void queryClient.invalidateQueries({ queryKey: ["review-queue", "image-batches"] });
+      void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      notify({
+        title: response.batch_complete ? "Image review complete" : "Image decisions saved",
+        description: selectedBatch?.doc_title,
+        tone: "success",
+      });
+    },
+    onError: (error) => notify({
+      title: "Image review failed",
+      description: errorMessage(error, "Image review decision is not available yet."),
+      tone: "error",
+    }),
+  });
+
+  function toggleCandidate(candidate: ImageReviewCandidate) {
+    if (candidate.status !== "pending" || previewMode) return;
+    setSelectedCandidateIds((current) => {
+      const next = new Set(current);
+      if (next.has(candidate.id)) next.delete(candidate.id);
+      else next.add(candidate.id);
+      return next;
+    });
+  }
+
+  function selectCandidates(mode: "recommended" | "all" | "none") {
+    if (!selectedBatch) return;
+    if (mode === "none") {
+      setSelectedCandidateIds(new Set());
+      return;
+    }
+    const next = selectedBatch.candidates.filter((candidate) => {
+      if (candidate.status !== "pending") return false;
+      return mode === "all" || candidate.recommended;
+    });
+    setSelectedCandidateIds(new Set(next.map((candidate) => candidate.id)));
+  }
+
+  function decide(request: Parameters<typeof reviewApi.decideImageBatch>[1]) {
+    if (!selectedBatch || previewMode) return;
+    decisionMutation.mutate(request);
+  }
+
+  const isMutating = decisionMutation.isPending;
+  const canDecide = Boolean(selectedBatch) && !previewMode && !isMutating;
+
+  return (
+    <div className="review-layout review-image-layout">
+      <section className="sv-card review-image-batch-panel" aria-label="PDF image review batches">
+        <div className="review-panel-header">
+          <div>
+            <p className="sv-eyebrow">Queue</p>
+            <h2 className="sv-section-title">PDF Image Batches</h2>
+            <p>Choose a held document image queue.</p>
+          </div>
+          <span className="sv-pill">{isLoading ? "Loading" : `${batches.length} batches`}</span>
+        </div>
+        <div className="review-queue-list" role="list">
+          {isLoading ? (
+            <div className="review-queue-skeleton" role="status">
+              <span className="sr-only">Loading image review batches.</span>
+              {Array.from({ length: 4 }, (_, index) => (
+                <div className="review-skeleton-row" key={index} aria-hidden="true">
+                  <Skeleton className="h-4 w-3/5" />
+                  <Skeleton className="h-3 w-4/5" />
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {!isLoading && batches.map((batch) => (
+            <button
+              key={batch.id}
+              type="button"
+              aria-current={selectedBatch?.id === batch.id ? "true" : undefined}
+              onClick={() => setSelectedBatchId(batch.id)}
+              className="review-image-batch-item"
+            >
+              <span>
+                <FileText aria-hidden="true" size={15} />
+                <strong>{batch.doc_title}</strong>
+              </span>
+              <small>{batch.pending_count} pending | {batch.approved_count} analyze | {batch.skipped_count} skipped</small>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="sv-card review-image-grid-panel" aria-label="PDF image candidates">
+        <div className="review-panel-header">
+          <div>
+            <p className="sv-eyebrow">Candidates</p>
+            <h2 className="sv-section-title">{selectedBatch ? selectedBatch.doc_title : "No batch selected"}</h2>
+            <p>{selectedBatch ? `${selectedBatch.candidate_count} images selected by the parser` : "Select a batch to review candidate images."}</p>
+          </div>
+          <span className="sv-pill">{selectedPendingIds.length} selected</span>
+        </div>
+        <div className="review-image-grid-toolbar">
+          <button type="button" onClick={() => selectCandidates("recommended")} disabled={!selectedBatch || previewMode} className="sv-action-secondary">
+            <CheckSquare aria-hidden="true" size={15} />
+            Recommended
+          </button>
+          <button type="button" onClick={() => selectCandidates("all")} disabled={!selectedBatch || previewMode} className="sv-action-secondary">
+            <CheckSquare aria-hidden="true" size={15} />
+            All pending
+          </button>
+          <button type="button" onClick={() => selectCandidates("none")} disabled={!selectedBatch || previewMode} className="sv-action-secondary">
+            <Square aria-hidden="true" size={15} />
+            Clear
+          </button>
+        </div>
+        <div className="review-image-grid" role="list">
+          {selectedBatch?.candidates.map((candidate) => (
+            <label key={candidate.id} className="review-image-candidate" data-selected={selectedCandidateIds.has(candidate.id) ? "true" : undefined} data-status={candidate.status}>
+              <input
+                type="checkbox"
+                checked={selectedCandidateIds.has(candidate.id)}
+                disabled={candidate.status !== "pending" || previewMode}
+                onChange={() => toggleCandidate(candidate)}
+              />
+              <span className="review-image-thumb">
+                <img src={reviewApi.imageCandidateContentUrl(candidate.content_url)} alt={candidateLabel(candidate)} loading="lazy" />
+              </span>
+              <span className="review-image-candidate-copy">
+                <strong>{candidateLabel(candidate)}</strong>
+                <small>{candidateQuality(candidate)}</small>
+              </span>
+              <span className="review-image-status-row">
+                {candidate.recommended ? <span className="sv-pill sv-pill-success">Recommended</span> : null}
+                <span className="sv-pill">{candidate.status}</span>
+              </span>
+            </label>
+          ))}
+          {!isLoading && !selectedBatch ? (
+            <ReviewPlaceholder
+              icon={<ImageIcon aria-hidden="true" size={20} />}
+              title="No image batch selected"
+              text="PDF image batches that need reviewer triage appear here before vision analysis runs."
+            />
+          ) : null}
+        </div>
+      </section>
+
+      <aside className="sv-card review-image-decision-panel" aria-label="PDF image review decisions">
+        <div className="review-panel-header">
+          <div>
+            <p className="sv-eyebrow">Decision</p>
+            <h2 className="sv-section-title">Analyze or Skip</h2>
+            <p>{selectedBatch ? `${selectedPendingIds.length} selected from ${selectedBatch.pending_count} pending` : "No batch selected."}</p>
+          </div>
+        </div>
+        {previewMode ? <InlineMessage tone="warning">Preview only. Image review actions are disabled for sample OCR items.</InlineMessage> : null}
+        <dl className="review-facts">
+          <ReviewFact label="Pending" value={String(selectedBatch?.pending_count ?? 0)} />
+          <ReviewFact label="Selected" value={String(selectedPendingIds.length)} />
+          <ReviewFact label="Analyze" value={String(selectedBatch?.approved_count ?? 0)} />
+          <ReviewFact label="Skipped" value={String(selectedBatch?.skipped_count ?? 0)} />
+        </dl>
+        <div className="review-actions">
+          <button
+            type="button"
+            onClick={() => decide({ approve_candidate_ids: selectedPendingIds, skip_remaining: true })}
+            disabled={!canDecide || selectedPendingIds.length === 0}
+            className="sv-action-primary"
+          >
+            {isMutating ? <Loader2 aria-hidden="true" className="animate-spin" size={16} /> : <CheckCircle2 aria-hidden="true" size={16} />}
+            Analyze selected
+          </button>
+          <button type="button" onClick={() => decide({ approve_recommended: true, skip_remaining: true })} disabled={!canDecide} className="sv-action-secondary">
+            <CheckSquare aria-hidden="true" size={16} />
+            Analyze recommended
+          </button>
+          <button
+            type="button"
+            onClick={() => decide({ skip_candidate_ids: selectedPendingIds })}
+            disabled={!canDecide || selectedPendingIds.length === 0}
+            className="sv-action-secondary"
+          >
+            <XCircle aria-hidden="true" size={16} />
+            Skip selected
+          </button>
+          <button type="button" onClick={() => decide({ skip_remaining: true })} disabled={!canDecide || pendingCandidates.length === 0} className="sv-action-danger">
+            <XCircle aria-hidden="true" size={16} />
+            Skip all pending
+          </button>
+        </div>
+        <p className="review-helper-text" role="status">
+          <AlertTriangle aria-hidden="true" size={14} />
+          The job resumes when no candidates remain pending.
+        </p>
+      </aside>
     </div>
   );
 }
@@ -540,6 +838,18 @@ function qualitySummary(item: ReviewItem): string {
   return item.quality_flags.slice(0, 2).map(qualityFlagLabel).join(", ");
 }
 
+function candidateLabel(candidate: ImageReviewCandidate): string {
+  const page = candidate.page ? `Page ${candidate.page}` : "Unknown page";
+  return `${page} | ${itemTypeLabel(candidate.source_kind)}`;
+}
+
+function candidateQuality(candidate: ImageReviewCandidate): string {
+  const size = candidate.width && candidate.height ? `${candidate.width}x${candidate.height}` : "size unknown";
+  const area = candidate.page_area_ratio !== null ? `${Math.round(candidate.page_area_ratio * 100)}% page` : "area unknown";
+  const flags = candidate.quality_flags.slice(0, 2).map(qualityFlagLabel).join(", ");
+  return [size, area, flags].filter(Boolean).join(" | ");
+}
+
 function devReviewPreviewItems(): ReviewItem[] | null {
   if (!import.meta.env.DEV) return null;
   if (new URLSearchParams(window.location.search).get("preview") !== "ocr-items") return null;
@@ -609,5 +919,7 @@ interface ReviewDocumentGroup {
   docTitle: string;
   items: ReviewItem[];
 }
+
+type ReviewTab = "ocr" | "images";
 
 type Props = { onLogout: () => void; onNavigate: (route: RouteId) => void; user: AuthUser };

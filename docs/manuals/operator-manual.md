@@ -1,6 +1,6 @@
 # Prudentia AI Operator Manual
 
-Last updated: 2026-06-30
+Last updated: 2026-07-02
 
 This manual explains how to run the local Prudentia AI deployment. It is written
 for the person responsible for Docker Desktop, Ollama, model caches, startup,
@@ -172,7 +172,7 @@ Use these checks after startup:
 docker compose --env-file .env.windows-airgap ps
 Invoke-RestMethod http://localhost:3000/healthz
 docker compose --env-file .env.windows-airgap exec api `
-  python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"
+  python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=8)"
 docker compose --env-file .env.windows-airgap logs --tail 100 api
 docker compose --env-file .env.windows-airgap logs --tail 100 ingestion-worker
 ```
@@ -329,7 +329,7 @@ Before switching the app provider to vLLM:
 3. Verify Docker Desktop GPU support.
 4. Start the required vLLM services.
 5. Confirm endpoints are healthy.
-6. Change provider in **Configs** or environment.
+6. Change provider in **Runtime Settings** or environment.
 7. Recreate API and worker services.
 
 Switching provider to vLLM before services and caches are ready leaves the app

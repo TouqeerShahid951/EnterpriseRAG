@@ -78,7 +78,7 @@ def retrieve_live_sql_hits(
     if ctx["request"].document_ids:
         return LiveSqlRetrievalResult([], False, "skipped", "document_scope")
     plan = ctx.get("route_plan")
-    if not _should_run_live_sql(plan):
+    if not _should_run_live_sql(plan, ctx.get("source_decision")):
         return LiveSqlRetrievalResult([], False, "skipped", "non_structured_route")
 
     _ = schedule_repo
@@ -104,6 +104,9 @@ def retrieve_live_sql_hits(
         for catalog in catalogs
         if _selected_source_allows(selected_source, "catalog", catalog.id)
     ]
+    preferred_catalog_id = str(getattr(ctx.get("source_decision"), "preferred_catalog_id", "") or "")
+    if preferred_catalog_id:
+        catalogs = sorted(catalogs, key=lambda catalog: 0 if catalog.id == preferred_catalog_id else 1)
     for catalog in catalogs:
         if token is not None:
             token.raise_if_cancelled()
@@ -262,8 +265,11 @@ def live_catalog_query_hits(
     return hits
 
 
-def _should_run_live_sql(plan: RoutePlan | None) -> bool:
-    return bool(plan and (plan.use_structured_query or plan.search_mode == "structured_first"))
+def _should_run_live_sql(plan: RoutePlan | None, source_decision: object | None = None) -> bool:
+    if plan and (plan.use_structured_query or plan.search_mode == "structured_first"):
+        return True
+    mode = str(getattr(source_decision, "resolved_mode", "") or "")
+    return mode in {"db_only", "db_first", "hybrid"}
 
 
 def _eligible_catalogs(
@@ -617,6 +623,7 @@ def _repair_prompt_block(feedback: _RepairFeedback | None) -> str:
         f"Previous failure stage: {feedback.stage}.",
         f"Sanitized error: {feedback.message}",
         "Return a corrected JSON object with a single sql string. Do not explain outside JSON.",
+        "If the error names a table or column, replace it with an exact approved table or column from the schema context.",
         "Do not relax any safety rule: use only the approved scope, approved columns, approved joins, one SELECT statement, and the configured row limit.",
     ]
     if feedback.previous_sql:

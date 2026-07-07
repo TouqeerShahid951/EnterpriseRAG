@@ -83,7 +83,7 @@ export function PrudentiaRagEvaluationsPage({ activeSpacePath, currentDocuments,
   return (
     <PrudentiaWorkspace activeRoute="evaluations" onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page rag-eval-page" id="main-content">
-        <div className="sv-page-inner rag-eval-page-inner">
+        <div className="sv-page-inner sv-page-inner-workbench rag-eval-page-inner">
           <header className="sv-page-header rag-eval-header">
             <div>
               <p className="sv-eyebrow">Evaluate</p>

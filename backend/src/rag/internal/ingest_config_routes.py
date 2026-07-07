@@ -27,6 +27,8 @@ async def get_internal_ingest_config(
         worker_concurrency=config.worker_concurrency,
         quality_preset=config.quality_preset,
         ocr_review_confidence_threshold=config.ocr_review_confidence_threshold,
+        pdf_image_review_threshold=config.pdf_image_review_threshold,
         vision_layout_repair_enabled=config.vision_layout_repair_enabled,
+        graph_enrichment_enabled=config.graph_enrichment_enabled,
         source=config.source,
     )

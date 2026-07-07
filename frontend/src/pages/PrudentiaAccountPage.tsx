@@ -12,6 +12,9 @@ import { errorMessage } from "../utils/format";
 
 export function PrudentiaAccountPage({ currentUser, isLoggingOut, onAuthChanged, onLogout, onNavigate }: Props) {
   const { notify } = useToast();
+  const userEmail = currentUser.email ?? "Unknown user";
+  const userGroupPaths = currentUser.group_paths ?? [];
+  const permissionVersion = currentUser.permission_version ?? "unknown";
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const passwordMutation = useMutation({
@@ -38,16 +41,16 @@ export function PrudentiaAccountPage({ currentUser, isLoggingOut, onAuthChanged,
       subtitle="Session details, password rotation, and sign-out controls for your own account."
       user={currentUser}
     >
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         <section className="sv-card p-5" data-cursor-glow>
           <div className="flex items-center gap-2">
             <ShieldCheck size={18} className="text-primary" />
             <h2 className="text-headline-sm">Session</h2>
           </div>
           <dl className="mt-4 space-y-3">
-            <Fact label="Email" value={currentUser.email} />
-            <Fact label="Knowledge Spaces" value={currentUser.group_paths.join(", ") || "No spaces"} />
-            <Fact label="Permission" value={`v${currentUser.permission_version}`} />
+            <Fact label="Email" value={userEmail} />
+            <Fact label="Knowledge Spaces" value={userGroupPaths.join(", ") || "No spaces"} />
+            <Fact label="Permission" value={`v${permissionVersion}`} />
           </dl>
           <button type="button" onClick={onLogout} disabled={isLoggingOut} className="sv-action-secondary mt-5">
             <LogOut size={16} />

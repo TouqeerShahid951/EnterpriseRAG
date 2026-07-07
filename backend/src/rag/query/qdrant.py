@@ -387,6 +387,7 @@ class QdrantClient:
         doc_id: str,
         *,
         topics: list[str],
+        llm_topics: list[str],
         cancellation_token: QueryCancellationToken | None = None,
     ) -> None:
         try:
@@ -398,6 +399,7 @@ class QdrantClient:
                 payload={
                     "payload": {
                         "topics": topics,
+                        "llm_topics": llm_topics,
                     },
                     "filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]},
                 },
@@ -424,6 +426,35 @@ class QdrantClient:
                 method="POST",
                 payload={
                     "payload": {
+                        "acl_group_paths": acl_group_paths,
+                    },
+                    "filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]},
+                },
+                timeout_seconds=self.timeout_seconds,
+                cancellation_token=cancellation_token,
+            )
+        except ServiceRequestError as exc:
+            if exc.status_code == 404:
+                return
+            raise
+
+    def set_document_access_scope(
+        self,
+        doc_id: str,
+        *,
+        group_path: str,
+        acl_group_paths: list[str],
+        cancellation_token: QueryCancellationToken | None = None,
+    ) -> None:
+        try:
+            request_json(
+                self.base_url,
+                f"{self._collection_path}/points/payload?wait=true",
+                service="qdrant",
+                method="POST",
+                payload={
+                    "payload": {
+                        "group_path": group_path,
                         "acl_group_paths": acl_group_paths,
                     },
                     "filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]},

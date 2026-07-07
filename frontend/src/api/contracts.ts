@@ -3,6 +3,7 @@ import { getConfiguredBaseUrl, normalizeBaseUrl } from "./url";
 import type {
   Document,
   DeleteDocumentResponse,
+  DocumentReingestRequest,
   DocumentGraphEnrichmentResponse,
   DocumentIngestStatus,
   DocumentReingestResponse,
@@ -50,6 +51,8 @@ import type {
   RerankerModelsResponse,
   RagSseEvent,
   RAGResponse,
+  ImageReviewDecisionResponse,
+  ImageReviewQueueResponse,
   ReviewItem,
   ReviewDecisionResponse,
   RecurrenceWindow,
@@ -77,6 +80,7 @@ export interface ChangePasswordRequest {
 export interface UploadDocumentRequest {
   file: File;
   group_path: string;
+  shared_group_paths?: string[];
   clearance_level?: ClearanceLevel | null;
   effective_date?: string | null;
   expiry_date?: string | null;
@@ -93,6 +97,7 @@ export interface IngestJobListRequest {
   search?: string;
   created_from?: string;
   created_to?: string;
+  uploaded_by_me?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -259,6 +264,10 @@ export interface UpdateDocumentSharesRequest {
   group_paths: string[];
 }
 
+export interface UpdateDocumentOwnerRequest {
+  group_path: string;
+}
+
 export interface UnshareDocumentRequest {
   group_path: string;
 }
@@ -331,7 +340,16 @@ export interface IngestConfigRequest {
   worker_concurrency: number;
   quality_preset: IngestionQualityPreset;
   ocr_review_confidence_threshold: number;
+  pdf_image_review_threshold: number;
   vision_layout_repair_enabled: boolean;
+  graph_enrichment_enabled: boolean;
+}
+
+export interface ImageReviewDecisionRequest {
+  approve_candidate_ids?: string[];
+  skip_candidate_ids?: string[];
+  approve_recommended?: boolean;
+  skip_remaining?: boolean;
 }
 
 export interface VllmDeploymentConfigRequest {
@@ -416,12 +434,32 @@ export interface ChatSessionListRequest {
 export const apiClient = new ApiClient();
 
 export const authApi = {
-  login: (request: LoginRequest) => apiClient.postJson<LoginResponse>("/api/v1/auth/login", request),
-  currentUser: () => apiClient.get<User>("/api/v1/auth/me"),
-  refresh: () => apiClient.postJson<LoginResponse>("/api/v1/auth/refresh", null),
+  login: async (request: LoginRequest) => {
+    const response = await apiClient.postJson<LoginResponse>("/api/v1/auth/login", request);
+    return { ...response, user: normalizeUser(response.user) };
+  },
+  currentUser: async () => normalizeUser(await apiClient.get<User>("/api/v1/auth/me", { timeoutMs: 8000 })),
+  refresh: async () => {
+    const response = await apiClient.postJson<LoginResponse>("/api/v1/auth/refresh", null);
+    return { ...response, user: normalizeUser(response.user) };
+  },
   logout: () => apiClient.postJson<void>("/api/v1/auth/logout", null),
-  changePassword: (request: ChangePasswordRequest) => apiClient.postJson<User>("/api/v1/auth/change-password", request),
+  changePassword: async (request: ChangePasswordRequest) => normalizeUser(await apiClient.postJson<User>("/api/v1/auth/change-password", request)),
 };
+
+function normalizeUser(user: User): User {
+  const legacyUser = user as User & { id?: string };
+  return {
+    ...user,
+    user_id: user.user_id ?? legacyUser.id ?? "",
+    email: user.email ?? "",
+    account_type: user.account_type ?? "member",
+    group_paths: Array.isArray(user.group_paths) ? user.group_paths : [],
+    clearance_level: user.clearance_level ?? "NATO_RESTRICTED",
+    permission_version: user.permission_version ?? 0,
+    must_change_password: Boolean(user.must_change_password),
+  };
+}
 
 export const uploadApi = {
   document: (request: UploadDocumentRequest) => {
@@ -433,6 +471,10 @@ export const uploadApi = {
     if (request.expiry_date) formData.set("expiry_date", request.expiry_date);
     if (request.doc_type) formData.set("doc_type", request.doc_type);
     if (request.description) formData.set("description", request.description);
+
+    for (const groupPath of request.shared_group_paths ?? []) {
+      formData.append("shared_group_paths", groupPath);
+    }
 
     for (const docId of request.supersedes ?? []) {
       formData.append("supersedes", docId);
@@ -601,14 +643,20 @@ export const documentsApi = {
       body: JSON.stringify(request),
       headers: { "Content-Type": "application/json" },
     }),
+  transferOwnership: async (documentId: string, request: UpdateDocumentOwnerRequest) =>
+    normalizeDocument(await apiClient.request<Document>(`/api/v1/docs/${encodeURIComponent(documentId)}/owner`, {
+      method: "PATCH",
+      body: JSON.stringify(request),
+      headers: { "Content-Type": "application/json" },
+    })),
   unshare: (documentId: string, request: UnshareDocumentRequest) =>
     apiClient.postJson<DocumentSharesResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/shares/unshare`, request),
   remove: (documentId: string) =>
     apiClient.delete<DeleteDocumentResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}`),
   permanentlyRemove: (documentId: string) =>
     apiClient.delete<DeleteDocumentResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/permanent`),
-  reingest: (documentId: string) =>
-    apiClient.postJson<DocumentReingestResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/reingest`, null),
+  reingest: (documentId: string, request: DocumentReingestRequest | null = null) =>
+    apiClient.postJson<DocumentReingestResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/reingest`, request),
   enrichGraph: (documentId: string) =>
     apiClient.postJson<DocumentGraphEnrichmentResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/graph-enrichment`, null),
   restore: (documentId: string) =>
@@ -705,6 +753,7 @@ function ingestJobListPath(basePath: string, request: IngestJobListRequest): str
   if (request.search?.trim()) params.set("search", request.search.trim());
   if (request.created_from) params.set("created_from", request.created_from);
   if (request.created_to) params.set("created_to", request.created_to);
+  if (request.uploaded_by_me) params.set("uploaded_by_me", "true");
   if (request.limit !== undefined) params.set("limit", String(request.limit));
   if (request.offset !== undefined) params.set("offset", String(request.offset));
   const query = params.toString();
@@ -851,6 +900,13 @@ export const adminApi = {
 
 export const reviewApi = {
   list: () => apiClient.get<{ items: ReviewItem[]; total: number }>("/api/v1/review-queue"),
+  listImageBatches: () => apiClient.get<ImageReviewQueueResponse>("/api/v1/review-queue/image-batches"),
+  decideImageBatch: (batchId: string, request: ImageReviewDecisionRequest) =>
+    apiClient.postJson<ImageReviewDecisionResponse>(`/api/v1/review-queue/image-batches/${encodeURIComponent(batchId)}/decisions`, request),
+  imageCandidateContentUrl: (contentUrl: string) =>
+    contentUrl.startsWith("http")
+      ? contentUrl
+      : `${normalizeBaseUrl(getConfiguredBaseUrl())}${contentUrl.startsWith("/") ? contentUrl : `/${contentUrl}`}`,
   approve: (itemId: string, correctedText: string) =>
     apiClient.postJson<ReviewDecisionResponse>(`/api/v1/review-queue/${encodeURIComponent(itemId)}/approve`, {
       corrected_text: correctedText,

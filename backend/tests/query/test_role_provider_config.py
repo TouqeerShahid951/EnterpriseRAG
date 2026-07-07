@@ -56,7 +56,7 @@ def test_list_runtime_models_queries_each_provider_endpoint(monkeypatch) -> None
     monkeypatch.setattr("rag.query.rag_config_service.request_json", fake_request_json)
     monkeypatch.setattr(
         "rag.query.rag_config_service.list_supported_dense_models",
-        lambda: ["nomic-ai/nomic-embed-text-v1.5-Q"],
+        lambda **_: ["nomic-ai/nomic-embed-text-v1.5-Q"],
     )
 
     chat_models, embedding_models, role_models = list_runtime_models(
@@ -96,7 +96,7 @@ def test_discover_runtime_models_keeps_healthy_roles_when_one_endpoint_fails(mon
     monkeypatch.setattr("rag.query.rag_config_service.request_json", fake_request_json)
     monkeypatch.setattr(
         "rag.query.rag_config_service.list_supported_dense_models",
-        lambda: ["nomic-ai/nomic-embed-text-v1.5-Q"],
+        lambda **_: ["nomic-ai/nomic-embed-text-v1.5-Q"],
     )
 
     result = discover_runtime_models(
@@ -113,6 +113,7 @@ def test_discover_runtime_models_keeps_healthy_roles_when_one_endpoint_fails(mon
             embedding_base_url="http://vllm-text:8000",
             chat_model="Qwen/Qwen3-14B-AWQ",
             embed_model="nomic-ai/nomic-embed-text-v1.5-Q",
+            faithfulness_model=None,
             chat_timeout_seconds=180,
             embed_timeout_seconds=45,
         )

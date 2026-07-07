@@ -132,6 +132,7 @@ def _job(
     return IngestJobRecord(
         id="job-1",
         doc_id="doc-1",
+        retry_of_job_id=None,
         origin="upload",
         status=status,
         progress_pct=progress_pct,

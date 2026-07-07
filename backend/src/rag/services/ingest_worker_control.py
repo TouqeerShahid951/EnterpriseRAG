@@ -10,6 +10,7 @@ from typing import Any
 from ..core.config import settings
 
 SNAPSHOT_CACHE_SECONDS = 3.0
+INSPECT_TIMEOUT_SECONDS = 0.5
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,7 @@ class IngestWorkerControl:
         if cached and now - cached[0] < SNAPSHOT_CACHE_SECONDS:
             return cached[1]
 
-        inspector = self._app.control.inspect(timeout=2)
+        inspector = self._app.control.inspect(timeout=INSPECT_TIMEOUT_SECONDS)
         stats = inspector.stats() or {}
         active = inspector.active() or {}
         active_queues = inspector.active_queues() or {}

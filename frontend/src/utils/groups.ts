@@ -59,7 +59,7 @@ export function displayNameFromPath(path: string): string {
     .join(" ");
 }
 
-export function userSpacesFromPaths(paths: string[]): GroupOption[] {
+export function userSpacesFromPaths(paths: string[] = []): GroupOption[] {
   return paths.map((path) => ({
     depth: Math.max(0, path.split("/").filter(Boolean).length - 1),
     name: displayNameFromPath(path),

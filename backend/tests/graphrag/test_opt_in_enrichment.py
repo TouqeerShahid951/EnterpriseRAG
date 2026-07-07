@@ -12,6 +12,7 @@ from rag.api.routes import document_routes, ingest_job_routes
 from rag.core.config import settings
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.identity_models import UserRecord
+from rag.repositories.ingest_config import IngestConfigRecord, InMemoryIngestConfigRepository
 from rag.schemas.ingest_jobs import GraphRAGCancelRequest
 from rag.services.graphrag_queue import GraphRAGDocumentIndexMessage, InMemoryGraphRAGMaintenanceQueue
 from rag.services.ingest_worker_control import WorkerActiveTask, WorkerCapacity, WorkerControlResult
@@ -53,6 +54,7 @@ def test_graph_enrichment_is_queued_only_after_user_request(monkeypatch: pytest.
             user=user,
             repo=repo,
             queue=queue,
+            config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
         )
     )
 
@@ -62,6 +64,56 @@ def test_graph_enrichment_is_queued_only_after_user_request(monkeypatch: pytest.
         GraphRAGDocumentIndexMessage(doc_id=document.id, job_id=job.id, reason="user_request")
     ]
     assert repo.audit_events[-1]["event_type"] == "documents.graph_enrichment.queued"
+
+
+def test_graph_enrichment_rejects_disabled_workspace_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(document_routes.settings, "graphrag_enabled", True)
+    repo = InMemoryDocumentRepository()
+    user = _user("contributor", group_paths=("/ops",))
+    document = _document(repo, user=user, status="complete")
+    repo.create_ingest_job(doc_id=document.id, status="complete", progress_pct=100, origin="upload")
+    queue = InMemoryGraphRAGMaintenanceQueue()
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            document_routes.queue_document_graph_enrichment(
+                document.id,
+                _csrf_request(),
+                user=user,
+                repo=repo,
+                queue=queue,
+                config_repo=_ingest_config_repo(graph_enrichment_enabled=False),
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "graphrag_disabled"
+    assert queue.document_messages == []
+
+
+def test_graphrag_status_uses_workspace_enrichment_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ingest_job_routes.settings, "graphrag_enabled", True)
+    monkeypatch.setattr(ingest_job_routes, "_redis_queue_length", lambda _queue_name: (0, None))
+    monkeypatch.setattr(ingest_job_routes, "_redis_queued_graphrag_tasks", lambda _queue_name: [])
+    user = _user("member", group_paths=("/ops",))
+
+    disabled = asyncio.run(
+        ingest_job_routes.get_graphrag_status(
+            user=user,
+            control=_GraphControl(),  # type: ignore[arg-type]
+            config_repo=_ingest_config_repo(graph_enrichment_enabled=False),
+        )
+    )
+    enabled = asyncio.run(
+        ingest_job_routes.get_graphrag_status(
+            user=user,
+            control=_GraphControl(),  # type: ignore[arg-type]
+            config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
+        )
+    )
+
+    assert disabled.enabled is False
+    assert enabled.enabled is True
 
 
 def test_graph_enrichment_requires_completed_indexing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,6 +131,7 @@ def test_graph_enrichment_requires_completed_indexing(monkeypatch: pytest.Monkey
                 user=user,
                 repo=repo,
                 queue=InMemoryGraphRAGMaintenanceQueue(),
+                config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
             )
         )
 
@@ -102,10 +155,35 @@ def test_graph_enrichment_requires_document_write_access(monkeypatch: pytest.Mon
                 user=reader,
                 repo=repo,
                 queue=InMemoryGraphRAGMaintenanceQueue(),
+                config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
             )
         )
 
     assert exc_info.value.status_code == 403
+
+
+def test_graph_enrichment_rejects_same_space_peer_contributor(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(document_routes.settings, "graphrag_enabled", True)
+    repo = InMemoryDocumentRepository()
+    uploader = _user("contributor", group_paths=("/ops",))
+    peer = _user("contributor", group_paths=("/ops",))
+    document = _document(repo, user=uploader, status="complete")
+    repo.create_ingest_job(doc_id=document.id, status="complete", progress_pct=100, origin="upload")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            document_routes.queue_document_graph_enrichment(
+                document.id,
+                _csrf_request(),
+                user=peer,
+                repo=repo,
+                queue=InMemoryGraphRAGMaintenanceQueue(),
+                config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
+            )
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail["code"] == "document_ingestion_forbidden"
 
 
 def test_running_graph_enrichment_can_be_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -146,16 +224,16 @@ def test_running_graph_enrichment_can_be_cancelled(monkeypatch: pytest.MonkeyPat
 
 
 class _GraphControl:
-    def __init__(self, task: WorkerActiveTask) -> None:
+    def __init__(self, task: WorkerActiveTask | None = None) -> None:
         self.task = task
 
     def snapshot(self, desired_concurrency: int) -> WorkerControlResult:
         return WorkerControlResult(
             desired_concurrency=desired_concurrency,
-            workers=(WorkerCapacity(name="graphrag-worker@node", pool_size=1, active_jobs=1),),
+            workers=(WorkerCapacity(name="graphrag-worker@node", pool_size=1, active_jobs=1 if self.task else 0),),
             apply_status="applied",
-            active_job_ids=frozenset({self.task.job_id}) if self.task.job_id else frozenset(),
-            active_tasks=(self.task,),
+            active_job_ids=frozenset({self.task.job_id}) if self.task and self.task.job_id else frozenset(),
+            active_tasks=(self.task,) if self.task else (),
         )
 
 
@@ -172,6 +250,12 @@ def _csrf_request() -> Request:
             ],
         }
     )
+
+
+def _ingest_config_repo(*, graph_enrichment_enabled: bool) -> InMemoryIngestConfigRepository:
+    repo = InMemoryIngestConfigRepository()
+    repo.save_active(IngestConfigRecord(graph_enrichment_enabled=graph_enrichment_enabled))
+    return repo
 
 
 def _document(repo: InMemoryDocumentRepository, *, user: UserRecord, status: str):

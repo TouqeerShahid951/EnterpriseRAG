@@ -352,7 +352,7 @@ Useful checks:
 docker compose --env-file .env.windows-airgap ps
 Invoke-RestMethod http://localhost:3000/healthz
 docker compose --env-file .env.windows-airgap exec api `
-  python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"
+  python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=8)"
 docker compose --env-file .env.windows-airgap logs --tail 100 api
 docker compose --env-file .env.windows-airgap logs --tail 100 ingestion-worker
 ```

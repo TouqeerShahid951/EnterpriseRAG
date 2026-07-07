@@ -25,6 +25,7 @@ class IngestJobPayload:
     content_type: str | None = None
     quality_preset: str | None = None
     review_batch_id: str | None = None
+    image_review_batch_id: str | None = None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "IngestJobPayload":
@@ -52,6 +53,7 @@ class IngestJobPayload:
             content_type=str(payload["content_type"]) if payload.get("content_type") else None,
             quality_preset=normalize_ingestion_quality_preset(payload.get("quality_preset")) if payload.get("quality_preset") else None,
             review_batch_id=str(payload["review_batch_id"]) if payload.get("review_batch_id") else None,
+            image_review_batch_id=str(payload["image_review_batch_id"]) if payload.get("image_review_batch_id") else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -79,4 +81,6 @@ class IngestJobPayload:
             payload["quality_preset"] = self.quality_preset
         if self.review_batch_id:
             payload["review_batch_id"] = self.review_batch_id
+        if self.image_review_batch_id:
+            payload["image_review_batch_id"] = self.image_review_batch_id
         return payload

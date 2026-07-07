@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { canAssignAccountType, canUploadToSpace, canWriteDocument } from "./authz";
+import { accountTypeLabel, accountTypeOptions, canAssignAccountType, canUploadToSpace, canWriteDocument } from "./authz";
 import { canAccessRoute, defaultRouteForUser, navigationGroupForRoute, routeFromLocation, visibleNavigation, type RouteId } from "./routes";
 import type { AccountType, ClearanceLevel, User } from "./types/api";
 
 describe("account type route access", () => {
+  it("uses simplified visible role names for assignment", () => {
+    expect(accountTypeOptions).toEqual(["platform_admin", "system_admin", "space_admin", "contributor", "auditor", "member"]);
+    expect(accountTypeLabel("contributor")).toBe("Document Contributor");
+    expect(accountTypeLabel("member")).toBe("Chat Member");
+    expect(accountTypeLabel("auditor")).toBe("Audit Viewer");
+  });
+
   it("allows platform admins to reach global surfaces", () => {
     const user = makeUser("platform_admin");
 
@@ -36,9 +43,9 @@ describe("account type route access", () => {
 
   it.each([
     ["user_manager", ["access"], ["chat", "upload", "settings", "review", "document-overview", "documents", "document-trash", "ingestion-health", "ingestion-jobs"]],
-    ["space_admin", ["chat", "upload", "document-overview", "knowledge-spaces", "documents", "document-trash", "document-extraction", "database-connectors", "ingestion-health", "ingestion-jobs"], ["access", "settings", "review"]],
-    ["contributor", ["chat", "upload", "document-overview", "knowledge-spaces", "documents", "document-trash", "ingestion-health", "ingestion-jobs"], ["access", "settings", "review", "document-extraction", "database-connectors"]],
-    ["reviewer", ["chat", "review", "document-overview", "knowledge-spaces", "documents", "document-trash", "ingestion-health", "ingestion-jobs"], ["access", "settings", "upload", "document-extraction", "database-connectors"]],
+    ["space_admin", ["access", "chat", "upload", "review", "document-overview", "knowledge-spaces", "documents", "document-trash", "document-extraction", "database-connectors", "ingestion-health", "ingestion-jobs"], ["settings"]],
+    ["contributor", ["chat", "upload", "review", "document-overview", "knowledge-spaces", "documents", "document-trash", "ingestion-health", "ingestion-jobs"], ["access", "settings", "document-extraction", "database-connectors"]],
+    ["reviewer", ["upload", "review", "ingestion-health", "ingestion-jobs"], ["access", "chat", "settings", "document-overview", "knowledge-spaces", "documents", "document-trash", "document-extraction", "database-connectors"]],
     ["auditor", ["activity-log", "document-overview", "knowledge-spaces", "documents", "document-trash", "ingestion-health", "ingestion-jobs"], ["chat", "upload", "review", "settings", "document-extraction", "database-connectors"]],
     ["member", ["chat", "document-overview", "knowledge-spaces", "documents", "document-trash", "ingestion-health", "ingestion-jobs"], ["access", "settings", "upload", "review", "document-extraction", "database-connectors"]],
   ] as [AccountType, RouteId[], RouteId[]][])("applies scoped route access for %s", (accountType, allowed, denied) => {
@@ -50,6 +57,7 @@ describe("account type route access", () => {
 
   it("uses a non-chat default route for non-query roles", () => {
     expect(defaultRouteForUser(makeUser("user_manager"))).toBe("access");
+    expect(defaultRouteForUser(makeUser("reviewer"))).toBe("upload");
     expect(defaultRouteForUser(makeUser("auditor"))).toBe("activity-log");
   });
 
@@ -67,7 +75,8 @@ describe("account type route access", () => {
     expect(canUploadToSpace(makeUser("contributor"), "/finance")).toBe(true);
     expect(canWriteDocument(makeUser("contributor"), "/finance/procurement")).toBe(false);
     expect(canUploadToSpace(makeUser("member"), "/finance")).toBe(false);
-    expect(canWriteDocument(makeUser("reviewer"), "/finance")).toBe(false);
+    expect(canUploadToSpace(makeUser("reviewer"), "/finance")).toBe(true);
+    expect(canWriteDocument(makeUser("reviewer"), "/finance/procurement")).toBe(false);
   });
 
   it("prevents lower admin roles from assigning platform-only roles", () => {
@@ -75,7 +84,10 @@ describe("account type route access", () => {
     expect(canAssignAccountType(makeUser("system_admin"), "platform_admin")).toBe(false);
     expect(canAssignAccountType(makeUser("system_admin"), "system_admin")).toBe(true);
     expect(canAssignAccountType(makeUser("user_manager"), "system_admin")).toBe(false);
-    expect(canAssignAccountType(makeUser("user_manager"), "space_admin")).toBe(true);
+    expect(canAssignAccountType(makeUser("user_manager"), "space_admin")).toBe(false);
+    expect(canAssignAccountType(makeUser("space_admin"), "contributor")).toBe(true);
+    expect(canAssignAccountType(makeUser("space_admin"), "member")).toBe(true);
+    expect(canAssignAccountType(makeUser("space_admin"), "auditor")).toBe(false);
   });
 
   it("redirects legacy Knowledge Space tabs to focused routes", () => {
@@ -91,8 +103,10 @@ describe("account type route access", () => {
     const contributorNavigation = visibleNavigation(makeUser("contributor"));
     const contributorIntake = contributorNavigation.find((item) => item.id === "document-intake");
     const contributorLibrary = contributorNavigation.find((item) => item.id === "document-library");
+    const contributorReview = contributorNavigation.find((item) => item.id === "review");
     const spaceAdminNavigation = visibleNavigation(makeUser("space_admin"));
     const spaceAdminIntake = spaceAdminNavigation.find((item) => item.id === "document-intake");
+    const spaceAdminReview = spaceAdminNavigation.find((item) => item.id === "review");
     const reviewerNavigation = visibleNavigation(makeUser("reviewer"));
     const reviewerIntake = reviewerNavigation.find((item) => item.id === "document-intake");
     const reviewerLibrary = reviewerNavigation.find((item) => item.id === "document-library");
@@ -101,16 +115,21 @@ describe("account type route access", () => {
     const reviewQueue = reviewerNavigation.find((item) => item.id === "review");
     const adminNavigation = visibleNavigation(makeUser("platform_admin"));
     const evaluations = adminNavigation.find((item) => item.id === "evaluations");
+    const settings = adminNavigation.find((item) => item.id === "settings");
     const systemAdminNavigation = visibleNavigation(makeUser("system_admin"));
 
     expect(contributorIntake?.children?.map((child) => child.route)).toEqual(["upload", "ingestion-jobs"]);
     expect(contributorLibrary?.children?.map((child) => child.route)).toEqual(["document-overview", "documents", "knowledge-spaces", "document-trash"]);
+    expect(contributorReview?.badge).toBe("review");
     expect(spaceAdminIntake?.children?.map((child) => child.route)).toEqual(["upload", "document-extraction", "database-connectors", "ingestion-jobs"]);
-    expect(reviewerIntake?.children?.map((child) => child.route)).toEqual(["ingestion-jobs"]);
-    expect(reviewerLibrary?.children?.map((child) => child.route)).toEqual(["document-overview", "documents", "knowledge-spaces", "document-trash"]);
+    expect(spaceAdminReview?.badge).toBe("review");
+    expect(spaceAdminNavigation.some((item) => item.id === "users")).toBe(true);
+    expect(reviewerIntake?.children?.map((child) => child.route)).toEqual(["upload", "ingestion-jobs"]);
+    expect(reviewerLibrary).toBeUndefined();
     expect(memberLibrary?.children?.map((child) => child.route)).toEqual(["document-overview", "documents", "knowledge-spaces", "document-trash"]);
     expect(reviewQueue?.badge).toBe("review");
     expect(evaluations?.label).toBe("RAG Evaluation");
+    expect(settings?.label).toBe("Runtime Settings");
     expect(systemAdminNavigation.some((item) => item.id === "evaluations")).toBe(false);
     expect(systemAdminNavigation.some((item) => item.id === "settings")).toBe(false);
     expect(systemAdminNavigation.some((item) => item.id === "users")).toBe(true);

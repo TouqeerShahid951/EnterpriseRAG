@@ -29,6 +29,8 @@ x-backend-env: &backend-env
   CONNECTOR_LIVE_SQL_MAX_REPAIR_ATTEMPTS: ${CONNECTOR_LIVE_SQL_MAX_REPAIR_ATTEMPTS:-2}
   CONNECTOR_LIVE_SQL_RESULT_VERIFIER_ENABLED: ${CONNECTOR_LIVE_SQL_RESULT_VERIFIER_ENABLED:-true}
   CONNECTOR_LIVE_SQL_VERIFIER_SAMPLE_ROWS: ${CONNECTOR_LIVE_SQL_VERIFIER_SAMPLE_ROWS:-5}
+  EVALUATION_ANSWER_LLM_VERIFIER_ENABLED: ${EVALUATION_ANSWER_LLM_VERIFIER_ENABLED:-true}
+  EVALUATION_ANSWER_LLM_VERIFIER_MODEL: ${EVALUATION_ANSWER_LLM_VERIFIER_MODEL:-}
   DATABASE_URL: ${DATABASE_URL:-postgresql://agenticrag:agenticrag-local-password@postgres:5432/agenticrag}
   DEPLOYMENT_CONTROLLER_TIMEOUT_SECONDS: ${DEPLOYMENT_CONTROLLER_TIMEOUT_SECONDS:-600}
   DEPLOYMENT_CONTROLLER_URL: ${DEPLOYMENT_CONTROLLER_URL:-http://deployment-controller:8080}
@@ -76,6 +78,7 @@ x-backend-env: &backend-env
   OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-}
   OLLAMA_VISION_NUM_CTX: ${OLLAMA_VISION_NUM_CTX:-8192}
   OLLAMA_THINKING_ENABLED: ${OLLAMA_THINKING_ENABLED:-false}
+  PDF_IMAGE_REVIEW_THRESHOLD: ${PDF_IMAGE_REVIEW_THRESHOLD:-64}
   QDRANT_COLLECTION: ${QDRANT_COLLECTION:-documents}
   QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
   RAG_FAITHFULNESS_MODEL: ${RAG_FAITHFULNESS_MODEL:-Qwen/Qwen3-8B-AWQ}
@@ -181,6 +184,7 @@ x-artifact-env: &artifact-env
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-agenticrag}
       POSTGRES_USER: ${POSTGRES_USER:-agenticrag}
@@ -196,11 +200,15 @@ services:
 
   redis:
     image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    restart: unless-stopped
+    entrypoint: ["sh", "/usr/local/bin/redis-aof-recover.sh"]
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-agenticrag-local-redis-password}"]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-agenticrag-local-redis-password}
+      REDIS_AOF_RECOVERY: ${REDIS_AOF_RECOVERY:-repair}
     volumes:
       - redis-data:/data
+      - ./infra/redis/redis-aof-recover.sh:/usr/local/bin/redis-aof-recover.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
       interval: 10s
@@ -209,6 +217,7 @@ services:
 
   minio:
     image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_BROWSER: "on"
@@ -224,6 +233,7 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.12.6
+    restart: unless-stopped
     user: "0:0"
     ports:
       - "127.0.0.1:${QDRANT_HTTP_PORT:-6333}:6333"
@@ -238,6 +248,7 @@ services:
 
   neo4j:
     image: neo4j:5.26-community
+    restart: unless-stopped
     environment:
       NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-agenticrag-local-neo4j-password}
       NEO4J_PLUGINS: '["graph-data-science"]'
@@ -257,6 +268,7 @@ services:
 
   clamav:
     image: clamav/clamav-debian:stable
+    restart: unless-stopped
     environment:
       CLAMAV_NO_FRESHCLAMD: ${CLAMAV_NO_FRESHCLAMD:-true}
     healthcheck:
@@ -268,6 +280,7 @@ services:
 
   vllm-text:
     image: vllm/vllm-openai:latest
+    restart: unless-stopped
     profiles: ["vllm"]
     ipc: host
     runtime: nvidia
@@ -315,6 +328,7 @@ services:
 
   vllm-embeddings:
     image: vllm/vllm-openai:latest
+    restart: unless-stopped
     profiles: ["vllm"]
     ipc: host
     runtime: nvidia
@@ -365,6 +379,7 @@ services:
 
   vllm-vision:
     image: vllm/vllm-openai:latest
+    restart: unless-stopped
     profiles: ["vllm"]
     ipc: host
     runtime: nvidia
@@ -414,6 +429,7 @@ services:
 
   deployment-controller:
     image: agenticrag-api
+    restart: unless-stopped
     profiles: ["vllm"]
     user: "0:0"
     command: ["python", "/workspace/deployment-controller/server.py"]
@@ -437,6 +453,7 @@ services:
 
   api:
     image: agenticrag-api
+    restart: unless-stopped
     build:
       context: ./backend
       dockerfile: apps/api/Dockerfile
@@ -479,14 +496,64 @@ services:
       clamav:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "python -m rag.shared.model_cache_health --fastembed && python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/live\", timeout=2)'"]
+      test: ["CMD-SHELL", "python -m rag.shared.model_cache_health --fastembed && python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/live\", timeout=8)'"]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
+      start_period: 5s
+      retries: 5
+
+  query-api:
+    image: agenticrag-api
+    restart: unless-stopped
+    command: ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: [*backend-env, *artifact-env]
+      ACCESS_COOKIE_NAME: ${ACCESS_COOKIE_NAME:-agenticrag_access_token}
+      ADMIN_SERVICE_URL: ${ADMIN_SERVICE_URL:-http://api:8000}
+      EVALUATION_DIAGNOSTIC_TOP_K: ${EVALUATION_DIAGNOSTIC_TOP_K:-10}
+      EVALUATION_QUEUE_BACKEND: ${EVALUATION_QUEUE_BACKEND:-celery}
+      EVALUATION_QUEUE_NAME: ${EVALUATION_QUEUE_NAME:-evaluation:jobs}
+      EVALUATION_RETENTION_DAYS: ${EVALUATION_RETENTION_DAYS:-30}
+      EVALUATION_TASK_NAME: ${EVALUATION_TASK_NAME:-rag.evaluations.tasks.run_evaluation}
+      FOLDER_SCHEDULER_INTERVAL_SECONDS: ${FOLDER_SCHEDULER_INTERVAL_SECONDS:-60}
+      FOLDER_SNAPSHOT_MAX_BYTES: ${FOLDER_SNAPSHOT_MAX_BYTES:-5368709120}
+      FOLDER_SNAPSHOT_MAX_FILES: ${FOLDER_SNAPSHOT_MAX_FILES:-100}
+      INGEST_QUEUE_BACKEND: ${INGEST_QUEUE_BACKEND:-celery}
+      INGEST_QUEUE_NAME: ${INGEST_QUEUE_NAME:-ingest:jobs}
+      INGEST_TASK_NAME: ${INGEST_TASK_NAME:-apps.ingestion.tasks.ingest_document}
+      PORT: 8000
+      REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-agenticrag_refresh_token}
+      SERVICE_NAME: query-api
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - *fastembed-cache-volume
+      - *folder-sources-volume
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      neo4j:
+        condition: service_healthy
+      clamav:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -m rag.shared.model_cache_health --fastembed && python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/live\", timeout=8)'"]
+      interval: 10s
+      timeout: 10s
       start_period: 5s
       retries: 5
 
   artifact-worker:
     image: agenticrag-api
+    restart: unless-stopped
     command: ["celery", "-A", "rag.artifact_jobs.celery_app", "worker", "--loglevel=INFO", "--queues=artifact:jobs"]
     healthcheck:
       disable: true
@@ -512,6 +579,7 @@ services:
 
   ingestion-worker:
     image: agenticrag-ingestion-worker
+    restart: unless-stopped
     command: ["celery", "-A", "apps.ingestion.celery_app", "worker", "--loglevel=info", "--hostname=ingestion-worker@%h", "--queues=${INGEST_QUEUE_NAME:-ingest:jobs}"]
     build:
       context: ./backend
@@ -543,10 +611,11 @@ services:
       PDF_FULL_DOC_WEAK_PAGE_RATIO: ${PDF_FULL_DOC_WEAK_PAGE_RATIO:-0.25}
       PDF_IMAGE_ANALYSIS_MAX_IMAGES: ${PDF_IMAGE_ANALYSIS_MAX_IMAGES:--1}
       PDF_IMAGE_ANALYSIS_MAX_FULL_PAGE_FALLBACKS: ${PDF_IMAGE_ANALYSIS_MAX_FULL_PAGE_FALLBACKS:--1}
+      PDF_IMAGE_REVIEW_THRESHOLD: ${PDF_IMAGE_REVIEW_THRESHOLD:-64}
       PDF_WEAK_PAGE_THRESHOLD: ${PDF_WEAK_PAGE_THRESHOLD:-5}
       SCANNED_VISUAL_REGION_ENABLED: ${SCANNED_VISUAL_REGION_ENABLED:-true}
       SCANNED_VISUAL_MIN_AREA_RATIO: ${SCANNED_VISUAL_MIN_AREA_RATIO:-0.03}
-      SCANNED_VISUAL_MAX_REGIONS_PER_PAGE: ${SCANNED_VISUAL_MAX_REGIONS_PER_PAGE:-4}
+      SCANNED_VISUAL_MAX_REGIONS_PER_PAGE: ${SCANNED_VISUAL_MAX_REGIONS_PER_PAGE:--1}
       SCANNED_VISUAL_TEXT_MASK_PADDING_PX: ${SCANNED_VISUAL_TEXT_MASK_PADDING_PX:-8}
       QDRANT_UPSERT_BATCH_SIZE: ${QDRANT_UPSERT_BATCH_SIZE:-64}
       RAG_CHUNK_MAX_CHARS: ${RAG_CHUNK_MAX_CHARS:-1200}
@@ -584,6 +653,7 @@ services:
 
   graphrag-worker:
     image: agenticrag-ingestion-worker
+    restart: unless-stopped
     command: ["celery", "-A", "apps.ingestion.celery_app", "worker", "--loglevel=info", "--hostname=graphrag-worker@%h", "--queues=${GRAPHRAG_QUEUE_NAME:-graphrag:jobs}"]
     environment:
       <<: *ingestion-worker-env
@@ -635,6 +705,7 @@ services:
 
   evaluation-worker:
     image: agenticrag-api
+    restart: unless-stopped
     command: ["celery", "-A", "rag.evaluations.celery_app", "worker", "--loglevel=INFO", "--queues=evaluation:jobs"]
     healthcheck:
       disable: true
@@ -666,6 +737,7 @@ services:
 
   folder-scheduler:
     image: agenticrag-api
+    restart: unless-stopped
     command: ["python", "-m", "rag.ops.folder_ingest_scheduler_cli", "--loop"]
     healthcheck:
       disable: true
@@ -691,6 +763,7 @@ services:
 
   ingest-maintenance:
     image: agenticrag-api
+    restart: unless-stopped
     command: ["python", "-m", "rag.ops.ingest_maintenance_cli", "--loop"]
     healthcheck:
       disable: true
@@ -714,6 +787,7 @@ services:
 
   frontend:
     image: agenticrag-frontend
+    restart: unless-stopped
     build:
       context: ./frontend
       args:
@@ -726,6 +800,10 @@ services:
     depends_on:
       api:
         condition: service_healthy
+        restart: true
+      query-api:
+        condition: service_healthy
+        restart: true
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/healthz || exit 1"]
       interval: 10s

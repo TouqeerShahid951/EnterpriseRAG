@@ -67,6 +67,8 @@ _SIGNALS: dict[RouteIntent, dict[str, tuple[str, ...]]] = {
             "list the",
             "give me the list",
             "show all",
+            "most assigned",
+            "most cases",
         ),
         "medium": ("all of the", "all the", "every", "sum", "updated in"),
         "weak": ("list", "enumerate"),

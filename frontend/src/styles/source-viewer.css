@@ -14,13 +14,13 @@
   z-index: 20;
   top: 0;
   display: flex;
-  min-height: 6.5rem;
+  min-height: 4.75rem;
   align-items: center;
   justify-content: space-between;
-  gap: 1.5rem;
+  gap: 1rem;
   border-bottom: 1px solid var(--color-surface-border);
   background: color-mix(in srgb, var(--color-surface-container-low) 94%, transparent);
-  padding: 1rem 1.5rem;
+  padding: 0.75rem 1rem;
   backdrop-filter: blur(12px);
   flex: 0 0 auto;
 }
@@ -30,10 +30,10 @@
 }
 
 .source-viewer-heading h1 {
-  max-width: 52rem;
+  max-width: 46rem;
   margin-top: 0.25rem;
   color: var(--color-on-surface);
-  font-size: 1.45rem;
+  font-size: 1.24rem;
   font-weight: 800;
   line-height: 1.2;
   overflow-wrap: anywhere;
@@ -42,7 +42,7 @@
 .source-viewer-heading > p:last-child {
   margin-top: 0.375rem;
   color: var(--color-secondary);
-  font-size: 0.8125rem;
+  font-size: 0.76rem;
   font-weight: 700;
 }
 
@@ -53,7 +53,7 @@
 .source-viewer-icon-button,
 .source-viewer-mode-button {
   display: inline-flex;
-  min-height: 2.75rem;
+  min-height: 2.35rem;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
@@ -86,21 +86,21 @@
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
-  padding: 1.5rem;
+  padding: 1rem;
 }
 
 .source-viewer-state {
   display: grid;
-  width: min(100%, 34rem);
-  min-height: 14rem;
+  width: min(100%, 30rem);
+  min-height: 11rem;
   place-items: center;
   align-content: center;
   gap: 0.75rem;
-  margin: 6rem auto 0;
+  margin: 3rem auto 0;
   border: 1px solid var(--color-surface-border);
   border-radius: 0.5rem;
   background: var(--color-surface-card);
-  padding: 2rem;
+  padding: 1.25rem;
   color: var(--color-secondary);
   text-align: center;
 }
@@ -135,13 +135,13 @@
   height: 100%;
   min-height: 0;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
   min-width: 0;
 }
 
 .source-viewer-toolbar {
   display: flex;
-  width: min(100%, 76rem);
+  width: min(100%, 68rem);
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
@@ -175,7 +175,7 @@
 }
 
 .source-viewer-icon-button {
-  width: 2.75rem;
+  width: 2.35rem;
   padding: 0;
 }
 
@@ -200,14 +200,14 @@
 .source-viewer-file-label,
 .source-viewer-zoom-readout {
   display: inline-flex;
-  min-height: 2.75rem;
+  min-height: 2.35rem;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--color-surface-border);
   border-radius: 0.5rem;
   background: var(--color-surface-container-low);
   color: var(--color-on-surface);
-  font-size: 0.8125rem;
+  font-size: 0.76rem;
   font-weight: 800;
 }
 
@@ -271,7 +271,7 @@
 
 .source-viewer-notice {
   display: flex;
-  width: min(100%, 68rem);
+  width: min(100%, 62rem);
   align-items: flex-start;
   gap: 0.5rem;
   margin-inline: auto;
@@ -304,7 +304,7 @@
 
 .source-viewer-pdf-scroll {
   box-sizing: border-box;
-  padding: 1rem;
+  padding: 0.75rem;
 }
 
 .source-viewer-pdf-page {
@@ -340,7 +340,7 @@
 }
 
 .source-viewer-image-scroll {
-  padding: 1rem;
+  padding: 0.75rem;
 }
 
 .source-viewer-image-stage {
@@ -370,8 +370,8 @@
 
 .source-viewer-asset-strip {
   display: flex;
-  width: min(100%, 68rem);
-  gap: 0.75rem;
+  width: min(100%, 62rem);
+  gap: 0.55rem;
   margin-inline: auto;
   overflow-x: auto;
   padding-bottom: 0.25rem;
@@ -379,10 +379,10 @@
 
 .source-viewer-asset-item {
   display: grid;
-  min-width: min(18rem, 82vw);
-  max-width: 22rem;
+  min-width: min(15rem, 82vw);
+  max-width: 18rem;
   grid-template-columns: 6.5rem minmax(0, 1fr);
-  gap: 0.75rem;
+  gap: 0.6rem;
   align-items: center;
   border: 1px solid var(--color-surface-border);
   border-radius: 0.5rem;
@@ -435,7 +435,7 @@
 }
 
 .source-viewer-docx-scroll {
-  padding: 0 1rem 2rem;
+  padding: 0 0.75rem 1.5rem;
 }
 
 .source-viewer-docx-scale-frame {
@@ -443,7 +443,7 @@
 }
 
 .source-viewer-docx-document {
-  min-width: 44rem;
+  min-width: min(38rem, 100%);
   transform-origin: top left;
 }
 
@@ -465,11 +465,11 @@
 }
 
 .source-viewer-json-scroll {
-  padding: 1rem;
+  padding: 0.75rem;
 }
 
 .source-viewer-json-document {
-  width: min(100%, 76rem);
+  width: min(100%, 68rem);
   min-height: 100%;
   max-width: 100%;
   margin: 0 auto;
@@ -578,6 +578,75 @@
   }
 }
 
+@media (min-width: 2200px) {
+  .source-viewer-header {
+    min-height: 5rem;
+    padding-inline: 1.25rem;
+  }
+
+  .source-viewer-heading h1 {
+    max-width: 72ch;
+    font-size: 1.35rem;
+  }
+
+  .source-viewer-stage {
+    padding: 1.25rem;
+  }
+
+  .source-viewer-document {
+    gap: 1rem;
+  }
+
+  .source-viewer-toolbar,
+  .source-viewer-notice,
+  .source-viewer-asset-strip {
+    width: min(100%, 96rem);
+  }
+
+  .source-viewer-pdf-scroll,
+  .source-viewer-image-scroll,
+  .source-viewer-json-scroll {
+    padding: 1rem;
+  }
+}
+
+@media (min-width: 3200px) {
+  .source-viewer-header {
+    padding-inline: 1.5rem;
+  }
+
+  .source-viewer-toolbar,
+  .source-viewer-notice,
+  .source-viewer-asset-strip {
+    width: min(100%, 144rem);
+  }
+
+  .source-viewer-stage {
+    padding: 1.5rem;
+  }
+
+  .source-viewer-asset-item {
+    max-width: 22rem;
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+  }
+
+  .source-viewer-asset-frame {
+    width: 7.5rem;
+  }
+}
+
+@media (min-width: 5120px) {
+  .source-viewer-toolbar,
+  .source-viewer-notice,
+  .source-viewer-asset-strip {
+    width: min(100%, 220rem);
+  }
+
+  .source-viewer-stage {
+    padding: 1.75rem;
+  }
+}
+
 @media (max-width: 720px) {
   .source-viewer-header {
     position: static;
@@ -647,7 +716,7 @@
   }
 
   .source-viewer-asset-item {
-    min-width: min(18rem, 88vw);
+    min-width: min(15rem, 88vw);
   }
 }
 

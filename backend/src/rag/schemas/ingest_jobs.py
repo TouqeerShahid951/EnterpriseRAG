@@ -18,9 +18,11 @@ IngestJobOrigin = Literal["upload", "reingest", "restore", "folder", "connector"
 class IngestJobItem(JobStatusResponse):
     document_id: str
     document_title: str
+    retry_of_job_id: str | None = None
     group_path: str
     clearance_level: ClearanceLevel = DEFAULT_CLEARANCE_LEVEL
     origin: IngestJobOrigin
+    uploaded_by: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     completed_at: datetime | None = None
@@ -36,6 +38,7 @@ class IngestJobListResponse(ContractModel):
 class IngestJobSummaryResponse(ContractModel):
     total: int = 0
     active: int = 0
+    needs_attention: int = 0
     status_counts: dict[str, int] = Field(default_factory=dict)
     stage_counts: dict[str, int] = Field(default_factory=dict)
     origin_counts: dict[str, int] = Field(default_factory=dict)

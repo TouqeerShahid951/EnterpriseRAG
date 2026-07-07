@@ -1,6 +1,6 @@
 # Prudentia AI User Guide
 
-Last updated: 2026-06-23
+Last updated: 2026-07-07
 
 This guide explains how to use the Prudentia AI / AgenticRAG workspace from the
 web application. It covers every account type and the main workflows users see
@@ -21,7 +21,7 @@ For offline Windows deployment and runtime setup, see
 
 Prudentia AI is an enterprise RAG workspace for uploading controlled documents,
 indexing them into Knowledge Spaces, asking grounded questions, querying
-approved databases with live read-only SQL, reviewing low-confidence OCR,
+approved databases with live read-only SQL, resolving Review Queue holds,
 auditing activity, evaluating answer quality, and using GraphRAG for corpus-level
 themes and patterns.
 
@@ -30,8 +30,8 @@ The application is organized around these areas:
 - **Operate**: workspace summary, ingestion health, and Query Intelligence.
 - **Corpus**: document intake, folder sources, database connectors, activity,
   document library, and Knowledge Spaces.
-- **Evaluate**: OCR review and RAG evaluation.
-- **Govern**: audit trail, user management, and Configs for platform
+- **Evaluate**: Review Queue and RAG evaluation.
+- **Govern**: audit trail, user management, and Runtime Settings for platform
   configuration.
 
 Navigation is role-aware. If a page is missing from your sidebar, your account
@@ -81,7 +81,7 @@ Each uploaded or scheduled file receives an ingestion job. Common statuses are:
 - **Scheduled**: waiting for its planned start time.
 - **Queued**: accepted and waiting for a worker.
 - **Processing**: being parsed, enriched, chunked, embedded, and indexed.
-- **Needs review**: low-confidence OCR or extraction needs human review.
+- **Needs review**: human OCR, extraction, or PDF image review is required.
 - **Indexed**: complete and searchable.
 - **Failed**: ingestion stopped with an error.
 - **Cancelled**: the job was manually cancelled.
@@ -118,14 +118,16 @@ or running.
 
 | Role | Main purpose | Typical access |
 | --- | --- | --- |
-| Platform Admin | Full platform ownership | All pages, all spaces, database connectors, user management, audit, review, RAG evaluation, and Configs |
-| System Admin | Global operations without platform config | Query, intake, library, review, audit, user management, and operational recovery |
-| User Manager | Account provisioning | Create and manage non-global-admin users inside assigned scopes |
-| Space Admin | Knowledge Space and document governance | Query, upload, folder sources, database connectors, library management, ingestion visibility, and space administration |
-| Contributor | Document intake and maintenance | Query, upload, document lifecycle actions in writable spaces, and ingestion visibility |
-| Reviewer | Extraction quality review | Query, OCR Review Queue, document visibility, and ingestion visibility |
-| Auditor | Read-only governance review | System Audit, visible document/space metadata, and ingestion visibility |
-| Member | Grounded document use | Query Intelligence and visible document library access |
+| Platform Admin | Full platform ownership | All pages, all spaces, database connectors, user management, audit, review, RAG evaluation, and Runtime Settings |
+| System Admin | Global operations without runtime settings | Query, intake, library, review, audit, user management, and operational recovery |
+| Space Admin | Knowledge Space administration and scoped user management | Query, upload, review, folder sources, database connectors, library management, space administration, and management of allowed users |
+| Document Contributor | Document intake, review, and maintenance | Query, upload, Review Queue, document lifecycle actions in writable spaces, and ingestion visibility |
+| Chat Member | Grounded document use | Query Intelligence and visible document library access |
+| Audit Viewer | Read-only governance review | System Audit, visible document/space metadata, and ingestion visibility |
+
+`User Manager` and `Reviewer` are legacy account types kept only for existing
+records and compatibility. New account assignments should use **Space Admin**
+for scoped user management and **Document Contributor** for upload plus review.
 
 ## Role Details
 
@@ -138,10 +140,10 @@ Platform Admins have global control across the workspace. They can:
 - Query across visible spaces and switch the active Knowledge Space.
 - Upload documents and operate folder ingestion.
 - Create and govern database connector profiles and approved schema catalogs.
-- Review OCR blocks.
+- Resolve Review Queue items.
 - View audit events.
 - Import RAG evaluation datasets and launch evaluation runs.
-- Configure inference roles, vLLM resources, ingestion profiles, and worker
+- Configure inference roles, vLLM resources, ingestion controls, and worker
   settings.
 
 Use this role sparingly. It can change runtime behavior for the whole system.
@@ -154,29 +156,20 @@ System Admins are global operational administrators. They can:
 - Manage Knowledge Spaces and documents globally.
 - Query, upload, reingest, restore, and delete documents.
 - Create and govern database connector profiles and approved schema catalogs.
-- Review OCR blocks.
+- Resolve Review Queue items.
 - View audit events.
 - Recover stale ingestion jobs.
 
-System Admins do not have access to Platform Admin-only configuration pages or
-RAG Evaluation.
-
-### User Manager
-
-User Managers provision and maintain users in their assigned scope. They can:
-
-- Open User Management.
-- Create users for assignable roles.
-- Edit user name, role, active state, and Knowledge Space memberships.
-- Delete manageable users.
-
-They cannot query, upload, review OCR, view audit, or change system
-configuration.
+System Admins do not have access to Platform Admin-only Runtime Settings or RAG
+Evaluation.
 
 ### Space Admin
 
 Space Admins own one or more Knowledge Spaces. They can:
 
+- Open User Management for allowed users in their assigned Knowledge Spaces.
+- Create, edit, disable, reset passwords for, and delete Chat Member and
+  Document Contributor accounts inside their scope.
 - Create, edit, and delete allowed Knowledge Spaces.
 - Upload, reingest, restore, soft delete, and in scoped cases permanently delete
   documents.
@@ -184,38 +177,47 @@ Space Admins own one or more Knowledge Spaces. They can:
 - Create and govern database connector profiles and approved schema catalogs
   for their allowed Knowledge Spaces and clearance.
 - Query documents in their spaces.
+- Open Review Queue and resolve pending OCR or PDF image-review items.
 - View ingestion health and activity for visible content.
 
 Permanent deletion is restricted and should be used only when retention policy
 allows it.
 
-### Contributor
+Space Admins cannot manage Platform Admins, System Admins, other Space Admins,
+or Audit Viewers, and cannot change global Runtime Settings or run RAG
+Evaluation.
 
-Contributors maintain documents in assigned spaces. They can:
+### Document Contributor
+
+Document Contributors maintain and quality-check documents in assigned spaces.
+They can:
 
 - Query visible indexed documents.
 - Upload files into writable Knowledge Spaces.
+- Open Review Queue and resolve pending OCR or PDF image-review items.
 - Track ingestion jobs.
 - Reingest, restore, or move writable documents to Trash.
 
-They cannot manage users, spaces, review queues, audit pages, RAG evaluations,
-or platform settings.
+They cannot manage users, spaces, connector approvals, audit pages, RAG
+evaluations, or platform settings.
 
-### Reviewer
+### Chat Member
 
-Reviewers resolve extraction issues. They can:
+Chat Members use the system for grounded answers. They can:
 
-- Query visible indexed documents.
-- Open the OCR Review Queue.
-- Inspect source pages and correction context.
-- Approve corrected extraction text or reject a bad block.
-- View ingestion status for visible content.
+- Ask questions in Query Intelligence.
+- Scope queries to a Knowledge Space or individual documents.
+- Inspect citations and evidence.
+- View documents visible to their role and clearance.
+- Open their own Account page and change their password.
 
-Reviewers normally do not upload or manage documents.
+Chat Members cannot upload, manage documents, use Review Queue, audit, manage users,
+or change settings.
 
-### Auditor
+### Audit Viewer
 
-Auditors inspect governance activity. They can:
+Audit Viewers inspect governance activity without changing system state. They
+can:
 
 - Open System Audit.
 - Review visible audit events, actors, targets, payload summaries, and creation
@@ -224,21 +226,8 @@ Auditors inspect governance activity. They can:
   exposes it.
 - View ingestion activity and health summaries.
 
-Auditors do not have Query Intelligence, upload, review, user management, or
-configuration access.
-
-### Member
-
-Members use the system for grounded answers. They can:
-
-- Ask questions in Query Intelligence.
-- Scope queries to a Knowledge Space or individual documents.
-- Inspect citations and evidence.
-- View documents visible to their role and clearance.
-- Open their own Account page and change their password.
-
-Members cannot upload, manage documents, review OCR, audit, manage users, or
-change settings.
+Audit Viewers do not have Query Intelligence, upload, review, user management,
+or configuration access.
 
 ## Getting Started
 
@@ -461,19 +450,21 @@ stored credentials.
 
 ### Capture and Review the Schema
 
-1. Click **Schema** on a tested profile.
+1. Click **Read Schema** on a tested profile.
 2. Review the captured table, column, relationship, index, and estimated-row
    information. Raw schema JSON is available for detailed inspection.
-3. Click **AI draft** to create a reviewable schema catalog. A writable
+3. Click **Prepare Review** to create a reviewable schema catalog. A writable
    Knowledge Space is required. Prudentia enriches tables one at a time and
    saves completed work, so the window can be closed while enrichment continues.
-4. Open **Review** under **Approved database scopes**.
+4. Open **Review Access** under **Schema Reviews**.
 5. Correct the catalog name, business rules, table and column descriptions, and
    synonyms. Mark tables and columns as allowed or disallowed, and flag
    sensitive fields.
-6. Select the Knowledge Space and clearance level that govern who can see this
-   source.
-7. Save the catalog as draft or reviewed, or click **Approve Scope** when the
+6. In **Access**, choose the owner Knowledge Space, optional shared Knowledge
+   Spaces, and clearance level that govern who can see this source.
+7. If enrichment is incomplete, select **Continue AI Enrichment** before final
+   approval.
+8. Select **Save Review** while drafting, or **Enable Live DB Access** when the
    catalog is ready for live queries.
 
 AI-generated descriptions are suggestions only. Live DB retrieval cannot use a
@@ -483,8 +474,10 @@ unapproved joins, system schemas, and chained SQL statements are blocked.
 
 ### Manage Approved Database Scopes
 
-The connector overview shows saved profiles, approved scope count, test status,
-and Live DB readiness. You can edit, retest, re-introspect, review, disable, or
+The connector overview is split into **Connections**, **Schema Reviews**,
+**Live Access**, and **Diagnostics** tabs. It shows saved profiles, allowed
+table, column, and join counts, access scope, clearance, test status, and Live
+DB readiness. You can edit, retest, read schema, review access, disable, or
 delete profiles and catalogs as permissions allow.
 
 Disabling a catalog removes it from Live DB source selection without deleting
@@ -583,12 +576,13 @@ Space Admins and global admins can create, edit, or delete Knowledge Spaces.
 Deleting a Knowledge Space only works when it is empty, has no child spaces, and
 has no assigned users.
 
-## OCR Review Queue
+## Review Queue
 
-Open **Review Queue** to resolve low-confidence extraction blocks before
-affected documents continue into the searchable library.
+Open **Review Queue** to resolve extraction holds before affected documents
+continue into the searchable library. The page has separate tabs for OCR blocks
+and PDF image batches.
 
-The review workspace includes:
+The **OCR blocks** tab includes:
 
 - Pending OCR blocks grouped by document.
 - Confidence indicators and quality flags.
@@ -596,7 +590,7 @@ The review workspace includes:
 - Original OCR text.
 - Editable corrected extraction text.
 
-To review an item:
+To review an OCR item:
 
 1. Select a pending block.
 2. Compare the OCR text with the document page.
@@ -607,9 +601,19 @@ To review an item:
 Approval requires non-empty corrected text. When the queue is clear, the page
 shows a ready state.
 
+The **PDF images** tab appears when large image-analysis batches pause for
+human triage. Select a held document batch, review the candidate thumbnails, and
+choose **Analyze selected**, **Analyze recommended**, **Skip selected**, or
+**Skip all pending**. The ingestion job resumes when no image candidates remain
+pending.
+
 ## User Management
 
-Platform Admins, System Admins, and User Managers can open **User Management**.
+Platform Admins, System Admins, and Space Admins can open **Govern > User
+Management**. Every signed-in user manages their own password and session from
+**Account Management** in the sidebar footer. Space Admins manage only allowed
+Chat Member and Document Contributor accounts inside their assigned Knowledge
+Spaces.
 
 ### Create a User
 
@@ -645,7 +649,8 @@ Documents and audit history are retained.
 
 - Platform Admins can assign any role.
 - System Admins can assign any role except Platform Admin.
-- User Managers cannot assign Platform Admin or System Admin.
+- Space Admins can assign Chat Member or Document Contributor accounts inside
+  their own Knowledge Space and clearance scope.
 - Scoped managers can only assign spaces and clearance levels allowed by their
   own account.
 
@@ -683,9 +688,15 @@ repeatable datasets.
 5. Click **Import dataset**.
 
 Dataset cases should include a `question` or `query`. Recommended fields include
-stable `id` or `case_id`, expected source documents, must-include text,
-must-not-include text, citation requirements, faithfulness threshold, and
+stable `id` or `case_id`, `expected_answer`, expected source documents,
+acceptable source pages, minimum source count, degradation policy, must-include
+text, must-not-include text, citation requirements, faithfulness threshold, and
 latency threshold.
+
+Common optional fields include `expected_source_docs`,
+`acceptable_source_pages`, `min_sources`, `must_include`, `must_not_include`,
+`must_cite_source` or `requires_citations`, `min_faithfulness_score`,
+`allow_degraded`, and `latency_threshold_ms`.
 
 ### Launch a Run
 
@@ -701,12 +712,18 @@ results, answer text, diagnostics JSON, and node timings.
 
 Active runs can be cancelled. Failed, partial, or cancelled runs can be retried.
 
-## System Configuration
+Answer-content checks first use deterministic literal matching. When the
+evaluation answer LLM verifier is enabled, a failed literal must-include check
+can be reviewed semantically by the configured model. The verdict is recorded in
+the case **Checks and diagnostic JSON** as `answer_content.llm_verifier`.
 
-The **Configs** page is Platform Admin-only. It is divided into **Models &
-Roles**, **Inference Services**, and **Ingestion Worker Capacity**. The status
-strip shows the active stack, whether the draft differs from the active config,
-model discovery health, and whether a vLLM restart is pending.
+## Runtime Settings
+
+The **Runtime Settings** page under **Govern > Runtime Settings** is Platform
+Admin-only. It is divided into **Models & Roles**, **Inference Services**, and
+**Ingestion Controls**. The status strip shows the active stack, whether the
+draft differs from the active runtime, model discovery health, and whether a
+vLLM restart is pending.
 
 ### Models & Roles
 
@@ -767,14 +784,11 @@ selected vLLM service, interrupts requests using that service, and recreates its
 container. These controls do not change the active model assignments in
 **Models & Roles**.
 
-### Ingestion Profiles and Worker Capacity
+### Ingestion Controls and Ingestion Settings
 
-Use **Ingestion Worker Capacity** to choose how new documents are parsed and how
-many jobs each worker replica can process at once.
-
-The profile on **Add Files** applies to that upload batch. The Configs value is
-the workspace default for ingestion requests that do not explicitly choose a
-profile.
+Use **Ingestion Controls** to manage worker capacity, review gates, and
+enrichment behavior for new ingestion jobs. The quality profile on **Add Files**
+still applies to that upload batch.
 
 | Ingestion profile | Behavior | Use when |
 | --- | --- | --- |
@@ -789,21 +803,27 @@ Additional controls are:
   confirmation above 4.
 - **OCR review threshold**: 0-100 percent. Blocks below the selected confidence
   pause in Review Queue.
+- **PDF image review threshold**: 0-10000 selected image candidates. Set it to
+  0 to skip the image-review gate; otherwise, batches above the threshold pause
+  in Review Queue before vision analysis runs.
 - **Vision layout repair**: asks the assigned vision model to re-read complex
   PDF pages after Docling. Keep it off for faster bulk ingestion; enable it when
   layout fidelity is more important than throughput.
+- **Graph enrichment**: shows the graph enrichment action for completed
+  documents. Keep it off for faster bulk ingestion when graph analysis is not
+  needed.
 
-The active-config facts show worker availability, the selected quality profile,
-apply status, observed pool size, active jobs, OCR threshold, and vision-repair
-state. Quality, OCR, and vision choices apply to new jobs. If no worker is
-online, the configuration is saved and capacity applies when a worker starts.
+The active runtime facts show worker availability, apply status, observed pool
+size, active jobs, OCR review threshold, PDF image review threshold,
+vision-repair state, and graph-enrichment state. If no worker is online, the
+configuration is saved and applies when a worker starts.
 
 ## Common Troubleshooting
 
 ### I Cannot See a Page
 
-Your role does not have that route. Ask a Platform Admin, System Admin, or User
-Manager to confirm your account type and Knowledge Space memberships.
+Your role does not have that route. Ask a Platform Admin, System Admin, or Space
+Admin to confirm your account type and Knowledge Space memberships.
 
 ### I Cannot Query
 
@@ -831,8 +851,11 @@ Check that:
 
 ### A Document Says Needs Review
 
-Open Review Queue with a Reviewer, System Admin, or Platform Admin account.
-Approve corrected OCR text or reject bad blocks so ingestion can continue.
+Open Review Queue with a Document Contributor, Space Admin, System Admin, or
+Platform Admin account. Use **OCR blocks** to approve corrected text or reject
+bad blocks. Use **PDF images** to choose which candidate images should be
+analyzed or skipped. Ingestion continues when the relevant queue item is fully
+resolved.
 
 ### A Job Looks Stuck
 
@@ -907,13 +930,13 @@ expectations, then retry the run.
 
 1. Sign in with the bootstrap account.
 2. Change the bootstrap password.
-3. Confirm **Configs** runtime health, role assignments, query planner, and
-   ingestion profile.
+3. Confirm **Runtime Settings** runtime health, role assignments, query planner,
+   and ingestion controls.
 4. Confirm GraphRAG queue and worker health in Ingestion Health when GraphRAG is
    enabled.
 5. Create top-level Knowledge Spaces.
-6. Create System Admin, User Manager, Space Admin, Reviewer, Auditor, and
-   Member accounts as needed.
+6. Create System Admin, Space Admin, Document Contributor, Chat Member, and
+   Audit Viewer accounts as needed.
 7. If live database access is required, test a connector, review its schema,
    and approve only the minimum required database scope.
 8. Import or upload pilot documents.
@@ -927,53 +950,33 @@ expectations, then retry the run.
 2. Upload or schedule documents.
 3. Monitor Activity and Ingestion Health.
 4. Resolve failed or stale ingestion jobs.
-5. Review OCR blocks when needed.
+5. Resolve Review Queue items when needed.
 6. Test and review database connector scopes when live data is in use.
 7. Check audit events for important document mutations.
-
-### User Manager
-
-1. Open User Management.
-2. Search for the target user.
-3. Create or edit users inside your allowed scope.
-4. Confirm account type, active state, and Knowledge Spaces.
-5. Hand off the initial password securely.
 
 ### Space Admin
 
 1. Create or confirm Knowledge Spaces.
-2. Upload documents or configure folder sources.
-3. If live data is required, test a read-only connector and approve a
+2. Open User Management and create scoped Chat Member or Document Contributor
+   accounts when needed.
+3. Upload documents or configure folder sources.
+4. If live data is required, test a read-only connector and approve a
    least-privilege schema catalog for the correct space and clearance.
-4. Monitor ingestion and GraphRAG activity.
-5. Reingest or restore documents as needed.
-6. Clean Trash only when retention policy allows.
+5. Monitor ingestion, Review Queue, and GraphRAG activity.
+6. Reingest or restore documents as needed.
+7. Clean Trash only when retention policy allows.
 
-### Contributor
+### Document Contributor
 
 1. Select the correct writable Knowledge Space.
 2. Upload source files with dates and description.
-3. Track ingestion progress.
-4. Ask a smoke query after indexing completes.
-5. Reingest or move incorrect documents to Trash if needed.
+3. Track ingestion progress and open Review Queue when documents need review.
+4. Compare OCR text to source page, then approve corrected text or reject
+   unusable blocks.
+5. Ask a smoke query after indexing completes.
+6. Reingest or move incorrect documents to Trash if needed.
 
-### Reviewer
-
-1. Open Review Queue.
-2. Work from lowest-confidence or oldest blocks.
-3. Compare OCR text to source page.
-4. Approve corrected text or reject unusable blocks.
-5. Refresh the queue and continue until clear.
-
-### Auditor
-
-1. Open System Audit.
-2. Review recent document and authentication events.
-3. Check target, actor, payload, and created time.
-4. Open visible library metadata when more context is needed.
-5. Escalate suspicious or missing activity to an admin.
-
-### Member
+### Chat Member
 
 1. Pick the correct Knowledge Space.
 2. Choose Auto, Documents, Live DB, or Hybrid for the question.
@@ -981,3 +984,11 @@ expectations, then retry the run.
 4. Use `@` to scope to a document when needed.
 5. Inspect citations and evidence.
 6. Start a new chat when switching topics.
+
+### Audit Viewer
+
+1. Open System Audit.
+2. Review recent document and authentication events.
+3. Check target, actor, payload, and created time.
+4. Open visible library metadata when more context is needed.
+5. Escalate suspicious or missing activity to an admin.

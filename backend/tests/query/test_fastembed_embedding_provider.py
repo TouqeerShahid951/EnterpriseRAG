@@ -26,7 +26,7 @@ def test_fastembed_embedding_provider_uses_local_model_catalog(monkeypatch) -> N
         raise AssertionError(f"unexpected network call: {base_url} {path}")
 
     monkeypatch.setattr(rag_config_service, "request_json", fake_request_json)
-    monkeypatch.setattr(rag_config_service, "list_supported_dense_models", lambda: ["nomic-ai/nomic-embed-text-v1.5-Q"])
+    monkeypatch.setattr(rag_config_service, "list_supported_dense_models", lambda **_: ["nomic-ai/nomic-embed-text-v1.5-Q"])
     monkeypatch.setattr(
         rag_config_service,
         "embed_dense_texts",

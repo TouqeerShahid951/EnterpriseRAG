@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from types import SimpleNamespace
 from typing import Callable
 from uuid import uuid4
 
@@ -21,12 +22,14 @@ from .images import (
     ScannedVisualRegionResult,
     docx_image_sources,
     image_dimensions,
+    image_source_candidate_key,
     image_sources_to_items,
     parse_image_document,
     pdf_image_sources,
     pdf_page_image_sources,
     pdf_scanned_visual_region_sources,
     pdf_visual_sources,
+    _vision_analysis_payload,
 )
 from .json import parse_json_document
 from .models import DocumentParseResult, ParsedImageAsset, ParsedPdfItem
@@ -53,10 +56,12 @@ DEFAULT_PDF_IMAGE_MAX_FULL_PAGE_FALLBACKS = None
 @dataclass(frozen=True)
 class PdfImageSelection:
     sources: list[ImageSource]
+    source_scores: dict[str, int] = field(default_factory=dict)
     skipped_unnecessary_count: int = 0
     skipped_duplicate_count: int = 0
     skipped_limit_count: int = 0
     skipped_full_page_fallback_count: int = 0
+    skipped_review_count: int = 0
 
     @property
     def skipped_count(self) -> int:
@@ -65,7 +70,22 @@ class PdfImageSelection:
             + self.skipped_duplicate_count
             + self.skipped_limit_count
             + self.skipped_full_page_fallback_count
+            + self.skipped_review_count
         )
+
+
+class PdfImageReviewRequired(RuntimeError):
+    def __init__(
+        self,
+        *,
+        parsed: DocumentParseResult,
+        visual_sources: PdfVisualSourceResult,
+        image_selection: PdfImageSelection,
+    ) -> None:
+        super().__init__("pdf image review required")
+        self.parsed = parsed
+        self.visual_sources = visual_sources
+        self.image_selection = image_selection
 
 
 VISION_LAYOUT_REPAIR_FLAGS = {
@@ -123,9 +143,11 @@ def parse_document(
     image_progress_callback: ImageProgressCallback | None = None,
     pdf_image_analysis_max_images: int | None = None,
     pdf_image_analysis_max_full_page_fallbacks: int | None = DEFAULT_PDF_IMAGE_MAX_FULL_PAGE_FALLBACKS,
+    pdf_image_review_threshold: int | None = None,
+    pdf_image_review_approved_keys: set[str] | None = None,
     scanned_visual_region_enabled: bool = True,
     scanned_visual_min_area_ratio: float = 0.03,
-    scanned_visual_max_regions_per_page: int = 4,
+    scanned_visual_max_regions_per_page: int = -1,
     scanned_visual_text_mask_padding_px: int = 8,
     vision_layout_repair_enabled: bool = False,
     doc_id: str | None = None,
@@ -203,6 +225,14 @@ def parse_document(
             scanned_visual_region_pages=scanned_visual_regions.visual_region_pages,
             scanned_visual_fallback_pages=scanned_visual_regions.whole_page_fallback_pages,
         )
+        if pdf_image_review_approved_keys is not None:
+            image_selection = _filter_pdf_image_selection_for_review(image_selection, pdf_image_review_approved_keys)
+        elif (
+            pdf_image_review_threshold is not None
+            and pdf_image_review_threshold > 0
+            and len(image_selection.sources) > pdf_image_review_threshold
+        ):
+            raise PdfImageReviewRequired(parsed=parsed, visual_sources=visual_sources, image_selection=image_selection)
         image_items, image_assets = image_sources_to_items(
             image_selection.sources,
             doc_id=image_context[0],
@@ -222,6 +252,7 @@ def parse_document(
             skipped_duplicate_count=image_selection.skipped_duplicate_count,
             skipped_limit_count=image_selection.skipped_limit_count,
             skipped_full_page_fallback_count=image_selection.skipped_full_page_fallback_count,
+            skipped_review_count=image_selection.skipped_review_count,
             scanned_visual_regions=scanned_visual_regions,
         )
     if kind == "docx":
@@ -262,6 +293,48 @@ def parse_document(
             filename=file_path.rsplit("/", 1)[-1] or "upload",
         )
     raise UnsupportedDocumentError()
+
+
+def resume_pdf_image_review(
+    parsed_items: list[ParsedPdfItem],
+    approved_sources: list[ImageSource],
+    *,
+    doc_id: str,
+    image_asset_store: ImageAssetStore,
+    image_analyzer: ImageAnalyzer,
+    candidate_count: int | None = None,
+    image_progress_callback: ImageProgressCallback | None = None,
+) -> DocumentParseResult:
+    image_items, image_assets = image_sources_to_items(
+        approved_sources,
+        doc_id=doc_id,
+        store=image_asset_store,
+        analyzer=image_analyzer,
+        start_index=len(parsed_items),
+        progress_callback=image_progress_callback,
+    )
+    skipped_review_count = max(0, candidate_count - len(approved_sources)) if candidate_count is not None else 0
+    parsed = DocumentParseResult(
+        items=parsed_items,
+        provenance=base_report(
+            document_kind="pdf",
+            page_count=_page_count(parsed_items),
+            primary_parser="review_resume",
+            secondary_parser="vision",
+            routing_mode="image_review_resume",
+            config={},
+            items=parsed_items,
+        ),
+    )
+    return _append_image_outputs(
+        parsed,
+        image_items=image_items,
+        image_assets=image_assets,
+        image_candidate_count=candidate_count,
+        image_selected_count=len(approved_sources),
+        skipped_image_count=skipped_review_count,
+        skipped_review_count=skipped_review_count,
+    )
 
 
 def _parse_pdf_with_ocr_fallback(
@@ -416,7 +489,7 @@ def _repair_pdf_complex_layout_with_vision(
             page=source.page,
         )
         try:
-            analysis = analyze_layout(content=source.content, content_type=source.content_type)
+            analysis = _analyze_layout_source(source, analyze_layout)
         except Exception:
             logger.exception("Vision layout repair failed for PDF page %s", source.page)
             evaluations.append({"page": source.page, "decision": "skipped", "reason": "vision_layout_request_failed"})
@@ -482,7 +555,9 @@ def _repair_pdf_complex_layout_with_vision(
                 extracted_text=_items_text(candidate_items) or None,
                 caption="Vision layout repair page render",
                 confidence=_analysis_confidence(analysis),
-                quality_flags=sorted({*source.quality_flags, "source:vision", "vision_layout_repair"}),
+                quality_flags=sorted(
+                    {*source.quality_flags, *_analysis_quality_flags(analysis), "source:vision", "vision_layout_repair"}
+                ),
             )
         )
         replacements[source.page] = _vision_layout_items_from_analysis(
@@ -507,6 +582,51 @@ def _repair_pdf_complex_layout_with_vision(
         candidate_pages=candidate_pages,
         evaluations=evaluations,
     )
+
+
+def _analyze_layout_source(source: ImageSource, analyze_layout: Callable[..., object]) -> object:
+    content, content_type, flags = _vision_analysis_payload(source)
+    analysis = analyze_layout(content=content, content_type=content_type)
+    if "vision_input_resized" not in flags or not _layout_analysis_needs_original_retry(analysis):
+        return _with_layout_analysis_flags(analysis, flags)
+    original_analysis = analyze_layout(content=source.content, content_type=source.content_type)
+    if not _layout_analysis_needs_original_retry(original_analysis) or _layout_analysis_signal_score(original_analysis) >= _layout_analysis_signal_score(analysis):
+        return _with_layout_analysis_flags(original_analysis, ["vision_layout_retry_original"])
+    return _with_layout_analysis_flags(analysis, [*flags, "vision_layout_retry_original_no_improvement"])
+
+
+def _layout_analysis_needs_original_retry(analysis: object) -> bool:
+    flags = _analysis_quality_flags(analysis)
+    if any(flag.startswith("vision_layout_failed") for flag in flags) or "vision_layout_empty_response" in flags:
+        return True
+    confidence = _analysis_confidence(analysis)
+    if confidence is not None and confidence < MIN_VISION_LAYOUT_CONFIDENCE:
+        return True
+    return _layout_analysis_text_chars(analysis) < MIN_VISION_LAYOUT_CHARS
+
+
+def _layout_analysis_signal_score(analysis: object) -> float:
+    score = float(_layout_analysis_text_chars(analysis))
+    confidence = _analysis_confidence(analysis)
+    if confidence is not None:
+        score += confidence * 50
+    if any(flag.startswith("vision_layout_failed") for flag in _analysis_quality_flags(analysis)):
+        score -= 100
+    return score
+
+
+def _with_layout_analysis_flags(analysis: object, extra_flags: list[str]) -> object:
+    if not extra_flags:
+        return analysis
+    flags = sorted({*_analysis_quality_flags(analysis), *extra_flags})
+    try:
+        return replace(analysis, quality_flags=flags)
+    except TypeError:
+        return SimpleNamespace(blocks=_analysis_blocks(analysis), confidence=_analysis_confidence(analysis), quality_flags=flags)
+
+
+def _layout_analysis_text_chars(analysis: object) -> int:
+    return _text_char_count("\n".join(_block_text(block) for block in _analysis_blocks(analysis)))
 
 
 def _vision_layout_candidate_pages(items: list[ParsedPdfItem]) -> set[int]:
@@ -953,6 +1073,7 @@ def _append_image_outputs(
     skipped_duplicate_count: int = 0,
     skipped_limit_count: int = 0,
     skipped_full_page_fallback_count: int = 0,
+    skipped_review_count: int = 0,
     scanned_visual_regions: ScannedVisualRegionResult | None = None,
 ) -> DocumentParseResult:
     if not image_items and not image_assets and skipped_image_count <= 0:
@@ -974,6 +1095,8 @@ def _append_image_outputs(
         image_provenance["image_analysis_skipped_limit_count"] = skipped_limit_count
     if skipped_full_page_fallback_count > 0:
         image_provenance["image_analysis_skipped_full_page_fallback_count"] = skipped_full_page_fallback_count
+    if skipped_review_count > 0:
+        image_provenance["image_analysis_skipped_review_count"] = skipped_review_count
     if scanned_visual_regions is not None:
         image_provenance["scanned_page_class_counts"] = scanned_visual_regions.page_class_counts
         image_provenance["scanned_visual_candidate_count"] = scanned_visual_regions.candidate_count
@@ -1085,9 +1208,11 @@ def _select_pdf_image_sources_for_analysis(
                 continue
             full_page_fallback_count += 1
         selected.append((score, order, source))
+    source_scores = {image_source_candidate_key(source): score for score, _, source in selected}
     if max_images is None or max_images < 0 or len(selected) <= max_images:
         return PdfImageSelection(
             sources=[source for _, _, source in selected],
+            source_scores=source_scores,
             skipped_unnecessary_count=skipped_unnecessary_count,
             skipped_duplicate_count=skipped_duplicate_count,
             skipped_full_page_fallback_count=skipped_full_page_fallback_count,
@@ -1095,6 +1220,7 @@ def _select_pdf_image_sources_for_analysis(
     if max_images == 0:
         return PdfImageSelection(
             sources=[],
+            source_scores={},
             skipped_unnecessary_count=skipped_unnecessary_count,
             skipped_duplicate_count=skipped_duplicate_count,
             skipped_full_page_fallback_count=skipped_full_page_fallback_count,
@@ -1105,12 +1231,28 @@ def _select_pdf_image_sources_for_analysis(
         for _, order, _ in sorted(selected, key=lambda item: (-item[0], item[1]))[:max_images]
     }
     limited_sources = [source for _, order, source in selected if order in selected_orders]
+    limited_scores = {image_source_candidate_key(source): score for score, order, source in selected if order in selected_orders}
     return PdfImageSelection(
         sources=limited_sources,
+        source_scores=limited_scores,
         skipped_unnecessary_count=skipped_unnecessary_count,
         skipped_duplicate_count=skipped_duplicate_count,
         skipped_full_page_fallback_count=skipped_full_page_fallback_count,
         skipped_limit_count=len(selected) - len(limited_sources),
+    )
+
+
+def _filter_pdf_image_selection_for_review(selection: PdfImageSelection, approved_keys: set[str]) -> PdfImageSelection:
+    approved_sources = [source for source in selection.sources if image_source_candidate_key(source) in approved_keys]
+    approved_scores = {
+        image_source_candidate_key(source): selection.source_scores.get(image_source_candidate_key(source), 0)
+        for source in approved_sources
+    }
+    return replace(
+        selection,
+        sources=approved_sources,
+        source_scores=approved_scores,
+        skipped_review_count=selection.skipped_review_count + len(selection.sources) - len(approved_sources),
     )
 
 

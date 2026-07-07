@@ -14,10 +14,10 @@ from rag.schemas.docs import DocumentTopicsUpdateRequest
 
 class FakeQdrant:
     def __init__(self) -> None:
-        self.topic_updates: list[tuple[str, list[str]]] = []
+        self.topic_updates: list[tuple[str, list[str], list[str]]] = []
 
-    def set_document_topics(self, doc_id: str, *, topics: list[str]) -> None:
-        self.topic_updates.append((doc_id, topics))
+    def set_document_topics(self, doc_id: str, *, topics: list[str], llm_topics: list[str]) -> None:
+        self.topic_updates.append((doc_id, topics, llm_topics))
 
 
 def test_update_document_topics_persists_curated_topics_and_syncs_qdrant() -> None:
@@ -30,7 +30,7 @@ def test_update_document_topics_persists_curated_topics_and_syncs_qdrant() -> No
     response = asyncio.run(
         document_routes.update_document_topics(
             document.id,
-            DocumentTopicsUpdateRequest(topics=["OCR", "ocr", "Handwriting"], llm_topics=[]),
+            DocumentTopicsUpdateRequest(topics=["OCR", "ocr", "Handwriting"], llm_topics=["LLM Topic"]),
             _csrf_request(),
             user=user,
             repo=repo,
@@ -39,8 +39,8 @@ def test_update_document_topics_persists_curated_topics_and_syncs_qdrant() -> No
     )
 
     assert response.topics == ["OCR", "Handwriting"]
-    assert response.llm_topics == []
-    assert qdrant.topic_updates == [(document.id, ["OCR", "Handwriting"])]
+    assert response.llm_topics == ["LLM Topic"]
+    assert qdrant.topic_updates == [(document.id, ["OCR", "Handwriting"], ["LLM Topic"])]
     assert repo.audit_events[-1]["event_type"] == "documents.topics_update"
     assert repo.audit_events[-1]["payload"]["old_llm_topics"] == ["LLM Old"]
 

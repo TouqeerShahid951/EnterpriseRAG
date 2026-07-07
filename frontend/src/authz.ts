@@ -3,10 +3,8 @@ import type { AccountType, ClearanceLevel, User } from "./types/api";
 export const accountTypeOptions: AccountType[] = [
   "platform_admin",
   "system_admin",
-  "user_manager",
   "space_admin",
   "contributor",
-  "reviewer",
   "auditor",
   "member",
 ];
@@ -27,12 +25,12 @@ export function accountTypeLabel(accountType: AccountType): string {
   return {
     platform_admin: "Platform Admin",
     system_admin: "System Admin",
-    user_manager: "User Manager",
+    user_manager: "Space Admin (legacy)",
     space_admin: "Space Admin",
-    contributor: "Contributor",
-    reviewer: "Reviewer",
-    auditor: "Auditor",
-    member: "Member",
+    contributor: "Document Contributor",
+    reviewer: "Document Reviewer (legacy)",
+    auditor: "Audit Viewer",
+    member: "Chat Member",
   }[accountType];
 }
 
@@ -71,29 +69,30 @@ export function clearanceLevelsAssignableBy(user: User): ClearanceLevel[] {
 
 export function roleDescription(accountType: AccountType): string {
   return {
-    platform_admin: "Global control across users, spaces, config, documents, review, audit, and queries.",
-    system_admin: "Global control across users, spaces, documents, review, audit, and queries, excluding configs and RAG evaluations.",
-    user_manager: "Creates and manages non-global-admin users within assigned Knowledge Spaces.",
-    space_admin: "Manages Knowledge Spaces and document governance within assigned scopes.",
-    contributor: "Uploads and manages documents in assigned Knowledge Spaces.",
-    reviewer: "Reviews low-confidence extraction and answer-quality items.",
+    platform_admin: "Global control across users, spaces, Runtime Settings, documents, review, audit, and queries.",
+    system_admin: "Global control across users, spaces, documents, review, audit, and queries, excluding Runtime Settings and RAG evaluations.",
+    user_manager: "Legacy scoped admin account. Use Space Admin for new assignments.",
+    space_admin: "Manages users, Knowledge Spaces, documents, upload, review, and chat within assigned scopes.",
+    contributor: "Chats with documents, uploads source files, and reviews ingestion/OCR issues in assigned Knowledge Spaces.",
+    reviewer: "Legacy intake account that uploads and reviews documents without chat access.",
     auditor: "Views audit, user, space, and document metadata without query or content access.",
-    member: "Queries and reads documents in assigned Knowledge Spaces.",
+    member: "Chats with and reads documents in assigned Knowledge Spaces.",
   }[accountType];
 }
 
 export function canQuery(user: User): boolean {
-  return ["platform_admin", "system_admin", "space_admin", "contributor", "reviewer", "member"].includes(user.account_type);
+  return ["platform_admin", "system_admin", "space_admin", "contributor", "member"].includes(user.account_type);
 }
 
 export function canUpload(user: User): boolean {
-  return ["platform_admin", "system_admin", "space_admin", "contributor"].includes(user.account_type);
+  return ["platform_admin", "system_admin", "space_admin", "contributor", "reviewer"].includes(user.account_type);
 }
 
 export function canUploadToSpace(user: User, groupPath: string): boolean {
   if (isGlobalAdmin(user)) return Boolean(groupPath);
   if (user.account_type === "space_admin") return isGroupPathInUserScope(user, groupPath);
   if (user.account_type === "contributor") return hasExactGroupScope(user, groupPath);
+  if (user.account_type === "reviewer") return hasExactGroupScope(user, groupPath);
   return false;
 }
 
@@ -102,11 +101,11 @@ export function canWriteDocument(user: User, groupPath: string, clearanceLevel?:
 }
 
 export function canReview(user: User): boolean {
-  return ["platform_admin", "system_admin", "reviewer"].includes(user.account_type);
+  return ["platform_admin", "system_admin", "space_admin", "contributor", "reviewer"].includes(user.account_type);
 }
 
 export function canManageUsers(user: User): boolean {
-  return ["platform_admin", "system_admin", "user_manager"].includes(user.account_type);
+  return ["platform_admin", "system_admin", "space_admin", "user_manager"].includes(user.account_type);
 }
 
 export function canManageSpaces(user: User): boolean {
@@ -136,7 +135,7 @@ export function isGlobalAdmin(user: User): boolean {
 export function canAssignAccountType(actor: User, accountType: AccountType): boolean {
   if (actor.account_type === "platform_admin") return true;
   if (actor.account_type === "system_admin") return accountType !== "platform_admin";
-  return actor.account_type === "user_manager" && !["platform_admin", "system_admin"].includes(accountType);
+  return ["space_admin", "user_manager"].includes(actor.account_type) && ["contributor", "member"].includes(accountType);
 }
 
 export function isGroupPathInUserScope(user: User, groupPath: string): boolean {

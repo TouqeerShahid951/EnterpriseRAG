@@ -56,6 +56,7 @@ def synthesize_graphrag_response(
         cancellation_token,
         question=_graphrag_question(ctx),
         contexts=contexts,
+        profile="graphrag_global",
     )
     if is_global_abstention(answer):
         sources = []

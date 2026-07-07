@@ -17,7 +17,13 @@ from rag.shared.thinking import (
 
 from ..errors import EmbeddingUnavailable
 from .http import ServiceRequestError, request_json
-from .ollama import METADATA_NUM_PREDICT, _coerce_metadata, _metadata_fallback, is_transient_service_error
+from .ollama import (
+    METADATA_NUM_PREDICT,
+    _coerce_metadata,
+    _metadata_fallback,
+    is_transient_service_error,
+    metadata_timeout_seconds,
+)
 
 METADATA_EXCEPTION_WARNING = "metadata_extraction_exception"
 
@@ -49,19 +55,13 @@ class OpenAICompatibleClient:
 
     def generate_metadata(self, text: str) -> dict[str, Any]:
         prompt = (
-            "Return ONLY a valid JSON object. "
-            "Do not return markdown, prose, YAML, labels, or numbered lists. "
-            "Use exactly these keys: summary, llm_topics, doc_type, claims. "
-            "summary must contain exactly two factual sentences. "
-            "llm_topics must be an array of 3 to 8 short strings. "
-            "doc_type must be a concise freeform string. "
-            "claims must be an array of objects, not strings; each claim object must have string keys "
-            "entity, attribute, and value. If there are no explicit claims, use an empty array.\n\n"
-            f"Document text:\n{text[:6000]}"
+            "JSON only: summary, llm_topics, doc_type. "
+            "summary=1 factual sentence; llm_topics=3-5 short strings; doc_type=short. "
+            f"Text:\n{text[:2000]}"
         )
         last_error: ServiceRequestError | None = None
         last_attempt = 0
-        for attempt in range(3):
+        for attempt in range(1):
             last_attempt = attempt + 1
             try:
                 payload = request_json(
@@ -79,14 +79,12 @@ class OpenAICompatibleClient:
                         "messages": [
                             {
                                 "role": "system",
-                                "content": no_thinking_system(
-                                    "You are a strict JSON metadata extraction API. Return only valid JSON."
-                                ),
+                                "content": no_thinking_system("Return valid JSON only."),
                             },
                             {"role": "user", "content": no_thinking_prompt(prompt, self.chat_model)},
                         ],
                     },
-                    timeout_seconds=self.chat_timeout_seconds,
+                    timeout_seconds=metadata_timeout_seconds(self.chat_timeout_seconds),
                 )
                 parsed = json.loads(_message_content(payload))
                 if not isinstance(parsed, dict):

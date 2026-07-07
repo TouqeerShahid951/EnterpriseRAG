@@ -20,7 +20,9 @@ CREATE TABLE IF NOT EXISTS workspace_ingest_config (
     worker_concurrency INTEGER NOT NULL DEFAULT 1,
     quality_preset TEXT NOT NULL DEFAULT 'fast',
     ocr_review_confidence_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.9,
+    pdf_image_review_threshold INTEGER NOT NULL DEFAULT 64,
     vision_layout_repair_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    graph_enrichment_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     updated_by UUID NULL REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -31,6 +33,9 @@ CREATE TABLE IF NOT EXISTS workspace_ingest_config (
     ),
     CONSTRAINT workspace_ingest_config_ocr_review_threshold CHECK (
         ocr_review_confidence_threshold >= 0 AND ocr_review_confidence_threshold <= 1
+    ),
+    CONSTRAINT workspace_ingest_config_pdf_image_review_threshold CHECK (
+        pdf_image_review_threshold BETWEEN 0 AND 10000
     )
 );
 INSERT INTO workspace_ingest_config (config_key, worker_concurrency)
@@ -41,7 +46,11 @@ ALTER TABLE workspace_ingest_config
 ALTER TABLE workspace_ingest_config
     ADD COLUMN IF NOT EXISTS ocr_review_confidence_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.9;
 ALTER TABLE workspace_ingest_config
+    ADD COLUMN IF NOT EXISTS pdf_image_review_threshold INTEGER NOT NULL DEFAULT 64;
+ALTER TABLE workspace_ingest_config
     ADD COLUMN IF NOT EXISTS vision_layout_repair_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE workspace_ingest_config
+    ADD COLUMN IF NOT EXISTS graph_enrichment_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE workspace_ingest_config DROP CONSTRAINT IF EXISTS workspace_ingest_config_quality_preset;
 ALTER TABLE workspace_ingest_config ADD CONSTRAINT workspace_ingest_config_quality_preset CHECK (
     quality_preset IN ('fast', 'balanced', 'high_accuracy')
@@ -49,6 +58,10 @@ ALTER TABLE workspace_ingest_config ADD CONSTRAINT workspace_ingest_config_quali
 ALTER TABLE workspace_ingest_config DROP CONSTRAINT IF EXISTS workspace_ingest_config_ocr_review_threshold;
 ALTER TABLE workspace_ingest_config ADD CONSTRAINT workspace_ingest_config_ocr_review_threshold CHECK (
     ocr_review_confidence_threshold >= 0 AND ocr_review_confidence_threshold <= 1
+);
+ALTER TABLE workspace_ingest_config DROP CONSTRAINT IF EXISTS workspace_ingest_config_pdf_image_review_threshold;
+ALTER TABLE workspace_ingest_config ADD CONSTRAINT workspace_ingest_config_pdf_image_review_threshold CHECK (
+    pdf_image_review_threshold BETWEEN 0 AND 10000
 );
 
 ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS chat_latency_ms DOUBLE PRECISION NULL;

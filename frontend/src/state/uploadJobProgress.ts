@@ -1,4 +1,4 @@
-import type { GraphRAGStatus, JobStatus, UploadJobStageProgress, UploadJobState, UploadJobStep } from "../types/api";
+import type { GraphRAGStatus, JobStatus, ParserProvenance, UploadJobStageProgress, UploadJobState, UploadJobStep } from "../types/api";
 import type { UploadJobView } from "../types/chat";
 
 export const uploadTerminalStatuses: ReadonlySet<UploadJobState> = new Set(["complete", "failed", "human_review", "cancelled"]);
@@ -29,8 +29,11 @@ export function isUploadCancellableStatus(status: UploadJobState | null | undefi
 }
 
 export function toUploadJobView(jobId: string, status: JobStatus | undefined): UploadJobView {
+  const statusWithDocument = status as (JobStatus & { document_id?: string | null; retry_of_job_id?: string | null }) | undefined;
   return {
     jobId,
+    documentId: statusWithDocument?.document_id ?? null,
+    retryOfJobId: statusWithDocument?.retry_of_job_id ?? null,
     status: status?.status ?? "queued",
     progressPct: status?.progress_pct ?? 0,
     stage: status?.stage ?? "queued",
@@ -70,6 +73,23 @@ export function formatUploadWarning(value: string): string {
   return WARNING_LABELS[value] ?? labelize(value);
 }
 
+export function formatIngestRunLabel(job: IngestRunLabelJob): string {
+  const attempt = positiveInt(job.attempt_count ?? job.attemptCount, 1);
+  const maxAttempts = positiveInt(job.max_attempts ?? job.maxAttempts, 3);
+  if (isReviewResumeRun(job)) return "Resumed after review";
+  if (attempt > 1) return `Retry ${attempt} of ${maxAttempts}`;
+  return `Attempt ${attempt} of ${maxAttempts}`;
+}
+
+function isReviewResumeRun(job: IngestRunLabelJob): boolean {
+  const provenance = job.parser_provenance ?? job.parserProvenance;
+  return provenance?.routing_mode === "image_review_resume" || provenance?.primary_parser === "review_resume";
+}
+
+function positiveInt(value: number | null | undefined, fallback: number): number {
+  return Number.isFinite(value) && Number(value) > 0 ? Math.floor(Number(value)) : fallback;
+}
+
 export type GraphEnrichmentChipState = "queued" | "running" | "unavailable";
 
 export interface GraphEnrichmentChip {
@@ -85,6 +105,15 @@ export interface GraphEnrichmentTask {
   state: "queued" | "running";
   elapsedSeconds: number | null;
 }
+
+type IngestRunLabelJob = {
+  attempt_count?: number | null;
+  max_attempts?: number | null;
+  attemptCount?: number | null;
+  maxAttempts?: number | null;
+  parser_provenance?: ParserProvenance | null;
+  parserProvenance?: ParserProvenance | null;
+};
 
 export function graphEnrichmentTaskForJob(
   job: { jobId: string; documentId?: string | null },
@@ -120,15 +149,15 @@ export function graphEnrichmentForJob(
   if (graphStatusError) {
     return { state: "unavailable", label: "Graph enrichment unavailable", detail: graphStatusError };
   }
-  if (!graphStatus?.enabled) return null;
-  if (graphStatus.queue_error || graphStatus.worker_error) {
+  const graphTask = graphEnrichmentTaskForJob(job, graphStatus);
+  if (!graphStatus?.enabled && !graphTask) return null;
+  if (graphStatus?.enabled && (graphStatus.queue_error || graphStatus.worker_error)) {
     return {
       state: "unavailable",
       label: "Graph enrichment unavailable",
       detail: graphStatus.queue_error ?? graphStatus.worker_error ?? null,
     };
   }
-  const graphTask = graphEnrichmentTaskForJob(job, graphStatus);
   if (graphTask?.state === "running") {
     return {
       state: "running",

@@ -43,34 +43,39 @@ export function PrudentiaDocumentOverviewPage({ documents, documentsLoading, onL
   const spaceRows = useMemo(() => summarizeSpaces(documents), [documents]);
   const attentionDocuments = documents.filter((doc) => isAttentionStatus(doc.ingest_status));
   const attentionDocs = attentionDocuments.slice(0, 5);
-  const activeBrowserJobs = uploadJobs.filter((item) => item.requestState !== "failed" && !isUploadTerminalStatus(item.job?.status)).length;
-  const failedBrowserJobs = uploadJobs.filter((item) => item.requestState === "failed" || item.job?.status === "failed").length;
+  const activeUploadJobs = uploadJobs.filter((item) => item.requestState !== "failed" && !isUploadTerminalStatus(item.job?.status)).length;
+  const failedUploadJobs = uploadJobs.filter((item) => item.requestState === "failed" || item.job?.status === "failed").length;
   const summary = jobsSummaryQuery.data;
-  const activeJobs = (summary?.active ?? 0) + activeBrowserJobs;
-  const needsAttention = attentionDocuments.length + failedBrowserJobs;
+  const activeJobs = (summary?.active ?? 0) + activeUploadJobs;
+  const documentAttentionCount = attentionDocuments.length;
+  const needsAttention = documentAttentionCount + failedUploadJobs;
   const currentCount = documents.filter((doc) => doc.is_current).length;
   const supersededCount = documents.length - currentCount;
   const indexedCurrentCount = documents.filter((doc) => doc.is_current && doc.ingest_status === "complete").length;
-  const processingCount = documents.filter((doc) => isProcessingStatus(doc.ingest_status)).length + activeBrowserJobs;
+  const processingCount = documents.filter((doc) => isProcessingStatus(doc.ingest_status)).length + activeUploadJobs;
   const reviewCount = documents.filter((doc) => doc.ingest_status === "human_review").length;
-  const failedCount = documents.filter((doc) => doc.ingest_status === "failed").length + failedBrowserJobs;
+  const failedDocumentCount = documents.filter((doc) => doc.ingest_status === "failed").length;
+  const failedCount = failedDocumentCount + failedUploadJobs;
   const expiringSoonCount = documents.filter((doc) => doc.is_current && isExpiringSoon(doc.expiry_date)).length;
   const trashCount = trashQuery.data?.total ?? 0;
+  const canUpload = canAccessRoute(user, "upload");
   const nextStep = buildNextStep({
     activeJobs,
     canOpenFolderSources: canAccessRoute(user, "document-extraction"),
-    canUpload: canAccessRoute(user, "upload"),
+    canUpload,
     canViewJobs,
+    documentAttentionCount,
     documentsCount: documents.length,
+    failedUploadJobs,
     indexedCurrentCount,
-    needsAttention,
   });
-  const statusShortcuts = buildStatusShortcuts({ canViewJobs, canViewDocuments, failedCount, indexedCurrentCount, processingCount, reviewCount, user });
+  const statusShortcuts = buildStatusShortcuts({ canUpload, canViewJobs, canViewDocuments, failedCount, failedDocumentCount, failedUploadJobs, indexedCurrentCount, processingCount, reviewCount, user });
   const lifecycleItems = buildLifecycleItems({ currentCount, expiringSoonCount, supersededCount, trashCount, user });
+  const attentionPanelShowsUploads = !documentsLoading && attentionDocs.length === 0 && failedUploadJobs > 0 && canUpload;
   return (
     <PrudentiaWorkspace activeRoute="document-overview" onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page" id="main-content">
-        <div className="sv-page-inner max-w-none">
+        <div className="sv-page-inner sv-page-inner-dashboard max-w-none">
           <header className="sv-page-header">
             <div>
               <p className="sv-eyebrow">Document Library</p>
@@ -106,10 +111,10 @@ export function PrudentiaDocumentOverviewPage({ documents, documentsLoading, onL
             <LifecycleStrip loading={documentsLoading || trashQuery.isLoading} onNavigate={onNavigate} items={lifecycleItems} />
           </section>
 
-          <div className={canViewJobs ? "mt-6 grid gap-6 xl:grid-cols-3" : "mt-6 grid gap-6 lg:grid-cols-2"}>
+          <div className={canViewJobs ? "mt-4 grid gap-4 xl:grid-cols-3" : "mt-4 grid gap-4 lg:grid-cols-2"}>
             <section className="sv-panel overflow-hidden">
-              <PanelHeader actionIcon={FileSearch} actionLabel="Open Attention" actionRoute="documents" actionSearch="?ingest=active" countLabel={documentsLoading ? "Loading" : `${attentionDocs.length} shown`} description="Failed, unknown, and review-required documents appear here first." onNavigate={onNavigate} title="Needs Attention" />
-              {documentsLoading ? <PanelSkeleton /> : attentionDocs.length ? <AttentionList documents={attentionDocs} onNavigate={onNavigate} /> : <Empty icon={CheckCircle2} title="No document issues" text="The visible library has no failed, unknown, or review-required document status." />}
+              <PanelHeader actionIcon={attentionPanelShowsUploads ? Upload : FileSearch} actionLabel={attentionPanelShowsUploads ? "Open Uploads" : "Open Attention"} actionRoute={attentionPanelShowsUploads ? "upload" : "documents"} actionSearch={attentionPanelShowsUploads ? undefined : "?ingest=active"} countLabel={documentsLoading ? "Loading" : `${attentionDocs.length} shown`} description={failedUploadJobs > 0 ? `Document issues appear here. Recent upload failures are listed ${canUpload ? "on the Upload page" : "outside this document list"}.` : "Failed, unknown, and review-required documents appear here first."} onNavigate={onNavigate} title="Needs Attention" />
+              {documentsLoading ? <PanelSkeleton /> : attentionDocs.length ? <AttentionList documents={attentionDocs} onNavigate={onNavigate} /> : <Empty actionLabel={attentionPanelShowsUploads ? "Open Uploads" : undefined} actionRoute={attentionPanelShowsUploads ? "upload" : undefined} icon={CheckCircle2} onNavigate={onNavigate} title="No document issues" text={failedUploadJobs > 0 ? `${failedUploadJobs} recent upload${failedUploadJobs === 1 ? "" : "s"} need attention${canUpload ? " on the Upload page" : ""}.` : "The visible library has no failed, unknown, or review-required document status."} />}
             </section>
             {canViewJobs ? (
               <section className="sv-panel overflow-hidden">
@@ -133,8 +138,12 @@ function Metric({ label, loading, tone, value }: { label: string; loading: boole
   return <div className={className} data-tone={tone}><span>{label}</span>{loading ? <Skeleton className="mt-1 h-6 w-12" /> : <strong>{value}</strong>}</div>;
 }
 
-function buildNextStep({ activeJobs, canOpenFolderSources, canUpload, canViewJobs, documentsCount, indexedCurrentCount, needsAttention }: NextStepInput): NextStep {
-  if (needsAttention > 0) return { detail: `${needsAttention} item${needsAttention === 1 ? "" : "s"} need review before the library is fully healthy.`, primaryLabel: "Review Documents", primaryRoute: "documents", primarySearch: "?ingest=active", secondaryLabel: canViewJobs ? "Open Activity" : undefined, secondaryRoute: canViewJobs ? "ingestion-jobs" : undefined, secondarySearch: canViewJobs ? "?status=failed" : undefined, title: "Attention needed", tone: "warning" };
+function buildNextStep({ activeJobs, canOpenFolderSources, canUpload, canViewJobs, documentAttentionCount, documentsCount, failedUploadJobs, indexedCurrentCount }: NextStepInput): NextStep {
+  if (documentAttentionCount > 0) {
+    const uploadDetail = failedUploadJobs > 0 ? ` ${failedUploadJobs} recent upload${failedUploadJobs === 1 ? "" : "s"} also need attention.` : "";
+    return { detail: `${documentAttentionCount} document${documentAttentionCount === 1 ? "" : "s"} need review before the library is fully healthy.${uploadDetail}`, primaryLabel: "Review Documents", primaryRoute: "documents", primarySearch: "?ingest=active", secondaryLabel: failedUploadJobs > 0 && canUpload ? "Open Uploads" : canViewJobs ? "Open Activity" : undefined, secondaryRoute: failedUploadJobs > 0 && canUpload ? "upload" : canViewJobs ? "ingestion-jobs" : undefined, secondarySearch: failedUploadJobs > 0 && canUpload ? undefined : canViewJobs ? "?status=failed" : undefined, title: "Attention needed", tone: "warning" };
+  }
+  if (failedUploadJobs > 0) return { detail: `${failedUploadJobs} recent upload${failedUploadJobs === 1 ? "" : "s"} need attention before the library is fully healthy.`, primaryLabel: canUpload ? "Open Uploads" : canViewJobs ? "Open Activity" : "Review Documents", primaryRoute: canUpload ? "upload" : canViewJobs ? "ingestion-jobs" : "documents", primarySearch: canUpload ? undefined : canViewJobs ? "?status=failed" : "?ingest=failed", secondaryLabel: canUpload && canViewJobs ? "Open Activity" : undefined, secondaryRoute: canUpload && canViewJobs ? "ingestion-jobs" : undefined, secondarySearch: canUpload && canViewJobs ? "?status=failed" : undefined, title: "Upload attention needed", tone: "warning" };
   if (activeJobs > 0) return { detail: `${activeJobs} processing run${activeJobs === 1 ? " is" : "s are"} still moving into the library.`, primaryLabel: canViewJobs ? "Track Activity" : "Open Processing", primaryRoute: canViewJobs ? "ingestion-jobs" : "documents", primarySearch: canViewJobs ? "?status=processing" : "?ingest=processing", secondaryLabel: "Open Documents", secondaryRoute: "documents", secondarySearch: "?ingest=processing", title: "Intake is running", tone: "active" };
   if (documentsCount === 0) return { detail: canOpenFolderSources ? "Start intake by adding files or setting up a folder source." : canUpload ? "Start intake by adding files to a writable Knowledge Space." : "Browse Knowledge Spaces to confirm where library content should appear.", primaryLabel: canUpload ? "Add Files" : "Open Knowledge Spaces", primaryRoute: canUpload ? "upload" : "knowledge-spaces", secondaryLabel: canOpenFolderSources ? "Folder Sources" : undefined, secondaryRoute: canOpenFolderSources ? "document-extraction" : undefined, title: "Library is empty", tone: "empty" };
   return { detail: `${indexedCurrentCount} current document${indexedCurrentCount === 1 ? " is" : "s are"} indexed and ready for library work.`, primaryLabel: "Open Indexed", primaryRoute: "documents", primarySearch: "?lifecycle=current&ingest=indexed", secondaryLabel: "Manage Spaces", secondaryRoute: "knowledge-spaces", title: "Library ready", tone: "success" };
@@ -150,12 +159,13 @@ function buildLifecycleItems({ currentCount, expiringSoonCount, supersededCount,
   return items.filter((item) => !item.route || canAccessRoute(user, item.route));
 }
 
-function buildStatusShortcuts({ canViewDocuments, canViewJobs, failedCount, indexedCurrentCount, processingCount, reviewCount, user }: StatusShortcutInput): StatusShortcut[] {
+function buildStatusShortcuts({ canUpload, canViewDocuments, canViewJobs, failedCount, failedDocumentCount, failedUploadJobs, indexedCurrentCount, processingCount, reviewCount, user }: StatusShortcutInput): StatusShortcut[] {
+  const failedUploadOnly = failedUploadJobs > 0 && failedDocumentCount === 0 && canUpload;
   const shortcuts: StatusShortcut[] = [
     { detail: "current and searchable", icon: CheckCircle2, label: "Indexed", route: "documents", search: "?lifecycle=current&ingest=indexed", tone: "success", value: indexedCurrentCount },
     { detail: canViewJobs ? "live intake runs" : "queued library items", icon: Hourglass, label: "Processing", route: canViewJobs ? "ingestion-jobs" : "documents", search: canViewJobs ? "?status=processing" : "?ingest=processing", tone: "active", value: processingCount },
     { detail: "human review required", icon: AlertTriangle, label: "Needs Review", route: "documents", search: "?ingest=human_review", tone: reviewCount > 0 ? "warning" : undefined, value: reviewCount },
-    { detail: canViewJobs ? "failed intake runs" : "failed documents", icon: XCircle, label: "Failed", route: canViewJobs ? "ingestion-jobs" : "documents", search: canViewJobs ? "?status=failed" : "?ingest=failed", tone: failedCount > 0 ? "warning" : undefined, value: failedCount },
+    { detail: failedUploadOnly ? "recent upload failures" : canViewJobs ? "failed intake runs" : "failed documents", icon: XCircle, label: "Failed", route: failedUploadOnly ? "upload" : canViewJobs ? "ingestion-jobs" : "documents", search: failedUploadOnly ? undefined : canViewJobs ? "?status=failed" : "?ingest=failed", tone: failedCount > 0 ? "warning" : undefined, value: failedCount },
   ];
   return shortcuts.filter((item) => (item.route === "documents" ? canViewDocuments : canAccessRoute(user, item.route)));
 }
@@ -193,5 +203,5 @@ function isProcessingStatus(status: DocumentIngestStatus) {
 
 type Props = { documents: Document[]; documentsLoading: boolean; onLogout: () => void; onNavigate: (route: RouteId, options?: NavigateOptions) => void; uploadJobs: UploadBatchItemView[]; user: AuthUser };
 type LifecycleInput = { currentCount: number; expiringSoonCount: number; supersededCount: number; trashCount: number; user: AuthUser };
-type NextStepInput = { activeJobs: number; canOpenFolderSources: boolean; canUpload: boolean; canViewJobs: boolean; documentsCount: number; indexedCurrentCount: number; needsAttention: number };
-type StatusShortcutInput = { canViewDocuments: boolean; canViewJobs: boolean; failedCount: number; indexedCurrentCount: number; processingCount: number; reviewCount: number; user: AuthUser };
+type NextStepInput = { activeJobs: number; canOpenFolderSources: boolean; canUpload: boolean; canViewJobs: boolean; documentAttentionCount: number; documentsCount: number; failedUploadJobs: number; indexedCurrentCount: number };
+type StatusShortcutInput = { canUpload: boolean; canViewDocuments: boolean; canViewJobs: boolean; failedCount: number; failedDocumentCount: number; failedUploadJobs: number; indexedCurrentCount: number; processingCount: number; reviewCount: number; user: AuthUser };

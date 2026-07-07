@@ -9,6 +9,9 @@ from ..artifact_jobs.service import ArtifactJobService, default_artifact_job_ser
 from ..auth.context import UserContext
 from ..core.config import Settings, settings
 from ..repositories.claims import claim_repository_from_settings
+from ..repositories.document_memory import InMemoryDocumentRepository
+from ..repositories.document_models import DocumentRepository
+from ..repositories.document_postgres import PostgresDocumentRepository
 from ..repositories.rag_config import RagConfigRepository, effective_rag_config, env_rag_config
 from ..schemas.query import QueryRequest, QueryStreamEvent, RAGResponse
 from .artifact_service import GeneratedArtifactService
@@ -37,6 +40,7 @@ class LocalRagService:
         rag_config_repo: RagConfigRepository | None = None,
         artifact_service: GeneratedArtifactService | None = None,
         artifact_job_service: ArtifactJobService | None = None,
+        document_repo: DocumentRepository | None = None,
     ) -> None:
         self.config = config
         self.rag_config = (
@@ -66,6 +70,7 @@ class LocalRagService:
             faithfulness_model=self.rag_config.faithfulness_model or self.rag_config.chat_model,
             reranker_model=self.rag_config.reranker_model,
             query_planner_enabled=self.rag_config.query_planner_enabled,
+            document_repo=document_repo or _document_repository_from_config(config),
         )
         self.artifact_job_service = artifact_job_service or default_artifact_job_service()
         self.graph = QueryGraphRunner(self.nodes)
@@ -233,6 +238,12 @@ class LocalRagService:
             degraded=False,
             degraded_reason=None,
         )
+
+
+def _document_repository_from_config(config: Settings) -> DocumentRepository:
+    if config.document_repository == "memory":
+        return InMemoryDocumentRepository()
+    return PostgresDocumentRepository(config.database_url)
 
 
 def get_local_rag_service() -> LocalRagService:

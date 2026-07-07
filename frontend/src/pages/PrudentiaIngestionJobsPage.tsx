@@ -3,12 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ChevronLeft, ChevronRight, FileClock, FileSearch, Loader2, Network, RotateCw, Search, Upload, XCircle } from "lucide-react";
 
 import { adminApi, documentsApi, ingestJobsApi } from "../api/contracts";
-import { canManageSpaces, canUpload, canViewSpaceMetadata, canWriteDocument, clearanceLevelLabel } from "../authz";
+import { canAccessClearance, canManageSpaces, canUpload, canViewSpaceMetadata, clearanceLevelLabel, hasExactGroupScope, isGlobalAdmin } from "../authz";
 import { useToast } from "../components/feedback/ToastProvider";
 import { InlineMessage, Skeleton } from "../components/layout/Common";
 import { PrudentiaWorkspace } from "../components/layout/PrudentiaWorkspace";
 import type { RouteId } from "../routes";
-import { formatSecondaryStageProgress, formatUploadWarning, graphEnrichmentForJob, graphEnrichmentTaskForJob, isUploadCancellableStatus, type GraphEnrichmentChip as GraphEnrichmentChipShape, type GraphEnrichmentTask } from "../state/uploadJobProgress";
+import { formatIngestRunLabel, formatSecondaryStageProgress, formatUploadWarning, graphEnrichmentForJob, graphEnrichmentTaskForJob, isUploadCancellableStatus, type GraphEnrichmentChip as GraphEnrichmentChipShape, type GraphEnrichmentTask } from "../state/uploadJobProgress";
 import type { GraphRAGStatus, IngestJob, IngestJobOrigin, ParserProvenance, UploadJobState, User as AuthUser } from "../types/api";
 import { errorMessage, formatDateTime } from "../utils/format";
 import { flattenGroups, userSpacesFromPaths } from "../utils/groups";
@@ -70,7 +70,7 @@ export function PrudentiaIngestionJobsPage({ onLogout, onNavigate, user }: Props
     },
   });
   const reingestMutation = useMutation({
-    mutationFn: (job: IngestJob) => documentsApi.reingest(job.document_id),
+    mutationFn: (job: IngestJob) => documentsApi.reingest(job.document_id, retryRequestForJob(job)),
     onSuccess: async (response, job) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] }),
@@ -153,7 +153,7 @@ export function PrudentiaIngestionJobsPage({ onLogout, onNavigate, user }: Props
   return (
     <PrudentiaWorkspace activeRoute="ingestion-jobs" onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page" id="main-content">
-        <div className="sv-page-inner max-w-none">
+        <div className="sv-page-inner sv-page-inner-workbench max-w-none">
           <header className="sv-page-header">
             <div>
               <p className="sv-eyebrow">Document Intake</p>
@@ -176,8 +176,9 @@ export function PrudentiaIngestionJobsPage({ onLogout, onNavigate, user }: Props
           <section className="sv-panel overflow-hidden">
             <div className="knowledge-job-metrics" aria-label="Ingestion job summary">
               <JobMetric label="Active" loading={summaryQuery.isLoading} value={summary?.active ?? 0} />
+              <JobMetric label="Attention" loading={summaryQuery.isLoading} value={summary?.needs_attention ?? 0} />
               <JobMetric label="Needs Review" loading={summaryQuery.isLoading} value={summary?.status_counts.human_review ?? 0} />
-              <JobMetric label="Failed" loading={summaryQuery.isLoading} value={summary?.status_counts.failed ?? 0} />
+              <JobMetric label="Failed Runs" loading={summaryQuery.isLoading} value={summary?.status_counts.failed ?? 0} />
               <JobMetric label="Indexed" loading={summaryQuery.isLoading} value={summary?.status_counts.complete ?? 0} tone="success" />
               <JobMetric label="Total Runs" loading={summaryQuery.isLoading} value={summary?.total ?? 0} />
             </div>
@@ -258,6 +259,7 @@ export function PrudentiaIngestionJobsPage({ onLogout, onNavigate, user }: Props
 }
 
 function JobTable({ cancelingJobId, cancellingGraphTaskId, enrichingJobId, graphStatus, graphStatusError, items, onCancelGraph, onCancelJob, onEnrichGraph, onReingestJob, reingestingDocumentId, user }: { cancelingJobId: string | null; cancellingGraphTaskId: string | null; enrichingJobId: string | null; graphStatus: GraphRAGStatus | undefined; graphStatusError: string | null; items: IngestJob[]; onCancelGraph: (job: IngestJob, task: GraphEnrichmentTask) => void; onCancelJob: (jobId: string) => void; onEnrichGraph: (job: IngestJob) => void; onReingestJob: (job: IngestJob) => void; reingestingDocumentId: string | null; user: AuthUser }) {
+  const retriedJobIds = new Set(items.map((job) => job.retry_of_job_id).filter((jobId): jobId is string => Boolean(jobId)));
   return (
     <div className="knowledge-doc-surface">
       <table className="sv-table ingest-job-table">
@@ -284,9 +286,11 @@ function JobTable({ cancelingJobId, cancellingGraphTaskId, enrichingJobId, graph
               { jobId: job.job_id, documentId: job.document_id },
               graphStatus,
             );
-            const canCancel = isUploadCancellableStatus(job.status) && canWriteDocument(user, job.group_path, job.clearance_level);
-            const canEnrichGraph = job.status === "complete" && canWriteDocument(user, job.group_path, job.clearance_level);
-            const canReingest = canReingestFromActivity(job, user);
+            const canManageJob = canManageActivityJob(job, user);
+            const canCancel = isUploadCancellableStatus(job.status) && canManageJob;
+            const canEnrichGraph = job.status === "complete" && canManageJob;
+            const wasRetried = retriedJobIds.has(job.job_id);
+            const canReingest = !wasRetried && canReingestFromActivity(job, user);
             const reingesting = reingestingDocumentId === job.document_id;
             return (
               <tr key={job.job_id} className="sv-table-row">
@@ -315,12 +319,14 @@ function JobTable({ cancelingJobId, cancellingGraphTaskId, enrichingJobId, graph
                   <strong>{job.stage_label}</strong>
                   <p className="text-on-surface-variant">{job.error_message || job.stage_detail}</p>
                   {job.error_code ? <span className="ingest-job-error"><AlertTriangle size={13} /> {job.error_code}</span> : null}
+                  {wasRetried ? <span className="ingest-job-error text-primary"><RotateCw size={13} /> Retried by a newer job</span> : null}
+                  {job.retry_of_job_id ? <span className="ingest-job-error text-secondary"><RotateCw size={13} /> Retry of {job.retry_of_job_id}</span> : null}
                   {job.warnings.map((warning) => (
                     <span className="ingest-job-error text-warning-amber" key={warning}><AlertTriangle size={13} /> {formatUploadWarning(warning)}</span>
                   ))}
                   {graphChip ? <GraphEnrichmentChip chip={graphChip} /> : null}
                   {job.parser_provenance ? <ParserProvenanceDetails provenance={job.parser_provenance} /> : null}
-                  <small>Attempt {job.attempt_count} of {job.max_attempts}</small>
+                  <small>{formatIngestRunLabel(job)}</small>
                 </td>
                 <td data-label="Actions">
                   <div className="knowledge-row-actions">
@@ -344,10 +350,10 @@ function JobTable({ cancelingJobId, cancellingGraphTaskId, enrichingJobId, graph
                         state={graphTask.state}
                       />
                     ) : null}
-                    {canEnrichGraph && !graphTask ? (
+                    {canEnrichGraph && graphStatus?.enabled && !graphTask ? (
                       <EnrichGraphControl
                         chip={graphChip}
-                        disabled={enrichingJobId === job.job_id || !graphStatus?.enabled || Boolean(graphChip)}
+                        disabled={enrichingJobId === job.job_id || Boolean(graphChip)}
                         isQueueing={enrichingJobId === job.job_id}
                         onEnrich={() => onEnrichGraph(job)}
                         title={job.document_title}
@@ -581,7 +587,19 @@ function isActiveJob(status: UploadJobState) {
 function canReingestFromActivity(job: IngestJob, user: AuthUser) {
   return (
     ["complete", "failed", "cancelled"].includes(job.status) &&
-    canWriteDocument(user, job.group_path, job.clearance_level)
+    canManageActivityJob(job, user)
+  );
+}
+
+function retryRequestForJob(job: IngestJob) {
+  return job.status === "failed" || job.status === "cancelled" ? { retry_of_job_id: job.job_id } : null;
+}
+
+function canManageActivityJob(job: IngestJob, user: AuthUser) {
+  return (
+    job.uploaded_by === user.user_id ||
+    (canAccessClearance(user, job.clearance_level) &&
+      (isGlobalAdmin(user) || (user.account_type === "space_admin" && hasExactGroupScope(user, job.group_path))))
   );
 }
 

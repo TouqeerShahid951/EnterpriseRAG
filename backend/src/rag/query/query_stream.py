@@ -33,6 +33,8 @@ def stream_graph(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEv
     yield QueryStreamEvent(event="trace", data={"trace_id": ctx["trace_id"], "session_id": ctx["session_id"]})
     yield _node_event("session_memory")
     ctx = _run("session_memory", ctx, nodes.session_memory)
+    yield _node_event("source_resolver")
+    ctx = _run("source_resolver", ctx, nodes.source_resolver)
     yield _node_event("intent_router")
     ctx = _run("intent_router", ctx, nodes.intent_router)
     yield QueryStreamEvent(event="intent", data={"intent": ctx["intent"]})
@@ -208,6 +210,7 @@ def _stream_synthesizer(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryS
             cancellation_token_from_context(ctx),
             question=prepared.question,
             contexts=prepared.contexts,
+            profile=prepared.profile,
         )
         for chunk in chunk_stream:
             _raise_if_cancelled(ctx)

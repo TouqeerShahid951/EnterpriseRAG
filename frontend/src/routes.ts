@@ -94,6 +94,8 @@ export function defaultRouteForUser(user: AuthUser): RouteId {
   if (canAccessRoute(user, "chat")) return "chat";
   if (canAccessRoute(user, "access")) return "access";
   if (canAccessRoute(user, "activity-log")) return "activity-log";
+  if (canAccessRoute(user, "upload")) return "upload";
+  if (canAccessRoute(user, "review")) return "review";
   if (canAccessRoute(user, "knowledge-spaces")) return "knowledge-spaces";
   return "account";
 }
@@ -149,7 +151,7 @@ export const workspaceNavigation: WorkspaceNavigationItem[] = [
   { icon: "evaluations", id: "evaluations", label: "RAG Evaluation", route: "evaluations", section: "Evaluate" },
   { icon: "audit", id: "audit", label: "System Audit", route: "activity-log", section: "Govern" },
   { icon: "users", id: "users", label: "User Management", route: "access", section: "Govern" },
-  { icon: "settings", id: "settings", label: "Configs", route: "settings", section: "Govern" },
+  { icon: "settings", id: "settings", label: "Runtime Settings", route: "settings", section: "Govern" },
 ];
 
 export function visibleNavigation(user: AuthUser): WorkspaceNavigationItem[] {

@@ -286,6 +286,7 @@ def _worker_config(*, ollama_vision_model: str = "") -> WorkerConfig:
         layered_docling_batch_pages=4,
         pdf_image_analysis_max_images=-1,
         pdf_image_analysis_max_full_page_fallbacks=-1,
+        pdf_image_review_threshold=64,
         scanned_visual_region_enabled=True,
         scanned_visual_min_area_ratio=0.03,
         scanned_visual_max_regions_per_page=4,

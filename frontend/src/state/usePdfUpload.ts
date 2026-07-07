@@ -1,17 +1,26 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ingestJobsApi, uploadApi, type UploadDocumentRequest } from "../api/contracts";
+import type { IngestJob, User as AuthUser } from "../types/api";
 import type { PdfUploadDraft, UploadBatchItemView } from "../types/chat";
 import { defaultPdfUploadDraft } from "./defaults";
 import { createId } from "./ids";
 import { toUploadRequests, validateDocumentFiles } from "./pdfUploadBatch";
 import { isUploadTerminalStatus, toUploadJobView } from "./uploadJobProgress";
 
-export function usePdfUpload() {
+const RECENT_UPLOAD_JOB_LIMIT = 20;
+
+export function usePdfUpload(currentUser: AuthUser | null) {
   const queryClient = useQueryClient();
   const [pdfDraft, setPdfDraft] = useState<PdfUploadDraft>(defaultPdfUploadDraft);
   const [submissions, setSubmissions] = useState<UploadSubmission[]>([]);
+  const [hiddenItemIds, setHiddenItemIds] = useState<Set<string>>(() => new Set());
   const [selectionError, setSelectionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSubmissions([]);
+    setHiddenItemIds(new Set());
+  }, [currentUser?.user_id]);
 
   const uploadMutation = useMutation({
     mutationFn: async (batch: PreparedUpload[]) => {
@@ -30,6 +39,7 @@ export function usePdfUpload() {
         }),
       );
       void queryClient.invalidateQueries({ queryKey: ["documents"] });
+      void queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] });
     },
   });
 
@@ -40,6 +50,15 @@ export function usePdfUpload() {
       void queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["documents"] });
     },
+  });
+
+  const recentUploadJobsQuery = useQuery({
+    queryKey: ["ingest-jobs", "recent-uploads", "mine", currentUser?.user_id],
+    queryFn: () => ingestJobsApi.list({ uploaded_by_me: true, limit: RECENT_UPLOAD_JOB_LIMIT, offset: 0 }),
+    enabled: Boolean(currentUser),
+    refetchInterval: (query) => query.state.data?.items?.some((job) => !isUploadTerminalStatus(job.status)) ? 2500 : false,
+    retry: false,
+    staleTime: 1000,
   });
 
   const jobQueries = useQueries({
@@ -62,6 +81,7 @@ export function usePdfUpload() {
   useEffect(() => {
     if (completedJobKey) {
       void queryClient.invalidateQueries({ queryKey: ["documents"] });
+      void queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] });
     }
   }, [completedJobKey, queryClient]);
 
@@ -89,7 +109,8 @@ export function usePdfUpload() {
     setSubmissions((current) => [
       ...batch.map(({ id, request }) => ({
         id,
-        file: request.file,
+        fileName: request.file.name,
+        fileSize: request.file.size,
         groupPath: request.group_path,
         clearanceLevel: request.clearance_level ?? pdfDraft.clearanceLevel,
         jobId: null,
@@ -103,12 +124,12 @@ export function usePdfUpload() {
     uploadMutation.mutate(batch);
   }
 
-  const batchItems: UploadBatchItemView[] = submissions.map((submission, index) => {
+  const submissionItems: UploadBatchItemView[] = submissions.map((submission, index) => {
     const query = jobQueries[index];
     return {
       id: submission.id,
-      fileName: submission.file.name,
-      fileSize: submission.file.size,
+      fileName: submission.fileName,
+      fileSize: submission.fileSize,
       groupPath: submission.groupPath,
       clearanceLevel: submission.clearanceLevel,
       requestState: submission.uploadError ? "failed" : submission.jobId ? "accepted" : "uploading",
@@ -117,11 +138,22 @@ export function usePdfUpload() {
       jobError: query?.error ?? null,
     };
   });
+  const submissionJobIds = new Set(submissions.map((submission) => submission.jobId).filter(Boolean));
+  const backendItems = (recentUploadJobsQuery.data?.items ?? [])
+    .filter((job) => !submissionJobIds.has(job.job_id))
+    .filter((job) => job.origin === "upload" || job.retry_of_job_id)
+    .map(ingestJobToUploadBatchItem);
+  const batchItems = [...submissionItems, ...backendItems].filter((item) => !hiddenItemIds.has(item.id));
+
+  function clearUploadJobs(itemIds: string[]) {
+    setHiddenItemIds((current) => new Set([...current, ...itemIds]));
+  }
 
   return {
     batchItems,
     cancelingJobId: cancelJobMutation.isPending ? cancelJobMutation.variables ?? null : null,
     cancelJob: (jobId: string) => cancelJobMutation.mutate(jobId),
+    clearUploadJobs,
     onPdfSubmit: handlePdfSubmit,
     pdfDraft,
     selectionError,
@@ -135,9 +167,10 @@ interface PreparedUpload {
   request: UploadDocumentRequest;
 }
 
-interface UploadSubmission {
+export interface UploadSubmission {
   id: string;
-  file: File;
+  fileName: string;
+  fileSize: number;
   groupPath: string;
   clearanceLevel: UploadSubmissionClearanceLevel;
   jobId: string | null;
@@ -148,4 +181,18 @@ type UploadSubmissionClearanceLevel = PdfUploadDraft["clearanceLevel"];
 
 function normalizeError(error: unknown): Error {
   return error instanceof Error ? error : new Error("Document upload failed.");
+}
+
+export function ingestJobToUploadBatchItem(job: IngestJob): UploadBatchItemView {
+  return {
+    id: job.job_id,
+    fileName: job.document_title,
+    fileSize: null,
+    groupPath: job.group_path,
+    clearanceLevel: job.clearance_level,
+    requestState: "accepted",
+    job: toUploadJobView(job.job_id, job),
+    uploadError: null,
+    jobError: null,
+  };
 }

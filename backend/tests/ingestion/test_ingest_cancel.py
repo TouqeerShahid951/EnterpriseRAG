@@ -82,6 +82,36 @@ def test_cancel_ingest_job_requires_write_scope(monkeypatch: pytest.MonkeyPatch)
     assert repo.get_ingest_job(job.id).status == "queued"  # type: ignore[union-attr]
 
 
+def test_cancel_ingest_job_rejects_same_space_peer_contributor(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = InMemoryDocumentRepository()
+    uploader = _user("contributor", group_paths=("/ops",))
+    peer = _user("contributor", group_paths=("/ops",))
+    document = _document(repo, user=uploader, status="queued")
+    job = repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin="upload")
+    monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda _doc_id: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=peer, repo=repo, queue=FakeQueue()))
+
+    assert exc_info.value.status_code == 403
+    assert repo.get_ingest_job(job.id).status == "queued"  # type: ignore[union-attr]
+
+
+def test_cancel_ingest_job_allows_space_admin_in_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = InMemoryDocumentRepository()
+    uploader = _user("contributor", group_paths=("/ops",))
+    space_admin = _user("space_admin", group_paths=("/ops",))
+    document = _document(repo, user=uploader, status="queued")
+    job = repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin="upload")
+    queue = FakeQueue()
+    monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda _doc_id: None)
+
+    response = asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=space_admin, repo=repo, queue=queue))
+
+    assert response.status == "cancelled"
+    assert queue.cancelled == [job.id]
+
+
 def test_cancel_terminal_ingest_job_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = InMemoryDocumentRepository()
     user = _user("contributor", group_paths=("/ops",))
@@ -132,6 +162,21 @@ def test_visible_ingest_job_items_include_completed_at_once() -> None:
     assert len(items) == 1
     assert items[0].job_id == job.id
     assert items[0].completed_at == job.completed_at
+
+
+def test_visible_ingest_job_items_can_filter_to_current_uploader() -> None:
+    repo = InMemoryDocumentRepository()
+    user = _user("contributor", group_paths=("/ops",))
+    other_user = _user("contributor", group_paths=("/ops",))
+    own_document = _document(repo, user=user, status="processing")
+    other_document = _document(repo, user=other_user, status="processing")
+    own_job = repo.create_ingest_job(doc_id=own_document.id, status="processing", progress_pct=20, origin="upload")
+    repo.create_ingest_job(doc_id=other_document.id, status="processing", progress_pct=20, origin="upload")
+
+    items = ingest_job_routes._visible_job_items(user, repo, origin_filter="upload", uploaded_by_user_id=user.id)
+
+    assert [item.job_id for item in items] == [own_job.id]
+    assert items[0].uploaded_by == user.id
 
 
 def _csrf_request() -> Request:

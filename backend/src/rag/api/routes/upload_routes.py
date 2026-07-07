@@ -10,8 +10,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 
 from ...auth.abac import normalize_group_path
 from ...auth.dependencies import require_csrf, require_current_user
-from ...auth.document_access import can_write_document
-from ...auth.permissions import can_upload_to_group
+from ...auth.document_access import can_read_document, can_write_document
+from ...auth.permissions import can_manage_group_path, can_upload_to_group, is_global_admin
 from ...repositories.documents import DocumentRepository, get_document_repository
 from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
 from ...schemas.common import StubResponse
@@ -55,6 +55,7 @@ async def create_upload(
     description: str | None = Form(default=None),
     quality_preset: str | None = Form(default=None),
     supersedes: list[str] = Form(default_factory=list),
+    shared_group_paths: list[str] = Form(default_factory=list),
     user: UserRecord = Depends(require_current_user),
     identity_repo: IdentityRepository = Depends(get_identity_repository),
     document_repo: DocumentRepository = Depends(get_document_repository),
@@ -64,6 +65,7 @@ async def create_upload(
 ) -> UploadResponse:
     require_csrf(request)
     normalized_group = _validated_upload_group(group_path, user, identity_repo)
+    normalized_shared_groups = _validated_upload_shares(shared_group_paths, owner_group_path=normalized_group, user=user, repo=identity_repo)
     normalized_clearance = _validated_upload_clearance(clearance_level, user)
     validate_declared_dates(effective_date, expiry_date)
     normalized_description = validated_description(description)
@@ -96,9 +98,13 @@ async def create_upload(
         pending_supersedes=supersedes_ids,
         ingest_status="queued",
     )
+    if normalized_shared_groups:
+        shared_document = document_repo.replace_document_shares(document.id, group_paths=normalized_shared_groups, actor_id=user.id)
+        if shared_document is not None:
+            document = shared_document
     job = document_repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin="upload")
-    _audit_upload(document_repo, user, document.id, job.id, file.filename, stored.size_bytes, normalized_group, normalized_clearance, content_type, normalized_quality_preset)
-    _enqueue_upload(queue, document_repo, job.id, document.id, stored.object_path, normalized_group, normalized_clearance, initial_doc_type, effective_date, expiry_date, normalized_description, supersedes_ids, content_type, normalized_quality_preset)
+    _audit_upload(document_repo, user, document.id, job.id, file.filename, stored.size_bytes, normalized_group, normalized_shared_groups, normalized_clearance, content_type, normalized_quality_preset)
+    _enqueue_upload(queue, document_repo, job.id, document.id, stored.object_path, normalized_group, list(document.access_group_paths), normalized_clearance, initial_doc_type, effective_date, expiry_date, normalized_description, supersedes_ids, content_type, normalized_quality_preset)
     return UploadResponse(job_id=job.id)
 
 
@@ -112,6 +118,7 @@ async def create_upload(
 )
 async def get_upload_status(
     job_id: str,
+    user: UserRecord = Depends(require_current_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
 ) -> JobStatusResponse:
     job = document_repo.get_ingest_job(job_id)
@@ -119,6 +126,17 @@ async def get_upload_status(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "job_not_found", "message": "Upload job was not found."},
+        )
+    document = document_repo.get_document(job.doc_id, include_deleted=True)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "document_not_found", "message": "Uploaded document was not found."},
+        )
+    if not can_read_document(user, document):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "upload_status_forbidden", "message": "User cannot view this upload job."},
         )
     return build_job_status_response(job)
 
@@ -137,6 +155,35 @@ def _validated_upload_group(group_path: str, user: UserRecord, repo: IdentityRep
             detail={"code": "upload_group_forbidden", "message": "User cannot upload into this group."},
         )
     return normalized
+
+
+def _validated_upload_shares(group_paths: list[str], *, owner_group_path: str, user: UserRecord, repo: IdentityRepository) -> list[str]:
+    if not group_paths:
+        return []
+    known = {group.path for group in repo.list_groups()}
+    shared: list[str] = []
+    seen: set[str] = set()
+    for raw_path in group_paths:
+        group_path = normalize_group_path(raw_path)
+        if group_path == owner_group_path or group_path in seen:
+            continue
+        if group_path not in known:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "group_not_found", "message": f"Shared Knowledge Space does not exist: {group_path}"},
+            )
+        seen.add(group_path)
+        shared.append(group_path)
+    if not shared:
+        return []
+    if is_global_admin(user):
+        return shared
+    if user.account_type == "space_admin" and can_manage_group_path(user, owner_group_path) and all(can_manage_group_path(user, group_path) for group_path in shared):
+        return shared
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"code": "upload_share_forbidden", "message": "User cannot share uploads with one or more selected Knowledge Spaces."},
+    )
 
 
 def _validated_upload_clearance(clearance_level: str, user: UserRecord) -> str:
@@ -194,8 +241,10 @@ def _validated_quality_preset(value: str | None) -> str | None:
     return normalized
 
 
-def _audit_upload(repo: DocumentRepository, user: UserRecord, doc_id: str, job_id: str, filename: str | None, size: int, group: str, clearance: str, content_type: str, quality_preset: str | None) -> None:
+def _audit_upload(repo: DocumentRepository, user: UserRecord, doc_id: str, job_id: str, filename: str | None, size: int, group: str, shared_groups: list[str], clearance: str, content_type: str, quality_preset: str | None) -> None:
     payload = {"job_id": job_id, "filename": filename, "size_bytes": size, "group_path": group, "clearance_level": clearance, "content_type": content_type}
+    if shared_groups:
+        payload["shared_group_paths"] = shared_groups
     if quality_preset:
         payload["quality_preset"] = quality_preset
     repo.append_audit_event(
@@ -214,6 +263,7 @@ def _enqueue_upload(
     doc_id: str,
     file_path: str,
     group_path: str,
+    acl_group_paths: list[str],
     clearance_level: str,
     doc_type: str | None,
     effective_date: date | None,
@@ -230,7 +280,7 @@ def _enqueue_upload(
                 doc_id=doc_id,
                 file_path=file_path,
                 group_path=group_path,
-                acl_group_paths=[group_path],
+                acl_group_paths=acl_group_paths,
                 clearance_level=clearance_level,
                 doc_type=doc_type,
                 effective_date=effective_date.isoformat() if effective_date else None,

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from rag.query.faithfulness import build_faithfulness_prompt, parse_faithfulness_result
-from rag.query.ollama import OllamaClient
+from rag.query.ollama import LONG_ANSWER_NUM_PREDICT, OllamaClient
 from rag.query.openai_compatible import OpenAICompatibleClient
 from rag.query.query_stream import _faithfulness_warnings
 from rag.schemas.query import RAGResponse, SourceAnchor
@@ -70,6 +70,7 @@ class FaithfulnessRuntimeTests(unittest.TestCase):
 
         payload = request_json.call_args.kwargs["payload"]
         self.assertEqual(payload["options"]["num_ctx"], 16384)
+        self.assertEqual(payload["options"]["num_predict"], LONG_ANSWER_NUM_PREDICT)
 
     def test_openai_compatible_faithfulness_caps_configured_json_budget(self) -> None:
         client = OpenAICompatibleClient(

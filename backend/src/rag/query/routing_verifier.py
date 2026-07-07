@@ -28,6 +28,8 @@ _VALID_INTENTS: set[RouteIntent] = {
     "comparative_summary",
     "temporal_factual",
 }
+_ROUTE_VERIFIER_QUERY_CHARS = 2500
+_ROUTE_VERIFIER_SIGNAL_TOKENS = 40
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,12 @@ def build_route_verifier_prompt(signals: QuerySignals, candidate_scores: dict[Ro
         {"intent": intent, "score": round(score, 3)}
         for intent, score in sorted(candidate_scores.items(), key=lambda item: item[1], reverse=True)[:5]
     ]
+    original_query = _query_excerpt(signals.original_query)
+    resolved_query = (
+        "<same as original query>"
+        if signals.resolved_query.strip() == signals.original_query.strip()
+        else _query_excerpt(signals.resolved_query)
+    )
     return (
         "Choose the best RAG route for the user query. "
         "Use only the query and routing signals. Do not answer the query. "
@@ -71,8 +79,8 @@ def build_route_verifier_prompt(signals: QuerySignals, candidate_scores: dict[Ro
         + ", ".join(sorted(_VALID_INTENTS))
         + ". secondary_intents must be a list. confidence must be 0 to 1. "
         "Prefer general_rag when no specialized route is clearly justified.\n\n"
-        f"Original query:\n{signals.original_query}\n\n"
-        f"Resolved query:\n{signals.resolved_query}\n\n"
+        f"Original query:\n{original_query}\n\n"
+        f"Resolved query:\n{resolved_query}\n\n"
         f"Signals:\n{json.dumps(_signal_summary(signals), sort_keys=True)}\n\n"
         f"Rule candidates:\n{json.dumps(candidates, sort_keys=True)}"
     )
@@ -94,7 +102,8 @@ def parse_route_verifier_result(raw: str) -> RouteVerifierDecision:
 
 def _signal_summary(signals: QuerySignals) -> dict[str, object]:
     return {
-        "tokens": signals.tokens,
+        "token_count": len(signals.tokens),
+        "tokens": signals.tokens[:_ROUTE_VERIFIER_SIGNAL_TOKENS],
         "domain_entity_clues": signals.domain_entity_clues,
         "temporal_clues": signals.temporal_clues,
         "followup_clues": signals.followup_clues,
@@ -103,6 +112,16 @@ def _signal_summary(signals: QuerySignals) -> dict[str, object]:
         "is_vague_followup": signals.is_vague_followup,
         "clarity_bonus": signals.clarity_bonus,
     }
+
+
+def _query_excerpt(text: str, max_chars: int = _ROUTE_VERIFIER_QUERY_CHARS) -> str:
+    clean = text.strip()
+    if len(clean) <= max_chars:
+        return clean
+    head_chars = max_chars * 3 // 4
+    tail_chars = max_chars - head_chars
+    omitted = len(clean) - max_chars
+    return f"{clean[:head_chars]}\n...[{omitted} chars omitted]...\n{clean[-tail_chars:]}"
 
 
 def _load_json_object(raw: str) -> dict[str, object]:

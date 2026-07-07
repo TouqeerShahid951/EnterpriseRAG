@@ -7,8 +7,16 @@ import pytest
 
 from rag_ingestion.errors import UnsupportedPdfError
 from rag_ingestion.parsers import document as document_module
-from rag_ingestion.parsers.document import _select_pdf_image_sources_for_analysis, parse_document
-from rag_ingestion.parsers.images import ImageAnalysisResult, ImageSource, _pdf_image_source_kind_and_flags, parse_image_document
+from rag_ingestion.parsers import images as images_module
+from rag_ingestion.parsers.document import PdfImageReviewRequired, _select_pdf_image_sources_for_analysis, parse_document, resume_pdf_image_review
+from rag_ingestion.parsers.images import (
+    ImageAnalysisResult,
+    ImageSource,
+    _pdf_image_source_kind_and_flags,
+    image_source_candidate_key,
+    image_sources_to_items,
+    parse_image_document,
+)
 from rag_ingestion.parsers.models import DocumentParseResult, ParsedImageAsset, ParsedPdfItem
 
 
@@ -23,6 +31,104 @@ class DummyStore:
 
 class DummyAnalyzer:
     pass
+
+
+def _jpeg_bytes(width: int, height: int) -> bytes:
+    from PIL import Image
+
+    image = Image.new("RGB", (width, height), color="white")
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", quality=90)
+    return buffer.getvalue()
+
+
+def _image_size(content: bytes) -> tuple[int, int]:
+    from PIL import Image
+
+    with Image.open(BytesIO(content)) as image:
+        return image.size
+
+
+def test_image_analysis_resizes_temporary_vision_copy_but_stores_original() -> None:
+    original = _jpeg_bytes(3000, 1000)
+
+    class RecordingAnalyzer:
+        def __init__(self) -> None:
+            self.calls: list[bytes] = []
+
+        def analyze_image(self, *, content: bytes, content_type: str) -> ImageAnalysisResult:
+            assert content_type == "image/jpeg"
+            self.calls.append(content)
+            return ImageAnalysisResult(extracted_text="Figure 1", caption="A wide engineering figure.", confidence=0.9)
+
+    store = DummyStore()
+    analyzer = RecordingAnalyzer()
+    items, assets = image_sources_to_items(
+        [
+            ImageSource(
+                content=original,
+                content_type="image/jpeg",
+                filename="figure.jpg",
+                source_kind="pdf_image",
+                quality_flags=["source:pdf_image"],
+                page=1,
+            )
+        ],
+        doc_id="doc-1",
+        store=store,
+        analyzer=analyzer,
+    )
+
+    assert len(items) == 1
+    assert len(assets) == 1
+    assert store.saved[0][3] == original
+    assert assets[0].width == 3000
+    assert assets[0].height == 1000
+    assert len(analyzer.calls) == 1
+    assert max(_image_size(analyzer.calls[0])) == 2048
+    assert "vision_input_resized" in assets[0].quality_flags
+
+
+def test_image_analysis_retries_original_when_resized_result_is_weak() -> None:
+    original = _jpeg_bytes(3000, 1800)
+
+    class RetryAnalyzer:
+        def __init__(self) -> None:
+            self.calls: list[bytes] = []
+
+        def analyze_image(self, *, content: bytes, content_type: str) -> ImageAnalysisResult:
+            assert content_type == "image/jpeg"
+            self.calls.append(content)
+            if len(self.calls) == 1:
+                return ImageAnalysisResult(quality_flags=["vision_empty_response"])
+            return ImageAnalysisResult(extracted_text="Recovered OCR text", caption="Recovered page description.", confidence=0.93)
+
+    store = DummyStore()
+    analyzer = RetryAnalyzer()
+    items, assets = image_sources_to_items(
+        [
+            ImageSource(
+                content=original,
+                content_type="image/jpeg",
+                filename="scan.jpg",
+                source_kind="pdf_page_image",
+                quality_flags=["source:pdf_page_image", "scanned_or_handwritten_candidate"],
+                page=1,
+            )
+        ],
+        doc_id="doc-1",
+        store=store,
+        analyzer=analyzer,
+    )
+
+    assert len(items) == 1
+    assert len(assets) == 1
+    assert len(analyzer.calls) == 2
+    assert max(_image_size(analyzer.calls[0])) == 2048
+    assert analyzer.calls[1] == original
+    assert "Recovered OCR text" in items[0].text
+    assert "vision_retry_original" in assets[0].quality_flags
+    assert "vision_empty_response" not in assets[0].quality_flags
 
 
 def test_standalone_image_with_empty_vision_result_still_indexes_asset() -> None:
@@ -210,6 +316,62 @@ def test_complex_layout_page_uses_structured_vision_repair(monkeypatch: pytest.M
     assert "layout_repair_source:vision" in parsed.items[0].quality_flags
 
 
+def test_complex_layout_repair_retries_original_when_resized_result_is_weak(monkeypatch: pytest.MonkeyPatch) -> None:
+    original = _jpeg_bytes(3000, 1800)
+    source = ImageSource(
+        content=original,
+        content_type="image/jpeg",
+        filename="page-1-layout.jpg",
+        source_kind="pdf_page_layout",
+        quality_flags=["source:pdf_page_image", "vision_layout_repair_candidate"],
+        page=1,
+        bbox=(0.0, 0.0, 3000.0, 1800.0),
+    )
+    store = DummyStore()
+
+    class RetryLayoutAnalyzer:
+        def __init__(self) -> None:
+            self.calls: list[bytes] = []
+
+        def analyze_layout(self, *, content: bytes, content_type: str):
+            assert content_type == "image/jpeg"
+            self.calls.append(content)
+            if len(self.calls) == 1:
+                return SimpleNamespace(blocks=[], confidence=0.9, quality_flags=[])
+            return SimpleNamespace(
+                blocks=[
+                    SimpleNamespace(block_type="heading", text="Case Summary", confidence=0.9),
+                    SimpleNamespace(block_type="text", text="Left column first. Right column second. Witness statement recovered.", confidence=0.86),
+                ],
+                confidence=0.88,
+                quality_flags=[],
+            )
+
+    analyzer = RetryLayoutAnalyzer()
+    monkeypatch.setattr(document_module, "_parse_pdf_with_ocr_fallback", lambda *args, **kwargs: _complex_layout_result())
+    monkeypatch.setattr(document_module, "pdf_page_image_sources", lambda _file_bytes, _pages: [source])
+    monkeypatch.setattr(document_module, "pdf_image_sources", lambda _file_bytes: [])
+
+    parsed = parse_document(
+        b"%PDF-1.7",
+        content_type="application/pdf",
+        file_path="complex.pdf",
+        min_chars_per_page=10,
+        doc_id="doc-1",
+        image_asset_store=store,
+        image_analyzer=analyzer,
+        vision_layout_repair_enabled=True,
+    )
+
+    assert len(analyzer.calls) == 2
+    assert max(_image_size(analyzer.calls[0])) == 2048
+    assert analyzer.calls[1] == original
+    assert store.saved[0][3] == original
+    assert parsed.provenance["vision_layout_repair"]["repaired_pages"] == [1]
+    assert "vision_layout_retry_original" in parsed.items[0].quality_flags
+    assert "vision_layout_retry_original" in parsed.assets[0].quality_flags
+
+
 def test_pdf_auxiliary_image_analysis_is_limited(monkeypatch: pytest.MonkeyPatch) -> None:
     sources = [_embedded_source(page=index + 1) for index in range(3)]
 
@@ -260,6 +422,134 @@ def test_pdf_auxiliary_image_analysis_is_limited(monkeypatch: pytest.MonkeyPatch
     assert parsed.provenance["image_analysis_selected_count"] == 2
     assert parsed.provenance["image_analysis_skipped_count"] == 1
     assert parsed.provenance["image_analysis_skipped_limit_count"] == 1
+    assert parsed.provenance["image_asset_count"] == 1
+
+
+def test_pdf_image_review_threshold_pauses_before_vision_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
+    sources = [_embedded_source(page=index + 1) for index in range(3)]
+
+    def unexpected_image_sources_to_items(*args, **kwargs):
+        raise AssertionError("image analysis should not run before image review")
+
+    monkeypatch.setattr(document_module, "_parse_pdf_with_ocr_fallback", lambda *args, **kwargs: _complex_layout_result())
+    monkeypatch.setattr(document_module, "pdf_image_sources", lambda _file_bytes: sources)
+    monkeypatch.setattr(document_module, "image_sources_to_items", unexpected_image_sources_to_items)
+
+    with pytest.raises(PdfImageReviewRequired) as raised:
+        parse_document(
+            b"%PDF-1.7",
+            content_type="application/pdf",
+            file_path="figures.pdf",
+            min_chars_per_page=10,
+            doc_id="doc-1",
+            image_asset_store=DummyStore(),
+            image_analyzer=DummyAnalyzer(),
+            pdf_image_review_threshold=2,
+        )
+
+    assert raised.value.parsed.provenance["document_kind"] == "pdf"
+    assert raised.value.image_selection.sources == sources
+    assert raised.value.visual_sources.image_candidate_count == 3
+    assert set(raised.value.image_selection.source_scores) == {image_source_candidate_key(source) for source in sources}
+
+
+def test_pdf_image_review_resume_analyzes_only_approved_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    sources = [_embedded_source(page=index + 1) for index in range(3)]
+    approved_key = image_source_candidate_key(sources[1])
+
+    def fake_image_sources_to_items(selected_sources, *, doc_id, store, analyzer, start_index=0, progress_callback=None):
+        del doc_id, store, analyzer, start_index, progress_callback
+        assert selected_sources == [sources[1]]
+        return (
+            [
+                ParsedPdfItem(
+                    index=0,
+                    text="Visible image text:\nApproved figure label",
+                    item_type="image_text",
+                    page_start=2,
+                    page_end=2,
+                    parser="pdf_image",
+                    quality_flags=["source:vision"],
+                )
+            ],
+            [
+                ParsedImageAsset(
+                    id="asset-1",
+                    source_kind="pdf_image",
+                    object_path="memory://asset-1.png",
+                    content_type="image/png",
+                    content_hash="hash",
+                    page=2,
+                    quality_flags=["source:vision"],
+                )
+            ],
+        )
+
+    monkeypatch.setattr(document_module, "_parse_pdf_with_ocr_fallback", lambda *args, **kwargs: _complex_layout_result())
+    monkeypatch.setattr(document_module, "pdf_image_sources", lambda _file_bytes: sources)
+    monkeypatch.setattr(document_module, "image_sources_to_items", fake_image_sources_to_items)
+
+    parsed = parse_document(
+        b"%PDF-1.7",
+        content_type="application/pdf",
+        file_path="figures.pdf",
+        min_chars_per_page=10,
+        doc_id="doc-1",
+        image_asset_store=DummyStore(),
+        image_analyzer=DummyAnalyzer(),
+        pdf_image_review_threshold=2,
+        pdf_image_review_approved_keys={approved_key},
+    )
+
+    assert parsed.provenance["image_analysis_selected_count"] == 1
+    assert parsed.provenance["image_analysis_skipped_review_count"] == 2
+    assert parsed.provenance["image_asset_count"] == 1
+
+
+def test_pdf_image_review_resume_uses_stored_sources_without_pdf_parse() -> None:
+    class Analyzer:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def analyze_image(self, *, content: bytes, content_type: str) -> ImageAnalysisResult:
+            self.calls += 1
+            assert content_type == "image/jpeg"
+            assert content
+            return ImageAnalysisResult(caption="Approved mission diagram.", confidence=0.88)
+
+    source = ImageSource(
+        content=_jpeg_bytes(64, 64),
+        content_type="image/jpeg",
+        filename="page-2-image-1.jpg",
+        source_kind="pdf_image",
+        quality_flags=["source:pdf_image", "image_review_approved"],
+        page=2,
+        bbox=(10.0, 20.0, 80.0, 90.0),
+        page_area_ratio=0.2,
+    )
+    parsed = resume_pdf_image_review(
+        [
+            ParsedPdfItem(
+                index=0,
+                text="Apollo mission body text.",
+                item_type="text",
+                page_start=2,
+                page_end=2,
+                parser="pymupdf",
+                quality_flags=["source:pymupdf_native"],
+            )
+        ],
+        [source],
+        doc_id="doc-1",
+        image_asset_store=DummyStore(),
+        image_analyzer=Analyzer(),
+        candidate_count=3,
+    )
+
+    assert [item.item_type for item in parsed.items] == ["text", "image_text"]
+    assert parsed.provenance["routing_mode"] == "image_review_resume"
+    assert parsed.provenance["image_analysis_selected_count"] == 1
+    assert parsed.provenance["image_analysis_skipped_review_count"] == 2
     assert parsed.provenance["image_asset_count"] == 1
 
 
@@ -530,6 +820,101 @@ def test_scanned_mixed_page_crops_visual_region(monkeypatch: pytest.MonkeyPatch)
     assert parsed.provenance["scanned_visual_selected_count"] == 1
     assert parsed.provenance["image_analysis_selected_count"] == 1
     assert parsed.provenance["image_asset_count"] == 1
+
+
+def test_scanned_visual_region_prefers_layout_picture_bbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    Image = pytest.importorskip("PIL.Image")
+
+    page_image = Image.new("RGB", (1000, 1400), "white")
+    image_bytes = BytesIO()
+    page_image.save(image_bytes, format="PNG")
+
+    class FakePixmap:
+        def tobytes(self, _format: str) -> bytes:
+            return image_bytes.getvalue()
+
+    class FakePage:
+        rect = SimpleNamespace(width=500, height=700)
+
+        def get_pixmap(self, *, dpi: int, alpha: bool):
+            assert dpi == 150
+            assert alpha is False
+            return FakePixmap()
+
+    monkeypatch.setattr(images_module, "prepare_page_layout", lambda _page: [[100, 200, 420, 500, "picture"]])
+
+    regions, tiny_count, ambiguous, cue_count, small_count = images_module._scanned_visual_regions_for_page(
+        FakePage(),
+        [_ocr_text_bbox()],
+        visual_cue_bboxes=[],
+        domain_visual_cue=False,
+        min_area_ratio=0.03,
+        max_regions=-1,
+        text_mask_padding_px=8,
+    )
+
+    assert len(regions) == 1
+    assert regions[0].bbox[0] < 100
+    assert regions[0].bbox[1] < 200
+    assert regions[0].bbox[2] > 420
+    assert regions[0].bbox[3] > 500
+    assert "layout_model_region_crop" in regions[0].quality_flags
+    assert tiny_count == 0
+    assert ambiguous is False
+    assert cue_count == 0
+    assert small_count == 0
+
+
+def test_scanned_mixed_page_default_keeps_all_visual_regions(monkeypatch: pytest.MonkeyPatch) -> None:
+    pdf_bytes = _scanned_page_pdf(include_visual=True, visual_kind="many")
+    parsed_text = _text_result(" ".join(["Recovered OCR text."] * 90), bbox=_ocr_text_bbox())
+
+    def fake_image_sources_to_items(selected_sources, *, doc_id, store, analyzer, start_index=0, progress_callback=None):
+        del doc_id, store, analyzer, start_index, progress_callback
+        assert [source.source_kind for source in selected_sources] == ["pdf_scanned_visual_region"] * 6
+        return (
+            [
+                ParsedPdfItem(
+                    index=index,
+                    text=f"Image description:\nVisual region {index + 1}.",
+                    item_type="image_text",
+                    page_start=1,
+                    page_end=1,
+                    parser="pdf_image",
+                    quality_flags=["source:vision", "visual_region_crop"],
+                )
+                for index in range(6)
+            ],
+            [
+                ParsedImageAsset(
+                    id=f"asset-{index + 1}",
+                    source_kind="pdf_scanned_visual_region",
+                    object_path=f"memory://asset-{index + 1}.png",
+                    content_type="image/png",
+                    content_hash=f"hash-{index + 1}",
+                    page=1,
+                    quality_flags=["source:vision", "visual_region_crop"],
+                )
+                for index in range(6)
+            ],
+        )
+
+    monkeypatch.setattr(document_module, "_parse_pdf_with_ocr_fallback", lambda *args, **kwargs: parsed_text)
+    monkeypatch.setattr(document_module, "image_sources_to_items", fake_image_sources_to_items)
+
+    parsed = parse_document(
+        pdf_bytes,
+        content_type="application/pdf",
+        file_path="scanned-many-visuals.pdf",
+        min_chars_per_page=10,
+        doc_id="doc-1",
+        image_asset_store=DummyStore(),
+        image_analyzer=DummyAnalyzer(),
+    )
+
+    assert parsed.provenance["scanned_page_class_counts"]["scanned_mixed"] == 1
+    assert parsed.provenance["scanned_visual_selected_count"] == 6
+    assert parsed.provenance["image_analysis_selected_count"] == 6
 
 
 def test_scanned_page_crops_small_domain_visual_when_text_has_cue(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -826,7 +1211,12 @@ def _scanned_page_pdf(*, include_visual: bool, visual_kind: str = "large") -> by
     for y in range(90, 330, 34):
         draw.rectangle((50, y, 520, y + 11), fill=(20, 20, 20))
     if include_visual:
-        if visual_kind == "small":
+        if visual_kind == "many":
+            for left in (570, 770):
+                for top in (430, 730, 1030):
+                    draw.rectangle((left, top, left + 175, top + 250), fill=(45, 45, 45))
+                    draw.rectangle((left + 25, top - 22, left + 105, top + 18), fill=(25, 25, 25))
+        elif visual_kind == "small":
             draw.rectangle((700, 520, 805, 610), fill=(45, 45, 45))
             draw.rectangle((730, 495, 780, 525), fill=(25, 25, 25))
             draw.rectangle((775, 505, 850, 518), fill=(25, 25, 25))

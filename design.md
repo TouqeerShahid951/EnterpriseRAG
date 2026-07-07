@@ -131,12 +131,16 @@ Account types are:
 
 - `platform_admin`
 - `system_admin`
-- `user_manager`
 - `space_admin`
 - `contributor`
-- `reviewer`
 - `auditor`
 - `member`
+
+`contributor`, `member`, and `auditor` surface in the UI as **Document
+Contributor**, **Chat Member**, and **Audit Viewer**. `user_manager` and
+`reviewer` are legacy internal account types kept for old records and
+compatibility; new assignments use `space_admin` for scoped user management and
+`contributor` for upload plus review.
 
 Knowledge Spaces are exact group paths such as `/finance` or `/legal`. Current
 authorization helpers use exact scope membership rather than descendant
@@ -263,9 +267,10 @@ version.
 ## Human Review
 
 Low-confidence OCR can pause ingestion in `human_review` state. Review batches
-store parsed items and the original resume payload. Reviewers approve or reject
-items through `/api/v1/review-queue`; approved parsed items are then used by a
-resume ingestion task instead of reparsing the original file.
+store parsed items and the original resume payload. Document Contributors,
+Space Admins, System Admins, and Platform Admins approve or reject items through
+`/api/v1/review-queue`; approved parsed items are then used by a resume
+ingestion task instead of reparsing the original file.
 
 ## Folder Ingestion
 
@@ -352,4 +357,3 @@ npm run build
   changes.
 - Keep offline runtime behavior explicit. Runtime code should not silently
   download models in airgapped deployments.
-

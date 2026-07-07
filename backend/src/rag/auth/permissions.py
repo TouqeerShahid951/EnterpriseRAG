@@ -33,6 +33,9 @@ ACCOUNT_TYPES: tuple[AccountType, ...] = (
 LEGACY_ADMIN_GROUP = "/admin"
 LEGACY_REVIEW_GROUP = "/review"
 GLOBAL_ADMIN_ACCOUNT_TYPES = {"platform_admin", "system_admin"}
+SCOPED_USER_MANAGER_ACCOUNT_TYPES = {"user_manager", "space_admin"}
+SCOPED_MANAGED_ACCOUNT_TYPES = {"contributor", "reviewer", "member"}
+SCOPED_ASSIGNABLE_ACCOUNT_TYPES = {"contributor", "member"}
 
 
 class PermissionUser(Protocol):
@@ -73,11 +76,11 @@ def is_global_admin(user: PermissionUser) -> bool:
 
 
 def can_query(user: PermissionUser) -> bool:
-    return user.account_type in {*GLOBAL_ADMIN_ACCOUNT_TYPES, "space_admin", "contributor", "reviewer", "member"}
+    return user.account_type in {*GLOBAL_ADMIN_ACCOUNT_TYPES, "space_admin", "contributor", "member"}
 
 
 def can_review(user: PermissionUser) -> bool:
-    return user.account_type in {*GLOBAL_ADMIN_ACCOUNT_TYPES, "reviewer"}
+    return user.account_type in {*GLOBAL_ADMIN_ACCOUNT_TYPES, "space_admin", "contributor", "reviewer"}
 
 
 def can_manage_workspace_config(user: PermissionUser) -> bool:
@@ -85,7 +88,7 @@ def can_manage_workspace_config(user: PermissionUser) -> bool:
 
 
 def can_manage_users(user: PermissionUser) -> bool:
-    return user.account_type in {*GLOBAL_ADMIN_ACCOUNT_TYPES, "user_manager"}
+    return user.account_type in {*GLOBAL_ADMIN_ACCOUNT_TYPES, *SCOPED_USER_MANAGER_ACCOUNT_TYPES}
 
 
 def can_manage_spaces(user: PermissionUser) -> bool:
@@ -103,7 +106,7 @@ def can_read_document_metadata(user: PermissionUser) -> bool:
 def can_write_document_scope(user: PermissionUser, group_path: str) -> bool:
     if is_global_admin(user):
         return True
-    if user.account_type in {"space_admin", "contributor"}:
+    if user.account_type in {"space_admin", "contributor", "reviewer"}:
         return has_exact_group_scope(user, group_path)
     return False
 
@@ -123,13 +126,13 @@ def can_assign_account_type(actor: PermissionUser, account_type: AccountType) ->
         return True
     if actor.account_type == "system_admin":
         return account_type != "platform_admin"
-    return actor.account_type == "user_manager" and account_type not in GLOBAL_ADMIN_ACCOUNT_TYPES
+    return actor.account_type in SCOPED_USER_MANAGER_ACCOUNT_TYPES and account_type in SCOPED_ASSIGNABLE_ACCOUNT_TYPES
 
 
 def can_assign_group_paths(actor: PermissionUser, group_paths: Sequence[str]) -> bool:
     if is_global_admin(actor):
         return True
-    if actor.account_type != "user_manager":
+    if actor.account_type not in SCOPED_USER_MANAGER_ACCOUNT_TYPES:
         return False
     return bool(group_paths) and all(has_exact_group_scope(actor, path) for path in group_paths)
 
@@ -137,7 +140,7 @@ def can_assign_group_paths(actor: PermissionUser, group_paths: Sequence[str]) ->
 def can_assign_clearance_level(actor: PermissionUser, clearance_level: str) -> bool:
     if is_global_admin(actor):
         return True
-    if actor.account_type != "user_manager":
+    if actor.account_type not in SCOPED_USER_MANAGER_ACCOUNT_TYPES:
         return False
     return clearance_rank(clearance_level) <= clearance_rank(actor.clearance_level)
 
@@ -147,7 +150,7 @@ def can_manage_target_user(actor: PermissionUser, target: PermissionUser) -> boo
         return True
     if actor.account_type == "system_admin":
         return target.account_type != "platform_admin"
-    if actor.account_type != "user_manager" or target.account_type in GLOBAL_ADMIN_ACCOUNT_TYPES:
+    if actor.account_type not in SCOPED_USER_MANAGER_ACCOUNT_TYPES or target.account_type not in SCOPED_MANAGED_ACCOUNT_TYPES:
         return False
     return can_assign_group_paths(actor, target.group_paths) and can_assign_clearance_level(actor, target.clearance_level)
 

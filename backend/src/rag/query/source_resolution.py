@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from ..auth.context import UserContext
 from ..connectors.models import ConnectorSchemaCatalogRecord
 from ..connectors.repositories import ConnectorProfileRepository, get_connector_profile_repository
 from ..connectors.schema_catalog import column_allowed, schema_catalog_visible_group_path, table_allowed
+from ..repositories.document_models import DocumentRecord, DocumentRepository
 from ..repositories.folder_schedule_models import FolderScheduleRepository
 from ..schemas.query import QuerySource
-from ..shared.contracts.clearance import clearance_rank
+from ..shared.contracts.clearance import can_access_clearance, clearance_rank
 from .state import QueryContext, scoped_user_context
 
 QuerySourceTargetKind = Literal["catalog"]
 ResolvedSourceMode = Literal["corpus_only", "db_only", "db_first", "corpus_first", "hybrid"]
+PreferredSource = Literal["database", "corpus", "balanced"]
 
 _SOURCE_PREFIXES = {
     "catalog": "connector_catalog:",
@@ -83,6 +86,15 @@ class VisibleQuerySource:
 
 
 @dataclass(frozen=True)
+class VisibleDocumentSource:
+    id: str
+    title: str
+    group_path: str
+    clearance_level: str
+    match_text: str
+
+
+@dataclass(frozen=True)
 class SourceDecision:
     requested_mode: str
     resolved_mode: ResolvedSourceMode
@@ -97,6 +109,21 @@ class SourceDecision:
     structured_score: int = 0
     corpus_score: int = 0
     source_match_score: int = 0
+    document_match_score: int = 0
+    preferred_source: PreferredSource = "balanced"
+    preferred_catalog_id: str | None = None
+    routing_confidence: float = 0.0
+    router_mode: str = "deterministic"
+    signal_reason: str = ""
+
+
+@dataclass(frozen=True)
+class _SourcePreference:
+    preferred_source: PreferredSource
+    confidence: float
+    reason: str
+    preferred_catalog_id: str | None = None
+    router_mode: str = "deterministic"
 
 
 class QuerySourceAccessError(ValueError):
@@ -140,6 +167,29 @@ def list_visible_query_sources(
     return sorted(sources, key=lambda item: (item.scope, item.name.lower(), item.id))
 
 
+def list_visible_document_sources(
+    user: UserContext,
+    *,
+    document_repo: DocumentRepository | None = None,
+) -> list[VisibleDocumentSource]:
+    if document_repo is None:
+        return []
+    documents: list[VisibleDocumentSource] = []
+    for document in document_repo.list_documents(state="active"):
+        if not _document_visible(document, user):
+            continue
+        documents.append(
+            VisibleDocumentSource(
+                id=document.id,
+                title=document.title or document.source_id,
+                group_path=document.group_path,
+                clearance_level=document.clearance_level,
+                match_text=_document_match_text(document),
+            )
+        )
+    return documents
+
+
 def public_query_source(source: VisibleQuerySource) -> QuerySource:
     return QuerySource(
         id=source.id,
@@ -180,8 +230,12 @@ def validate_query_source_access(
 def resolve_query_source(
     ctx: QueryContext,
     *,
+    config: object | None = None,
+    llm: object | None = None,
+    routing_model: str | None = None,
     schedule_repo: FolderScheduleRepository | None = None,
     connector_profile_repo: ConnectorProfileRepository | None = None,
+    document_repo: DocumentRepository | None = None,
 ) -> SourceDecision:
     request = ctx["request"]
     user = scoped_user_context(ctx)
@@ -190,6 +244,7 @@ def resolve_query_source(
         schedule_repo=schedule_repo,
         connector_profile_repo=connector_profile_repo,
     )
+    documents = list_visible_document_sources(user, document_repo=document_repo)
     selected = validate_query_source_access(
         source_id=request.query_source_id,
         user=user,
@@ -202,7 +257,20 @@ def resolve_query_source(
         query_after_directives = _strip_named_source(query_after_directives, inline_source)
     structured_score = _structured_score(query_after_directives)
     corpus_score = _term_score(query_after_directives, _CORPUS_TERMS)
-    source_match_score = max((_source_match_score(query_after_directives, source) for source in sources), default=0)
+    source_scores = [(source, _source_match_score(query_after_directives, source)) for source in sources]
+    source_match_score = max((score for _source, score in source_scores), default=0)
+    preferred_source_record = _best_scored_source(source_scores)
+    document_match_score = max((_document_match_score(query_after_directives, document) for document in documents), default=0)
+    db_bias, corpus_bias = _conversation_source_bias(ctx.get("session_turns", []))
+    followup = _looks_like_followup(query_after_directives)
+    preference = _deterministic_preference(
+        structured_score=structured_score,
+        corpus_score=corpus_score,
+        source_match_score=source_match_score,
+        document_match_score=document_match_score,
+        db_bias=db_bias if followup else 0,
+        corpus_bias=corpus_bias if followup else 0,
+    )
     explicit = request.source_mode != "auto" or bool(request.query_source_id)
 
     if request.source_mode == "corpus_only":
@@ -217,6 +285,10 @@ def resolve_query_source(
             structured_score=structured_score,
             corpus_score=corpus_score,
             source_match_score=source_match_score,
+            document_match_score=document_match_score,
+            preferred_source="corpus",
+            routing_confidence=1.0,
+            signal_reason="explicit_corpus_mode",
         )
     if request.source_mode == "db_only" or (request.source_mode == "auto" and selected is not None):
         return _decision(
@@ -230,6 +302,11 @@ def resolve_query_source(
             structured_score=structured_score,
             corpus_score=corpus_score,
             source_match_score=source_match_score,
+            document_match_score=document_match_score,
+            preferred_source="database",
+            preferred_catalog_id=selected.target_id if selected is not None else None,
+            routing_confidence=1.0,
+            signal_reason="explicit_database_mode",
         )
     if request.source_mode == "hybrid":
         return _decision(
@@ -243,6 +320,11 @@ def resolve_query_source(
             structured_score=structured_score,
             corpus_score=corpus_score,
             source_match_score=source_match_score,
+            document_match_score=document_match_score,
+            preferred_source=preference.preferred_source,
+            preferred_catalog_id=preferred_source_record.target_id if preferred_source_record is not None else None,
+            routing_confidence=preference.confidence,
+            signal_reason=preference.reason,
         )
     if inline_source is not None:
         return _decision(
@@ -257,6 +339,11 @@ def resolve_query_source(
             structured_score=structured_score,
             corpus_score=corpus_score,
             source_match_score=source_match_score,
+            document_match_score=document_match_score,
+            preferred_source="database",
+            preferred_catalog_id=inline_source.target_id,
+            routing_confidence=1.0,
+            signal_reason="inline_named_database_source",
         )
     if directive == "db":
         return _decision(
@@ -270,6 +357,10 @@ def resolve_query_source(
             structured_score=structured_score,
             corpus_score=corpus_score,
             source_match_score=source_match_score,
+            document_match_score=document_match_score,
+            preferred_source="database",
+            routing_confidence=1.0,
+            signal_reason="inline_database_directive",
         )
     if directive == "corpus":
         return _decision(
@@ -283,6 +374,10 @@ def resolve_query_source(
             structured_score=structured_score,
             corpus_score=corpus_score,
             source_match_score=source_match_score,
+            document_match_score=document_match_score,
+            preferred_source="corpus",
+            routing_confidence=1.0,
+            signal_reason="inline_corpus_directive",
         )
     if request.document_ids:
         return _decision(
@@ -295,6 +390,10 @@ def resolve_query_source(
             structured_score=structured_score,
             corpus_score=corpus_score,
             source_match_score=source_match_score,
+            document_match_score=document_match_score,
+            preferred_source="corpus",
+            routing_confidence=1.0,
+            signal_reason="document_scope_selected",
         )
     if not sources:
         return _decision(
@@ -307,22 +406,31 @@ def resolve_query_source(
             structured_score=structured_score,
             corpus_score=corpus_score,
             source_match_score=source_match_score,
+            document_match_score=document_match_score,
+            preferred_source="corpus",
+            routing_confidence=preference.confidence,
+            signal_reason=preference.reason,
         )
-    if structured_score > 0 and corpus_score > 0 and source_match_score > 0:
-        resolved: ResolvedSourceMode = "hybrid"
-        reason = "mixed_structured_and_corpus_signals"
-    elif structured_score > 0 and source_match_score > 0:
-        resolved = "db_first"
-        reason = "structured_query_matches_database_scope"
-    elif corpus_score > 0:
-        resolved = "corpus_only"
-        reason = "corpus_language_detected"
-    else:
-        resolved = "corpus_first"
-        reason = "auto_default_corpus_first"
+    router = _advisory_llm_source_router(
+        query=query_after_directives,
+        user=user,
+        sources=sources,
+        documents=documents,
+        session_turns=ctx.get("session_turns", []),
+        config=config,
+        llm=llm,
+        routing_model=routing_model,
+        deterministic=preference,
+    )
+    effective = router or preference
+    reason = (
+        "auto_hybrid_llm_router"
+        if router is not None
+        else f"auto_hybrid_{effective.preferred_source}_preferred"
+    )
     return _decision(
         request.source_mode,
-        resolved,
+        "hybrid",
         query_after_directives,
         explicit=False,
         reason=reason,
@@ -330,6 +438,13 @@ def resolve_query_source(
         structured_score=structured_score,
         corpus_score=corpus_score,
         source_match_score=source_match_score,
+        document_match_score=document_match_score,
+        preferred_source=effective.preferred_source,
+        preferred_catalog_id=effective.preferred_catalog_id
+        or (preferred_source_record.target_id if preferred_source_record is not None else None),
+        routing_confidence=effective.confidence,
+        router_mode=effective.router_mode,
+        signal_reason=effective.reason,
     )
 
 
@@ -352,6 +467,12 @@ def _decision(
     structured_score: int,
     corpus_score: int,
     source_match_score: int,
+    document_match_score: int,
+    preferred_source: PreferredSource,
+    preferred_catalog_id: str | None = None,
+    routing_confidence: float = 0.0,
+    router_mode: str = "deterministic",
+    signal_reason: str = "",
 ) -> SourceDecision:
     return SourceDecision(
         requested_mode=requested_mode,
@@ -367,6 +488,12 @@ def _decision(
         structured_score=structured_score,
         corpus_score=corpus_score,
         source_match_score=source_match_score,
+        document_match_score=document_match_score,
+        preferred_source=preferred_source,
+        preferred_catalog_id=preferred_catalog_id,
+        routing_confidence=round(max(0.0, min(1.0, routing_confidence)), 3),
+        router_mode=router_mode,
+        signal_reason=signal_reason,
     )
 
 
@@ -378,6 +505,15 @@ def _catalog_visible(catalog: ConnectorSchemaCatalogRecord, user: UserContext) -
     if schema_catalog_visible_group_path(catalog.group_path, catalog.catalog_json, user.group_paths) is None:
         return False
     return clearance_rank(catalog.clearance_level) <= clearance_rank(user.clearance_level)
+
+
+def _document_visible(document: DocumentRecord, user: UserContext) -> bool:
+    if not document.is_current:
+        return False
+    if not can_access_clearance(user.clearance_level, document.clearance_level):
+        return False
+    visible_groups = set(user.group_paths)
+    return bool(visible_groups & set(document.access_group_paths))
 
 
 def _source_from_catalog(catalog: ConnectorSchemaCatalogRecord, *, profile_name: str, user: UserContext) -> VisibleQuerySource:
@@ -436,6 +572,27 @@ def _catalog_match_text(catalog_json: dict[str, object]) -> str:
     return " ".join(part for part in parts if part)
 
 
+def _document_match_text(document: DocumentRecord) -> str:
+    parts: list[str] = [
+        document.title or "",
+        document.source_id,
+        document.doc_type or "",
+        document.auto_doc_type or "",
+        document.description or "",
+        document.summary or "",
+        document.language or "",
+    ]
+    parts.extend(document.topics)
+    parts.extend(document.llm_topics)
+    if document.effective_date is not None:
+        parts.append(document.effective_date.isoformat())
+    if document.expiry_date is not None:
+        parts.append(document.expiry_date.isoformat())
+    for value in document.extracted_dates.values():
+        parts.append(str(value))
+    return " ".join(part for part in parts if part)
+
+
 def _strip_source_directive(query: str) -> tuple[str, str | None]:
     if _DB_DIRECTIVE_RE.search(query):
         return _compact_query(_DB_DIRECTIVE_RE.sub(" ", query)), "db"
@@ -481,6 +638,217 @@ def _source_match_score(query: str, source: VisibleQuerySource) -> int:
     query_tokens = set(_tokens(query))
     source_tokens = set(_tokens(source.match_text))
     return len(query_tokens & source_tokens)
+
+
+def _document_match_score(query: str, document: VisibleDocumentSource) -> int:
+    query_tokens = set(_tokens(query))
+    document_tokens = set(_tokens(document.match_text))
+    return len(query_tokens & document_tokens)
+
+
+def _best_scored_source(scored: list[tuple[VisibleQuerySource, int]]) -> VisibleQuerySource | None:
+    if not scored:
+        return None
+    source, score = max(scored, key=lambda item: item[1])
+    return source if score > 0 else None
+
+
+def _deterministic_preference(
+    *,
+    structured_score: int,
+    corpus_score: int,
+    source_match_score: int,
+    document_match_score: int,
+    db_bias: int,
+    corpus_bias: int,
+) -> _SourcePreference:
+    db_score = source_match_score + (structured_score * 2) + db_bias
+    doc_score = document_match_score + (corpus_score * 2) + corpus_bias
+    margin = db_score - doc_score
+    if margin >= 2:
+        preferred: PreferredSource = "database"
+    elif margin <= -2:
+        preferred = "corpus"
+    else:
+        preferred = "balanced"
+    total = max(1, db_score + doc_score)
+    confidence = 0.5 + min(0.45, abs(margin) / max(4, total))
+    reason = f"db_score={db_score},doc_score={doc_score},margin={margin}"
+    return _SourcePreference(preferred, confidence, reason)
+
+
+def _conversation_source_bias(turns: list[dict[str, object]]) -> tuple[int, int]:
+    db_bias = 0
+    corpus_bias = 0
+    for turn in turns[-3:]:
+        mode = str(turn.get("source_mode") or "")
+        preferred = str(turn.get("preferred_source") or "")
+        if mode in {"db_only", "db_first"} or preferred == "database":
+            db_bias += 2
+        elif mode == "corpus_only" or preferred == "corpus":
+            corpus_bias += 2
+        elif mode == "hybrid" or preferred == "balanced":
+            db_bias += 1
+            corpus_bias += 1
+        for source in turn.get("sources") or []:
+            if not isinstance(source, dict):
+                continue
+            doc_id = str(source.get("doc_id") or "")
+            if doc_id.startswith("connector-live-scope:"):
+                db_bias += 1
+            elif doc_id:
+                corpus_bias += 1
+    return db_bias, corpus_bias
+
+
+def _looks_like_followup(query: str) -> bool:
+    normalized = _normalize(query)
+    tokens = normalized.split()
+    if len(tokens) <= 4 and tokens:
+        return True
+    return any(
+        phrase in f" {normalized} "
+        for phrase in (
+            " what about ",
+            " and ",
+            " those ",
+            " them ",
+            " it ",
+            " same ",
+            " also ",
+        )
+    )
+
+
+def _advisory_llm_source_router(
+    *,
+    query: str,
+    user: UserContext,
+    sources: list[VisibleQuerySource],
+    documents: list[VisibleDocumentSource],
+    session_turns: list[dict[str, object]],
+    config: object | None,
+    llm: object | None,
+    routing_model: str | None,
+    deterministic: _SourcePreference,
+) -> _SourcePreference | None:
+    if not bool(getattr(config, "rag_source_router_llm_enabled", False)):
+        return None
+    if llm is None or not sources or not documents:
+        return None
+    if deterministic.preferred_source != "balanced" and deterministic.confidence >= 0.70:
+        return None
+    generator = getattr(llm, "generate_json", None)
+    if generator is None:
+        return None
+    try:
+        raw = generator(
+            prompt=_source_router_prompt(
+                query=query,
+                user=user,
+                sources=sources,
+                documents=documents,
+                session_turns=session_turns,
+                deterministic=deterministic,
+            ),
+            model=routing_model,
+            system="You choose source priority for a retrieval system without excluding available sources.",
+            max_tokens=512,
+        )
+        payload = json.loads(str(raw))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    confidence = _float(payload.get("confidence"))
+    threshold = float(getattr(config, "rag_source_router_llm_min_confidence", 0.60) or 0.60)
+    if confidence < threshold:
+        return None
+    preferred = str(payload.get("preferred_source") or "").strip().lower()
+    if preferred not in {"database", "corpus", "balanced"}:
+        return None
+    catalog_id = _valid_router_catalog_id(payload.get("preferred_catalog_id"), sources)
+    reason = _compact_query(str(payload.get("reason") or "llm_source_router"))[:240]
+    return _SourcePreference(
+        preferred,  # type: ignore[arg-type]
+        confidence,
+        reason,
+        preferred_catalog_id=catalog_id,
+        router_mode="llm",
+    )
+
+
+def _source_router_prompt(
+    *,
+    query: str,
+    user: UserContext,
+    sources: list[VisibleQuerySource],
+    documents: list[VisibleDocumentSource],
+    session_turns: list[dict[str, object]],
+    deterministic: _SourcePreference,
+) -> str:
+    payload = {
+        "query": query,
+        "workspace_group_paths": list(user.group_paths),
+        "deterministic_preference": {
+            "preferred_source": deterministic.preferred_source,
+            "confidence": deterministic.confidence,
+            "reason": deterministic.reason,
+        },
+        "visible_database_catalogs": [
+            {
+                "id": source.target_id,
+                "name": source.name,
+                "description": source.description,
+                "connector_type": source.connector_type,
+                "summary": _compact_query(source.match_text)[:900],
+            }
+            for source in sources[:6]
+        ],
+        "visible_documents": [
+            {
+                "id": document.id,
+                "title": document.title,
+                "summary": _compact_query(document.match_text)[:700],
+            }
+            for document in documents[:8]
+        ],
+        "recent_turns": [
+            {
+                "query": str(turn.get("query") or "")[:240],
+                "answer": str(turn.get("answer") or "")[:300],
+                "source_mode": turn.get("source_mode"),
+                "preferred_source": turn.get("preferred_source"),
+            }
+            for turn in session_turns[-3:]
+        ],
+    }
+    return (
+        "Choose which source should be prioritized for this Auto query. "
+        "Do not exclude sources; Auto will still search both database and documents. "
+        "Return only JSON with keys preferred_source, preferred_catalog_id, confidence, and reason. "
+        'preferred_source must be one of "database", "corpus", or "balanced". '
+        "preferred_catalog_id must be one of the visible database catalog ids or null.\n\n"
+        f"{json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)}"
+    )
+
+
+def _valid_router_catalog_id(value: object, sources: list[VisibleQuerySource]) -> str | None:
+    if value is None:
+        return None
+    candidate = str(value).strip()
+    valid_ids = {source.target_id for source in sources}
+    valid_source_ids = {source.id: source.target_id for source in sources}
+    if candidate in valid_ids:
+        return candidate
+    return valid_source_ids.get(candidate)
+
+
+def _float(value: object) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _tokens(value: str) -> list[str]:

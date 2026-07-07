@@ -17,7 +17,7 @@ from ..artifact_pipeline import (
 )
 from ..artifact_service import GeneratedArtifactService, generated_artifact_service_from_settings
 from ..cancellation import cancellation_token_from_context
-from ..conflicts import ConflictChecker, apply_conflict_detection
+from ..conflicts import ConflictChecker, apply_conflict_detection, apply_hybrid_disagreement_detection
 from ..evidence_quality import EvidenceQuality, assess_evidence_quality
 from ..faithfulness import FAITHFULNESS_CHECK_FAILED, attributed_sources, evaluate_faithfulness
 from ..inference import InferenceClient
@@ -87,6 +87,7 @@ class QueryNodes:
         schedule_repo: object | None = None,
         connector_profile_repo: object | None = None,
         connector_registry: object | None = None,
+        document_repo: object | None = None,
     ) -> None:
         self.config = config
         self.ollama = ollama
@@ -101,6 +102,7 @@ class QueryNodes:
         self.query_planner_enabled = config.rag_query_planner_enabled if query_planner_enabled is None else query_planner_enabled
         self.schedule_repo = schedule_repo
         self.connector_profile_repo = connector_profile_repo
+        self.document_repo = document_repo
         self.retrieval_service = RetrievalService(
             config=config,
             embedder=ollama,
@@ -120,15 +122,21 @@ class QueryNodes:
         _raise_if_cancelled(ctx)
         decision = resolve_query_source(
             ctx,
+            config=self.config,
+            llm=self.ollama,
+            routing_model=self.routing_model,
             schedule_repo=self.schedule_repo,
             connector_profile_repo=self.connector_profile_repo,
+            document_repo=self.document_repo,
         )
         ctx["source_decision"] = decision
         if decision.semantic_query and decision.semantic_query != ctx["request"].query:
             ctx["request"] = ctx["request"].model_copy(update={"query": decision.semantic_query})
         detail = (
             f"{decision.resolved_mode}:{decision.reason}"
-            f",structured={decision.structured_score},corpus={decision.corpus_score},source={decision.source_match_score}"
+            f",structured={decision.structured_score},corpus={decision.corpus_score}"
+            f",source={decision.source_match_score},document={decision.document_match_score}"
+            f",preferred={decision.preferred_source},router={decision.router_mode}"
         )
         _mark_execution(ctx, "source_resolver", "deterministic", detail)
         return ctx
@@ -342,7 +350,6 @@ class QueryNodes:
             ctx["verifier_decision"] = "degrade"
             ctx["degraded"] = True
             ctx["degraded_reason"] = "Insufficient relevant evidence after retrieval retries"
-            ctx["retrieved_hits"] = []
             _mark_execution(ctx, "verifier", "deterministic", ",".join(quality.reasons))
             log_verifier_decision(ctx)
             return ctx
@@ -454,11 +461,16 @@ class QueryNodes:
     def contradiction_detector(self, ctx: QueryContext) -> QueryContext:
         _raise_if_cancelled(ctx)
         plan = ctx.get("route_plan")
-        if plan is not None and not plan.use_conflict_checker:
-            return ctx
-        ctx["conflict_checker_used"] = True
-        _mark_execution(ctx, "contradiction_detector", "deterministic")
-        return apply_conflict_detection(ctx, self.conflict_checker, self.qdrant)
+        if plan is None or plan.use_conflict_checker:
+            ctx["conflict_checker_used"] = True
+            _mark_execution(ctx, "contradiction_detector", "deterministic")
+            ctx = apply_conflict_detection(ctx, self.conflict_checker, self.qdrant)
+        if self.config.rag_hybrid_disagreement_detector_enabled:
+            before = ctx["conflict_flag"]
+            ctx = apply_hybrid_disagreement_detection(ctx)
+            if ctx["conflict_flag"] and not before:
+                _mark_execution(ctx, "contradiction_detector", "deterministic", "hybrid_source_disagreement")
+        return ctx
 
     def evidence_builder(self, ctx: QueryContext) -> QueryContext:
         _raise_if_cancelled(ctx)
@@ -470,6 +482,7 @@ class QueryNodes:
             token_budget=ctx["token_budget"],
             limit=plan.top_k if plan else self.config.rag_top_k,
             broader_table_context=_should_promote_parent_context(plan),
+            query=" ".join(ctx.get("sub_queries") or [ctx["request"].query]),
         )
         return ctx
 
@@ -712,6 +725,10 @@ class QueryNodes:
                 "answer": response.answer,
                 "intent": response.intent,
                 "sources": [source.model_dump() for source in response.sources],
+                "source_mode": response.source_mode,
+                "source_decision_reason": response.source_decision_reason,
+                "preferred_source": getattr(ctx.get("source_decision"), "preferred_source", None),
+                "source_types": _response_source_types(response.sources),
             },
         )
         ctx["response"] = response.model_copy(update={
@@ -739,6 +756,16 @@ def _mark_execution(ctx: QueryContext, node: str, mode: str, detail: str | None 
     ctx["execution_modes"][node] = mode
     if detail:
         ctx["execution_details"][node] = detail
+
+
+def _response_source_types(sources: list[object]) -> list[str]:
+    types: list[str] = []
+    for source in sources:
+        doc_id = str(getattr(source, "doc_id", "") or "")
+        source_type = "database" if doc_id.startswith("connector-live-scope:") else "corpus"
+        if source_type not in types:
+            types.append(source_type)
+    return types
 
 
 def _is_current_only_for_route(plan: RoutePlan) -> bool:

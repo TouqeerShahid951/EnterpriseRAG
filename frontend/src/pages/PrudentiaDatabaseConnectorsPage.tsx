@@ -22,12 +22,12 @@ export function PrudentiaDatabaseConnectorsPage({ onLogout, onNavigate, user }: 
   return (
     <PrudentiaWorkspace activeRoute="database-connectors" onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page" id="main-content">
-        <div className="sv-page-inner max-w-6xl">
+        <div className="sv-page-inner sv-page-inner-workbench database-connectors-page-inner max-w-6xl">
           <header className="sv-page-header">
             <div>
               <p className="sv-eyebrow">Live Database Access</p>
               <h1 className="sv-page-title">Database Connectors</h1>
-              <p className="sv-page-subtitle">Create SQL Server and PostgreSQL connections, inspect schemas, and choose the tables, columns, and joins Live DB may use.</p>
+              <p className="sv-page-subtitle">Connect read-only databases, review schemas, and approve exactly what Live DB may use.</p>
             </div>
             <button type="button" onClick={() => onNavigate("document-extraction")} className="sv-action-secondary">
               <Database size={16} /> Folder Sources

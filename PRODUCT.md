@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Enterprise administrators, knowledge managers, reviewers, and authorized knowledge workers operating document intake, retrieval, governance, and evaluation workflows. They need clear system state, predictable controls, and traceable evidence while working with sensitive information.
+Enterprise administrators, Space Admins, Document Contributors, Audit Viewers, and Chat Members operating document intake, retrieval, governance, and evaluation workflows. They need clear system state, predictable controls, and traceable evidence while working with sensitive information.
 
 ## Product Purpose
 

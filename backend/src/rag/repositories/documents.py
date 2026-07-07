@@ -6,7 +6,19 @@ from functools import lru_cache
 
 from ..core.config import settings
 from .document_memory import InMemoryDocumentRepository
-from .document_models import AuditEventRecord, DocumentImageAssetRecord, DocumentRecord, DocumentRepository, IngestJobRecord, ReviewBatchRecord, ReviewDecisionRecord, ReviewItemRecord
+from .document_models import (
+    AuditEventRecord,
+    DocumentImageAssetRecord,
+    DocumentRecord,
+    DocumentRepository,
+    ImageReviewBatchRecord,
+    ImageReviewCandidateRecord,
+    ImageReviewDecisionRecord,
+    IngestJobRecord,
+    ReviewBatchRecord,
+    ReviewDecisionRecord,
+    ReviewItemRecord,
+)
 from .document_postgres import PostgresDocumentRepository
 
 
@@ -24,6 +36,9 @@ def get_document_repository() -> DocumentRepository:
 __all__ = [
     "DocumentRecord",
     "DocumentImageAssetRecord",
+    "ImageReviewBatchRecord",
+    "ImageReviewCandidateRecord",
+    "ImageReviewDecisionRecord",
     "DocumentRepository",
     "AuditEventRecord",
     "InMemoryDocumentRepository",

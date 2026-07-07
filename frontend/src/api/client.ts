@@ -6,6 +6,11 @@ import { getConfiguredBaseUrl, normalizeBaseUrl } from "./url";
 export { ApiClientError } from "./response";
 
 type JsonBody = object | unknown[] | string | number | boolean | null;
+type TimeoutId = ReturnType<typeof setTimeout>;
+
+export interface ApiRequestInit extends RequestInit {
+  timeoutMs?: number;
+}
 
 export const AUTH_SESSION_EXPIRED_EVENT = "agenticrag:auth-session-expired";
 export const AUTH_SESSION_TOUCHED_EVENT = "agenticrag:auth-session-touched";
@@ -38,27 +43,27 @@ export class ApiClient {
     this.onSessionExpired = options.onSessionExpired;
   }
 
-  get<TResponse>(path: string, init?: RequestInit): Promise<TResponse> {
+  get<TResponse>(path: string, init?: ApiRequestInit): Promise<TResponse> {
     return this.request<TResponse>(path, { ...init, method: "GET" });
   }
 
-  delete<TResponse>(path: string, init?: RequestInit): Promise<TResponse> {
+  delete<TResponse>(path: string, init?: ApiRequestInit): Promise<TResponse> {
     return this.request<TResponse>(path, { ...init, method: "DELETE" });
   }
 
-  postJson<TResponse>(path: string, body: JsonBody, init?: RequestInit): Promise<TResponse> {
+  postJson<TResponse>(path: string, body: JsonBody, init?: ApiRequestInit): Promise<TResponse> {
     return this.json<TResponse>("POST", path, body, init);
   }
 
-  putJson<TResponse>(path: string, body: JsonBody, init?: RequestInit): Promise<TResponse> {
+  putJson<TResponse>(path: string, body: JsonBody, init?: ApiRequestInit): Promise<TResponse> {
     return this.json<TResponse>("PUT", path, body, init);
   }
 
-  patchJson<TResponse>(path: string, body: JsonBody, init?: RequestInit): Promise<TResponse> {
+  patchJson<TResponse>(path: string, body: JsonBody, init?: ApiRequestInit): Promise<TResponse> {
     return this.json<TResponse>("PATCH", path, body, init);
   }
 
-  postForm<TResponse>(path: string, formData: FormData, init?: RequestInit): Promise<TResponse> {
+  postForm<TResponse>(path: string, formData: FormData, init?: ApiRequestInit): Promise<TResponse> {
     return this.request<TResponse>(path, {
       ...init,
       method: "POST",
@@ -70,7 +75,7 @@ export class ApiClient {
     return this.fetchWithAuthRefresh(path, init);
   }
 
-  async *postJsonSse<TEvent>(path: string, body: JsonBody, init?: RequestInit): AsyncGenerator<TEvent> {
+  async *postJsonSse<TEvent>(path: string, body: JsonBody, init?: ApiRequestInit): AsyncGenerator<TEvent> {
     const response = await this.fetchWithAuthRefresh(path, {
       ...init,
       method: "POST",
@@ -92,7 +97,7 @@ export class ApiClient {
     yield* parseSseStream<TEvent>(response.body);
   }
 
-  async request<TResponse>(path: string, init: RequestInit = {}): Promise<TResponse> {
+  async request<TResponse>(path: string, init: ApiRequestInit = {}): Promise<TResponse> {
     const response = await this.fetchWithAuthRefresh(path, init);
 
     if (!response.ok) {
@@ -106,7 +111,7 @@ export class ApiClient {
     return parseResponse<TResponse>(response);
   }
 
-  private async fetchWithAuthRefresh(path: string, init: RequestInit): Promise<Response> {
+  private async fetchWithAuthRefresh(path: string, init: ApiRequestInit): Promise<Response> {
     const response = await this.fetchOnce(path, init);
     if (response.ok) {
       this.sessionExpiredNotified = false;
@@ -116,7 +121,7 @@ export class ApiClient {
       return response;
     }
 
-    const refreshed = await this.refreshAccessToken();
+    const refreshed = await this.refreshAccessToken(init.timeoutMs);
     if (!refreshed) {
       this.notifySessionExpired();
       return response;
@@ -125,15 +130,22 @@ export class ApiClient {
     return this.fetchOnce(path, init);
   }
 
-  private fetchOnce(path: string, init: RequestInit): Promise<Response> {
+  private async fetchOnce(path: string, init: ApiRequestInit): Promise<Response> {
+    const { timeoutMs, signal: callerSignal, ...fetchInit } = init;
     const method = (init.method ?? "GET").toUpperCase();
     const headers = this.buildHeaders(method, init.headers);
-    return fetch(this.toUrl(path), {
-      ...init,
-      method,
-      headers,
-      credentials: "include",
-    });
+    const timeout = createTimeoutSignal(timeoutMs, callerSignal);
+    try {
+      return await fetch(this.toUrl(path), {
+        ...fetchInit,
+        method,
+        headers,
+        credentials: "include",
+        signal: timeout.signal,
+      });
+    } finally {
+      timeout.cleanup();
+    }
   }
 
   private canRefreshFor(path: string): boolean {
@@ -145,10 +157,11 @@ export class ApiClient {
     );
   }
 
-  private refreshAccessToken(): Promise<boolean> {
+  private refreshAccessToken(timeoutMs?: number): Promise<boolean> {
     if (!this.refreshPromise) {
       this.refreshPromise = this.fetchOnce(this.refreshPath, {
         method: "POST",
+        timeoutMs,
         body: JSON.stringify(null),
         headers: {
           [JSON_CONTENT_TYPE_HEADER]: JSON_CONTENT_TYPE,
@@ -174,7 +187,7 @@ export class ApiClient {
     method: "POST" | "PUT" | "PATCH",
     path: string,
     body: JsonBody,
-    init?: RequestInit,
+    init?: ApiRequestInit,
   ): Promise<TResponse> {
     return this.request<TResponse>(path, {
       ...init,
@@ -230,4 +243,31 @@ export class ApiClient {
       window.dispatchEvent(new Event(AUTH_SESSION_TOUCHED_EVENT));
     }
   }
+}
+
+function createTimeoutSignal(timeoutMs: number | undefined, callerSignal: AbortSignal | null | undefined) {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return { signal: callerSignal, cleanup: () => undefined };
+  }
+
+  const controller = new AbortController();
+  let timeoutId: TimeoutId | undefined;
+  let abortListener: (() => void) | undefined;
+
+  if (callerSignal?.aborted) {
+    controller.abort(callerSignal.reason);
+  } else if (callerSignal) {
+    abortListener = () => controller.abort(callerSignal.reason);
+    callerSignal.addEventListener("abort", abortListener, { once: true });
+  }
+
+  timeoutId = setTimeout(() => controller.abort(new DOMException("Request timed out.", "TimeoutError")), timeoutMs);
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (callerSignal && abortListener) callerSignal.removeEventListener("abort", abortListener);
+    },
+  };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type CSSProperties, type Dispatch, type FormEvent, type SetStateAction } from "react";
+import { useEffect, useId, useMemo, useState, type CSSProperties, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -21,6 +21,7 @@ import {
   Search,
   Share2,
   ShieldAlert,
+  Shuffle,
   Trash2,
   Unlink,
   Upload,
@@ -38,6 +39,7 @@ import {
   clearanceLevelLabel,
   clearanceLevelsAssignableBy,
   defaultClearanceLevel,
+  hasExactGroupScope,
   isGlobalAdmin,
   isGroupPathInUserScope,
 } from "../authz";
@@ -318,6 +320,38 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
     },
   });
 
+  const transferDocumentOwnerMutation = useMutation({
+    mutationFn: ({ document, groupPath }: DocumentOwnerTransferMutation) =>
+      documentsApi.transferOwnership(document.id, { group_path: groupPath }),
+    onMutate: ({ document }) => {
+      setPendingIds((current) => new Set([...current, document.id]));
+    },
+    onSuccess: (updated, { document }) => {
+      notify({
+        title: "Document ownership transferred",
+        description: `${updated.title} now belongs to ${updated.owner_group_path}.`,
+        tone: "success",
+      });
+      void refreshDocuments();
+      void queryClient.invalidateQueries({ queryKey: ["documents", "detail", document.id] });
+      void queryClient.invalidateQueries({ queryKey: ["documents", "shares", document.id] });
+      void queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] });
+    },
+    onError: (error) => notify({
+      title: "Ownership transfer failed",
+      description: errorMessage(error, "Unable to transfer document ownership."),
+      tone: "error",
+    }),
+    onSettled: (_data, _error, variables) => {
+      if (!variables) return;
+      setPendingIds((current) => {
+        const next = new Set(current);
+        next.delete(variables.document.id);
+        return next;
+      });
+    },
+  });
+
   const unshareDocumentMutation = useMutation({
     mutationFn: ({ document, groupPath }: DocumentUnshareMutation) =>
       documentsApi.unshare(document.id, { group_path: groupPath }),
@@ -536,7 +570,7 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
   return (
     <PrudentiaWorkspace activeRoute={activeRoute} onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page" id="main-content">
-        <div className="sv-page-inner max-w-none">
+        <div className="sv-page-inner sv-page-inner-workbench max-w-none">
           <header className="sv-page-header knowledge-page-header">
             <div>
               <p className="sv-eyebrow">Document Library</p>
@@ -625,6 +659,7 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
                   onClose={() => setSelectedDocumentId(null)}
                   onClearanceChange={(document, clearanceLevel) => updateDocumentClearanceMutation.mutate({ document, clearanceLevel })}
                   onDocumentAction={performDocumentAction}
+                  onOwnerChange={(document, groupPath) => transferDocumentOwnerMutation.mutate({ document, groupPath })}
                   onSharesChange={(document, groupPaths) => updateDocumentSharesMutation.mutate({ document, groupPaths })}
                   onTopicsChange={(document, topics) => updateDocumentTopicsMutation.mutate({ document, topics })}
                   onUnshare={(document, groupPath) => unshareDocumentMutation.mutate({ document, groupPath })}
@@ -699,6 +734,7 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
                   onClose={() => setSelectedDocumentId(null)}
                   onClearanceChange={(document, clearanceLevel) => updateDocumentClearanceMutation.mutate({ document, clearanceLevel })}
                   onDocumentAction={performDocumentAction}
+                  onOwnerChange={(document, groupPath) => transferDocumentOwnerMutation.mutate({ document, groupPath })}
                   onSharesChange={(document, groupPaths) => updateDocumentSharesMutation.mutate({ document, groupPaths })}
                   onTopicsChange={(document, topics) => updateDocumentTopicsMutation.mutate({ document, topics })}
                   onUnshare={(document, groupPath) => unshareDocumentMutation.mutate({ document, groupPath })}
@@ -1538,7 +1574,7 @@ function UploadJobCard({ graphStatus, graphStatusError, item }: { graphStatus: G
       <div className="knowledge-job-card-main">
         <div>
           <h4>{item.fileName}</h4>
-          <p>{item.groupPath} · {clearanceLevelLabel(item.clearanceLevel)} · {formatFileSizeForJob(item.fileSize)}</p>
+          <p>{[item.groupPath, clearanceLevelLabel(item.clearanceLevel), item.fileSize === null ? null : formatFileSizeForJob(item.fileSize)].filter(Boolean).join(" · ")}</p>
         </div>
         <IngestStatusPill status={status} />
       </div>
@@ -1815,64 +1851,104 @@ function DocumentTable({
   );
 }
 
+function RowActionTooltip({ children, label }: RowActionTooltipProps) {
+  const tooltipId = useId();
+
+  return (
+    <span className="knowledge-row-action-tooltip">
+      {children(tooltipId)}
+      <span id={tooltipId} role="tooltip" className="knowledge-action-tooltip">{label}</span>
+    </span>
+  );
+}
+
 function DocumentRowActions({ cancellingGraph = false, document, enriching = false, graphChip = null, graphEnabled = false, graphTask = null, mode, onAction, onCancelGraph, onEnrichGraph, pending, user }: DocumentRowActionsProps) {
   const writable = canModifyDocument(user, document);
   const canPermanent = canPermanentlyDeleteDocument(user, document);
+  const cancelGraphTooltip = graphTask ? `Cancel ${graphTask.state} graph enrichment` : "Cancel graph enrichment";
+  const enrichGraphTooltip = graphChip?.detail ?? graphChip?.label ?? (graphEnabled ? "Enrich graph" : "Graph enrichment unavailable");
+
   if (mode === "trash") {
     return (
       <div className="knowledge-row-actions">
         {writable ? (
-          <button type="button" onClick={() => onAction("restore", document)} disabled={pending} className="knowledge-icon-action" aria-label={`Restore ${document.title}`} title="Restore">
-            <ArchiveRestore size={15} />
-          </button>
+          <RowActionTooltip label="Restore">
+            {(tooltipId) => (
+              <button type="button" onClick={() => onAction("restore", document)} disabled={pending} className="knowledge-icon-action" aria-describedby={tooltipId} aria-label={`Restore ${document.title}`}>
+                <ArchiveRestore aria-hidden="true" size={15} />
+              </button>
+            )}
+          </RowActionTooltip>
         ) : null}
         {canPermanent ? (
-          <button type="button" onClick={() => onAction("permanent", document)} disabled={pending} className="knowledge-icon-action knowledge-icon-action-danger" aria-label={`Permanently delete ${document.title}`} title="Permanently delete">
-            <ShieldAlert size={15} />
-          </button>
+          <RowActionTooltip label="Permanently delete">
+            {(tooltipId) => (
+              <button type="button" onClick={() => onAction("permanent", document)} disabled={pending} className="knowledge-icon-action knowledge-icon-action-danger" aria-describedby={tooltipId} aria-label={`Permanently delete ${document.title}`}>
+                <ShieldAlert aria-hidden="true" size={15} />
+              </button>
+            )}
+          </RowActionTooltip>
         ) : null}
       </div>
     );
   }
   return (
     <div className="knowledge-row-actions">
-      <a href={documentsApi.contentUrl(document.id)} target="_blank" rel="noreferrer" className="knowledge-icon-action" aria-label={`View ${document.title}`} title="View">
-        <Eye size={15} />
-      </a>
+      <RowActionTooltip label="View">
+        {(tooltipId) => (
+          <a href={documentsApi.contentUrl(document.id)} target="_blank" rel="noreferrer" className="knowledge-icon-action" aria-describedby={tooltipId} aria-label={`View ${document.title}`}>
+            <Eye aria-hidden="true" size={15} />
+          </a>
+        )}
+      </RowActionTooltip>
       {writable ? (
         <>
           {document.ingest_status === "complete" && graphTask && onCancelGraph ? (
-            <button
-              type="button"
-              onClick={onCancelGraph}
-              disabled={pending || cancellingGraph}
-              className="knowledge-icon-action knowledge-graph-action knowledge-icon-action-danger"
-              aria-label={`Cancel graph enrichment for ${document.title}`}
-              title={`Cancel ${graphTask.state} graph enrichment`}
-            >
-              {cancellingGraph ? <Loader2 className="animate-spin" size={15} /> : <XCircle size={15} />}
-              <span>{cancellingGraph ? "Cancelling" : "Cancel graph"}</span>
-            </button>
+            <RowActionTooltip label={cancelGraphTooltip}>
+              {(tooltipId) => (
+                <button
+                  type="button"
+                  onClick={onCancelGraph}
+                  disabled={pending || cancellingGraph}
+                  className="knowledge-icon-action knowledge-graph-action knowledge-icon-action-danger"
+                  aria-describedby={tooltipId}
+                  aria-label={`Cancel graph enrichment for ${document.title}`}
+                >
+                  {cancellingGraph ? <Loader2 aria-hidden="true" className="animate-spin" size={15} /> : <XCircle aria-hidden="true" size={15} />}
+                </button>
+              )}
+            </RowActionTooltip>
           ) : null}
-          {document.ingest_status === "complete" && !graphTask && onEnrichGraph ? (
-            <button
-              type="button"
-              onClick={onEnrichGraph}
-              disabled={pending || enriching || !graphEnabled || Boolean(graphChip)}
-              className="knowledge-icon-action knowledge-graph-action"
-              aria-label={`Enrich graph for ${document.title}`}
-              title={graphChip?.detail ?? (graphChip?.label || (graphEnabled ? "Enrich graph" : "Graph enrichment unavailable"))}
-            >
-              {enriching ? <Loader2 className="animate-spin" size={15} /> : <Network size={15} />}
-              <span>{enriching ? "Queueing" : graphChip?.state === "running" ? "Running" : graphChip?.state === "queued" ? "Queued" : "Enrich graph"}</span>
-            </button>
+          {document.ingest_status === "complete" && graphEnabled && !graphTask && onEnrichGraph ? (
+            <RowActionTooltip label={enriching ? "Queueing graph enrichment" : enrichGraphTooltip}>
+              {(tooltipId) => (
+                <button
+                  type="button"
+                  onClick={onEnrichGraph}
+                  disabled={pending || enriching || Boolean(graphChip)}
+                  className="knowledge-icon-action knowledge-graph-action"
+                  aria-describedby={tooltipId}
+                  aria-label={`Enrich graph for ${document.title}`}
+                >
+                  {enriching ? <Loader2 aria-hidden="true" className="animate-spin" size={15} /> : <Network aria-hidden="true" size={15} />}
+                </button>
+              )}
+            </RowActionTooltip>
           ) : null}
-          <button type="button" onClick={() => onAction("reingest", document)} disabled={pending} className="knowledge-icon-action" aria-label={`Reingest ${document.title}`} title="Reingest">
-            <RotateCw size={15} />
-          </button>
-          <button type="button" onClick={() => onAction("trash", document)} disabled={pending} className="knowledge-icon-action knowledge-icon-action-danger" aria-label={`Move ${document.title} to Trash`} title="Move to Trash">
-            <Trash2 size={15} />
-          </button>
+          <RowActionTooltip label="Reingest">
+            {(tooltipId) => (
+              <button type="button" onClick={() => onAction("reingest", document)} disabled={pending} className="knowledge-icon-action" aria-describedby={tooltipId} aria-label={`Reingest ${document.title}`}>
+                <RotateCw aria-hidden="true" size={15} />
+              </button>
+            )}
+          </RowActionTooltip>
+          <RowActionTooltip label="Move to Trash">
+            {(tooltipId) => (
+              <button type="button" onClick={() => onAction("trash", document)} disabled={pending} className="knowledge-icon-action knowledge-icon-action-danger" aria-describedby={tooltipId} aria-label={`Move ${document.title} to Trash`}>
+                <Trash2 aria-hidden="true" size={15} />
+              </button>
+            )}
+          </RowActionTooltip>
         </>
       ) : null}
     </div>
@@ -1913,7 +1989,7 @@ function BulkToolbar({ count, mode, onAction, onClear, user }: BulkToolbarProps)
   );
 }
 
-function DocumentInspector({ document, onClearanceChange, onClose, onDocumentAction, onSharesChange, onTopicsChange, onUnshare, pending, spaceOptions, user }: DocumentInspectorProps) {
+function DocumentInspector({ document, onClearanceChange, onClose, onDocumentAction, onOwnerChange, onSharesChange, onTopicsChange, onUnshare, pending, spaceOptions, user }: DocumentInspectorProps) {
   const detailQuery = useQuery({
     queryKey: ["documents", "detail", document?.id],
     queryFn: () => documentsApi.get(document?.id ?? ""),
@@ -1932,18 +2008,21 @@ function DocumentInspector({ document, onClearanceChange, onClose, onDocumentAct
   const [topicInput, setTopicInput] = useState("");
   const [shareDraft, setShareDraft] = useState<string[]>([]);
   const [shareCandidate, setShareCandidate] = useState("");
+  const [ownerCandidate, setOwnerCandidate] = useState("");
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("overview");
   const clearanceOptions = useMemo(() => clearanceLevelsAssignableBy(user), [user]);
   const selectedTopics = useMemo(() => uniqueTopicValues([...(selected?.topics ?? []), ...(selected?.llm_topics ?? [])]), [selected?.topics, selected?.llm_topics]);
   const selectedTopicKey = selectedTopics.join("\u001f");
   const selectedShareKey = (selected?.shared_group_paths ?? []).join("\u001f");
   const shareDraftKey = shareDraft.join("\u001f");
+  const ownerGroupPath = selected?.owner_group_path ?? selected?.group_path ?? "";
   const shareOptions = useMemo(
     () => spaceOptions
-      .filter((space) => space.path !== (selected?.owner_group_path ?? selected?.group_path))
+      .filter((space) => space.path !== ownerGroupPath)
       .filter((space) => !shareDraft.includes(space.path)),
-    [selected?.group_path, selected?.owner_group_path, shareDraft, spaceOptions],
+    [ownerGroupPath, shareDraft, spaceOptions],
   );
+  const ownerOptions = useMemo(() => ownershipTransferOptions(user, ownerGroupPath, spaceOptions), [ownerGroupPath, spaceOptions, user]);
   useEffect(() => {
     if (selected) setClearanceDraft(selected.clearance_level);
   }, [selected?.id, selected?.clearance_level]);
@@ -1951,6 +2030,9 @@ function DocumentInspector({ document, onClearanceChange, onClose, onDocumentAct
     setShareDraft(selected?.shared_group_paths ?? []);
     setShareCandidate("");
   }, [selected?.id, selectedShareKey]);
+  useEffect(() => {
+    setOwnerCandidate("");
+  }, [selected?.id, ownerGroupPath]);
   useEffect(() => {
     setTopicDraft(selectedTopics);
     setTopicInput("");
@@ -1962,6 +2044,7 @@ function DocumentInspector({ document, onClearanceChange, onClose, onDocumentAct
   const writable = canModifyDocument(user, selected);
   const canPermanent = canPermanentlyDeleteDocument(user, selected);
   const isDeleted = Boolean(selected.deleted_at);
+  const canTransferOwner = canTransferDocumentOwner(user, selected) && !isDeleted;
   const canEditClearance = writable && !isDeleted;
   const clearanceChanged = clearanceDraft !== selected.clearance_level;
   const canEditTopics = writable && !isDeleted;
@@ -2079,6 +2162,17 @@ function DocumentInspector({ document, onClearanceChange, onClose, onDocumentAct
             <Fact label="Deleted" value={selected.deleted_at ? formatDateTime(selected.deleted_at) : "Not deleted"} />
             <Fact label="Expires" value={selected.expiry_date ? formatDate(selected.expiry_date) : "No expiry"} />
           </dl>
+          <InspectorSection title="Owner Knowledge Space">
+            <OwnerTransferControl
+              canTransfer={canTransferOwner}
+              currentGroupPath={ownerGroupPath}
+              disabled={pending}
+              onTransfer={() => onOwnerChange(selected, ownerCandidate)}
+              options={ownerOptions}
+              selectedCandidate={ownerCandidate}
+              setSelectedCandidate={setOwnerCandidate}
+            />
+          </InspectorSection>
           <InspectorSection title="Shared Knowledge Spaces">
             <ShareControl
               canEdit={canEditShares}
@@ -2368,6 +2462,56 @@ function ChipList({ empty, values }: { empty: string; values: string[] }) {
   return (
     <div className="flex flex-wrap gap-2">
       {unique.slice(0, 16).map((value) => <span key={value} className="sv-pill">{value}</span>)}
+    </div>
+  );
+}
+
+function OwnerTransferControl({
+  canTransfer,
+  currentGroupPath,
+  disabled,
+  onTransfer,
+  options,
+  selectedCandidate,
+  setSelectedCandidate,
+}: OwnerTransferControlProps) {
+  const canSubmit = canTransfer && Boolean(selectedCandidate) && !disabled;
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (canSubmit) onTransfer();
+  }
+
+  return (
+    <div className="knowledge-topic-editor">
+      <label className="sv-field" htmlFor="document-owner-current">
+        <span className="sv-label">Current owner</span>
+        <input id="document-owner-current" className="sv-input" disabled readOnly value={currentGroupPath} />
+      </label>
+      {canTransfer ? (
+        <form className="knowledge-topic-form" onSubmit={submit}>
+          <label className="sv-field" htmlFor="document-owner-space">
+            <span className="sv-label">Transfer to</span>
+            <select
+              id="document-owner-space"
+              className="sv-select"
+              disabled={disabled || options.length === 0}
+              onChange={(event) => setSelectedCandidate(event.target.value)}
+              value={selectedCandidate}
+            >
+              <option value="">Select space</option>
+              {options.map((space) => (
+                <option key={space.path} value={space.path}>
+                  {space.name} {space.path}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="submit" className="sv-action-primary" disabled={!canSubmit}>
+            <Shuffle size={15} /> Transfer Ownership
+          </button>
+        </form>
+      ) : null}
     </div>
   );
 }
@@ -2764,6 +2908,20 @@ function canModifyDocument(user: AuthUser, document: Document) {
   return canWriteDocument(user, document.owner_group_path ?? document.group_path, document.clearance_level);
 }
 
+export function canTransferDocumentOwner(user: AuthUser, document: Document) {
+  const ownerGroupPath = document.owner_group_path ?? document.group_path;
+  return isGlobalAdmin(user) || (user.account_type === "space_admin" && hasExactGroupScope(user, ownerGroupPath));
+}
+
+export function ownershipTransferOptions(user: AuthUser, ownerGroupPath: string, spaceOptions: GroupOption[]) {
+  const currentOwner = ownerGroupPath.trim();
+  if (!currentOwner) return [];
+  const candidates = spaceOptions.filter((space) => space.path !== currentOwner);
+  if (isGlobalAdmin(user)) return candidates;
+  if (user.account_type !== "space_admin" || !hasExactGroupScope(user, currentOwner)) return [];
+  return candidates.filter((space) => hasExactGroupScope(user, space.path));
+}
+
 function canPermanentlyDeleteDocument(user: AuthUser, document: Document) {
   if (document.governance_owner === "system") return isGlobalAdmin(user);
   const groupPath = document.owner_group_path ?? document.group_path;
@@ -2931,6 +3089,7 @@ type InspectorTab = "overview" | "governance" | "extracted" | "versions";
 type SpaceDraft = { name: string; path: string; pathTouched: boolean };
 type SpacePanelState = { kind: "create-space" } | { kind: "edit-space"; space: GroupOption } | null;
 type TreeRowStyle = CSSProperties & { "--space-depth": number };
+type RowActionTooltipProps = { children: (tooltipId: string) => ReactNode; label: string };
 
 type ExplorerUrlState = {
   activeTab: ExplorerTab;
@@ -3089,6 +3248,7 @@ type DocumentInspectorProps = {
   onClearanceChange: (document: Document, clearanceLevel: ClearanceLevel) => void;
   onClose: () => void;
   onDocumentAction: (action: DocumentAction, document: Document) => void;
+  onOwnerChange: (document: Document, groupPath: string) => void;
   onSharesChange: (document: Document, groupPaths: string[]) => void;
   onTopicsChange: (document: Document, topics: string[]) => void;
   onUnshare: (document: Document, groupPath: string) => void;
@@ -3112,12 +3272,27 @@ type DocumentSharesMutation = {
   groupPaths: string[];
 };
 
+type DocumentOwnerTransferMutation = {
+  document: Document;
+  groupPath: string;
+};
+
 type DocumentUnshareMutation = {
   document: Document;
   groupPath: string;
 };
 
 type InspectorSectionProps = { children: React.ReactNode; defaultCollapsed?: boolean; resetKey?: string; title: string };
+
+type OwnerTransferControlProps = {
+  canTransfer: boolean;
+  currentGroupPath: string;
+  disabled: boolean;
+  onTransfer: () => void;
+  options: GroupOption[];
+  selectedCandidate: string;
+  setSelectedCandidate: (path: string) => void;
+};
 
 type ShareControlProps = {
   canEdit: boolean;

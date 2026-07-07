@@ -80,7 +80,7 @@ USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=5s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"
+HEALTHCHECK --interval=10s --timeout=10s --retries=5 --start-period=5s \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=8)"
 
 CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

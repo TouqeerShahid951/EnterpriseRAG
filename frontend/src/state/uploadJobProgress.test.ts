@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatIngestRunLabel,
   formatSecondaryStageProgress,
   formatStageProgress,
   formatUploadWarning,
@@ -23,6 +24,30 @@ describe("upload job progress formatting", () => {
   it("maps metadata warning codes to readable labels", () => {
     expect(formatUploadWarning("ollama_metadata_timeout")).toBe("Metadata model timed out; fallback metadata was used");
     expect(formatUploadWarning("unknown_warning")).toBe("Unknown Warning");
+  });
+
+  it("labels review resumes separately from retries", () => {
+    expect(formatIngestRunLabel({ attempt_count: 1, max_attempts: 3 })).toBe("Attempt 1 of 3");
+    expect(formatIngestRunLabel({ attempt_count: 2, max_attempts: 3 })).toBe("Retry 2 of 3");
+    expect(formatIngestRunLabel({
+      attempt_count: 2,
+      max_attempts: 3,
+      parser_provenance: {
+        version: 1,
+        document_kind: "pdf",
+        page_count: 359,
+        primary_parser: "review_resume",
+        secondary_parser: "vision",
+        routing_mode: "image_review_resume",
+        config: {},
+        docling_selection: null,
+        parser_item_counts: {},
+        parser_page_counts: {},
+        quality_flag_counts: {},
+        fallback: null,
+        errors: [],
+      },
+    })).toBe("Resumed after review");
   });
 
   it("suppresses duplicate secondary stage progress", () => {
@@ -81,6 +106,42 @@ describe("upload job progress formatting", () => {
     });
 
     expect(chip).toBeNull();
+  });
+
+  it("hides idle graph enrichment when the workspace toggle is disabled", () => {
+    const chip = graphEnrichmentForJob({ jobId: "job-1", status: "complete", documentId: "doc-1" }, {
+      enabled: false,
+      queue_name: "graphrag:jobs",
+      queued_jobs: 0,
+      queue_error: null,
+      worker_online: true,
+      worker_error: null,
+      active_jobs: 0,
+      observed_pool_size: 1,
+      workers: [],
+      active_tasks: [],
+      queued_tasks: [],
+    });
+
+    expect(chip).toBeNull();
+  });
+
+  it("keeps running graph enrichment visible after the workspace toggle is disabled", () => {
+    const chip = graphEnrichmentForJob({ jobId: "job-1", status: "complete", documentId: "doc-1" }, {
+      enabled: false,
+      queue_name: "graphrag:jobs",
+      queued_jobs: 0,
+      queue_error: null,
+      worker_online: true,
+      worker_error: null,
+      active_jobs: 1,
+      observed_pool_size: 1,
+      workers: [],
+      active_tasks: [{ task_id: "task-1", task_name: "apps.ingestion.tasks.index_document_graphrag", worker: "graph@node", job_id: "job-1", document_id: "doc-1", started_at: null, elapsed_seconds: 12 }],
+      queued_tasks: [],
+    });
+
+    expect(chip?.label).toBe("Graph enrichment running");
   });
 
   it("treats cancelled jobs as terminal but not cancellable", () => {

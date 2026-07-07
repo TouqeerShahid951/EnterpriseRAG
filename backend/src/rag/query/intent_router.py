@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .cancellation import QueryCancellationToken, QueryCancelled
+from .http import ServiceRequestError
 from .retrieval_plans import retrieval_settings_for
 from .routing_models import QuerySignals, RouteMethod, RoutePenalty, RoutePlan, RuleRouteResult, public_intent_for
 from .routing_rules import LLM_VERIFIER_FLOOR, score_route_rules, should_call_llm_verifier
@@ -38,7 +39,7 @@ def route_query(
             )
         except QueryCancelled:
             raise
-        except (TypeError, ValueError, RuntimeError):
+        except (TypeError, ValueError, RuntimeError, ServiceRequestError):
             verifier_penalty = RoutePenalty(None, "llm_verifier_failed", -0.20)
 
     if verifier_decision is not None:

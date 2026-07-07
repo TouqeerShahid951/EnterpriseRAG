@@ -50,6 +50,9 @@ export function toUploadRequests(draft: PdfUploadDraft): UploadDocumentRequest[]
   return draft.files.map((file) => ({
     file,
     group_path: draft.groupPath.trim(),
+    shared_group_paths: draft.sharedGroupPaths
+      .map((path) => path.trim())
+      .filter((path) => path && path !== draft.groupPath.trim()),
     clearance_level: draft.clearanceLevel,
     effective_date: draft.effectiveDate || null,
     expiry_date: draft.expiryDate || null,

@@ -9,6 +9,7 @@ from rag.connectors.registry import default_connector_registry
 from rag.query.live_sql import retrieve_live_sql_hits
 from rag.query.qdrant import SearchHit
 from rag.query.routing_models import RoutePlan
+from rag.query.source_resolution import SourceDecision
 from rag.query.sources import sources_from_hits
 from rag.query.state import initial_state
 from rag.connectors.repositories import InMemoryConnectorProfileRepository
@@ -264,7 +265,7 @@ def test_live_sql_generation_and_execution_fail_closed_to_fallback() -> None:
     assert connector_failure.hits == []
 
 
-def test_retrieval_service_prepends_live_sql_for_structured_routes_only() -> None:
+def test_retrieval_service_prepends_live_sql_for_structured_and_explicit_database_routes() -> None:
     schedule_repo = InMemoryFolderScheduleRepository()
     profile_repo = _repo_with_approved_catalog(live_rows=[{"id": "1", "status": "open"}])
     llm = FakeLlm()
@@ -290,6 +291,50 @@ def test_retrieval_service_prepends_live_sql_for_structured_routes_only() -> Non
     assert [hit.payload["doc_id"] for hit in factual_hits] == ["indexed"]
     assert factual_ctx["execution_modes"]["live_sql_retriever"] == "skipped"
     assert len(llm.generated_prompts) == 1
+
+    db_factual_ctx = _ctx("What is the status of ticket TCK-2025-5002?", structured=False)
+    db_factual_ctx["source_decision"] = SourceDecision(
+        requested_mode="db_only",
+        resolved_mode="db_only",
+        semantic_query=db_factual_ctx["request"].query,
+        explicit=True,
+        reason="composer_selected_database",
+        allow_source_expansion=False,
+    )
+    db_factual_hits = service.retrieve(db_factual_ctx)
+
+    assert db_factual_hits[0].payload["source_type"] == "connector_live_sql_database_scope"
+    assert db_factual_ctx["execution_modes"]["live_sql_retriever"] == "ai_assisted"
+    assert len(llm.generated_prompts) == 2
+
+
+def test_retrieval_service_hybrid_corpus_preference_keeps_live_sql_after_vector_hits() -> None:
+    profile_repo = _repo_with_approved_catalog(live_rows=[{"id": "1", "status": "open"}])
+    llm = FakeLlm()
+    service = RetrievalService(
+        config=FakeConfig(),
+        embedder=llm,
+        vector_store=FakeQdrant(),
+        schedule_repo=InMemoryFolderScheduleRepository(),
+        connector_profile_repo=profile_repo,
+        connector_registry=default_connector_registry(),
+    )
+    ctx = _ctx("What is the status?", structured=False)
+    ctx["source_decision"] = SourceDecision(
+        requested_mode="auto",
+        resolved_mode="hybrid",
+        semantic_query=ctx["request"].query,
+        explicit=False,
+        reason="auto_hybrid_corpus_preferred",
+        allow_source_expansion=False,
+        preferred_source="corpus",
+    )
+
+    hits = service.retrieve(ctx)
+
+    assert hits[0].payload["doc_id"] == "indexed"
+    assert hits[1].payload["source_type"] == "connector_live_sql_database_scope"
+    assert ctx["execution_modes"]["live_sql_retriever"] == "ai_assisted"
 
 
 def test_live_sql_retrieval_uses_approved_database_scope_without_schedule() -> None:

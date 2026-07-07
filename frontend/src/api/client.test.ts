@@ -4,6 +4,7 @@ import { ApiClient, ApiClientError, AUTH_SESSION_EXPIRED_EVENT, AUTH_SESSION_TOU
 
 describe("ApiClient auth refresh", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -127,6 +128,24 @@ describe("ApiClient auth refresh", () => {
       AUTH_SESSION_TOUCHED_EVENT,
       AUTH_SESSION_EXPIRED_EVENT,
     ]);
+  });
+
+  it("aborts a request after the configured timeout", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://api.test" });
+    const request = client.get("/api/v1/auth/me", { timeoutMs: 25 });
+    const assertion = expect(request).rejects.toMatchObject({ name: "TimeoutError" });
+
+    await vi.advanceTimersByTimeAsync(25);
+
+    await assertion;
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.signal?.aborted).toBe(true);
   });
 });
 

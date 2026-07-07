@@ -37,7 +37,7 @@ PDF_PATH = DOCS_DIR / "Prudentia-AI-End-User-Walkthrough.pdf"
 
 TITLE = "Prudentia AI End User Walkthrough"
 SUBTITLE = "Search documents and live data, choose ingestion profiles, verify evidence, and use optional GraphRAG"
-UPDATED = "2026-06-23"
+UPDATED = "2026-07-07"
 
 BLUE = RGBColor(46, 116, 181)
 DARK_BLUE = RGBColor(31, 77, 120)
@@ -67,9 +67,19 @@ FEATURE_ROWS = [
     FeatureRow("Activity", "Track upload, folder, restore, and reingestion jobs.", "Corpus > Document Intake > Activity"),
     FeatureRow("Folder Sources", "Upload local folder snapshots.", "Corpus > Document Intake > Folder Sources"),
     FeatureRow("Database Connectors", "Approve SQL Server or PostgreSQL scopes for live read-only answers.", "Corpus > Document Intake > Database Connectors"),
-    FeatureRow("Review Queue", "Correct low-confidence OCR blocks before indexing continues.", "Evaluate > Review Queue"),
+    FeatureRow("Review Queue", "Resolve OCR blocks and PDF image-analysis holds before indexing continues.", "Evaluate > Review Queue"),
     FeatureRow("System Audit", "Review visible authentication, document, and ingestion activity.", "Govern > System Audit"),
-    FeatureRow("Configs", "Assign inference roles, tune services, and choose ingestion defaults.", "Govern > Configs"),
+    FeatureRow("Runtime Settings", "Assign inference roles, tune services, and manage ingestion controls.", "Govern > Runtime Settings"),
+]
+
+
+ROLE_ROWS = [
+    ("Platform Admin", "Full platform ownership: users, spaces, Runtime Settings, RAG Evaluation, audit, connectors, uploads, review, and documents."),
+    ("System Admin", "Global operations: users except Platform Admins, spaces, documents, uploads, review, audit, and recovery."),
+    ("Space Admin", "Assigned-space administration: scoped users, spaces, uploads, review, folder sources, connectors, and document lifecycle."),
+    ("Document Contributor", "Document work: chat, upload, track ingestion, resolve Review Queue items, and maintain writable documents."),
+    ("Chat Member", "Everyday use: chat with visible documents, scope questions, inspect evidence, and browse visible library metadata."),
+    ("Audit Viewer", "Governance review: inspect visible audit events and metadata without changing system state."),
 ]
 
 
@@ -77,7 +87,7 @@ STATUS_ROWS = [
     ("Scheduled", "Waiting for a planned start time."),
     ("Queued", "Accepted and waiting for an ingestion worker."),
     ("Processing", "Being parsed, enriched, chunked, embedded, and indexed."),
-    ("Needs review", "Paused for human OCR or extraction review."),
+    ("Needs review", "Paused for human OCR, extraction, or PDF image review."),
     ("Indexed", "Complete and searchable."),
     ("Failed", "Stopped with an error that needs investigation."),
     ("Cancelled", "Manually stopped before completion."),
@@ -89,7 +99,7 @@ TROUBLESHOOTING_ROWS = [
     ("You cannot query", "The active space has no indexed current documents, or the model runtime is unavailable.", "Switch space, wait for indexing, or report the runtime issue."),
     ("No documents appear", "Wrong active space, insufficient clearance, or no documents are current.", "Check the space selector and ask your workspace admin to verify access."),
     ("Upload is rejected", "Unsupported type, empty file, file over 50 MB, or no writable space.", "Use PDF, DOCX, JPG, JPEG, PNG, or JSON and choose a writable Knowledge Space."),
-    ("A document needs review", "Low-confidence OCR paused indexing.", "A reviewer should correct or reject the pending block in Review Queue."),
+    ("A document needs review", "OCR, extraction, or PDF image triage paused indexing.", "A Document Contributor, Space Admin, System Admin, or Platform Admin should resolve the pending Review Queue item."),
     ("An ingestion job looks stuck", "Worker heartbeat, parsing, OCR, or model services may be delayed.", "Open Activity or Ingestion Health and share the job ID with operations."),
     ("Source highlight is unavailable", "The source may lack page coordinates or exact text matching.", "Use the original document link and compare page, excerpt, and citation details."),
     ("The answer has a warning", "Sources may conflict, faithfulness may be low, or the response is degraded.", "Inspect citations manually before using the answer."),
@@ -137,7 +147,7 @@ def build_docx(path: Path) -> None:
     add_h1(doc, "How to Use This Guide")
     add_note_box(
         doc,
-        "Your sidebar is permission-aware. If a feature described here does not appear, your account does not include that permission. Connector governance and Configs are included for administrators who can see those pages.",
+        "Your sidebar is permission-aware. If a feature described here does not appear, your account does not include that permission. Connector governance and Runtime Settings are included for administrators who can see those pages.",
     )
     add_numbered_list(
         doc,
@@ -149,6 +159,16 @@ def build_docx(path: Path) -> None:
             "Use Add Files, Activity, Review Queue, or Audit only when those pages appear in your sidebar.",
         ],
     )
+
+    add_h1(doc, "Know Your Account Type")
+    add_para(doc, "Your account type controls which pages and actions appear. Knowledge Space membership and clearance still limit what you can see inside those pages.")
+    add_table(
+        doc,
+        ["Account type", "Typical access"],
+        ROLE_ROWS,
+        [2300, 7060],
+    )
+    add_note_box(doc, "Legacy User Manager and Reviewer records may exist in older data. New assignments use Space Admin for scoped user management and Document Contributor for upload plus review.")
 
     add_h1(doc, "Feature Map")
     add_para(doc, "Use this map to connect common tasks to the page where they happen.")
@@ -350,27 +370,38 @@ def build_docx(path: Path) -> None:
             "Open Document Intake > Database Connectors and add a read-only profile.",
             "Enter server or host, port, database, user, password, and the required driver or SSL mode.",
             "Save the encrypted profile, then click Test.",
-            "Click Schema to inspect tables, columns, relationships, indexes, and raw schema JSON.",
-            "Create an AI draft, then correct its catalog name, business rules, descriptions, synonyms, allowed fields, and sensitivity flags.",
-            "Assign the correct Knowledge Space and clearance, then Approve Scope.",
+            "Click Read Schema to inspect tables, columns, relationships, indexes, and raw schema JSON.",
+            "Click Prepare Review, then correct the catalog name, business rules, descriptions, synonyms, allowed fields, and sensitivity flags.",
+            "Assign the owner Knowledge Space, optional shared Knowledge Spaces, and clearance, then Enable Live DB Access after review.",
             "In Query Intelligence, choose Live DB or Hybrid and select the approved source.",
         ],
     )
     add_note_box(doc, "Only approved, non-sensitive tables, columns, and relationships can be queried. Write statements, wildcards, unapproved joins, system schemas, and chained SQL are blocked.", fill=CAUTION_FILL)
 
-    add_h1(doc, "Review OCR Blocks")
-    add_para(doc, "If Review Queue appears in your sidebar, use it to resolve low-confidence OCR before indexing continues.")
+    add_h1(doc, "Use Review Queue")
+    add_para(doc, "If Review Queue appears in your sidebar, use it to resolve OCR blocks and PDF image-analysis holds before indexing continues.")
+    add_h2(doc, "OCR Blocks")
     add_numbered_list(
         doc,
         [
-            "Open Review Queue.",
+            "Open Review Queue and choose OCR blocks.",
             "Select a pending block grouped under a document.",
             "Compare the OCR text with the source page preview.",
             "Edit Corrected extraction text.",
             "Click Approve correction to save, or Reject block if it should not continue.",
         ],
     )
-    add_note_box(doc, "Approval requires non-empty corrected text. When the queue is clear, the page shows a ready state.")
+    add_h2(doc, "PDF Images")
+    add_numbered_list(
+        doc,
+        [
+            "Choose PDF images.",
+            "Select a held document image batch.",
+            "Review candidate thumbnails and recommended markers.",
+            "Choose Analyze selected, Analyze recommended, Skip selected, or Skip all pending.",
+        ],
+    )
+    add_note_box(doc, "OCR approval requires non-empty corrected text. Image batches resume when no candidates remain pending.")
 
     add_h1(doc, "Read the System Audit")
     add_para(
@@ -378,8 +409,8 @@ def build_docx(path: Path) -> None:
         "If System Audit appears in your sidebar, use it to review visible authentication, document, ingestion, and workspace events.",
     )
 
-    add_h1(doc, "Use Configs")
-    add_para(doc, "Configs is Platform Admin-only and contains Models & Roles, Inference Services, and Ingestion Worker Capacity.")
+    add_h1(doc, "Use Runtime Settings")
+    add_para(doc, "Runtime Settings is Platform Admin-only under Govern and contains Models & Roles, Inference Services, and Ingestion Controls.")
     add_h2(doc, "Models & Roles")
     add_bullets(
         doc,
@@ -392,14 +423,16 @@ def build_docx(path: Path) -> None:
     )
     add_h2(doc, "Inference Services")
     add_para(doc, "Check provider availability and manage vLLM text, embedding, and vision limits. Applying limits restarts only the selected service and interrupts requests using it.")
-    add_h2(doc, "Ingestion Profiles and Worker Capacity")
+    add_h2(doc, "Ingestion Controls")
     add_table(doc, ["Profile", "Behavior", "Best for"], INGESTION_PROFILE_ROWS, [1800, 4460, 3100], compact=True)
     add_bullets(
         doc,
         [
             "Worker concurrency is 1-10 per replica; one is recommended for the default 8 GB environment.",
             "OCR blocks below the review threshold pause in Review Queue.",
+            "PDF image batches above the image review threshold pause before vision analysis; set the threshold to 0 to skip this gate.",
             "Vision layout repair re-reads complex PDF pages after Docling and trades throughput for fidelity.",
+            "Graph enrichment controls whether completed documents expose the graph enrichment action.",
         ],
     )
     add_bullets(
@@ -525,8 +558,8 @@ def add_docx_cover(doc: Document) -> None:
         doc,
         ["Field", "Details"],
         [
-            ("Audience", "Members, contributors, reviewers, auditors, space admins, system admins, and platform admins"),
-            ("Scope", "Document and live-data queries, connectors, ingestion profiles, optional GraphRAG, evidence, activity, governance, and Configs"),
+            ("Audience", "Chat Members, Document Contributors, Audit Viewers, Space Admins, System Admins, and Platform Admins"),
+            ("Scope", "Document and live-data queries, connectors, ingestion profiles, optional GraphRAG, evidence, activity, governance, and Runtime Settings"),
             ("Not covered", "Deployment internals, secret rotation, database administration, and developer operations"),
             ("Updated", UPDATED),
         ],
@@ -760,6 +793,7 @@ def build_pdf(path: Path) -> None:
     story.extend(pdf_cover(styles))
     story.append(PageBreak())
     story.extend(pdf_quick_start(styles))
+    story.extend(pdf_role_guide(styles))
     story.extend(pdf_feature_map(styles))
     story.extend(pdf_section(styles, "Sign In and Navigate", [
         "Open the web application URL provided by your organization. Local deployments commonly use http://localhost:3000.",
@@ -818,13 +852,19 @@ def build_pdf(path: Path) -> None:
         "Use schedule run details to review queued, skipped, and failed files.",
     ]))
     story.extend(pdf_database_connectors_section(styles))
-    story.extend(pdf_numbered_section(styles, "Review OCR Blocks", [
-        "Open Review Queue.",
+    story.extend(pdf_numbered_section(styles, "Use Review Queue - OCR Blocks", [
+        "Open Review Queue and choose OCR blocks.",
         "Select a pending block grouped under a document.",
         "Compare the OCR text with the source page preview.",
         "Edit Corrected extraction text.",
         "Click Approve correction to save, or Reject block if it should not continue.",
-    ], lead="If Review Queue appears in your sidebar, use it to resolve low-confidence OCR before indexing continues."))
+    ], lead="If Review Queue appears in your sidebar, use it to resolve OCR blocks before indexing continues."))
+    story.extend(pdf_numbered_section(styles, "Use Review Queue - PDF Images", [
+        "Choose PDF images.",
+        "Select a held document image batch.",
+        "Review candidate thumbnails and recommended markers.",
+        "Choose Analyze selected, Analyze recommended, Skip selected, or Skip all pending.",
+    ], lead="Large PDF image-analysis batches can pause here for human triage. The job resumes when no candidates remain pending."))
     story.extend(pdf_section(styles, "Read the System Audit", [
         "Events are newest first.",
         "Each row shows event type, target, actor, payload summary, and created time.",
@@ -884,8 +924,8 @@ def pdf_cover(styles: dict[str, ParagraphStyle]) -> list:
             styles,
             ["Field", "Details"],
             [
-                ("Audience", "Members, contributors, reviewers, auditors, space admins, system admins, and platform admins"),
-                ("Scope", "Document and live-data queries, connectors, ingestion profiles, optional GraphRAG, evidence, activity, governance, and Configs"),
+                ("Audience", "Chat Members, Document Contributors, Audit Viewers, Space Admins, System Admins, and Platform Admins"),
+                ("Scope", "Document and live-data queries, connectors, ingestion profiles, optional GraphRAG, evidence, activity, governance, and Runtime Settings"),
                 ("Not covered", "Deployment internals, secret rotation, database administration, and developer operations"),
                 ("Updated", UPDATED),
             ],
@@ -907,6 +947,15 @@ def pdf_quick_start(styles: dict[str, ParagraphStyle]) -> list:
             "Inspect citations before relying on an answer.",
             "Use Add Files, Activity, Review Queue, or Audit only when those pages appear in your sidebar.",
         ]),
+    ]
+
+
+def pdf_role_guide(styles: dict[str, ParagraphStyle]) -> list:
+    return [
+        Paragraph("Know Your Account Type", styles["h1"]),
+        Paragraph("Your account type controls which pages and actions appear. Knowledge Space membership and clearance still limit what you can see inside those pages.", styles["body"]),
+        pdf_table(styles, ["Account type", "Typical access"], ROLE_ROWS, [1.55 * inch, 4.95 * inch]),
+        pdf_note(styles, "Legacy User Manager and Reviewer records may exist in older data. New assignments use Space Admin for scoped user management and Document Contributor for upload plus review."),
     ]
 
 
@@ -996,9 +1045,9 @@ def pdf_database_connectors_section(styles: dict[str, ParagraphStyle]) -> list:
         *pdf_numbered_items(styles, [
             "Add a read-only profile with host, port, database, credentials, and required driver or SSL mode.",
             "Save the encrypted profile and click Test.",
-            "Click Schema to inspect tables, columns, relationships, indexes, and raw schema JSON.",
-            "Create an AI draft and review names, business rules, descriptions, synonyms, allowed fields, and sensitivity flags.",
-            "Assign the correct Knowledge Space and clearance, then Approve Scope.",
+            "Click Read Schema to inspect tables, columns, relationships, indexes, and raw schema JSON.",
+            "Click Prepare Review and review names, business rules, descriptions, synonyms, allowed fields, and sensitivity flags.",
+            "Assign the owner Knowledge Space, optional shared Knowledge Spaces, and clearance, then Enable Live DB Access after review.",
             "Choose Live DB or Hybrid in Query Intelligence and select the approved source.",
         ]),
         pdf_note(styles, "Only approved, non-sensitive tables, columns, and relationships can be queried. Write statements, wildcards, unapproved joins, system schemas, and chained SQL are blocked."),
@@ -1008,8 +1057,8 @@ def pdf_database_connectors_section(styles: dict[str, ParagraphStyle]) -> list:
 def pdf_configs_section(styles: dict[str, ParagraphStyle]) -> list:
     return [
         KeepTogether([
-            Paragraph("Use Configs", styles["h1"]),
-            Paragraph("Configs is Platform Admin-only. It contains Models & Roles, Inference Services, and Ingestion Worker Capacity.", styles["body"]),
+            Paragraph("Use Runtime Settings", styles["h1"]),
+            Paragraph("Runtime Settings is Platform Admin-only under Govern. It contains Models & Roles, Inference Services, and Ingestion Controls.", styles["body"]),
         ]),
         KeepTogether([
             Paragraph("Models & Roles", styles["h2"]),
@@ -1025,12 +1074,14 @@ def pdf_configs_section(styles: dict[str, ParagraphStyle]) -> list:
             Paragraph("Check provider availability and manage vLLM text, embedding, and vision limits. Applying limits restarts only the selected service and interrupts requests that use it.", styles["body"]),
         ]),
         KeepTogether([
-            Paragraph("Ingestion Profiles", styles["h2"]),
+            Paragraph("Ingestion Controls", styles["h2"]),
             pdf_table(styles, ["Profile", "Behavior", "Best for"], INGESTION_PROFILE_ROWS, [1.15 * inch, 3.15 * inch, 2.2 * inch]),
             *pdf_bullets(styles, [
                 "Worker concurrency is 1-10 per replica; one is recommended for the default 8 GB environment.",
                 "OCR below the review threshold pauses in Review Queue.",
+                "PDF image batches above the image review threshold pause before vision analysis; set the threshold to 0 to skip this gate.",
                 "Vision layout repair re-reads complex PDF pages after Docling and trades throughput for fidelity.",
+                "Graph enrichment controls whether completed documents expose the graph enrichment action.",
             ]),
         ]),
     ]

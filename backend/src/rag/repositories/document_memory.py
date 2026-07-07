@@ -15,6 +15,9 @@ from .document_models import (
     DocumentEntityRecord,
     DocumentImageAssetRecord,
     DocumentRecord,
+    ImageReviewBatchRecord,
+    ImageReviewCandidateRecord,
+    ImageReviewDecisionRecord,
     IngestJobRecord,
     ReviewBatchRecord,
     ReviewDecisionRecord,
@@ -30,6 +33,8 @@ class InMemoryDocumentRepository:
         self._jobs: dict[str, IngestJobRecord] = {}
         self._review_batches: dict[str, ReviewBatchRecord] = {}
         self._review_items: dict[str, ReviewItemRecord] = {}
+        self._image_review_batches: dict[str, ImageReviewBatchRecord] = {}
+        self._image_review_candidates: dict[str, ImageReviewCandidateRecord] = {}
         self._image_assets: dict[str, DocumentImageAssetRecord] = {}
         self._edges: set[tuple[str, str]] = set()
         self._shares: dict[str, set[str]] = {}
@@ -111,6 +116,29 @@ class InMemoryDocumentRepository:
         self._shares[document_id] = shares
         updated = replace(document, updated_at=datetime.now(UTC))
         self._documents[document_id] = updated
+        return self._with_shares(updated)
+
+    def replace_document_access_scope(
+        self,
+        document_id: str,
+        *,
+        owner_group_path: str,
+        shared_group_paths: list[str],
+        actor_id: str | None,
+    ) -> DocumentRecord | None:
+        _ = actor_id
+        document = self._documents.get(document_id)
+        if document is None:
+            return None
+        owner_group = normalize_group_path(owner_group_path)
+        shares = {
+            normalize_group_path(path)
+            for path in shared_group_paths
+            if normalize_group_path(path) != owner_group
+        }
+        updated = replace(document, group_path=owner_group, updated_at=datetime.now(UTC))
+        self._documents[document_id] = updated
+        self._shares[document_id] = shares
         return self._with_shares(updated)
 
     def remove_document_share(self, document_id: str, group_path: str) -> DocumentRecord | None:
@@ -277,13 +305,17 @@ class InMemoryDocumentRepository:
         status: str,
         progress_pct: int,
         origin: str = "unknown",
+        retry_of_job_id: str | None = None,
     ) -> IngestJobRecord:
         if doc_id not in self._documents:
             raise ValueError("document does not exist")
+        if retry_of_job_id is not None and retry_of_job_id not in self._jobs:
+            raise ValueError("retry source job does not exist")
         now = datetime.now(UTC)
         job = IngestJobRecord(
             id=str(uuid4()),
             doc_id=doc_id,
+            retry_of_job_id=retry_of_job_id,
             origin=origin,
             status=status,
             progress_pct=progress_pct,
@@ -433,8 +465,6 @@ class InMemoryDocumentRepository:
 
     def cancel_review_batch_for_job(self, job_id: str) -> int:
         batches = [batch for batch in self._review_batches.values() if batch.job_id == job_id and batch.status == "pending"]
-        if not batches:
-            return 0
         now = datetime.now(UTC)
         batch_ids = {batch.id for batch in batches}
         cancelled_items = 0
@@ -443,6 +473,20 @@ class InMemoryDocumentRepository:
         for item_id, item in list(self._review_items.items()):
             if item.batch_id in batch_ids and item.status == "pending":
                 self._review_items[item_id] = replace(item, status="rejected", updated_at=now)
+                cancelled_items += 1
+        image_batches = [batch for batch in self._image_review_batches.values() if batch.job_id == job_id and batch.status == "pending"]
+        image_batch_ids = {batch.id for batch in image_batches}
+        for batch in image_batches:
+            self._image_review_batches[batch.id] = replace(batch, status="rejected", updated_at=now)
+        for candidate_id, candidate in list(self._image_review_candidates.items()):
+            if candidate.batch_id in image_batch_ids and candidate.status == "pending":
+                self._image_review_candidates[candidate_id] = replace(
+                    candidate,
+                    status="skipped",
+                    assigned_to=None,
+                    skip_reason="ingest_cancelled",
+                    updated_at=now,
+                )
                 cancelled_items += 1
         return cancelled_items
 
@@ -551,6 +595,129 @@ class InMemoryDocumentRepository:
         batch = replace(self._review_batches[item.batch_id], status="rejected", updated_at=now)
         self._review_batches[batch.id] = batch
         return ReviewDecisionRecord(item=updated_item, batch=batch, batch_complete=False)
+
+    def create_image_review_batch(
+        self,
+        *,
+        job_id: str,
+        doc_id: str,
+        parsed_items: list[dict[str, Any]],
+        resume_payload: dict[str, Any],
+        candidates: list[dict[str, Any]],
+    ) -> ImageReviewBatchRecord:
+        if doc_id not in self._documents:
+            raise ValueError("document does not exist")
+        now = datetime.now(UTC)
+        document = self._documents[doc_id]
+        batch = ImageReviewBatchRecord(
+            id=str(uuid4()),
+            job_id=job_id,
+            doc_id=doc_id,
+            doc_title=document.title or document.id,
+            status="pending",
+            parsed_items=[dict(item) for item in parsed_items],
+            resume_payload=dict(resume_payload),
+            candidate_count=len(candidates),
+            recommended_count=sum(1 for candidate in candidates if bool(candidate.get("recommended", True))),
+            created_at=now,
+            updated_at=now,
+        )
+        self._image_review_batches[batch.id] = batch
+        for candidate in candidates:
+            record = ImageReviewCandidateRecord(
+                id=str(candidate.get("id") or uuid4()),
+                batch_id=batch.id,
+                doc_id=doc_id,
+                doc_title=batch.doc_title,
+                candidate_key=str(candidate["candidate_key"]),
+                filename=str(candidate.get("filename") or "image"),
+                source_kind=str(candidate.get("source_kind") or "pdf_image"),
+                page=_int_or_none(candidate.get("page")),
+                bbox=_bbox_list(candidate.get("bbox")),
+                page_area_ratio=float(candidate["page_area_ratio"]) if isinstance(candidate.get("page_area_ratio"), (int, float)) else None,
+                object_path=str(candidate["object_path"]),
+                content_type=str(candidate.get("content_type") or "image/png"),
+                width=_int_or_none(candidate.get("width")),
+                height=_int_or_none(candidate.get("height")),
+                content_hash=str(candidate["content_hash"]),
+                quality_flags=tuple(str(flag) for flag in candidate.get("quality_flags", []) if str(flag)),
+                score=int(candidate.get("score") or 0),
+                recommended=bool(candidate.get("recommended", True)),
+                status="pending",
+                assigned_to=None,
+                skip_reason=None,
+                created_at=now,
+                updated_at=now,
+            )
+            self._image_review_candidates[record.id] = record
+        return batch
+
+    def get_image_review_batch(self, batch_id: str) -> ImageReviewBatchRecord | None:
+        return self._image_review_batches.get(batch_id)
+
+    def list_image_review_batches(self, *, status: str = "pending") -> list[ImageReviewBatchRecord]:
+        batches = [batch for batch in self._image_review_batches.values() if batch.status == status]
+        return sorted(batches, key=lambda batch: batch.created_at or datetime.min.replace(tzinfo=UTC))
+
+    def list_image_review_candidates_for_batch(
+        self,
+        batch_id: str,
+        *,
+        status: str | None = None,
+    ) -> list[ImageReviewCandidateRecord]:
+        candidates = [candidate for candidate in self._image_review_candidates.values() if candidate.batch_id == batch_id]
+        if status is not None:
+            candidates = [candidate for candidate in candidates if candidate.status == status]
+        return sorted(candidates, key=lambda candidate: (candidate.page or 0, -candidate.score, candidate.filename, candidate.id))
+
+    def get_image_review_candidate(self, candidate_id: str) -> ImageReviewCandidateRecord | None:
+        return self._image_review_candidates.get(candidate_id)
+
+    def apply_image_review_decisions(
+        self,
+        batch_id: str,
+        *,
+        approve_candidate_ids: list[str],
+        skip_candidate_ids: list[str],
+        reviewer_id: str,
+        approve_recommended: bool = False,
+        skip_remaining: bool = False,
+    ) -> ImageReviewDecisionRecord | None:
+        batch = self._image_review_batches.get(batch_id)
+        if batch is None:
+            return None
+        now = datetime.now(UTC)
+        approve_set = set(approve_candidate_ids)
+        skip_set = set(skip_candidate_ids)
+        changed: list[ImageReviewCandidateRecord] = []
+        for candidate in self.list_image_review_candidates_for_batch(batch_id):
+            status = candidate.status
+            skip_reason = candidate.skip_reason
+            if status == "pending" and (candidate.id in approve_set or (approve_recommended and candidate.recommended)):
+                status = "approved"
+                skip_reason = None
+            elif status == "pending" and (candidate.id in skip_set or skip_remaining):
+                status = "skipped"
+                skip_reason = "reviewer_skipped"
+            if status != candidate.status or skip_reason != candidate.skip_reason:
+                updated = replace(candidate, status=status, assigned_to=reviewer_id, skip_reason=skip_reason, updated_at=now)
+                self._image_review_candidates[candidate.id] = updated
+                changed.append(updated)
+        all_candidates = self.list_image_review_candidates_for_batch(batch_id)
+        complete = all(candidate.status != "pending" for candidate in all_candidates)
+        if complete:
+            batch = replace(batch, status="approved", updated_at=now)
+        else:
+            batch = replace(batch, updated_at=now)
+        self._image_review_batches[batch.id] = batch
+        return ImageReviewDecisionRecord(batch=batch, candidates=tuple(changed), batch_complete=complete)
+
+    def get_image_review_approved_keys(self, batch_id: str) -> list[str]:
+        return [
+            candidate.candidate_key
+            for candidate in self.list_image_review_candidates_for_batch(batch_id)
+            if candidate.status == "approved"
+        ]
 
     def replace_document_image_assets(
         self,

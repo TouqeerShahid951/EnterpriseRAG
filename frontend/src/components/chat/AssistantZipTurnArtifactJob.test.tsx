@@ -1,8 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ArtifactJobSummary, RAGResponse } from "../../types/api";
+import type { ArtifactJobSummary, RAGResponse, SourceAnchor } from "../../types/api";
 import type { AssistantTurn } from "../../types/chat";
+import { sourceCitationLabel } from "../../utils/sourceCitation";
 import { AssistantZipTurn } from "./AssistantZipTurn";
 
 const baseJob: ArtifactJobSummary = {
@@ -95,6 +96,42 @@ describe("AssistantZipTurn artifact job progress", () => {
     }
   });
 });
+
+describe("AssistantZipTurn pending draft", () => {
+  it("renders streamed draft markdown and citations through the cited answer renderer", () => {
+    const citation = sourceCitationLabel(source);
+    const turn: AssistantTurn = {
+      id: "assistant-pending",
+      role: "assistant",
+      status: "pending",
+      question: "What should managers do?",
+      createdAt: "2026-06-17T09:00:00+00:00",
+      progress: [{ id: "source-1", label: "Evidence source found", kind: "source", source }],
+      streamText: `**Set the tone** for risk management ${citation}`,
+    };
+
+    const markup = renderToStaticMarkup(<AssistantZipTurn documents={[]} onSelectSource={() => undefined} selectedSource={null} turn={turn} />);
+
+    expect(markup).toContain("Drafting cited answer");
+    expect(markup).toContain("<strong>Set the tone</strong>");
+    expect(markup).toContain('class="rag-inline-citation"');
+    expect(markup).not.toContain("**Set the tone**");
+  });
+});
+
+const source: SourceAnchor = {
+  chunk_id: "doc-1:chunk-7",
+  clearance_level: "NATO_RESTRICTED",
+  doc_id: "doc-1",
+  doc_title: "NIST.AI.100-1.pdf",
+  effective_date: "2026-06-04",
+  excerpt: "Senior leadership sets the tone for risk management.",
+  group_path: "/admin",
+  highlight_ranges: [],
+  page: 26,
+  page_end: 27,
+  page_start: 26,
+};
 
 function turnWithJob(job: ArtifactJobSummary): AssistantTurn {
   return {

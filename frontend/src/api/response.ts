@@ -42,7 +42,10 @@ export async function toApiError(response: Response): Promise<ApiError> {
 
     if (!contentType.includes(JSON_CONTENT_TYPE)) {
       const message = await response.text();
-      return message ? { ...fallback, message } : fallback;
+      if (!message || contentType.includes("text/html") || message.trimStart().startsWith("<")) {
+        return fallback;
+      }
+      return { ...fallback, message };
     }
 
     const payload = (await response.json()) as unknown;

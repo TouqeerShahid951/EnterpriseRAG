@@ -12,7 +12,8 @@ from ..errors import EmbeddingUnavailable
 from .http import ServiceRequestError, request_json
 
 
-METADATA_NUM_PREDICT = 1012
+METADATA_NUM_PREDICT = 256
+METADATA_TIMEOUT_SECONDS = 20.0
 METADATA_WARNING = "ollama_metadata_unavailable"
 METADATA_TIMEOUT_WARNING = "ollama_metadata_timeout"
 METADATA_TRANSPORT_WARNING = "ollama_metadata_transport_error"
@@ -27,20 +28,8 @@ METADATA_FORMAT = {
             "type": "string",
             "maxLength": 80,
         },
-        "claims": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "entity": {"type": "string"},
-                    "attribute": {"type": "string"},
-                    "value": {"type": "string"},
-                },
-                "required": ["entity", "attribute", "value"],
-            },
-        },
     },
-    "required": ["summary", "llm_topics", "doc_type", "claims"],
+    "required": ["summary", "llm_topics", "doc_type"],
 }
 
 
@@ -73,15 +62,9 @@ class OllamaClient:
 
     def generate_metadata(self, text: str) -> dict[str, Any]:
         prompt = (
-            "Return ONLY a valid JSON object matching the provided schema. "
-            "Do not return markdown, prose, YAML, labels, or numbered lists. "
-            "Use exactly these keys: summary, llm_topics, doc_type, claims. "
-            "summary must contain exactly two factual sentences. "
-            "llm_topics must be an array of 3 to 8 short strings. "
-            "doc_type must be a concise freeform string. "
-            "claims must be an array of objects, not strings; each claim object must have string keys "
-            "entity, attribute, and value. If there are no explicit claims, use an empty array.\n\n"
-            f"Document text:\n{text[:6000]}"
+            "JSON only: summary, llm_topics, doc_type. "
+            "summary=1 factual sentence; llm_topics=3-5 short strings; doc_type=short. "
+            f"Text:\n{text[:2000]}"
         )
         request_payload = {
             "model": self.chat_model,
@@ -95,13 +78,13 @@ class OllamaClient:
                 num_ctx=self.num_ctx,
             ),
             "messages": [
-                {"role": "system", "content": "You are a strict JSON metadata extraction API. Return only valid JSON."},
+                {"role": "system", "content": "Return valid JSON only."},
                 {"role": "user", "content": prompt},
             ],
         }
         last_error: ServiceRequestError | None = None
         last_attempt = 0
-        for attempt in range(3):
+        for attempt in range(1):
             last_attempt = attempt + 1
             try:
                 payload = request_json(
@@ -110,7 +93,7 @@ class OllamaClient:
                     service="ollama",
                     method="POST",
                     payload=request_payload,
-                    timeout_seconds=self.chat_timeout_seconds,
+                    timeout_seconds=min(self.chat_timeout_seconds, METADATA_TIMEOUT_SECONDS),
                 )
                 parsed = _parse_json_object(_message_content(payload))
                 if not isinstance(parsed, dict):
@@ -225,6 +208,10 @@ def is_transient_service_error(exc: ServiceRequestError) -> bool:
     return exc.status_code is None or exc.status_code in {408, 429} or (
         exc.status_code is not None and 500 <= exc.status_code <= 599
     )
+
+
+def metadata_timeout_seconds(chat_timeout_seconds: float) -> float:
+    return min(chat_timeout_seconds, METADATA_TIMEOUT_SECONDS)
 
 
 def _ollama_options(*, temperature: float, num_predict: int, num_ctx: int | None) -> dict[str, int | float]:

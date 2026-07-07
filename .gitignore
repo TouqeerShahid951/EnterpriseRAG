@@ -30,3 +30,4 @@ program.py
 bootstrap.py
 frontend.backup.*/
 *.bak-codex-*
+backups/

@@ -6,6 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..repositories.documents import DocumentRepository, get_document_repository
 from ..schemas.internal import (
+    ImageReviewApprovedKeysResponse,
+    ImageReviewBatchCreateRequest,
+    ImageReviewBatchCreateResponse,
+    ImageReviewCandidatePayload,
+    ImageReviewResumeResponse,
     ReviewBatchCreateRequest,
     ReviewBatchCreateResponse,
     ReviewBatchParsedItemsResponse,
@@ -67,3 +72,101 @@ async def get_review_batch_parsed_items(
                     parsed["quality_flags"] = sorted({*flag_list, "ocr_review_approved"})
                     break
     return ReviewBatchParsedItemsResponse(parsed_items=items)
+
+
+@router.post("/image-review-batches", response_model=ImageReviewBatchCreateResponse, summary="Create PDF image review batch")
+async def create_image_review_batch(
+    payload: ImageReviewBatchCreateRequest,
+    document_repo: DocumentRepository = Depends(get_document_repository),
+    service: ServiceTokenContext = Depends(require_service_token),
+) -> ImageReviewBatchCreateResponse:
+    _ = service
+    if not payload.candidates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "empty_image_review_batch", "message": "Image review batch must contain at least one candidate."},
+        )
+    batch = document_repo.create_image_review_batch(
+        job_id=payload.job_id,
+        doc_id=payload.doc_id,
+        parsed_items=payload.parsed_items,
+        resume_payload=payload.resume_payload,
+        candidates=[candidate.model_dump() for candidate in payload.candidates],
+    )
+    return ImageReviewBatchCreateResponse(image_review_batch_id=batch.id)
+
+
+@router.get(
+    "/image-review-batches/{batch_id}/approved-keys",
+    response_model=ImageReviewApprovedKeysResponse,
+    summary="Read approved PDF image review candidate keys",
+)
+async def get_image_review_approved_keys(
+    batch_id: str,
+    document_repo: DocumentRepository = Depends(get_document_repository),
+    service: ServiceTokenContext = Depends(require_service_token),
+) -> ImageReviewApprovedKeysResponse:
+    _ = service
+    batch = document_repo.get_image_review_batch(batch_id)
+    if batch is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "image_review_batch_not_found", "message": "Image review batch was not found."},
+        )
+    if batch.status != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "image_review_batch_not_approved", "message": "Image review batch is not approved yet."},
+        )
+    return ImageReviewApprovedKeysResponse(candidate_keys=document_repo.get_image_review_approved_keys(batch.id))
+
+
+@router.get(
+    "/image-review-batches/{batch_id}/resume",
+    response_model=ImageReviewResumeResponse,
+    summary="Read approved PDF image review candidates and parsed items",
+)
+async def get_image_review_resume(
+    batch_id: str,
+    document_repo: DocumentRepository = Depends(get_document_repository),
+    service: ServiceTokenContext = Depends(require_service_token),
+) -> ImageReviewResumeResponse:
+    _ = service
+    batch = document_repo.get_image_review_batch(batch_id)
+    if batch is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "image_review_batch_not_found", "message": "Image review batch was not found."},
+        )
+    if batch.status != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "image_review_batch_not_approved", "message": "Image review batch is not approved yet."},
+        )
+    return ImageReviewResumeResponse(
+        parsed_items=[dict(item) for item in batch.parsed_items],
+        candidates=[
+            _image_review_candidate_payload(candidate)
+            for candidate in document_repo.list_image_review_candidates_for_batch(batch.id, status="approved")
+        ],
+        candidate_count=batch.candidate_count,
+    )
+
+
+def _image_review_candidate_payload(candidate) -> ImageReviewCandidatePayload:
+    return ImageReviewCandidatePayload(
+        candidate_key=candidate.candidate_key,
+        filename=candidate.filename,
+        source_kind=candidate.source_kind,
+        page=candidate.page,
+        bbox=candidate.bbox,
+        page_area_ratio=candidate.page_area_ratio,
+        object_path=candidate.object_path,
+        content_type=candidate.content_type,
+        width=candidate.width,
+        height=candidate.height,
+        content_hash=candidate.content_hash,
+        quality_flags=list(candidate.quality_flags),
+        score=candidate.score,
+        recommended=candidate.recommended,
+    )

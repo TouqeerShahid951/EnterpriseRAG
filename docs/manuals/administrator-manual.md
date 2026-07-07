@@ -1,19 +1,18 @@
 # Prudentia AI Administrator Manual
 
-Last updated: 2026-06-30
+Last updated: 2026-07-07
 
 This manual explains how to administer Prudentia AI from the web application. It
-is written for Platform Admins, System Admins, User Managers, and Space Admins.
+is written for Platform Admins, System Admins, and Space Admins.
 For startup, backup, update, and Docker runtime work, use the [Operator Manual](operator-manual.md).
 
 ## 1. Administrator Roles
 
 | Role | Main responsibility | Important limits |
 | --- | --- | --- |
-| Platform Admin | Full platform ownership, Configs, RAG Evaluation, users, spaces, audit, documents, connectors | Use sparingly. This role can change runtime behavior for the whole deployment. |
-| System Admin | Global operations, users except Platform Admins, spaces, documents, review, audit, recovery | No Platform Admin-only Configs or RAG Evaluation access. |
-| User Manager | Account provisioning within allowed scope | Cannot query, upload, audit, review OCR, or change settings. |
-| Space Admin | Knowledge Space and document governance inside assigned scopes | Can manage allowed spaces and documents, but not global platform settings. |
+| Platform Admin | Full platform ownership, Runtime Settings, RAG Evaluation, users, spaces, audit, documents, connectors | Use sparingly. This role can change runtime behavior for the whole deployment. |
+| System Admin | Global operations, users except Platform Admins, spaces, documents, review, audit, recovery | No Platform Admin-only Runtime Settings or RAG Evaluation access. |
+| Space Admin | Knowledge Space governance, document work, review, and scoped user management | Can manage allowed spaces, documents, connectors, and lower-scope users, but not global platform settings or peer/admin accounts. |
 
 ### Account Type Assignment Reference
 
@@ -21,14 +20,16 @@ Use the narrowest role that lets the person do their job.
 
 | Account type | Why it exists | Use it when the person needs to | Do not use it when |
 | --- | --- | --- | --- |
-| Platform Admin | Full platform ownership | Manage every user and space, change Configs, run evaluations, govern connectors, review audit, and make deployment-wide model choices | The person only needs operational or space-level administration |
-| System Admin | Global operations without platform Configs | Manage users except Platform Admins, govern documents, recover ingestion, review audit, review OCR, and manage spaces globally | The person must change model/provider settings or run RAG Evaluation |
-| User Manager | Account provisioning | Create users, reset passwords, activate or deactivate accounts, and assign allowed spaces and clearance | The person needs to query documents, upload files, or inspect audit |
-| Space Admin | Space-level governance | Own documents, spaces, folder sources, and database scopes inside assigned Knowledge Spaces | The person needs global configuration or user management |
-| Contributor | Document intake and maintenance | Upload, track, reingest, restore, or trash writable documents in assigned spaces | The person should only ask questions and inspect evidence |
-| Reviewer | OCR quality review | Correct or reject low-confidence extraction blocks and monitor visible ingestion status | The person needs to upload or govern documents |
-| Auditor | Governance review | Search, filter, inspect, and export visible audit events without changing system state | The person needs document content access through Query Intelligence |
-| Member | Everyday knowledge use | Ask grounded questions, inspect citations, and browse visible document metadata | The person needs to upload, manage, review, audit, or configure anything |
+| Platform Admin | Full platform ownership | Manage every user and space, change Runtime Settings, run evaluations, govern connectors, review audit, and make deployment-wide model choices | The person only needs operational or space-level administration |
+| System Admin | Global operations without Runtime Settings | Manage users except Platform Admins, govern documents, recover ingestion, review audit, resolve Review Queue holds, and manage spaces globally | The person must change model/provider settings or run RAG Evaluation |
+| Space Admin | Space-level administration | Manage assigned spaces, scoped Chat Member and Document Contributor accounts, uploads, folder sources, connector scopes, document lifecycle, and Review Queue work | The person needs global configuration, RAG Evaluation, audit review, or management of global/peer admin accounts |
+| Document Contributor | Document intake, review, and maintenance | Query, upload, track, resolve Review Queue items, reingest, restore, or trash writable documents in assigned spaces | The person should only ask questions and inspect evidence, or needs user/space administration |
+| Chat Member | Everyday knowledge use | Ask grounded questions, inspect citations, and browse visible document metadata | The person needs to upload, manage, review, audit, or configure anything |
+| Audit Viewer | Governance review | Search, filter, inspect, and export visible audit events without changing system state | The person needs document content access through Query Intelligence |
+
+`User Manager` and `Reviewer` are legacy account types retained for old records
+and compatibility. New assignments should use **Space Admin** for scoped user
+management and **Document Contributor** for upload plus review.
 
 If a page is not visible, the signed-in administrator does not have the role
 required for that page.
@@ -40,12 +41,12 @@ After the operator starts the deployment:
 1. Open the app URL. Local deployments commonly use `http://localhost:3000`.
 2. Sign in with `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD`.
 3. Open **Account Management** and change the bootstrap password immediately.
-4. Open **Configs** and confirm runtime model health.
+4. Open **Govern > Runtime Settings** and confirm runtime model health.
 5. Confirm the active provider stack, role assignments, query planner, and
    ingestion profile.
 6. Create the top-level Knowledge Spaces.
-7. Create System Admin, User Manager, Space Admin, Reviewer, Auditor,
-   Contributor, and Member accounts as needed.
+7. Create System Admin, Space Admin, Document Contributor, Chat Member, and
+   Audit Viewer accounts as needed.
 8. Upload a small pilot document and confirm it reaches **Indexed** status.
 9. Ask a cited smoke-test question in **Query Intelligence**.
 10. If Live DB is required, create and approve the first least-privilege
@@ -56,6 +57,10 @@ After the operator starts the deployment:
 ## 3. User Management
 
 Open **Govern > User Management**.
+
+Platform Admins and System Admins manage users globally according to their role
+limits. Space Admins manage only Chat Member and Document Contributor accounts
+inside their assigned Knowledge Spaces and clearance scope.
 
 ### Create A User
 
@@ -194,28 +199,34 @@ returned rows as answer evidence.
 1. Add a connection profile with a least-privilege read-only database account.
 2. Save the encrypted profile.
 3. Test the profile.
-4. Capture schema metadata.
-5. Create an AI draft catalog.
+4. Select **Read Schema** to capture schema metadata.
+5. Select **Prepare Review** to create a reviewable schema catalog.
 6. Review table and column descriptions, synonyms, relationships, business
    rules, allowed fields, and sensitivity flags.
-7. Assign the correct Knowledge Space and clearance.
-8. Save as draft or reviewed until ready.
-9. Select **Approve Scope** only after human review is complete.
+7. Assign the owner Knowledge Space, optional shared Knowledge Spaces, and
+   clearance.
+8. Select **Continue AI Enrichment** if enrichment has not finished.
+9. Select **Save Review** while drafting or while waiting for review.
+10. Select **Enable Live DB Access** only after human review is complete.
 
 Only approved, non-sensitive tables, columns, and relationships can be queried.
 Write statements, wildcard column selection, unapproved joins, system schemas,
 and chained SQL statements are blocked.
 
-## 9. OCR Review Administration
+## 9. Review Queue Administration
 
-Reviewers, System Admins, and Platform Admins can open **Review Queue**.
+Document Contributors, Space Admins, System Admins, and Platform Admins can open
+**Review Queue**.
 
 If many documents pause in **Needs review**:
 
-1. Review the configured OCR threshold in **Configs**.
+1. Review the OCR and PDF image thresholds in **Runtime Settings > Ingestion
+   Controls**.
 2. Confirm the ingestion worker is healthy in **Ingestion Health**.
-3. Have reviewers resolve the oldest or lowest-confidence blocks first.
-4. Re-check Activity after approvals to confirm ingestion continues.
+3. Have Document Contributors or admins resolve the oldest OCR blocks and PDF
+   image batches first.
+4. Re-check Activity after approvals or skip decisions to confirm ingestion
+   continues.
 
 ## 10. RAG Evaluation
 
@@ -223,8 +234,15 @@ RAG Evaluation is Platform Admin-only. Use it to measure answer quality with
 repeatable datasets.
 
 Dataset cases should include a `question` or `query`. Recommended fields
-include stable IDs, expected source documents, must-include text, must-not-include
-text, citation requirements, faithfulness threshold, and latency threshold.
+include stable IDs, `expected_answer`, expected source documents, acceptable
+source pages, minimum source count, degradation policy, must-include text,
+must-not-include text, citation requirements, faithfulness threshold, and
+latency threshold.
+
+Supported optional expectation fields include `expected_source_docs`,
+`acceptable_source_pages`, `min_sources`, `must_include`, `must_not_include`,
+`must_cite_source` or `requires_citations`, `min_faithfulness_score`,
+`allow_degraded`, and `latency_threshold_ms`.
 
 Basic workflow:
 
@@ -240,10 +258,15 @@ Basic workflow:
 
 Active runs can be cancelled. Failed, partial, or cancelled runs can be retried.
 
-## 11. Configs
+Answer-content checks first use deterministic literal matching. When the
+evaluation answer LLM verifier is enabled, a failed literal must-include check
+can be reviewed semantically by the configured model. The verdict is recorded in
+the case **Checks and diagnostic JSON** as `answer_content.llm_verifier`.
 
-Configs is Platform Admin-only. It includes **Models & Roles**, **Inference
-Services**, and **Ingestion Worker Capacity**.
+## 11. Runtime Settings
+
+Runtime Settings is Platform Admin-only under **Govern > Runtime Settings**. It
+includes **Models & Roles**, **Inference Services**, and **Ingestion Controls**.
 
 ### Models & Roles
 
@@ -282,14 +305,21 @@ Do not switch the active provider to vLLM unless the vLLM services and model
 caches are actually available. In the default Windows airgapped rollout, Ollama
 is the expected provider until vLLM is deliberately enabled.
 
-### Ingestion Worker Capacity
+### Ingestion Controls
 
-Use **Ingestion Worker Capacity** to set the default ingestion profile, OCR
-review threshold, vision layout repair, and worker concurrency.
+Use **Ingestion Controls** to set worker concurrency, OCR review threshold, PDF
+image review threshold, vision layout repair, and graph-enrichment visibility
+for new ingestion jobs.
 
 One worker-concurrency slot is recommended for the default 8 GB Docker
 environment. Increasing concurrency can improve throughput only if CPU, memory,
 OCR, model, and storage capacity can support it.
+
+The PDF image review threshold pauses unusually large image-analysis batches in
+Review Queue before vision analysis runs. Set it to 0 only when policy allows
+the image-review gate to be skipped. Graph enrichment controls whether the
+completed-document graph enrichment action is visible; keep it off for faster
+bulk ingestion when corpus-level graph analysis is not needed.
 
 ## 12. System Audit
 
@@ -318,9 +348,9 @@ handled according to your organization's sensitive-data policy.
 | User cannot see a page | Role does not include the route | Confirm account type and assign the correct role only if justified. |
 | User cannot see documents | Wrong space, low clearance, lifecycle filter | Check Knowledge Space memberships, clearance, and document lifecycle. |
 | Upload stuck in queued | Worker unavailable or capacity saturated | Check Ingestion Health and ask operator to inspect worker logs if needed. |
-| Many Needs review jobs | OCR threshold too high or low-quality scans | Assign reviewers or tune threshold after policy review. |
+| Many Needs review jobs | OCR threshold, PDF image threshold, or low-quality scans | Assign Document Contributors or admins to clear review work, or tune thresholds after policy review. |
 | Live DB source missing | Catalog not approved or outside user's scope | Review connector catalog, Knowledge Space, clearance, and disabled state. |
-| Query answers degrade | Runtime provider, retrieval, or source availability issue | Check Configs health, document indexing, and source mode. |
+| Query answers degrade | Runtime provider, retrieval, or source availability issue | Check Runtime Settings health, document indexing, and source mode. |
 | GraphRAG unavailable | Graph worker or Neo4j unavailable, or docs not opted in | Check Ingestion Health and operator runtime status. |
 
 ## 14. Admin Safety Rules

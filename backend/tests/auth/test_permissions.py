@@ -50,7 +50,47 @@ def test_user_manager_cannot_assign_global_admin_roles() -> None:
 
     assert not can_assign_account_type(user_manager, "platform_admin")
     assert not can_assign_account_type(user_manager, "system_admin")
-    assert can_assign_account_type(user_manager, "space_admin")
+    assert not can_assign_account_type(user_manager, "space_admin")
+    assert can_assign_account_type(user_manager, "contributor")
+
+
+def test_space_admin_manages_lower_scoped_users_only() -> None:
+    space_admin = _user("space_admin")
+
+    assert can_manage_users(space_admin)
+    assert can_review(space_admin)
+    assert can_assign_account_type(space_admin, "member")
+    assert can_assign_account_type(space_admin, "contributor")
+    assert not can_assign_account_type(space_admin, "auditor")
+    assert not can_assign_account_type(space_admin, "space_admin")
+    assert can_manage_target_user(space_admin, _user("member"))
+    assert can_manage_target_user(space_admin, _user("contributor"))
+    assert not can_manage_target_user(space_admin, _user("space_admin"))
+    assert not can_manage_target_user(space_admin, _user("platform_admin"))
+
+
+def test_document_contributor_can_query_upload_and_review() -> None:
+    contributor = _user("contributor")
+
+    assert can_query(contributor)
+    assert can_review(contributor)
+    assert can_write_document_scope(contributor, "/finance")
+
+
+def test_member_is_chat_only_inside_document_workflows() -> None:
+    member = _user("member")
+
+    assert can_query(member)
+    assert not can_review(member)
+    assert not can_write_document_scope(member, "/finance")
+
+
+def test_legacy_reviewer_uploads_and_reviews_without_query() -> None:
+    reviewer = _user("reviewer")
+
+    assert not can_query(reviewer)
+    assert can_review(reviewer)
+    assert can_write_document_scope(reviewer, "/finance")
 
 
 def _user(account_type: str):

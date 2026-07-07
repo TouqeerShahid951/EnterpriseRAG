@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from ...auth.abac import normalize_group_path
 from ...auth.dependencies import require_csrf, require_current_user
-from ...auth.document_access import can_read_document, can_write_document
+from ...auth.document_access import can_manage_document_ingestion, can_read_document, can_write_document
 from ...auth.permissions import can_manage_group_path, is_global_admin
 from ...core.config import settings
 from ...graphrag.cleanup import (
@@ -23,6 +23,7 @@ from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
 from ...repositories.documents import DocumentRecord, DocumentRepository, IngestJobRecord, get_document_repository
 from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
+from ...repositories.ingest_config import IngestConfigRepository, effective_ingest_config, get_ingest_config_repository
 from ...schemas.common import ErrorResponse
 from ...schemas.docs import (
     DeleteDocumentResponse,
@@ -33,6 +34,8 @@ from ...schemas.docs import (
     DocumentEntity,
     DocumentGraphEnrichmentResponse,
     DocumentListResponse,
+    DocumentOwnerUpdateRequest,
+    DocumentReingestRequest,
     DocumentReingestResponse,
     DocumentSharesResponse,
     DocumentSharesUpdateRequest,
@@ -129,6 +132,66 @@ async def get_document_shares(
 ) -> DocumentSharesResponse:
     document = require_visible_document(user, repo.get_document(document_id, include_deleted=True))
     return document_shares_to_schema(document)
+
+
+@router.patch(
+    "/{document_id}/owner",
+    response_model=Document,
+    responses={
+        status.HTTP_200_OK: {"model": Document},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+    },
+    summary="Transfer document ownership to another Knowledge Space",
+)
+async def transfer_document_owner(
+    document_id: str,
+    payload: DocumentOwnerUpdateRequest,
+    request: Request,
+    user: UserRecord = Depends(require_current_user),
+    repo: DocumentRepository = Depends(get_document_repository),
+    identity_repo: IdentityRepository = Depends(get_identity_repository),
+    qdrant: QdrantClient = Depends(get_document_qdrant_client),
+    graphrag: GraphRAGDeletionService = Depends(get_document_graphrag_deletion_service),
+    graphrag_queue: GraphRAGMaintenanceQueue = Depends(get_graphrag_maintenance_queue),
+    config_repo: IngestConfigRepository = Depends(get_ingest_config_repository),
+) -> Document:
+    require_csrf(request)
+    document = require_visible_document(user, repo.get_document(document_id, include_deleted=True))
+    if document.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "document_deleted", "message": "Restore the document before transferring ownership."},
+        )
+    target_group = _validated_owner_group_path(payload.group_path, identity_repo)
+    if target_group == document.group_path:
+        return document_to_schema(document)
+    if not _can_transfer_document_owner(user, current_group_path=document.group_path, target_group_path=target_group):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "document_owner_transfer_forbidden", "message": "User cannot transfer ownership between these Knowledge Spaces."},
+        )
+    updated = _replace_document_owner_with_index(
+        document,
+        target_group_path=target_group,
+        actor_id=user.id,
+        repo=repo,
+        qdrant=qdrant,
+    )
+    ingest_config = effective_ingest_config(repo=config_repo)
+    _refresh_graphrag_after_owner_transfer(
+        old_document=document,
+        updated_document=updated,
+        actor_id=user.id,
+        repo=repo,
+        graphrag=graphrag,
+        queue=graphrag_queue,
+        enabled=settings.graphrag_enabled and ingest_config.graph_enrichment_enabled,
+    )
+    return document_to_schema(updated)
 
 
 @router.put(
@@ -465,7 +528,6 @@ async def update_document_topics(
     document = require_writable_document(user, repo.get_document(document_id))
     topics = _normalize_topic_values(payload.topics)
     llm_topics = _normalize_topic_values(payload.llm_topics)
-    indexed_topics = _unique_text([*topics, *llm_topics])
     if topics == list(document.topics) and llm_topics == list(document.llm_topics):
         return document_to_schema(document)
 
@@ -473,7 +535,7 @@ async def update_document_topics(
     if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "document_not_found", "message": "Document was not found."})
     try:
-        qdrant.set_document_topics(document.id, topics=indexed_topics)
+        qdrant.set_document_topics(document.id, topics=topics, llm_topics=llm_topics)
     except ServiceRequestError as exc:
         repo.update_document_topics(document.id, topics=list(document.topics), llm_topics=list(document.llm_topics))
         repo.append_audit_event(
@@ -568,13 +630,15 @@ async def supersede_documents(
 async def reingest_document(
     document_id: str,
     request: Request,
+    payload: DocumentReingestRequest | None = None,
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
     storage: UploadStorage = Depends(get_upload_storage),
     queue: IngestQueue = Depends(get_ingest_queue),
 ) -> DocumentReingestResponse:
     require_csrf(request)
-    document = require_writable_document(user, repo.get_document(document_id))
+    document = require_ingestion_manager_document(user, repo.get_document(document_id))
+    retry_of_job_id = _validated_retry_of_job_id(repo, document, payload.retry_of_job_id if payload else None)
     job = _queue_document_reingest(
         document,
         action="reingest",
@@ -582,6 +646,7 @@ async def reingest_document(
         storage=storage,
         queue=queue,
         actor_id=user.id,
+        retry_of_job_id=retry_of_job_id,
     )
     return DocumentReingestResponse(document_id=document.id, job_id=job.id)
 
@@ -605,10 +670,12 @@ async def queue_document_graph_enrichment(
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
     queue: GraphRAGMaintenanceQueue = Depends(get_graphrag_maintenance_queue),
+    config_repo: IngestConfigRepository = Depends(get_ingest_config_repository),
 ) -> DocumentGraphEnrichmentResponse:
     require_csrf(request)
-    document = require_writable_document(user, repo.get_document(document_id))
-    if not settings.graphrag_enabled:
+    document = require_ingestion_manager_document(user, repo.get_document(document_id))
+    ingest_config = effective_ingest_config(repo=config_repo)
+    if not (settings.graphrag_enabled and ingest_config.graph_enrichment_enabled):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "graphrag_disabled", "message": "Graph enrichment is disabled for this workspace."},
@@ -967,6 +1034,164 @@ def _try_set_qdrant_document_acl(qdrant: QdrantClient, document_id: str, access_
         return
 
 
+def _set_qdrant_document_access_scope(
+    qdrant: QdrantClient,
+    document_id: str,
+    *,
+    group_path: str,
+    access_group_paths: list[str],
+) -> None:
+    qdrant.set_document_access_scope(document_id, group_path=group_path, acl_group_paths=access_group_paths)
+
+
+def _try_set_qdrant_document_access_scope(
+    qdrant: QdrantClient,
+    document_id: str,
+    *,
+    group_path: str,
+    access_group_paths: list[str],
+) -> None:
+    try:
+        _set_qdrant_document_access_scope(qdrant, document_id, group_path=group_path, access_group_paths=access_group_paths)
+    except ServiceRequestError:
+        return
+
+
+def _replace_document_owner_with_index(
+    document: DocumentRecord,
+    *,
+    target_group_path: str,
+    actor_id: str | None,
+    repo: DocumentRepository,
+    qdrant: QdrantClient,
+) -> DocumentRecord:
+    old_owner = document.group_path
+    old_shares = list(document.shared_group_paths)
+    old_acl = list(document.access_group_paths)
+    next_shares = _owner_transfer_shared_paths(document, target_group_path)
+    updated = repo.replace_document_access_scope(
+        document.id,
+        owner_group_path=target_group_path,
+        shared_group_paths=next_shares,
+        actor_id=actor_id,
+    )
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "document_not_found", "message": "Document was not found."})
+    try:
+        _set_qdrant_document_access_scope(
+            qdrant,
+            updated.id,
+            group_path=updated.group_path,
+            access_group_paths=list(updated.access_group_paths),
+        )
+    except ServiceRequestError as exc:
+        repo.replace_document_access_scope(document.id, owner_group_path=old_owner, shared_group_paths=old_shares, actor_id=actor_id)
+        _try_set_qdrant_document_access_scope(qdrant, document.id, group_path=old_owner, access_group_paths=old_acl)
+        repo.append_audit_event(
+            event_type="documents.owner.transfer",
+            actor_id=actor_id,
+            target_type="document",
+            target_id=document.id,
+            payload={
+                "old_group_path": old_owner,
+                "new_group_path": target_group_path,
+                "old_shared_group_paths": old_shares,
+                "new_shared_group_paths": next_shares,
+                "action_result": "failed",
+                "error_code": "document_owner_transfer_index_failed",
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "document_owner_transfer_index_failed", "message": f"Unable to update indexed document ownership: {exc}"},
+        ) from exc
+    repo.append_audit_event(
+        event_type="documents.owner.transfer",
+        actor_id=actor_id,
+        target_type="document",
+        target_id=document.id,
+        payload={
+            "old_group_path": old_owner,
+            "new_group_path": updated.group_path,
+            "old_shared_group_paths": old_shares,
+            "new_shared_group_paths": list(updated.shared_group_paths),
+            "qdrant_collection": settings.qdrant_collection,
+            "action_result": "success",
+        },
+    )
+    return updated
+
+
+def _refresh_graphrag_after_owner_transfer(
+    *,
+    old_document: DocumentRecord,
+    updated_document: DocumentRecord,
+    actor_id: str,
+    repo: DocumentRepository,
+    graphrag: GraphRAGDeletionService,
+    queue: GraphRAGMaintenanceQueue,
+    enabled: bool,
+) -> None:
+    if not enabled or updated_document.ingest_status != "complete":
+        return
+    job = next((candidate for candidate in repo.list_ingest_jobs() if candidate.doc_id == updated_document.id and candidate.status == "complete"), None)
+    if job is None:
+        return
+    cleanup_status = "skipped"
+    cleanup_partition = partition_key_for_document(old_document)
+    try:
+        cleanup = graphrag.delete_document(doc_id=old_document.id, partition_key=cleanup_partition)
+        cleanup_status = cleanup.status
+        cleanup_partition = cleanup.partition_key or cleanup_partition
+    except GraphRAGCleanupError as exc:
+        repo.append_audit_event(
+            event_type="documents.owner.transfer.graphrag_refresh",
+            actor_id=actor_id,
+            target_type="document",
+            target_id=updated_document.id,
+            payload={
+                "old_group_path": old_document.group_path,
+                "new_group_path": updated_document.group_path,
+                "action_result": "warning",
+                "warning_code": "graphrag_cleanup_failed",
+                "message": str(exc)[:240],
+            },
+        )
+    try:
+        queue.enqueue_document_index(
+            GraphRAGDocumentIndexMessage(doc_id=updated_document.id, job_id=job.id, reason="documents.owner.transfer")
+        )
+    except Exception as exc:
+        repo.append_audit_event(
+            event_type="documents.owner.transfer.graphrag_refresh",
+            actor_id=actor_id,
+            target_type="document",
+            target_id=updated_document.id,
+            payload={
+                "old_group_path": old_document.group_path,
+                "new_group_path": updated_document.group_path,
+                "action_result": "warning",
+                "warning_code": "graphrag_reindex_enqueue_failed",
+                "message": str(exc)[:240],
+            },
+        )
+        return
+    repo.append_audit_event(
+        event_type="documents.owner.transfer.graphrag_refresh",
+        actor_id=actor_id,
+        target_type="document",
+        target_id=updated_document.id,
+        payload={
+            "old_group_path": old_document.group_path,
+            "new_group_path": updated_document.group_path,
+            "job_id": job.id,
+            "graphrag_cleanup_status": cleanup_status,
+            "graphrag_partition_key": cleanup_partition,
+            "action_result": "queued",
+        },
+    )
+
+
 def _replace_document_shares_with_index(
     document: DocumentRecord,
     shares: list[str],
@@ -1051,6 +1276,33 @@ def _validated_share_groups(group_paths: list[str], *, document: DocumentRecord,
     return normalized
 
 
+def _validated_owner_group_path(group_path: str, identity_repo: IdentityRepository) -> str:
+    try:
+        normalized = normalize_group_path(group_path)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "invalid_group_path", "message": str(exc)}) from exc
+    if normalized not in {group.path for group in identity_repo.list_groups()}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "group_not_found", "message": f"Knowledge Space does not exist: {normalized}"},
+        )
+    return normalized
+
+
+def _can_transfer_document_owner(user: UserRecord, *, current_group_path: str, target_group_path: str) -> bool:
+    return is_global_admin(user) or (
+        can_manage_group_path(user, current_group_path) and can_manage_group_path(user, target_group_path)
+    )
+
+
+def _owner_transfer_shared_paths(document: DocumentRecord, target_group_path: str) -> list[str]:
+    return [
+        path
+        for path in _document_acl_group_paths(document.group_path, list(document.shared_group_paths))
+        if normalize_group_path(path) != target_group_path
+    ]
+
+
 def _document_acl_group_paths(owner_group_path: str, shared_group_paths: list[str]) -> list[str]:
     normalized_owner = normalize_group_path(owner_group_path)
     paths = [normalized_owner, *[normalize_group_path(path) for path in shared_group_paths]]
@@ -1073,6 +1325,7 @@ def _queue_document_reingest(
     actor_id: str | None,
     skip_active_job_check: bool = False,
     source: object | None = None,
+    retry_of_job_id: str | None = None,
 ) -> IngestJobRecord:
     if not skip_active_job_check and repo.get_active_ingest_job_for_document(document.id):
         raise HTTPException(
@@ -1080,7 +1333,7 @@ def _queue_document_reingest(
             detail={"code": "document_ingest_active", "message": "Document already has an active ingestion job."},
         )
     stored = source or _read_reingest_source(document, storage)
-    job = repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin=action)
+    job = repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin=action, retry_of_job_id=retry_of_job_id)
     message = _ingest_message_for_document(document, job.id, stored, repo)
     try:
         queue.enqueue(message)
@@ -1091,7 +1344,7 @@ def _queue_document_reingest(
             actor_id=actor_id,
             target_type="document",
             target_id=document.id,
-            payload={"group_path": document.group_path, "clearance_level": document.clearance_level, "job_id": job.id, "action_result": "failed", "error_code": "queue_unavailable"},
+            payload={"group_path": document.group_path, "clearance_level": document.clearance_level, "job_id": job.id, "retry_of_job_id": retry_of_job_id, "action_result": "failed", "error_code": "queue_unavailable"},
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1102,9 +1355,26 @@ def _queue_document_reingest(
         actor_id=actor_id,
         target_type="document",
         target_id=document.id,
-        payload={"group_path": document.group_path, "clearance_level": document.clearance_level, "job_id": job.id, "action_result": "success"},
+        payload={"group_path": document.group_path, "clearance_level": document.clearance_level, "job_id": job.id, "retry_of_job_id": retry_of_job_id, "action_result": "success"},
     )
     return job
+
+
+def _validated_retry_of_job_id(repo: DocumentRepository, document: DocumentRecord, retry_of_job_id: str | None) -> str | None:
+    if not retry_of_job_id:
+        return None
+    retry_job = repo.get_ingest_job(retry_of_job_id)
+    if retry_job is None or retry_job.doc_id != document.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "retry_job_not_found", "message": "The ingestion job being retried was not found for this document."},
+        )
+    if retry_job.status not in {"failed", "cancelled"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "retry_job_not_retryable", "message": "Only failed or cancelled ingestion jobs can be linked as retries."},
+        )
+    return retry_job.id
 
 
 def _read_reingest_source(document: DocumentRecord, storage: UploadStorage) -> object:
@@ -1278,6 +1548,16 @@ def require_writable_document(user: UserRecord, document: DocumentRecord | None)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "document_forbidden", "message": "User cannot modify this document."},
+        )
+    return visible
+
+
+def require_ingestion_manager_document(user: UserRecord, document: DocumentRecord | None) -> DocumentRecord:
+    visible = require_visible_document(user, document)
+    if not can_manage_document_ingestion(user, visible):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "document_ingestion_forbidden", "message": "Only the uploader or a scoped admin can manage this ingestion job."},
         )
     return visible
 

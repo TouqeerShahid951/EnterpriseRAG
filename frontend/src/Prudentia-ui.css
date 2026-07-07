@@ -199,9 +199,9 @@
 }
 
 @layer utilities {
-  .text-display-lg { font-size: 36px; line-height: 44px; letter-spacing: 0; font-weight: 700; font-family: var(--font-inter); }
-  .text-headline-md { font-size: 32px; line-height: 40px; letter-spacing: 0; font-weight: 700; font-family: var(--font-inter); }
-  .text-headline-sm { font-size: 20px; line-height: 28px; font-weight: 700; font-family: var(--font-inter); }
+  .text-display-lg { font-size: 32px; line-height: 40px; letter-spacing: 0; font-weight: 700; font-family: var(--font-inter); }
+  .text-headline-md { font-size: 28px; line-height: 36px; letter-spacing: 0; font-weight: 700; font-family: var(--font-inter); }
+  .text-headline-sm { font-size: 18px; line-height: 26px; font-weight: 700; font-family: var(--font-inter); }
   .text-body-lg { font-size: 16px; line-height: 24px; font-weight: 400; font-family: var(--font-inter); }
   .text-body-md { font-size: 14px; line-height: 20px; font-weight: 400; font-family: var(--font-inter); }
   .text-label-md { font-size: 12px; line-height: 16px; letter-spacing: 0; font-weight: 600; font-family: var(--font-inter); }

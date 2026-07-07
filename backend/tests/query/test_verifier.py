@@ -67,6 +67,37 @@ def test_verifier_does_not_prune_passing_aggregation_evidence() -> None:
     assert result["evidence_quality"].in_scope_doc_ids == frozenset({"fir-1", "fir-2"})
 
 
+def test_verifier_keeps_weak_hits_for_degraded_synthesis() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="employee count at end of year"),
+        user=UserContext(user_id="user", email="user@example.com", group_paths=("/admin",)),
+        started=perf_counter(),
+    )
+    ctx["route_plan"] = RoutePlan(
+        original_query=ctx["request"].query,
+        resolved_query=ctx["request"].query,
+        intent="general_rag",
+        public_intent="factual_simple",
+        top_k=10,
+    )
+    ctx["retrieved_hits"] = [
+        hit(
+            "report:page",
+            doc_id="report",
+            doc_title="Report.pdf",
+            text="Unrelated but authorized page text.",
+        )
+    ]
+
+    result = QueryNodes.verifier(object.__new__(QueryNodes), ctx)
+
+    assert result["verifier_decision"] == "degrade"
+    assert result["degraded"] is True
+    assert [item.payload["chunk_id"] for item in result["retrieved_hits"]] == ["report:page"]
+
+
 def test_evidence_builder_keeps_aggregation_rows_exact() -> None:
     ctx = initial_state(
         trace_id="trace",

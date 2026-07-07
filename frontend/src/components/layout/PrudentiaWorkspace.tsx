@@ -53,6 +53,7 @@ export function PrudentiaWorkspace({ activeRoute, children, onLogout, onNavigate
   return (
     <div
       className={sidebarCollapsed ? "Prudentia-shell Prudentia-shell-sidebar-collapsed" : "Prudentia-shell"}
+      data-route={activeRoute}
       onPointerMove={updateCursorGlow}
       style={{ "--sidebar-width": `${visibleSidebarWidth}px` } as CSSProperties}
     >
@@ -78,7 +79,7 @@ export function PrudentiaBasicPage({ activeRoute, children, onLogout, onNavigate
   return (
     <PrudentiaWorkspace activeRoute={activeRoute} onLogout={onLogout} onNavigate={onNavigate} sidebarHeaderContent={sidebarHeaderContent} user={user}>
       <main className="sv-page" id="main-content">
-        <div className="sv-page-inner">
+        <div className={`sv-page-inner ${pageInnerModeClass(activeRoute)}`}>
           <header className="sv-page-header">
             <div>
               <p className="sv-eyebrow">Prudentia AI</p>
@@ -119,6 +120,13 @@ type BasicProps = Props & {
   subtitle: string;
   title: string;
 };
+
+function pageInnerModeClass(route: RouteId): string {
+  if (route === "settings" || route === "access") return "sv-page-inner-workbench";
+  if (route === "overview") return "sv-page-inner-dashboard";
+  if (route === "account") return "sv-page-inner-form";
+  return "";
+}
 
 function readStoredSidebarWidth(): number {
   return readStoredNumber(SIDEBAR_WIDTH_STORAGE_KEY, {

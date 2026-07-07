@@ -18,6 +18,7 @@ class InferenceClient(Protocol):
         *,
         question: str,
         contexts: list[str],
+        profile: str | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str: ...
 
@@ -26,6 +27,7 @@ class InferenceClient(Protocol):
         *,
         question: str,
         contexts: list[str],
+        profile: str | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> Iterator[str]: ...
 
@@ -119,18 +121,30 @@ class RoleRoutedInferenceClient:
         *,
         question: str,
         contexts: list[str],
+        profile: str | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
-        return self.chat_client.answer(question=question, contexts=contexts, cancellation_token=cancellation_token)
+        return self.chat_client.answer(
+            question=question,
+            contexts=contexts,
+            profile=profile,
+            cancellation_token=cancellation_token,
+        )
 
     def stream_answer(
         self,
         *,
         question: str,
         contexts: list[str],
+        profile: str | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> Iterator[str]:
-        return self.chat_client.stream_answer(question=question, contexts=contexts, cancellation_token=cancellation_token)
+        return self.chat_client.stream_answer(
+            question=question,
+            contexts=contexts,
+            profile=profile,
+            cancellation_token=cancellation_token,
+        )
 
     def judge_faithfulness(
         self,
@@ -218,18 +232,30 @@ class SplitEmbeddingInferenceClient:
         *,
         question: str,
         contexts: list[str],
+        profile: str | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
-        return self.language_client.answer(question=question, contexts=contexts, cancellation_token=cancellation_token)
+        return self.language_client.answer(
+            question=question,
+            contexts=contexts,
+            profile=profile,
+            cancellation_token=cancellation_token,
+        )
 
     def stream_answer(
         self,
         *,
         question: str,
         contexts: list[str],
+        profile: str | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> Iterator[str]:
-        return self.language_client.stream_answer(question=question, contexts=contexts, cancellation_token=cancellation_token)
+        return self.language_client.stream_answer(
+            question=question,
+            contexts=contexts,
+            profile=profile,
+            cancellation_token=cancellation_token,
+        )
 
     def judge_faithfulness(
         self,

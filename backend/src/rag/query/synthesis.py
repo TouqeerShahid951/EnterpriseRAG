@@ -9,22 +9,33 @@ from time import perf_counter
 from ..schemas.query import ConflictPair, RAGResponse, SourceAnchor
 from .cancellation import QueryCancellationToken, call_with_optional_cancellation
 from .inference import InferenceClient
+from .ollama import SYNTHESIS_PROMPT_HEADROOM_TOKENS, answer_num_predict_for_profile, estimate_answer_prompt_tokens
 from .state import QueryContext
 from .routing_models import RoutePlan
 from .sources import citation_label, source_citation, sources_from_hits
 
 _CITATION_RE = re.compile(r"\[[^\[\]\n]{1,200}:[^\[\]\n]{1,200}\]")
 _CLAIM_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?!\[)|(?<=\])\s+|\n+")
+_MARKDOWN_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
 _WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{2,}")
 _TABLE_ROW_COLUMNS_RE = re.compile(r"^\[Columns:\s*(.*?)\]\s*$", re.MULTILINE)
 _TABLE_ROW_VALUE_RE = re.compile(r"^Value:\s*(.*?)\s*$", re.MULTILINE)
 _SUPPORT_STOPWORDS = {
     "and",
     "are",
+    "does",
     "for",
     "from",
     "has",
     "have",
+    "how",
+    "into",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
     "that",
     "the",
     "this",
@@ -128,11 +139,17 @@ def synthesize_response(
             cancellation_token,
             question=prepared.question,
             contexts=prepared.contexts,
+            profile=prepared.profile,
         )
+        answer = ensure_answer_has_citation(answer, available_sources)
         if is_global_abstention(answer):
-            available_sources = []
-            ctx["degraded"] = True
-            ctx["degraded_reason"] = ctx["degraded_reason"] or "Insufficient relevant evidence after retrieval retries"
+            fallback_answer = extractive_fallback_answer(ctx["request"].query, available_sources)
+            if fallback_answer:
+                answer = fallback_answer
+            else:
+                ctx["degraded"] = True
+                ctx["degraded_reason"] = ctx["degraded_reason"] or "Insufficient relevant evidence after retrieval retries"
+                answer = cited_insufficient_evidence_answer(ctx["request"].query, available_sources)
     elif ctx.get("source_expansion"):
         available_sources = []
         answer = "I could not answer from the selected source. You can search all sources too."
@@ -157,15 +174,24 @@ def prepare_synthesis_input(ctx: QueryContext, sources: list[SourceAnchor]) -> P
     base_question = plan.resolved_query if plan is not None else ctx["request"].query
     profile = synthesis_profile_for_plan(plan)
     exhaustive_scope = _has_exhaustive_document_scope(ctx)
+    question = _profiled_question(
+        base_question,
+        plan=plan,
+        profile=profile,
+        exhaustive_document_scope=exhaustive_scope,
+        scoped_document_titles=_scoped_document_titles(ctx) if exhaustive_scope else (),
+    )
+    contexts = route_source_contexts(sources, profile=profile, include_location=exhaustive_scope)
+    contexts, sources = _fit_prompt_budget(
+        question=question,
+        contexts=contexts,
+        sources=sources,
+        profile=profile,
+        token_budget=ctx["token_budget"],
+    )
     return PreparedSynthesis(
-        question=_profiled_question(
-            base_question,
-            plan=plan,
-            profile=profile,
-            exhaustive_document_scope=exhaustive_scope,
-            scoped_document_titles=_scoped_document_titles(ctx) if exhaustive_scope else (),
-        ),
-        contexts=route_source_contexts(sources, profile=profile, include_location=exhaustive_scope),
+        question=question,
+        contexts=contexts,
         profile=profile,
         sources=sources,
     )
@@ -198,6 +224,30 @@ def route_source_contexts(
     return [_route_source_context(source, profile=profile, include_location=include_location) for source in sources]
 
 
+def _fit_prompt_budget(
+    *,
+    question: str,
+    contexts: list[str],
+    sources: list[SourceAnchor],
+    profile: str,
+    token_budget: int,
+) -> tuple[list[str], list[SourceAnchor]]:
+    prompt_budget = synthesis_prompt_token_budget(token_budget=token_budget, profile=profile)
+    trimmed_contexts = list(contexts)
+    trimmed_sources = list(sources)
+    while (
+        len(trimmed_contexts) > 1
+        and estimate_answer_prompt_tokens(question=question, contexts=trimmed_contexts, profile=profile) > prompt_budget
+    ):
+        trimmed_contexts.pop()
+        trimmed_sources.pop()
+    return trimmed_contexts, trimmed_sources
+
+
+def synthesis_prompt_token_budget(*, token_budget: int, profile: str | None) -> int:
+    return max(1, token_budget - answer_num_predict_for_profile(profile) - SYNTHESIS_PROMPT_HEADROOM_TOKENS)
+
+
 def ensure_answer_has_citation(answer: str, sources: list[SourceAnchor]) -> str:
     if not sources:
         return answer
@@ -207,12 +257,21 @@ def ensure_answer_has_citation(answer: str, sources: list[SourceAnchor]) -> str:
     pieces = _CLAIM_BOUNDARY_RE.split(cleaned)
     boundaries = _CLAIM_BOUNDARY_RE.findall(cleaned)
     cited: list[str] = []
-    for piece in pieces:
+    for index, piece in enumerate(pieces):
         statement = piece.strip()
-        if statement and _WORD_RE.search(statement) and not any(label in statement for label in valid_labels):
+        if _is_markdown_table_header(index, pieces) or _is_markdown_table_separator(statement):
+            statement = _strip_citations(statement).strip()
+        elif _is_markdown_table_row(statement):
+            if not any(label in statement for label in valid_labels):
+                best_source = _best_supported_source(statement, sources)
+                if best_source is not None:
+                    statement = _insert_citation_into_last_table_cell(statement, source_citation(best_source))
+            else:
+                statement = _normalize_markdown_table_row_citations(statement)
+        elif statement and _WORD_RE.search(statement) and not any(label in statement for label in valid_labels):
             best_source = _best_supported_source(statement, sources)
             if best_source is not None:
-                statement = f"{statement} {source_citation(best_source)}"
+                statement = _append_citation(statement, source_citation(best_source))
         cited.append(statement)
     result = ""
     for index, piece in enumerate(cited):
@@ -222,6 +281,58 @@ def ensure_answer_has_citation(answer: str, sources: list[SourceAnchor]) -> str:
             boundary = boundaries[index]
             result += "\n" if "\n" in boundary else " "
     return result.strip()
+
+
+def _append_citation(statement: str, label: str) -> str:
+    if _is_markdown_table_separator(statement):
+        return _strip_citations(statement).strip()
+    if _is_markdown_table_row(statement):
+        return _insert_citation_into_last_table_cell(statement, label)
+    return f"{statement} {label}"
+
+
+def _strip_citations(text: str) -> str:
+    return _CITATION_RE.sub("", text)
+
+
+def _is_markdown_table_row(text: str) -> bool:
+    stripped = text.strip()
+    return stripped.startswith("|") and stripped.count("|") >= 2
+
+
+def _is_markdown_table_header(index: int, pieces: list[str]) -> bool:
+    statement = pieces[index].strip()
+    if not _is_markdown_table_row(statement):
+        return False
+    for next_piece in pieces[index + 1:]:
+        next_statement = next_piece.strip()
+        if not next_statement:
+            continue
+        return _is_markdown_table_separator(next_statement)
+    return False
+
+
+def _is_markdown_table_separator(text: str) -> bool:
+    stripped = _strip_citations(text).strip()
+    return bool(stripped and _MARKDOWN_TABLE_SEPARATOR_RE.match(stripped))
+
+
+def _normalize_markdown_table_row_citations(statement: str) -> str:
+    labels = _CITATION_RE.findall(statement)
+    if not labels:
+        return statement
+    last_label = labels[-1]
+    stripped = statement.strip()
+    if stripped.rfind("|") < stripped.rfind(last_label):
+        return _insert_citation_into_last_table_cell(_strip_citations(stripped).strip(), last_label)
+    return statement
+
+
+def _insert_citation_into_last_table_cell(statement: str, label: str) -> str:
+    stripped = _strip_citations(statement).strip()
+    if stripped.endswith("|"):
+        return f"{stripped[:-1].rstrip()} {label} |"
+    return f"{stripped} {label}"
 
 
 def _profiled_question(
@@ -372,6 +483,32 @@ def response_sources(answer: str, sources: list[SourceAnchor]) -> list[SourceAnc
     return sources[:1]
 
 
+def extractive_fallback_answer(question: str, sources: list[SourceAnchor]) -> str | None:
+    if not sources:
+        return None
+    question_terms = _support_terms(question)
+    if _asks_for_title(question_terms):
+        source = _best_source(question_terms, sources)
+        if source is not None:
+            heading = _first_heading(source.excerpt)
+            if heading:
+                return f"The title is {heading} {source_citation(source)}."
+    if _asks_for_definition(question_terms):
+        match = _best_definition_sentence(question_terms, _definition_target_terms(question), sources)
+        if match is not None:
+            sentence, source = match
+            return f"{sentence} {source_citation(source)}."
+    return None
+
+
+def cited_insufficient_evidence_answer(question: str, sources: list[SourceAnchor]) -> str:
+    source = _best_source(_support_terms(question), sources)
+    return (
+        "The indexed evidence does not contain enough information to answer this question. "
+        f"Closest relevant evidence reviewed: {source_citation(source)}."
+    )
+
+
 def is_global_abstention(answer: str) -> bool:
     if _CITATION_RE.search(answer):
         return False
@@ -414,6 +551,8 @@ def _best_supported_source(statement: str, sources: list[SourceAnchor]) -> Sourc
         return None
     best_source = max(sources, key=lambda source: len(statement_terms & _support_terms(source.excerpt)))
     overlap = statement_terms & _support_terms(best_source.excerpt)
+    if any(any(character.isdigit() for character in term) for term in overlap):
+        return best_source
     if len(overlap) < min(2, len(statement_terms)):
         return None
     if len(overlap) / len(statement_terms) < 0.5:
@@ -427,6 +566,75 @@ def _support_terms(text: str) -> set[str]:
         for match in _WORD_RE.finditer(text)
         if match.group(0).lower() not in _SUPPORT_STOPWORDS
     }
+
+
+def _asks_for_title(question_terms: set[str]) -> bool:
+    return bool(question_terms & {"header", "heading", "title"}) or {"top", "form"} <= question_terms
+
+
+def _asks_for_definition(question_terms: set[str]) -> bool:
+    return bool(question_terms & {"define", "defined", "definition"})
+
+
+def _best_source(question_terms: set[str], sources: list[SourceAnchor]) -> SourceAnchor | None:
+    scored = [
+        (
+            len(question_terms & _support_terms(source.excerpt))
+            + (3 * len(question_terms & _support_terms(source.doc_title))),
+            index,
+            source,
+        )
+        for index, source in enumerate(sources)
+    ]
+    score, _, source = max(scored, key=lambda item: (item[0], -item[1]))
+    return source if score > 0 else sources[0]
+
+
+def _first_heading(text: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip().strip("#").strip()
+        if stripped and len(stripped) <= 120 and not stripped.startswith("<!--"):
+            return stripped
+    return ""
+
+
+def _definition_target_terms(question: str) -> set[str]:
+    match = re.search(r"\bdefine(?:s|d)?\s+(?:a|an|the)?\s*([A-Za-z0-9_-]+)", question, flags=re.IGNORECASE)
+    return {match.group(1).lower()} if match else set()
+
+
+def _best_definition_sentence(
+    question_terms: set[str],
+    target_terms: set[str],
+    sources: list[SourceAnchor],
+) -> tuple[str, SourceAnchor] | None:
+    best: tuple[int, int, str, SourceAnchor] | None = None
+    for source_index, source in enumerate(sources):
+        for sentence in _sentence_candidates(source.excerpt):
+            lowered = sentence.lower()
+            if not any(marker in lowered for marker in (" refers to ", " is ", " are ", " means ", " defined as ")):
+                continue
+            sentence_terms = _support_terms(sentence)
+            if target_terms and not target_terms & sentence_terms:
+                continue
+            score = (len(target_terms & sentence_terms) * 5) + len(question_terms & sentence_terms)
+            if score <= 0:
+                continue
+            candidate = (score, -source_index, sentence, source)
+            if best is None or candidate > best:
+                best = candidate
+    if best is None:
+        return None
+    return best[2], best[3]
+
+
+def _sentence_candidates(text: str) -> list[str]:
+    normalized = " ".join(text.split())
+    return [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", normalized)
+        if 20 <= len(sentence.strip()) <= 500
+    ]
 
 
 def build_conflict_answer(conflicts: list[ConflictPair]) -> str:

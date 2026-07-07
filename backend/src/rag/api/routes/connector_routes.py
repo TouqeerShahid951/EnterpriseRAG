@@ -64,7 +64,7 @@ def get_schema_enrichment_runtime() -> SchemaEnrichmentRuntime:
 
 
 @router.get("/profiles", response_model=ConnectorProfileListResponse, summary="List connector profiles")
-async def list_connector_profiles(
+def list_connector_profiles(
     user: UserRecord = Depends(require_current_user),
     repo: ConnectorProfileRepository = Depends(get_connector_profile_repository),
 ) -> ConnectorProfileListResponse:
@@ -74,7 +74,7 @@ async def list_connector_profiles(
 
 
 @router.post("/profiles", status_code=status.HTTP_201_CREATED, response_model=ConnectorProfile, summary="Create a connector profile")
-async def create_connector_profile(
+def create_connector_profile(
     request: Request,
     payload: ConnectorProfileCreateRequest,
     user: UserRecord = Depends(require_current_user),
@@ -94,7 +94,7 @@ async def create_connector_profile(
 
 
 @router.put("/profiles/{profile_id}", response_model=ConnectorProfile, summary="Update a connector profile")
-async def update_connector_profile(
+def update_connector_profile(
     profile_id: str,
     request: Request,
     payload: ConnectorProfileUpdateRequest,
@@ -119,7 +119,7 @@ async def update_connector_profile(
 
 
 @router.delete("/profiles/{profile_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a connector profile")
-async def delete_connector_profile(
+def delete_connector_profile(
     profile_id: str,
     request: Request,
     user: UserRecord = Depends(require_current_user),
@@ -132,7 +132,7 @@ async def delete_connector_profile(
 
 
 @router.post("/profiles/{profile_id}/test", response_model=ConnectorTestResponse, summary="Test a connector profile")
-async def test_connector_profile(
+def test_connector_profile(
     profile_id: str,
     request: Request,
     user: UserRecord = Depends(require_current_user),
@@ -153,7 +153,7 @@ async def test_connector_profile(
 
 
 @router.post("/profiles/{profile_id}/introspect", response_model=ConnectorSchemaSnapshot, summary="Capture connector schema introspection")
-async def introspect_connector_profile(
+def introspect_connector_profile(
     profile_id: str,
     request: Request,
     user: UserRecord = Depends(require_current_user),
@@ -182,7 +182,7 @@ async def introspect_connector_profile(
     response_model=ConnectorSchemaCatalogListResponse,
     summary="List approved database scope catalogs for a connector profile",
 )
-async def list_connector_schema_catalogs(
+def list_connector_schema_catalogs(
     profile_id: str,
     user: UserRecord = Depends(require_current_user),
     repo: ConnectorProfileRepository = Depends(get_connector_profile_repository),
@@ -199,7 +199,7 @@ async def list_connector_schema_catalogs(
     response_model=ConnectorSchemaCatalog,
     summary="Create a reviewable approved database scope catalog",
 )
-async def create_connector_schema_catalog(
+def create_connector_schema_catalog(
     profile_id: str,
     request: Request,
     payload: ConnectorSchemaCatalogCreateRequest,
@@ -258,7 +258,7 @@ async def create_connector_schema_catalog(
     response_model=ConnectorSchemaCatalog,
     summary="Create an AI-enriched draft schema catalog for admin review",
 )
-async def create_ai_schema_catalog_draft(
+def create_ai_schema_catalog_draft(
     profile_id: str,
     request: Request,
     payload: ConnectorSchemaCatalogAiDraftRequest,
@@ -314,7 +314,7 @@ async def create_ai_schema_catalog_draft(
     response_model=ConnectorSchemaCatalog,
     summary="Enrich one table in a draft schema catalog",
 )
-async def enrich_connector_schema_catalog_table(
+def enrich_connector_schema_catalog_table(
     profile_id: str,
     catalog_id: str,
     request: Request,
@@ -373,7 +373,7 @@ async def enrich_connector_schema_catalog_table(
     response_model=ConnectorSchemaCatalog,
     summary="Update or approve a database scope catalog",
 )
-async def update_connector_schema_catalog(
+def update_connector_schema_catalog(
     profile_id: str,
     catalog_id: str,
     request: Request,

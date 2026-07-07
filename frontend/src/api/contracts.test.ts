@@ -112,6 +112,30 @@ describe("documentsApi", () => {
     expect(response.governance_owner).toBe("system");
   });
 
+  it("transfers document ownership through a CSRF-protected patch", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      ...legacyDocument,
+      group_path: "/finance",
+      owner_group_path: "/finance",
+      shared_group_paths: ["/legal"],
+      access_group_paths: ["/finance", "/legal"],
+      governance_owner: "system",
+      ingest_status: "complete",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    const response = await documentsApi.transferOwnership("doc/1", { group_path: "/finance" });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/docs/doc%2F1/owner");
+    expect(init.method).toBe("PATCH");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({ group_path: "/finance" }));
+    expect(response.owner_group_path).toBe("/finance");
+    expect(response.shared_group_paths).toEqual(["/legal"]);
+  });
+
   it("queues optional graph enrichment with CSRF protection", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({
       document_id: "doc/1",
@@ -214,6 +238,7 @@ describe("uploadApi", () => {
     await uploadApi.document({
       file: new File(["%PDF-1.7"], "policy.pdf", { type: "application/pdf" }),
       group_path: "/legal",
+      shared_group_paths: ["/finance", "/ops"],
     });
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -223,12 +248,28 @@ describe("uploadApi", () => {
     const body = init.body as FormData;
     expect(body.has("quality_preset")).toBe(false);
     expect(body.get("group_path")).toBe("/legal");
+    expect(body.getAll("shared_group_paths")).toEqual(["/finance", "/ops"]);
   });
 });
 
 describe("ingestJobsApi", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("filters ingestion jobs to uploads from the current user", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ items: [], total: 0, limit: 20, offset: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await ingestJobsApi.list({ origin: "upload", uploaded_by_me: true, limit: 20, offset: 0 });
+
+    const calls = fetchMock.mock.calls as unknown as Array<[unknown]>;
+    const url = String(calls[0][0]);
+    expect(url).toContain("/api/v1/ingest-jobs?");
+    expect(url).toContain("origin=upload");
+    expect(url).toContain("uploaded_by_me=true");
+    expect(url).toContain("limit=20");
+    expect(url).toContain("offset=0");
   });
 
   it("cancels an encoded ingestion job with CSRF protection", async () => {
@@ -284,6 +325,26 @@ describe("ingestJobsApi", () => {
     expect(init.method).toBe("POST");
     expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
     expect(init.body).toBe(JSON.stringify({ task_id: "graph/task-1" }));
+  });
+});
+
+describe("documentsApi reingest", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("links a manual retry to the failed ingestion job", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ document_id: "doc/1", job_id: "job-2", status: "queued" }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    await documentsApi.reingest("doc/1", { retry_of_job_id: "job-1" });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/docs/doc%2F1/reingest");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify({ retry_of_job_id: "job-1" }));
   });
 });
 

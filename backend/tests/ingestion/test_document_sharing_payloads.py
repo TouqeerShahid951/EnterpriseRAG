@@ -91,6 +91,41 @@ def test_qdrant_points_include_chunk_claims_and_entity_hints() -> None:
     assert payload["named_entities"] == [{"text": "Acme Corp", "type": "organization", "start": None, "end": None}]
 
 
+def test_qdrant_points_preserve_generated_topics_separately() -> None:
+    job = IngestJobPayload(
+        job_id="job-1",
+        doc_id="doc-1",
+        file_path="memory://Shared.pdf",
+        group_path="/legal",
+        effective_date=None,
+        supersedes=[],
+    )
+    chunk = TextChunk(
+        index=0,
+        page=1,
+        text="Shared document text",
+        parent_chunk_id="doc-1:parent:0",
+        parent_text="Shared document text",
+        chunk_type="text",
+        section_title=None,
+        page_start=1,
+        page_end=1,
+    )
+
+    points = build_qdrant_points(
+        job=job,
+        chunks=[chunk],
+        vectors=[[0.1, 0.2, 0.3]],
+        sparse_vectors=[SparseVector(indices=[], values=[])],
+        metadata={"topics": ["OCR"], "llm_topics": ["Handwriting recognition"]},
+        file_bytes=b"shared document",
+    )
+
+    payload = points[0]["payload"]
+    assert payload["topics"] == ["OCR"]
+    assert payload["llm_topics"] == ["Handwriting recognition"]
+
+
 def test_upload_quality_preset_roundtrips_through_queue_and_worker_payload() -> None:
     message = IngestQueueMessage(
         job_id="job-1",

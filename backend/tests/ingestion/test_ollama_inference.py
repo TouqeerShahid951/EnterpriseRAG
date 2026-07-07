@@ -38,9 +38,12 @@ def test_ollama_metadata_request_includes_context_limit(monkeypatch) -> None:
 
     payload = calls[0][2]["payload"]
     assert payload["options"]["num_ctx"] == 16384
-    assert payload["messages"][0]["content"] == "You are a strict JSON metadata extraction API. Return only valid JSON."
-    assert "Return ONLY a valid JSON object" in payload["messages"][1]["content"]
-    assert "claims must be an array of objects, not strings" in payload["messages"][1]["content"]
+    assert payload["options"]["num_predict"] == ollama_module.METADATA_NUM_PREDICT
+    assert payload["format"]["required"] == ["summary", "llm_topics", "doc_type"]
+    assert payload["messages"][0]["content"] == "Return valid JSON only."
+    assert "JSON only: summary, llm_topics, doc_type" in payload["messages"][1]["content"]
+    assert "summary, llm_topics, doc_type" in payload["messages"][1]["content"]
+    assert "claims" not in payload["messages"][1]["content"]
 
 
 def test_ollama_metadata_timeout_returns_specific_warning(monkeypatch) -> None:
@@ -60,12 +63,12 @@ def test_ollama_metadata_timeout_returns_specific_warning(monkeypatch) -> None:
 
     metadata = client.generate_metadata("document text")
 
-    assert len(calls) == 3
+    assert len(calls) == 1
     assert metadata["_warnings"] == ["ollama_metadata_timeout"]
     assert metadata["_metadata_errors"][0] == {
         "warning": "ollama_metadata_timeout",
         "service": "ollama",
-        "attempts": 3,
+        "attempts": 1,
         "message": "request timed out",
     }
 
@@ -106,7 +109,7 @@ def test_ollama_metadata_http_error_returns_safe_diagnostic(monkeypatch) -> None
     assert metadata["_metadata_errors"][0] == {
         "warning": "ollama_metadata_http_error",
         "service": "ollama",
-        "attempts": 3,
+        "attempts": 1,
         "message": "metadata service returned HTTP 500",
         "status_code": 500,
     }

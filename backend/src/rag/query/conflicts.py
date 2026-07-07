@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -14,6 +15,19 @@ from .cancellation import call_with_optional_cancellation, cancellation_token_fr
 from .qdrant import QdrantClient, SearchHit
 from .state import QueryContext, scoped_user_context, visible_group_paths
 from .sources import source_from_hit
+
+_DISAGREEMENT_FIELDS = {
+    "status",
+    "state",
+    "priority",
+    "severity",
+    "stage",
+    "owner",
+    "assignee",
+    "amount",
+    "total",
+    "count",
+}
 
 
 class ConflictChecker(Protocol):
@@ -51,6 +65,54 @@ def apply_conflict_detection(ctx: QueryContext, checker: ConflictChecker, qdrant
     conflicts = _resolve_original_sources(ctx, conflicts, qdrant)
     ctx["conflict_pairs"] = conflicts
     ctx["conflict_flag"] = bool(conflicts)
+    return ctx
+
+
+def apply_hybrid_disagreement_detection(ctx: QueryContext) -> QueryContext:
+    decision = ctx.get("source_decision")
+    if str(getattr(decision, "resolved_mode", "") or "") != "hybrid":
+        return ctx
+    if ctx["conflict_flag"]:
+        return ctx
+    db_hits = [hit for hit in ctx["retrieved_hits"] if _is_live_db_hit(hit)]
+    doc_hits = [hit for hit in ctx["retrieved_hits"] if not _is_live_db_hit(hit)]
+    if not db_hits or not doc_hits:
+        return ctx
+    conflicts: list[ConflictPair] = []
+    for db_hit in db_hits:
+        for label, db_value in _db_fields(db_hit):
+            if _normalized_value(db_value) == "":
+                continue
+            for doc_hit in doc_hits:
+                doc_value = _document_field_value(doc_hit, label)
+                if not doc_value or _values_agree(db_value, doc_value):
+                    continue
+                source_a = source_from_hit(db_hit, query=ctx["request"].query)
+                source_b = source_from_hit(doc_hit, query=ctx["request"].query)
+                conflicts.append(
+                    ConflictPair(
+                        claim_a_id=f"{db_hit.point_id}:{label}",
+                        claim_b_id=f"{doc_hit.point_id}:{label}",
+                        doc_a_id=str(db_hit.payload.get("doc_id", db_hit.point_id)),
+                        doc_b_id=str(doc_hit.payload.get("doc_id", doc_hit.point_id)),
+                        chunk_a_id=str(db_hit.payload.get("chunk_id", db_hit.point_id)),
+                        chunk_b_id=str(doc_hit.payload.get("chunk_id", doc_hit.point_id)),
+                        entity=str(db_hit.payload.get("doc_title") or db_hit.payload.get("table_title") or "Live DB"),
+                        attribute=label,
+                        value_a=db_value,
+                        value_b=doc_value,
+                        source_a=source_a,
+                        source_b=source_b,
+                    )
+                )
+                break
+            if conflicts:
+                break
+        if conflicts:
+            break
+    if conflicts:
+        ctx["conflict_pairs"] = conflicts
+        ctx["conflict_flag"] = True
     return ctx
 
 
@@ -162,3 +224,62 @@ def _claim_from_payload(hit: SearchHit, raw_claim: dict[str, object]) -> ClaimRe
 
 def _text(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _is_live_db_hit(hit: SearchHit) -> bool:
+    if str(hit.payload.get("source_type") or "").startswith("connector_live_sql"):
+        return True
+    return str(hit.payload.get("doc_id") or "").startswith("connector-live-scope:")
+
+
+def _db_fields(hit: SearchHit) -> list[tuple[str, str]]:
+    raw_fields = hit.payload.get("structured_fields")
+    fields: list[tuple[str, str]] = []
+    if isinstance(raw_fields, list):
+        for item in raw_fields:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label") or "").strip()
+            value = str(item.get("value") or "").strip()
+            if label and value and _normalized_label(label) in _DISAGREEMENT_FIELDS:
+                fields.append((label, value))
+    for name in _DISAGREEMENT_FIELDS:
+        value = hit.payload.get(name)
+        if value not in (None, ""):
+            fields.append((name, str(value)))
+    return fields
+
+
+def _document_field_value(hit: SearchHit, label: str) -> str | None:
+    text = str(hit.payload.get("text") or "")
+    normalized_label = re.escape(_normalized_label(label).replace("_", " "))
+    patterns = [
+        rf"\b{normalized_label}\b\s*(?:is|=|:|-)\s*([A-Za-z0-9_][A-Za-z0-9_\- ]{{0,60}})",
+        rf"\b{normalized_label.replace(' ', '_')}\b\s*(?:is|=|:|-)\s*([A-Za-z0-9_][A-Za-z0-9_\- ]{{0,60}})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return _clean_extracted_value(match.group(1))
+    return None
+
+
+def _clean_extracted_value(value: str) -> str:
+    text = re.split(r"[\n.;,|]", value, maxsplit=1)[0]
+    return " ".join(text.split()).strip()
+
+
+def _normalized_label(value: str) -> str:
+    return " ".join(re.findall(r"[A-Za-z0-9_]+", value.lower())).replace(" ", "_")
+
+
+def _normalized_value(value: str) -> str:
+    return " ".join(re.findall(r"[A-Za-z0-9_]+", value.lower()))
+
+
+def _values_agree(left: str, right: str) -> bool:
+    left_norm = _normalized_value(left)
+    right_norm = _normalized_value(right)
+    if not left_norm or not right_norm:
+        return True
+    return left_norm == right_norm or left_norm in right_norm or right_norm in left_norm

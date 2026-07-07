@@ -79,6 +79,7 @@ class DocumentCrossReferenceRecord:
 class IngestJobRecord:
     id: str
     doc_id: str
+    retry_of_job_id: str | None
     origin: str
     status: str
     progress_pct: int
@@ -146,6 +147,55 @@ class ReviewDecisionRecord:
 
 
 @dataclass(frozen=True)
+class ImageReviewBatchRecord:
+    id: str
+    job_id: str
+    doc_id: str
+    doc_title: str
+    status: str
+    parsed_items: list[dict[str, Any]]
+    resume_payload: dict[str, Any]
+    candidate_count: int
+    recommended_count: int
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
+@dataclass(frozen=True)
+class ImageReviewCandidateRecord:
+    id: str
+    batch_id: str
+    doc_id: str
+    doc_title: str
+    candidate_key: str
+    filename: str
+    source_kind: str
+    page: int | None
+    bbox: list[float] | None
+    page_area_ratio: float | None
+    object_path: str
+    content_type: str
+    width: int | None
+    height: int | None
+    content_hash: str
+    quality_flags: tuple[str, ...]
+    score: int
+    recommended: bool
+    status: str
+    assigned_to: str | None
+    skip_reason: str | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
+@dataclass(frozen=True)
+class ImageReviewDecisionRecord:
+    batch: ImageReviewBatchRecord
+    candidates: tuple[ImageReviewCandidateRecord, ...]
+    batch_complete: bool = False
+
+
+@dataclass(frozen=True)
 class DocumentImageAssetRecord:
     id: str
     doc_id: str
@@ -175,6 +225,14 @@ class DocumentRepository(Protocol):
         document_id: str,
         *,
         group_paths: list[str],
+        actor_id: str | None,
+    ) -> DocumentRecord | None: ...
+    def replace_document_access_scope(
+        self,
+        document_id: str,
+        *,
+        owner_group_path: str,
+        shared_group_paths: list[str],
         actor_id: str | None,
     ) -> DocumentRecord | None: ...
     def remove_document_share(self, document_id: str, group_path: str) -> DocumentRecord | None: ...
@@ -222,6 +280,7 @@ class DocumentRepository(Protocol):
         status: str,
         progress_pct: int,
         origin: str = "unknown",
+        retry_of_job_id: str | None = None,
     ) -> IngestJobRecord: ...
     def get_ingest_job(self, job_id: str) -> IngestJobRecord | None: ...
     def list_ingest_jobs(self) -> list[IngestJobRecord]: ...
@@ -281,6 +340,35 @@ class DocumentRepository(Protocol):
     def list_review_items_for_batch(self, batch_id: str) -> list[ReviewItemRecord]: ...
     def approve_review_item(self, item_id: str, *, corrected_text: str, reviewer_id: str) -> ReviewDecisionRecord | None: ...
     def reject_review_item(self, item_id: str, *, reviewer_id: str) -> ReviewDecisionRecord | None: ...
+    def create_image_review_batch(
+        self,
+        *,
+        job_id: str,
+        doc_id: str,
+        parsed_items: list[dict[str, Any]],
+        resume_payload: dict[str, Any],
+        candidates: list[dict[str, Any]],
+    ) -> ImageReviewBatchRecord: ...
+    def get_image_review_batch(self, batch_id: str) -> ImageReviewBatchRecord | None: ...
+    def list_image_review_batches(self, *, status: str = "pending") -> list[ImageReviewBatchRecord]: ...
+    def list_image_review_candidates_for_batch(
+        self,
+        batch_id: str,
+        *,
+        status: str | None = None,
+    ) -> list[ImageReviewCandidateRecord]: ...
+    def get_image_review_candidate(self, candidate_id: str) -> ImageReviewCandidateRecord | None: ...
+    def apply_image_review_decisions(
+        self,
+        batch_id: str,
+        *,
+        approve_candidate_ids: list[str],
+        skip_candidate_ids: list[str],
+        reviewer_id: str,
+        approve_recommended: bool = False,
+        skip_remaining: bool = False,
+    ) -> ImageReviewDecisionRecord | None: ...
+    def get_image_review_approved_keys(self, batch_id: str) -> list[str]: ...
     def replace_document_image_assets(
         self,
         *,

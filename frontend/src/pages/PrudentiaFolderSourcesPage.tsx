@@ -22,7 +22,7 @@ export function PrudentiaFolderSourcesPage({ onLogout, onNavigate, user }: Props
   return (
     <PrudentiaWorkspace activeRoute="document-extraction" onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page" id="main-content">
-        <div className="sv-page-inner max-w-6xl">
+        <div className="sv-page-inner sv-page-inner-workbench max-w-6xl">
           <header className="sv-page-header">
             <div>
               <p className="sv-eyebrow">Document Intake</p>

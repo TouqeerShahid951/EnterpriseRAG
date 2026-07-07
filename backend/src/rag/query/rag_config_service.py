@@ -324,7 +324,7 @@ def _role_probe(config_record: RagConfigRecord, role: str, model: str | None) ->
 def _list_embedding_models(config_record: RagConfigRecord) -> list[str]:
     if config_record.embedding_provider == "fastembed":
         try:
-            return list_supported_dense_models()
+            return list_supported_dense_models(cache_dir=settings.rag_dense_cache_dir, cached_only=True)
         except FastEmbedDenseError as exc:
             raise RagConfigValidationError(
                 code="fastembed_unavailable",

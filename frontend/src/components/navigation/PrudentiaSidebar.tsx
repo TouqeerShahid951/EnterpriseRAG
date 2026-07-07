@@ -14,6 +14,8 @@ import {
   LogOut,
   Menu,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Search,
   Settings,
   ShieldCheck,
@@ -36,10 +38,15 @@ import {
 } from "../../routes";
 import type { User as AuthUser } from "../../types/api";
 
-export const Prudentia_SIDEBAR_MIN_WIDTH = 212;
-export const Prudentia_SIDEBAR_MAX_WIDTH = 320;
-export const Prudentia_SIDEBAR_DEFAULT_WIDTH = 240;
-export const Prudentia_SIDEBAR_COLLAPSED_WIDTH = 60;
+export const Prudentia_SIDEBAR_MIN_WIDTH = 196;
+export const Prudentia_SIDEBAR_MAX_WIDTH = 288;
+export const Prudentia_SIDEBAR_DEFAULT_WIDTH = 224;
+export const Prudentia_SIDEBAR_COLLAPSED_WIDTH = 56;
+
+export function reviewQueueBadgeCount(ocrTotal: number | null | undefined, imageCandidateTotal: number | null | undefined): number | null {
+  if (ocrTotal == null && imageCandidateTotal == null) return null;
+  return (ocrTotal ?? 0) + (imageCandidateTotal ?? 0);
+}
 
 const iconByKey: Record<NavigationIcon, LucideIcon> = {
   audit: FolderKanban,
@@ -66,7 +73,9 @@ export function PrudentiaSidebar({
   sidebarWidth,
   user,
 }: Props) {
-  const primarySpace = formatKnowledgeSpace(user.group_paths);
+  const userGroupPaths = user.group_paths ?? [];
+  const userEmail = user.email ?? "Unknown user";
+  const primarySpace = formatKnowledgeSpace(userGroupPaths);
   const items = useMemo(() => visibleNavigation(user), [user]);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(() => navigationGroupForRoute(activeRoute));
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -95,6 +104,14 @@ export function PrudentiaSidebar({
     staleTime: 4000,
     retry: false,
   });
+  const imageReviewQuery = useQuery({
+    queryKey: ["review-queue", "image-batches"],
+    queryFn: reviewApi.listImageBatches,
+    enabled: canAccessRoute(user, "review"),
+    refetchInterval: 5000,
+    staleTime: 4000,
+    retry: false,
+  });
 
   useEffect(() => {
     setExpandedGroup(navigationGroupForRoute(activeRoute));
@@ -113,9 +130,9 @@ export function PrudentiaSidebar({
     if (badge === "trash") return trashQuery.data?.total ?? null;
     if (badge === "jobs") {
       const summary = jobsSummaryQuery.data;
-      return summary ? summary.active + (summary.status_counts.failed ?? 0) : null;
+      return summary ? summary.needs_attention : null;
     }
-    if (badge === "review") return reviewQuery.data?.total ?? null;
+    if (badge === "review") return reviewQueueBadgeCount(reviewQuery.data?.total, imageReviewQuery.data?.candidate_total);
     return null;
   }
 
@@ -273,15 +290,15 @@ export function PrudentiaSidebar({
             onClick={() => navigate("account")}
             className={activeRoute === "account" ? "Prudentia-account-button Prudentia-account-button-active" : "Prudentia-account-button"}
             aria-current={activeRoute === "account" ? "page" : undefined}
-            aria-label={`Account management for ${user.email}`}
-            title={`Account: ${user.email}`}
+            aria-label={`Account management for ${userEmail}`}
+            title={`Account: ${userEmail}`}
           >
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary-fixed text-on-primary-fixed text-[11px] font-bold">
-              {user.email.slice(0, 2).toUpperCase()}
+              {userEmail.slice(0, 2).toUpperCase()}
             </div>
             <div>
-              <strong className="block max-w-48 truncate text-label-md text-on-surface">{user.email}</strong>
-              <small className="text-secondary">{user.group_paths[0] ?? "No space"}</small>
+              <strong className="block max-w-48 truncate text-label-md text-on-surface">{userEmail}</strong>
+              <small className="text-secondary">{userGroupPaths[0] ?? "No space"}</small>
             </div>
           </button>
           {onToggleTheme ? (
@@ -342,7 +359,14 @@ function SidebarCollapseButton({ collapsed, onToggle }: SidebarCollapseButtonPro
       aria-expanded={!collapsed}
       title={collapsed ? "Expand navigation" : "Collapse navigation"}
     >
-      {collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronLeft size={14} aria-hidden="true" />}
+      {collapsed ? (
+        <span className="Prudentia-sidebar-collapse-logo" aria-hidden="true">
+          <PrudentiaBrandMark />
+        </span>
+      ) : null}
+      <span className="Prudentia-sidebar-collapse-icon" aria-hidden="true">
+        {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+      </span>
     </button>
   );
 }

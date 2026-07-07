@@ -108,6 +108,7 @@ class WorkerConfig:
     layered_docling_batch_pages: int
     pdf_image_analysis_max_images: int
     pdf_image_analysis_max_full_page_fallbacks: int
+    pdf_image_review_threshold: int
     scanned_visual_region_enabled: bool
     scanned_visual_min_area_ratio: float
     scanned_visual_max_regions_per_page: int
@@ -199,9 +200,10 @@ class WorkerConfig:
             layered_docling_batch_pages=max(1, int(os.getenv("LAYERED_DOCLING_BATCH_PAGES", "4"))),
             pdf_image_analysis_max_images=int(os.getenv("PDF_IMAGE_ANALYSIS_MAX_IMAGES", "-1")),
             pdf_image_analysis_max_full_page_fallbacks=int(os.getenv("PDF_IMAGE_ANALYSIS_MAX_FULL_PAGE_FALLBACKS", "-1")),
+            pdf_image_review_threshold=int(os.getenv("PDF_IMAGE_REVIEW_THRESHOLD", "64")),
             scanned_visual_region_enabled=parse_bool(os.getenv("SCANNED_VISUAL_REGION_ENABLED"), True),
             scanned_visual_min_area_ratio=max(0.0, float(os.getenv("SCANNED_VISUAL_MIN_AREA_RATIO", "0.03"))),
-            scanned_visual_max_regions_per_page=max(0, int(os.getenv("SCANNED_VISUAL_MAX_REGIONS_PER_PAGE", "4"))),
+            scanned_visual_max_regions_per_page=int(os.getenv("SCANNED_VISUAL_MAX_REGIONS_PER_PAGE", "-1")),
             scanned_visual_text_mask_padding_px=max(0, int(os.getenv("SCANNED_VISUAL_TEXT_MASK_PADDING_PX", "8"))),
             ocr_review_confidence_threshold=float(os.getenv("OCR_REVIEW_CONFIDENCE_THRESHOLD", "0.9")),
             native_text_min_chars_per_page=int(os.getenv("NATIVE_TEXT_MIN_CHARS_PER_PAGE", "10")),

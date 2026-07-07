@@ -10,6 +10,7 @@ from rag.api.routes.query_routes import list_query_sources
 from rag.auth.context import UserContext
 from rag.connectors.models import ConnectorSchemaCatalogRecord
 from rag.connectors.repositories import InMemoryConnectorProfileRepository
+from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.query.source_resolution import (
     QuerySourceAccessError,
     list_visible_query_sources,
@@ -182,10 +183,27 @@ def test_source_resolver_auto_routes_structured_schema_matches_to_db_first() -> 
         connector_profile_repo=profile_repo,
     )
 
-    assert decision.resolved_mode == "db_first"
-    assert decision.reason == "structured_query_matches_database_scope"
+    assert decision.resolved_mode == "hybrid"
+    assert decision.reason == "auto_hybrid_database_preferred"
+    assert decision.preferred_source == "database"
     assert decision.structured_score > 0
     assert decision.source_match_score > 0
+
+
+def test_source_resolver_auto_routes_schema_term_matches_to_db_first() -> None:
+    schedule_repo, profile_repo, _catalog = _repos_with_sources()
+
+    decision = resolve_query_source(
+        _ctx(QueryRequest(query="What is the status of case CASE-2025-5002?")),
+        schedule_repo=schedule_repo,
+        connector_profile_repo=profile_repo,
+    )
+
+    assert decision.resolved_mode == "hybrid"
+    assert decision.reason == "auto_hybrid_database_preferred"
+    assert decision.preferred_source == "database"
+    assert decision.structured_score == 0
+    assert decision.source_match_score >= 2
 
 
 def test_source_resolver_auto_keeps_policy_questions_in_corpus() -> None:
@@ -197,8 +215,9 @@ def test_source_resolver_auto_keeps_policy_questions_in_corpus() -> None:
         connector_profile_repo=profile_repo,
     )
 
-    assert decision.resolved_mode == "corpus_only"
-    assert decision.reason == "corpus_language_detected"
+    assert decision.resolved_mode == "hybrid"
+    assert decision.reason == "auto_hybrid_corpus_preferred"
+    assert decision.preferred_source == "corpus"
     assert decision.corpus_score > 0
 
 
@@ -212,10 +231,113 @@ def test_source_resolver_auto_routes_mixed_database_and_corpus_signals_to_hybrid
     )
 
     assert decision.resolved_mode == "hybrid"
-    assert decision.reason == "mixed_structured_and_corpus_signals"
+    assert decision.reason.startswith("auto_hybrid_")
     assert decision.structured_score > 0
     assert decision.corpus_score > 0
     assert decision.source_match_score > 0
+
+
+def test_source_resolver_auto_without_visible_database_stays_corpus_only() -> None:
+    schedule_repo = InMemoryFolderScheduleRepository()
+    profile_repo = InMemoryConnectorProfileRepository()
+
+    decision = resolve_query_source(
+        _ctx(QueryRequest(query="What is the current status?")),
+        schedule_repo=schedule_repo,
+        connector_profile_repo=profile_repo,
+    )
+
+    assert decision.resolved_mode == "corpus_only"
+    assert decision.reason == "no_visible_database_sources"
+    assert decision.preferred_source == "corpus"
+
+
+def test_source_resolver_auto_uses_document_metadata_for_corpus_preference() -> None:
+    schedule_repo, profile_repo, _catalog = _repos_with_sources()
+    document_repo = _document_repo_with_policy()
+
+    decision = resolve_query_source(
+        _ctx(QueryRequest(query="What does the retention manual say?")),
+        schedule_repo=schedule_repo,
+        connector_profile_repo=profile_repo,
+        document_repo=document_repo,
+    )
+
+    assert decision.resolved_mode == "hybrid"
+    assert decision.preferred_source == "corpus"
+    assert decision.document_match_score > 0
+
+
+def test_source_resolver_auto_followup_inherits_previous_source_bias() -> None:
+    schedule_repo, profile_repo, _catalog = _repos_with_sources()
+    ctx = _ctx(QueryRequest(query="What about pending ones?"))
+    ctx["session_turns"] = [
+        {
+            "query": "Which cases are open?",
+            "answer": "Open cases...",
+            "source_mode": "hybrid",
+            "preferred_source": "database",
+            "sources": [{"doc_id": "connector-live-scope:catalog"}],
+        }
+    ]
+
+    decision = resolve_query_source(
+        ctx,
+        schedule_repo=schedule_repo,
+        connector_profile_repo=profile_repo,
+    )
+
+    assert decision.resolved_mode == "hybrid"
+    assert decision.preferred_source == "database"
+    assert "db_score" in decision.signal_reason
+
+
+def test_source_resolver_auto_llm_router_is_advisory_when_ambiguous() -> None:
+    schedule_repo, profile_repo, catalog = _repos_with_sources()
+    document_repo = _document_repo_with_policy()
+    llm = FakeRouterLlm(
+        {
+            "preferred_source": "corpus",
+            "preferred_catalog_id": catalog.id,
+            "confidence": 0.92,
+            "reason": "manual title matches",
+        }
+    )
+
+    decision = resolve_query_source(
+        _ctx(QueryRequest(query="case retention")),
+        config=FakeSourceRouterConfig(),
+        llm=llm,
+        routing_model="router",
+        schedule_repo=schedule_repo,
+        connector_profile_repo=profile_repo,
+        document_repo=document_repo,
+    )
+
+    assert decision.resolved_mode == "hybrid"
+    assert decision.router_mode == "llm"
+    assert decision.preferred_source == "corpus"
+    assert decision.preferred_catalog_id == catalog.id
+    assert llm.calls == 1
+
+
+def test_source_resolver_auto_ignores_low_confidence_llm_router() -> None:
+    schedule_repo, profile_repo, _catalog = _repos_with_sources()
+    document_repo = _document_repo_with_policy()
+    llm = FakeRouterLlm({"preferred_source": "corpus", "confidence": 0.2, "reason": "weak"})
+
+    decision = resolve_query_source(
+        _ctx(QueryRequest(query="case retention")),
+        config=FakeSourceRouterConfig(),
+        llm=llm,
+        schedule_repo=schedule_repo,
+        connector_profile_repo=profile_repo,
+        document_repo=document_repo,
+    )
+
+    assert decision.resolved_mode == "hybrid"
+    assert decision.router_mode == "deterministic"
+    assert llm.calls == 1
 
 
 def test_source_resolver_selected_source_sets_opaque_target() -> None:
@@ -337,6 +459,40 @@ def _add_schedule(
     )
 
 
+def _document_repo_with_policy() -> InMemoryDocumentRepository:
+    repo = InMemoryDocumentRepository()
+    document = repo.create_document(
+        document_id="doc-policy",
+        title="Retention manual",
+        source_id="retention-manual.pdf",
+        group_path="/ops",
+        clearance_level="NATO_RESTRICTED",
+        doc_type="manual",
+        effective_date=None,
+        expiry_date=None,
+        description="Document retention policy and procedures",
+        pending_supersedes=[],
+        content_hash="hash-policy",
+        uploaded_by="user",
+        file_path="/tmp/retention-manual.pdf",
+        ingest_status="completed",
+    )
+    repo.save_document_metadata(
+        document_id=document.id,
+        summary="Retention manual for document policy questions.",
+        language="en",
+        topics=["retention", "policy"],
+        llm_topics=["manual"],
+        doc_type="manual",
+        auto_doc_type="policy",
+        extracted_dates={},
+        metadata_flags={},
+        entities=[],
+        cross_references=[],
+    )
+    return repo
+
+
 def _ctx(request: QueryRequest):
     return initial_state(
         trace_id="trace",
@@ -358,3 +514,20 @@ def _user(*, group_paths: tuple[str, ...] = ("/ops",)) -> UserContext:
 
 def _profile_id(profile_repo: InMemoryConnectorProfileRepository) -> str:
     return profile_repo.list_profiles()[0].id
+
+
+class FakeSourceRouterConfig:
+    rag_source_router_llm_enabled = True
+    rag_source_router_llm_min_confidence = 0.60
+
+
+class FakeRouterLlm:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.calls = 0
+
+    def generate_json(self, **_: object) -> str:
+        self.calls += 1
+        import json
+
+        return json.dumps(self.payload)
