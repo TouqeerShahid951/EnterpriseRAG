@@ -13,7 +13,7 @@ import time
 from typing import Any, Iterable, Iterator
 
 from rag.shared.runtime_offline import apply_runtime_offline_defaults, runtime_offline_enabled
-from rag_ingestion.docling_models import (
+from rag.ingestion.parsers.docling_models import (
     build_rapidocr_options,
     configured_docling_artifacts_path,
     verify_docling_offline_artifacts,

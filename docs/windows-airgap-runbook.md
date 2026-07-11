@@ -209,7 +209,7 @@ docker run --rm `
   -e DO_NOT_TRACK=1 `
   -v agenticrag_backend-docling-cache:/models/docling `
   agenticrag-ingestion-worker `
-  python -m rag_ingestion.ops.prewarm_docling
+  python -m rag.ingestion.ops.prewarm_docling
 ```
 
 The prewarm command verifies the Docling layout/table cache and the RapidOCR OCR
@@ -498,7 +498,7 @@ that Docling and OCR artifacts verify successfully:
 
 ```powershell
 docker compose --env-file .env.windows-airgap exec ingestion-worker `
-  python -m rag_ingestion.ops.prewarm_docling --verify-only
+  python -m rag.ingestion.ops.prewarm_docling --verify-only
 ```
 
 If reranking fails, confirm the FastEmbed cache folder is not empty:

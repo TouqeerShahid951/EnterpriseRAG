@@ -15,7 +15,7 @@ from ..auth.permissions import can_manage_group_path
 from ..connectors.crypto import decrypt_secret, keyring_from_settings
 from ..connectors.models import CONNECTOR_RECORD_CONTENT_TYPE, DIRECT_CHUNKS_MODE, JSON_SNAPSHOT_MODE
 from ..connectors.repositories import ConnectorProfileRepository
-from ..connectors.registry import ConnectorRegistry, default_connector_registry
+from ..connectors.registry import ConnectorRegistry
 from ..connectors.sql_safety import SqlValidationError, validate_read_only_sql
 from ..core.config import settings
 from ..repositories.document_models import DocumentRepository
@@ -34,7 +34,8 @@ from .document_uploads import (
 from .file_scanning import FileScanner
 from .folder_schedule_time import next_recurring_window_after_current, next_run_for_schedule, normalize_timezone
 from .folder_sources import LocalFolderSource, MinioPrefixSource, resolve_local_folder_path
-from .ingest_queue import IngestQueue, IngestQueueMessage
+from ..ingestion.contracts import IngestJobPayload
+from ..ingestion.queue import IngestQueue
 from .upload_storage import UploadStorage
 
 FOLDER_SNAPSHOT_MAX_FILES = settings.folder_snapshot_max_files
@@ -950,7 +951,7 @@ def _queue_item(
         return
     document_repo.update_ingest_job(item.job_id, status="queued", progress_pct=0)
     queue.enqueue(
-        IngestQueueMessage(
+        IngestJobPayload(
             job_id=item.job_id,
             doc_id=item.document_id,
             file_path=item.object_path,

@@ -1,8 +1,7 @@
-from rag.services.ingest_queue import IngestQueueMessage, _message_payload
-from rag_ingestion.chunking import TextChunk
-from rag_ingestion.indexing.payloads import build_qdrant_points
-from rag_ingestion.indexing.sparse import SparseVector
-from rag_ingestion.messages import IngestJobPayload
+from rag.ingestion.chunking import TextChunk
+from rag.ingestion.contracts import IngestJobPayload
+from rag.ingestion.indexing.payloads import build_qdrant_points
+from rag.ingestion.indexing.sparse import SparseVector
 
 
 def test_qdrant_points_include_shared_acl_group_paths() -> None:
@@ -127,7 +126,7 @@ def test_qdrant_points_preserve_generated_topics_separately() -> None:
 
 
 def test_upload_quality_preset_roundtrips_through_queue_and_worker_payload() -> None:
-    message = IngestQueueMessage(
+    message = IngestJobPayload(
         job_id="job-1",
         doc_id="doc-1",
         file_path="memory://policy.pdf",
@@ -137,7 +136,7 @@ def test_upload_quality_preset_roundtrips_through_queue_and_worker_payload() -> 
         quality_preset="high_accuracy",
     )
 
-    payload = _message_payload(message)
+    payload = message.to_dict()
     job = IngestJobPayload.from_dict(payload)
 
     assert payload["quality_preset"] == "high_accuracy"

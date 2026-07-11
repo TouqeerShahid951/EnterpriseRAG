@@ -688,7 +688,7 @@ services:
   docling-prewarm:
     image: agenticrag-ingestion-worker
     profiles: ["prewarm"]
-    command: ["python", "-m", "rag_ingestion.ops.prewarm_docling"]
+    command: ["python", "-m", "rag.ingestion.ops.prewarm_docling"]
     environment:
       DOCLING_ARTIFACTS_PATH: /models/docling
       DOCLING_OCR_BACKEND: ${DOCLING_OCR_BACKEND:-onnxruntime}

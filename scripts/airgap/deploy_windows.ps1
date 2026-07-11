@@ -82,7 +82,7 @@ function Verify-DoclingCache {
     -e HF_DATASETS_OFFLINE=1 `
     -v "${DoclingCacheDir}:/models/docling" `
     agenticrag-ingestion-worker `
-    python -m rag_ingestion.ops.prewarm_docling --verify-only
+    python -m rag.ingestion.ops.prewarm_docling --verify-only
   if ($LASTEXITCODE -ne 0) { throw "Docling/OCR cache verification failed." }
 }
 

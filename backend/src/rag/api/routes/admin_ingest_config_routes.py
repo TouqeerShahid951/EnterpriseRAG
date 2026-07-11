@@ -13,7 +13,7 @@ from ...repositories.ingest_config import (
     get_ingest_config_repository,
 )
 from ...schemas.ingest_config import IngestConfigRequest, IngestConfigResponse, IngestWorkerState
-from ...services.ingest_worker_control import IngestWorkerControl, WorkerControlResult, get_ingest_worker_control
+from ...ingestion.worker_control import IngestWorkerControl, WorkerControlResult, get_ingest_worker_control
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 

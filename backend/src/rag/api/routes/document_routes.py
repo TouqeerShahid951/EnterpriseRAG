@@ -46,7 +46,8 @@ from ...schemas.docs import (
     VersionChainResponse,
 )
 from ...schemas.query import SourceAnchor
-from ...services.ingest_queue import IngestQueue, IngestQueueMessage, get_ingest_queue
+from ...ingestion.contracts import IngestJobPayload
+from ...ingestion.queue import IngestQueue, get_ingest_queue
 from ...services.graphrag_queue import (
     GraphRAGDocumentIndexMessage,
     GraphRAGMaintenanceQueue,
@@ -1392,11 +1393,11 @@ def _read_reingest_source(document: DocumentRecord, storage: UploadStorage) -> o
         ) from exc
 
 
-def _ingest_message_for_document(document: DocumentRecord, job_id: str, stored: object, repo: DocumentRepository) -> IngestQueueMessage:
+def _ingest_message_for_document(document: DocumentRecord, job_id: str, stored: object, repo: DocumentRepository) -> IngestJobPayload:
     filename = str(getattr(stored, "filename", "") or _filename_for_document(document))
     content_type = getattr(stored, "content_type", None) or _content_type_for_filename(filename)
     supersedes = repo.list_superseded_document_ids(document.id) or list(document.pending_supersedes)
-    return IngestQueueMessage(
+    return IngestJobPayload(
         job_id=job_id,
         doc_id=document.id,
         file_path=str(document.file_path),

@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from rag_ingestion.infrastructure.backend import IngestAttempt
-from rag_ingestion.infrastructure.http import ServiceRequestError
-from rag_ingestion.messages import IngestJobPayload
-from rag_ingestion.service import _resume_exhausted_review_attempt, _retry_or_fail
+from rag.ingestion.adapters.backend import IngestAttempt
+from rag.ingestion.adapters.http import ServiceRequestError
+from rag.ingestion.contracts import IngestJobPayload
+from rag.ingestion.execution import _resume_exhausted_review_attempt, _retry_or_fail
 
 
 class RetryScheduled(Exception):

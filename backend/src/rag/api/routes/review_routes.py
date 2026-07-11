@@ -18,7 +18,8 @@ from ...schemas.review import (
     ReviewQueueResponse,
 )
 from ...services.document_image_asset_storage import DocumentImageAssetStorage, get_document_image_asset_storage
-from ...services.ingest_queue import IngestQueue, IngestQueueMessage, get_ingest_queue
+from ...ingestion.contracts import IngestJobPayload
+from ...ingestion.queue import IngestQueue, get_ingest_queue
 
 router = APIRouter(prefix="/review-queue", tags=["review-queue"])
 
@@ -128,7 +129,7 @@ async def decide_image_review_batch(
             resume_payload = dict(decision.batch.resume_payload)
             resume_payload["image_review_batch_id"] = decision.batch.id
             try:
-                queue.enqueue(IngestQueueMessage.from_payload(resume_payload))
+                queue.enqueue(IngestJobPayload.from_dict(resume_payload))
                 document_repo.update_ingest_job(decision.batch.job_id, status="queued", progress_pct=0)
             except RuntimeError as exc:
                 raise HTTPException(
@@ -188,7 +189,7 @@ async def approve_review_item(
         resume_payload = dict(decision.batch.resume_payload)
         resume_payload["review_batch_id"] = decision.batch.id
         try:
-            queue.enqueue(IngestQueueMessage.from_payload(resume_payload))
+            queue.enqueue(IngestJobPayload.from_dict(resume_payload))
             document_repo.update_ingest_job(decision.batch.job_id, status="queued", progress_pct=0)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail={"code": "queue_unavailable", "message": "Upload queue is unavailable."}) from exc

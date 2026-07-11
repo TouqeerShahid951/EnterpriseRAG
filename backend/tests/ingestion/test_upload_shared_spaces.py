@@ -13,15 +13,15 @@ from rag.core.config import settings
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.identity import InMemoryIdentityRepository, UserRecord
 from rag.services.file_scanning import NoopFileScanner
-from rag.services.ingest_queue import IngestQueueMessage
+from rag.ingestion.contracts import IngestJobPayload
 from rag.services.upload_storage import StoredUpload
 
 
 class FakeQueue:
     def __init__(self) -> None:
-        self.messages: list[IngestQueueMessage] = []
+        self.messages: list[IngestJobPayload] = []
 
-    def enqueue(self, message: IngestQueueMessage) -> None:
+    def enqueue(self, message: IngestJobPayload) -> None:
         self.messages.append(message)
 
 

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from rag_ingestion.parsers import pymupdf as pymupdf_parser
+from rag.ingestion.parsers import pymupdf as pymupdf_parser
 
 
 class FakePage:

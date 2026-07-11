@@ -6,7 +6,7 @@ import os
 
 from celery import Celery
 
-from rag_ingestion.config import WorkerConfig
+from rag.ingestion.config import WorkerConfig
 
 config = WorkerConfig.from_env()
 soft_time_limit = int(os.getenv("INGEST_TASK_SOFT_TIME_LIMIT_SECONDS", "1800"))

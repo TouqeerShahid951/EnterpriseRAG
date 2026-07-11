@@ -244,9 +244,9 @@ def _alternating_row_fields(row: list[str]) -> list[dict[str, str]]:
 
 def _field_score(fields: list[dict[str, str]], *, penalize_generic: bool) -> int:
     score = 0
-    for field in fields:
-        label = collapse_whitespace(field.get("label"))
-        value = collapse_whitespace(field.get("value"))
+    for structured_field in fields:
+        label = collapse_whitespace(structured_field.get("label"))
+        value = collapse_whitespace(structured_field.get("value"))
         if not label or not value:
             continue
         score += 1
@@ -426,9 +426,9 @@ def _row(
 
 def _normalized_structured_fields(fields: list[dict[str, str]]) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
-    for field in fields:
-        label = collapse_whitespace(field.get("label"))
-        value = collapse_whitespace(field.get("value"))
+    for structured_field in fields:
+        label = collapse_whitespace(structured_field.get("label"))
+        value = collapse_whitespace(structured_field.get("value"))
         if not label or not value:
             continue
         normalized.append({"label": label.rstrip(":"), "value": value})
@@ -444,12 +444,12 @@ def _bounded_form_like_record_chunks(
     section = _section_label(items[0]) if items else ""
     grouped_fields: list[list[dict[str, str]]] = []
     current_fields: list[dict[str, str]] = []
-    for field in fields:
-        candidate_fields = [*current_fields, field]
+    for structured_field in fields:
+        candidate_fields = [*current_fields, structured_field]
         candidate_text = _structured_record_text(section=section, fields=candidate_fields)
         if current_fields and _too_large(candidate_text, target_tokens, target_tokens * CHARS_PER_TOKEN_GUARD):
             grouped_fields.append(current_fields)
-            current_fields = [field]
+            current_fields = [structured_field]
             continue
         current_fields = candidate_fields
     if current_fields:

@@ -15,7 +15,7 @@ from rag.repositories.identity_models import UserRecord
 from rag.repositories.ingest_config import IngestConfigRecord, InMemoryIngestConfigRepository
 from rag.schemas.ingest_jobs import GraphRAGCancelRequest
 from rag.services.graphrag_queue import GraphRAGDocumentIndexMessage, InMemoryGraphRAGMaintenanceQueue
-from rag.services.ingest_worker_control import WorkerActiveTask, WorkerCapacity, WorkerControlResult
+from rag.ingestion.worker_control import WorkerActiveTask, WorkerCapacity, WorkerControlResult
 
 
 def test_successful_ingestion_does_not_automatically_queue_graph_enrichment(monkeypatch: pytest.MonkeyPatch) -> None:

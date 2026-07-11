@@ -353,7 +353,7 @@ Docling cache verification:
 
 ```powershell
 docker compose --env-file .env.windows-airgap exec ingestion-worker `
-  python -m rag_ingestion.ops.prewarm_docling --verify-only
+  python -m rag.ingestion.ops.prewarm_docling --verify-only
 ```
 
 FastEmbed cache verification:

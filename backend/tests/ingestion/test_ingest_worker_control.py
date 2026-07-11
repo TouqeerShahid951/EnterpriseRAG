@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from rag.services.ingest_worker_control import INSPECT_TIMEOUT_SECONDS, IngestWorkerControl
+from rag.ingestion.worker_control import INSPECT_TIMEOUT_SECONDS, IngestWorkerControl
 
 
 def test_snapshot_tracks_only_workers_subscribed_to_ingest_queue() -> None:

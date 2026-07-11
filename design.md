@@ -58,7 +58,7 @@ flowchart LR
 | Frontend | `frontend/src/App.tsx`, `frontend/src/routes.ts`, `frontend/src/api/*` | Browser application, role-gated navigation, chat, uploads, document library, review queue, audit, settings, evaluations, SSE query streaming. |
 | Public API | `backend/apps/api/main.py`, `backend/src/rag/api/routes/*` | Authenticated REST and streaming API under `/api/v1`. Handles auth, upload, documents, query, review, audit, admin, evaluations, and artifact job endpoints. |
 | Internal API | `backend/src/rag/internal/*` | Service-token protected endpoints under `/internal` used by workers for job state, config snapshots, review batches, ABAC context, claims, and supersession. |
-| Ingestion worker | `backend/apps/ingestion/tasks.py`, `backend/src/rag_ingestion/*` | Celery worker that parses documents, enriches metadata, chunks content, embeds text, indexes Qdrant, saves claims, and updates ingestion status. |
+| Ingestion worker | `backend/apps/ingestion/tasks.py`, `backend/src/rag/ingestion/*` | Celery worker that parses documents, enriches metadata, chunks content, embeds text, indexes Qdrant, saves claims, and updates ingestion status. |
 | Artifact worker | `backend/src/rag/artifact_jobs/*` | Durable document generation workflow. Plans, retrieves evidence, composes content, validates grounding, renders files, stores outputs, and reports progress. |
 | Artifact sandbox | `backend/src/rag/artifact_sandbox/*` | Isolated render service for DOCX, PPTX, PDF, and related generated artifacts. Applies policy and timeout limits. |
 | Evaluation worker | `backend/src/rag/evaluations/*` | Runs imported evaluation datasets against the current RAG configuration and stores per-case diagnostics. |
@@ -187,7 +187,7 @@ sequenceDiagram
 ```
 
 The ingestion graph is assembled in
-`backend/src/rag_ingestion/stages/graph.py`:
+`backend/src/rag/ingestion/pipeline/graph.py`:
 
 1. Mark processing.
 2. Download the source file.

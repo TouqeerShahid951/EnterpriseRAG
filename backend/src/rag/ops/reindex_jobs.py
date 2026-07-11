@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from ..services.ingest_queue import IngestQueueMessage
+from ..ingestion.contracts import IngestJobPayload
 from ..shared.contracts.clearance import normalize_clearance_level
 
 
@@ -99,8 +99,8 @@ def reindex_document_from_row(row: dict[str, Any]) -> ReindexDocument:
     )
 
 
-def build_ingest_message(document: ReindexDocument, job_id: str) -> IngestQueueMessage:
-    return IngestQueueMessage(
+def build_ingest_message(document: ReindexDocument, job_id: str) -> IngestJobPayload:
+    return IngestJobPayload(
         job_id=job_id,
         doc_id=document.doc_id,
         file_path=document.file_path,

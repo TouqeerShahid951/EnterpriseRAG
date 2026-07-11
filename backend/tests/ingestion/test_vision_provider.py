@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from rag_ingestion.config import (
+from rag.ingestion.config import (
     BackendConfig,
     MinioConfig,
     MockSwitches,
@@ -11,10 +11,10 @@ from rag_ingestion.config import (
     VisionConfig,
     WorkerConfig,
 )
-from rag_ingestion.infrastructure import vision as vision_module
-from rag_ingestion.infrastructure.vision import OLLAMA_PROVIDER, VisionClient
-from rag_ingestion.parsers.images import _image_item_text
-from rag_ingestion.service import _build_vision_client
+from rag.ingestion.adapters import vision as vision_module
+from rag.ingestion.adapters.vision import OLLAMA_PROVIDER, VisionClient
+from rag.ingestion.parsers.images import _image_item_text
+from rag.ingestion.execution import _build_vision_client
 
 
 def test_ollama_runtime_config_routes_vision_to_ollama() -> None:

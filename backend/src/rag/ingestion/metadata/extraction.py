@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from ..messages import IngestJobPayload
+from ..contracts import IngestJobPayload
 from .crossrefs import extract_cross_references
 from .dates import days_between, extract_dates
 from .entities import extract_named_entities

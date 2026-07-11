@@ -38,15 +38,15 @@ from ...schemas.ingest_jobs import (
     StaleIngestJobItem,
     StaleIngestJobListResponse,
 )
-from ...services.ingest_queue import IngestQueue, get_ingest_queue
+from ...ingestion.queue import IngestQueue, get_ingest_queue
 from ...services.graphrag_queue import GraphRAGMaintenanceQueue, get_graphrag_maintenance_queue
-from ...services.ingest_recovery import (
+from ...ingestion.recovery import (
     IngestRecoveryError,
     MAX_INGEST_ATTEMPTS,
     list_stale_ingest_jobs,
     requeue_stale_ingest_job,
 )
-from ...services.ingest_worker_control import (
+from ...ingestion.worker_control import (
     IngestWorkerControl,
     WorkerControlResult,
     get_graphrag_worker_control,

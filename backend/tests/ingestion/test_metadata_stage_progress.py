@@ -3,9 +3,9 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
-from rag_ingestion.messages import IngestJobPayload
-from rag_ingestion.stages import steps
-from rag_ingestion.stages.state import IngestDependencies
+from rag.ingestion.contracts import IngestJobPayload
+from rag.ingestion.pipeline import steps
+from rag.ingestion.pipeline.state import IngestDependencies
 
 
 class FakeBackend:

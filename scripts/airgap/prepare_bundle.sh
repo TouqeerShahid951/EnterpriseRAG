@@ -165,7 +165,7 @@ docker run --rm \
   -e HF_HUB_OFFLINE=0 -e TRANSFORMERS_OFFLINE=0 -e HF_DATASETS_OFFLINE=0 \
   -e HF_HUB_DISABLE_XET=1 -e DO_NOT_TRACK=1 \
   -v "$docling_volume:/cache" agenticrag-ingestion-worker \
-  python -m rag_ingestion.ops.prewarm_docling --output-dir /cache
+  python -m rag.ingestion.ops.prewarm_docling --output-dir /cache
 
 mapfile -t images < <(compose config --images | sort -u)
 printf "%s\n" "${images[@]}" > "$BUNDLE_DIR/image-list.txt"

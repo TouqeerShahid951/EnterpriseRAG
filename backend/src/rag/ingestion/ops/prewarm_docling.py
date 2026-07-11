@@ -6,7 +6,7 @@ import argparse
 import os
 from pathlib import Path
 
-from rag_ingestion.docling_models import (
+from rag.ingestion.parsers.docling_models import (
     DEFAULT_DOCLING_ARTIFACTS_PATH,
     rapidocr_cache_matrix,
     verify_docling_offline_artifacts,

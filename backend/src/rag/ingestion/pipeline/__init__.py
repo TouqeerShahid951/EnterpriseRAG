@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from .messages import IngestJobPayload
-from .stages import IngestDependencies, run_ingest_graph
+from ..contracts import IngestJobPayload
+from .graph import IngestDependencies, run_ingest_graph
 
 
 def run_ingestion_pipeline(payload: IngestJobPayload, dependencies: IngestDependencies):

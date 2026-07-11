@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from rag_ingestion.messages import IngestJobPayload
-from rag_ingestion.parsers.models import DocumentParseResult, ParsedImageAsset, ParsedPdfItem
-from rag_ingestion.stages import steps
+from rag.ingestion.contracts import IngestJobPayload
+from rag.ingestion.parsers.models import DocumentParseResult, ParsedImageAsset, ParsedPdfItem
+from rag.ingestion.pipeline import steps
 
 
 def test_image_review_resume_skips_pdf_parse(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -15,13 +15,13 @@ from rag.repositories.ingest_config import (
     get_ingest_config_repository,
 )
 from rag.repositories.postgres import PostgresConnectionMixin
-from rag.services.ingest_queue import IngestQueue, get_ingest_queue
-from rag.services.ingest_recovery import (
+from rag.ingestion.queue import IngestQueue, get_ingest_queue
+from rag.ingestion.recovery import (
     MAX_INGEST_ATTEMPTS,
     list_stale_ingest_jobs,
     requeue_stale_ingest_job,
 )
-from rag.services.ingest_worker_control import IngestWorkerControl, get_ingest_worker_control
+from rag.ingestion.worker_control import IngestWorkerControl, get_ingest_worker_control
 
 ADVISORY_LOCK_ID = 867530902
 MAX_ATTEMPTS = MAX_INGEST_ATTEMPTS

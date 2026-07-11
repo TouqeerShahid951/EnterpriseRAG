@@ -13,7 +13,7 @@ from rag.repositories.folder_schedules import get_folder_schedule_repository
 from rag.repositories.postgres import PostgresConnectionMixin
 from rag.services.folder_ingestion import dispatch_due_schedules
 from rag.services.folder_sources import get_local_folder_source, get_minio_prefix_source
-from rag.services.ingest_queue import get_ingest_queue
+from rag.ingestion.queue import get_ingest_queue
 from rag.services.upload_storage import get_upload_storage
 
 ADVISORY_LOCK_ID = 867530901

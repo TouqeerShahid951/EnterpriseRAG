@@ -42,9 +42,9 @@ from rag.repositories.folder_schedule_memory import InMemoryFolderScheduleReposi
 from rag.repositories.identity_memory import InMemoryIdentityRepository
 from rag.services.folder_ingestion import create_connector_schedule, create_local_folder_schedule, dispatch_due_schedules
 from rag.services.folder_sources import LocalFolderSource, list_local_folder_directories
-from rag.services.ingest_queue import InMemoryIngestQueue
+from rag.ingestion.queue import InMemoryIngestQueue
 from rag.services.upload_storage import StoredUpload
-from rag_ingestion.parsers.document import parse_document
+from rag.ingestion.parsers.document import parse_document
 
 
 class FakeMinioSource:

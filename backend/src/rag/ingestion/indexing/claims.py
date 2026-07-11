@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import NAMESPACE_URL, uuid5
 
 from ..chunking import TextChunk
-from ..messages import IngestJobPayload
+from ..contracts import IngestJobPayload
 
 ClaimPayload = dict[str, str]
 

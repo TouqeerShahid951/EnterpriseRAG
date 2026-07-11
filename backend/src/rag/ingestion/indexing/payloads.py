@@ -10,7 +10,7 @@ from rag.shared.contracts.clearance import clearance_rank, normalize_clearance_l
 from rag.shared.contracts.group_paths import normalize_group_path
 
 from ..chunking import TextChunk
-from ..messages import IngestJobPayload
+from ..contracts import IngestJobPayload
 from .claims import claim_ids_for_chunk, claims_for_chunk
 from .metadata_text import compact_summary, metadata_terms_for_chunk, metadata_version, title_from_path
 from .sparse import SparseVector

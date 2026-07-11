@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from rag_ingestion.config import WorkerConfig
+from rag.ingestion.config import WorkerConfig
 
 
 def main() -> int:

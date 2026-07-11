@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from rag_ingestion.parsers.models import ParsedPdfItem
-from rag_ingestion.stages.steps import _low_confidence_ocr_items
+from rag.ingestion.parsers.models import ParsedPdfItem
+from rag.ingestion.pipeline.steps import _low_confidence_ocr_items
 
 
 def _ocr_item(*, confidence: float | None) -> ParsedPdfItem:

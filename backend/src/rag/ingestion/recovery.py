@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from ..repositories.document_models import DocumentRecord, DocumentRepository, IngestJobRecord
-from .ingest_queue import IngestQueue, IngestQueueMessage
+from .contracts import IngestJobPayload
+from .queue import IngestQueue
 
 MAX_INGEST_ATTEMPTS = 3
 
@@ -141,13 +142,14 @@ def ingest_job_last_activity(job: IngestJobRecord) -> datetime | None:
     return job.last_heartbeat_at or job.updated_at or job.created_at
 
 
-def ingest_queue_message(document: DocumentRecord, job: IngestJobRecord) -> IngestQueueMessage:
+def ingest_queue_message(document: DocumentRecord, job: IngestJobRecord) -> IngestJobPayload:
     content_type, _ = mimetypes.guess_type(document.file_path or "")
-    return IngestQueueMessage(
+    return IngestJobPayload(
         job_id=job.id,
         doc_id=document.id,
         file_path=document.file_path or "",
         group_path=document.group_path,
+        clearance_level=document.clearance_level,
         acl_group_paths=list(document.access_group_paths),
         doc_type=document.doc_type,
         effective_date=document.effective_date.isoformat() if document.effective_date else None,

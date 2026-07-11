@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Protocol
 
-from rag.shared.ingestion_quality import DEFAULT_INGESTION_QUALITY_PRESET, normalize_ingestion_quality_preset
+from rag.ingestion.quality import DEFAULT_INGESTION_QUALITY_PRESET, normalize_ingestion_quality_preset
 
 from ..core.config import Settings, settings
 from .postgres import PostgresConnectionMixin

@@ -7,20 +7,20 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from billiard.exceptions import SoftTimeLimitExceeded
-from rag.shared.ingestion_quality import parser_tuning_for_quality_preset
+from rag.ingestion.quality import parser_tuning_for_quality_preset
 
-from .infrastructure.backend import BackendInternalClient, IngestAttempt
-from .infrastructure.http import ServiceRequestError
-from .infrastructure.inference import build_ingestion_inference_client
-from .infrastructure.ollama import is_transient_service_error
-from .infrastructure.storage import DocumentImageAssetWriter, UploadObjectReader
-from .infrastructure.vision import OPENAI_COMPATIBLE_PROVIDER, OLLAMA_PROVIDER, VisionClient
+from .adapters.backend import BackendInternalClient, IngestAttempt
+from .adapters.http import ServiceRequestError
+from .adapters.inference import build_ingestion_inference_client
+from .adapters.ollama import is_transient_service_error
+from .adapters.storage import DocumentImageAssetWriter, UploadObjectReader
+from .adapters.vision import OPENAI_COMPATIBLE_PROVIDER, OLLAMA_PROVIDER, VisionClient
 from .config import WorkerConfig
 from .errors import EmbeddingUnavailable, HumanReviewRequired, IngestJobCancelled, WorkerStepError
 from .indexing.qdrant import QdrantClient
 from .indexing.sparse import SparseEmbedder
-from .messages import IngestJobPayload
-from .stages import IngestDependencies, run_ingest_graph
+from .contracts import IngestJobPayload
+from .pipeline import IngestDependencies, run_ingest_graph
 
 
 def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:

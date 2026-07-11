@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
-from rag.shared.ingestion_quality import DEFAULT_INGESTION_QUALITY_PRESET, normalize_ingestion_quality_preset
+from rag.ingestion.quality import DEFAULT_INGESTION_QUALITY_PRESET, normalize_ingestion_quality_preset
 
 TRUE_VALUES = {"1", "true", "yes", "on", "y"}
 FALSE_VALUES = {"0", "false", "no", "off", "n"}

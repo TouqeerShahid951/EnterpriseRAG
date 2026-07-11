@@ -54,7 +54,7 @@ ENV DOCLING_OCR_BACKEND=onnxruntime
 ENV DOCLING_OCR_LANGS=english
 ENV HF_HUB_DISABLE_XET=1
 
-COPY src/rag_ingestion /app/src/rag_ingestion
+COPY src/rag/ingestion /app/src/rag/ingestion
 COPY src/rag/__init__.py /app/src/rag/__init__.py
 COPY src/rag/graphrag /app/src/rag/graphrag
 COPY src/rag/shared /app/src/rag/shared
@@ -72,7 +72,7 @@ RUN python -c 'from pathlib import Path; import rapidocr; path = Path(rapidocr._
 USER appuser
 
 RUN if [ "$PREWARM_DOCLING" = "true" ]; then \
-        python -m rag_ingestion.ops.prewarm_docling; \
+        python -m rag.ingestion.ops.prewarm_docling; \
     fi
 
 ENV AIRGAP_RUNTIME_OFFLINE=1

@@ -17,7 +17,7 @@ from ...repositories.identity import IdentityRepository, UserRecord, get_identit
 from ...schemas.common import StubResponse
 from ...schemas.upload import JobStatusResponse, UploadResponse
 from ...shared.contracts.clearance import DEFAULT_CLEARANCE_LEVEL, clearance_rank, normalize_clearance_level
-from ...shared.ingestion_quality import normalize_ingestion_quality_preset
+from ...ingestion.quality import normalize_ingestion_quality_preset
 from ...services.document_uploads import (
     default_filename,
     default_title,
@@ -28,7 +28,8 @@ from ...services.document_uploads import (
     validate_upload_size,
 )
 from ...services.file_scanning import FileScanner, get_file_scanner
-from ...services.ingest_queue import IngestQueue, IngestQueueMessage, get_ingest_queue
+from ...ingestion.contracts import IngestJobPayload
+from ...ingestion.queue import IngestQueue, get_ingest_queue
 from ...services.upload_status import build_job_status_response
 from ...services.upload_storage import UploadStorage, get_upload_storage
 
@@ -275,7 +276,7 @@ def _enqueue_upload(
 ) -> None:
     try:
         queue.enqueue(
-            IngestQueueMessage(
+            IngestJobPayload(
                 job_id=job_id,
                 doc_id=doc_id,
                 file_path=file_path,

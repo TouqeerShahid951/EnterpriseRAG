@@ -5,11 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from rag_ingestion.errors import UnsupportedPdfError
-from rag_ingestion.parsers import document as document_module
-from rag_ingestion.parsers import images as images_module
-from rag_ingestion.parsers.document import PdfImageReviewRequired, _select_pdf_image_sources_for_analysis, parse_document, resume_pdf_image_review
-from rag_ingestion.parsers.images import (
+from rag.ingestion.errors import UnsupportedPdfError
+from rag.ingestion.parsers import document as document_module
+from rag.ingestion.parsers import images as images_module
+from rag.ingestion.parsers.document import PdfImageReviewRequired, _select_pdf_image_sources_for_analysis, parse_document, resume_pdf_image_review
+from rag.ingestion.parsers.images import (
     ImageAnalysisResult,
     ImageSource,
     _pdf_image_source_kind_and_flags,
@@ -17,7 +17,7 @@ from rag_ingestion.parsers.images import (
     image_sources_to_items,
     parse_image_document,
 )
-from rag_ingestion.parsers.models import DocumentParseResult, ParsedImageAsset, ParsedPdfItem
+from rag.ingestion.parsers.models import DocumentParseResult, ParsedImageAsset, ParsedPdfItem
 
 
 class DummyStore:

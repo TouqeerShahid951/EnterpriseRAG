@@ -15,7 +15,7 @@ from rag.shared.contracts.qdrant_schema import (
     create_collection_payload,
 )
 
-from ..infrastructure.http import ServiceRequestError, request_json
+from ..adapters.http import ServiceRequestError, request_json
 
 
 class QdrantClient:

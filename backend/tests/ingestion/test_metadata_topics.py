@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from rag_ingestion.config import DEFAULT_TOPIC_TAXONOMY, _topic_taxonomy
-from rag_ingestion.chunking import TextChunk
-from rag_ingestion.indexing.metadata_text import metadata_prefix, metadata_terms_for_chunk
-from rag_ingestion.metadata.topics import classify_topics
+from rag.ingestion.config import DEFAULT_TOPIC_TAXONOMY, _topic_taxonomy
+from rag.ingestion.chunking import TextChunk
+from rag.ingestion.indexing.metadata_text import metadata_prefix, metadata_terms_for_chunk
+from rag.ingestion.metadata.topics import classify_topics
 
 
 def test_topic_taxonomy_has_no_builtin_topics() -> None:

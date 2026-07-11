@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
-from ..infrastructure.backend import BackendInternalClient
-from ..infrastructure.inference import IngestionInferenceClient
-from ..infrastructure.storage import DocumentImageAssetWriter, UploadObjectReader
-from ..infrastructure.vision import VisionClient
+from ..adapters.backend import BackendInternalClient
+from ..adapters.inference import IngestionInferenceClient
+from ..adapters.storage import DocumentImageAssetWriter, UploadObjectReader
+from ..adapters.vision import VisionClient
 from ..indexing.qdrant import QdrantClient
 from ..indexing.sparse import SparseEmbedder
-from ..messages import IngestJobPayload
+from ..contracts import IngestJobPayload
 
 
 class IngestState(TypedDict, total=False):

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
-from rag_ingestion.infrastructure import ollama as ollama_module
-from rag_ingestion.infrastructure.ollama import OllamaClient
-from rag_ingestion.infrastructure.http import ServiceRequestError
+from rag.ingestion.adapters import ollama as ollama_module
+from rag.ingestion.adapters.ollama import OllamaClient
+from rag.ingestion.adapters.http import ServiceRequestError
 
 
 def test_ollama_metadata_request_includes_context_limit(monkeypatch) -> None:

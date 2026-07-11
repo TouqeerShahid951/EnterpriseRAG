@@ -5,7 +5,7 @@ import types
 
 import pytest
 
-from rag_ingestion.parsers.docling_adapter import _docling_convert_timeout_seconds, _docling_imports, docling_layout_blocks, parse_docling_pdf
+from rag.ingestion.parsers.docling_adapter import _docling_convert_timeout_seconds, _docling_imports, docling_layout_blocks, parse_docling_pdf
 
 
 class FakeBody:

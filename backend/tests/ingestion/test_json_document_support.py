@@ -6,10 +6,10 @@ from fastapi import HTTPException
 from rag.query.qdrant import SearchHit
 from rag.query.query_retrieval import _promote_structured_matches
 from rag.services.document_uploads import JSON_CONTENT_TYPE, validated_document_type
-from rag_ingestion.chunking import chunk_items
-from rag_ingestion.errors import WorkerStepError
-from rag_ingestion.parsers.document import parse_document
-from rag_ingestion.parsers.json import parse_json_document
+from rag.ingestion.chunking import chunk_items
+from rag.ingestion.errors import WorkerStepError
+from rag.ingestion.parsers.document import parse_document
+from rag.ingestion.parsers.json import parse_json_document
 
 
 def test_valid_json_upload_is_accepted_by_filename_and_content_type() -> None:

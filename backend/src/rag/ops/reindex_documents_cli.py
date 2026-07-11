@@ -9,7 +9,7 @@ from rag.shared.contracts.qdrant_schema import collection_mode, collection_vecto
 
 from ..core.config import settings
 from ..query.http import ServiceRequestError, request_json
-from ..services.ingest_queue import CeleryIngestQueue
+from ..ingestion.queue import CeleryIngestQueue
 from .qdrant_document_repair import mark_documents_not_current
 from .reindex_jobs import (
     build_ingest_message,

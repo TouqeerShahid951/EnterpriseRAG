@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from rag_ingestion.chunking import chunk_items
-from rag_ingestion.parsers.models import ParsedPdfItem
+from rag.ingestion.chunking import chunk_items
+from rag.ingestion.parsers.models import ParsedPdfItem
 
 
 def test_low_confidence_docling_ocr_table_rows_are_suppressed_when_vision_ocr_covers_page() -> None:

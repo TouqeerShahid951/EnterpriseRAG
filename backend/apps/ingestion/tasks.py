@@ -9,10 +9,10 @@ from typing import Any
 
 from apps.ingestion.celery_app import celery_app
 from rag.graphrag.indexing import GraphRAGIndexingService, config_from_mapping
-from rag_ingestion.config import WorkerConfig
-from rag_ingestion.infrastructure.http import ServiceRequestError
-from rag_ingestion.infrastructure.inference import build_ingestion_inference_client
-from rag_ingestion.service import _build_backend, run_ingest_document
+from rag.ingestion.config import WorkerConfig
+from rag.ingestion.adapters.http import ServiceRequestError
+from rag.ingestion.adapters.inference import build_ingestion_inference_client
+from rag.ingestion.execution import _build_backend, run_ingest_document
 
 
 @celery_app.task(bind=True, name="apps.ingestion.tasks.ingest_document")

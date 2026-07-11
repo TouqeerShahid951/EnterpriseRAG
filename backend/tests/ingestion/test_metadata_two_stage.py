@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from rag_ingestion.metadata.two_stage import generate_metadata_v2
+from rag.ingestion.metadata.two_stage import generate_metadata_v2
 
 
 def test_single_window_metadata_skips_consolidation_call() -> None:

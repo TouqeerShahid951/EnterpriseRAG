@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from ..errors import IngestJobCancelled
-from ..messages import IngestJobPayload
+from ..contracts import IngestJobPayload
 from .state import IngestDependencies, IngestState
 from .steps import (
     chunk_text,

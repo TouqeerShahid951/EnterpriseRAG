@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from rag.shared.ingestion_quality import parser_tuning_for_quality_preset
-from rag_ingestion.parsers.layered import _selected_docling_pages
-from rag_ingestion.parsers.quality import WeakPage
+from rag.ingestion.quality import parser_tuning_for_quality_preset
+from rag.ingestion.parsers.layered import _selected_docling_pages
+from rag.ingestion.parsers.quality import WeakPage
 
 
 def test_fast_profile_caps_docling_to_small_page_budget() -> None:

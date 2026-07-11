@@ -8,7 +8,7 @@ from typing import Any
 from rag.shared.contracts.sparse import SparseVector
 from rag.shared.runtime_offline import apply_runtime_offline_defaults
 
-from ..infrastructure.http import ServiceRequestError
+from ..adapters.http import ServiceRequestError
 
 
 class SparseEmbedder:

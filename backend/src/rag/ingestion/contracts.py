@@ -1,12 +1,14 @@
-"""Celery task payload parsing."""
+"""Validated payload shared by ingestion producers and workers."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Self
 
 from rag.shared.contracts.clearance import DEFAULT_CLEARANCE_LEVEL, normalize_clearance_level
-from rag.shared.ingestion_quality import normalize_ingestion_quality_preset
+
+from .quality import normalize_ingestion_quality_preset
 
 
 @dataclass(frozen=True)
@@ -28,8 +30,9 @@ class IngestJobPayload:
     image_review_batch_id: str | None = None
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "IngestJobPayload":
-        missing = [field for field in ("job_id", "doc_id", "file_path", "group_path") if not payload.get(field)]
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
+        required_fields = ("job_id", "doc_id", "file_path", "group_path")
+        missing = [field for field in required_fields if not str(payload.get(field) or "").strip()]
         if missing:
             raise ValueError(f"ingest payload missing required fields: {', '.join(missing)}")
         raw_supersedes = payload.get("supersedes", [])
