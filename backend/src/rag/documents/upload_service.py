@@ -20,9 +20,9 @@ from ..ingestion.queue import IngestQueue
 from ..repositories.document_models import DocumentRepository
 from ..repositories.identity_models import IdentityRepository, UserRecord
 from ..repositories.ingest_job_models import IngestJobRepository
-from ..services.file_scanning import FileScanner
-from ..services.upload_storage import UploadStorage
 from ..shared.contracts.clearance import clearance_rank, normalize_clearance_level
+from .scanning import FileScanner
+from .storage import UploadStorage
 from .upload_validation import (
     UploadRejected,
     default_filename,

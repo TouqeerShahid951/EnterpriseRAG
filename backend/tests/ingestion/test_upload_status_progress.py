@@ -5,7 +5,7 @@ import json
 
 from rag.api.routes.ingest_job_routes import _graphrag_queued_task_from_redis_item
 from rag.repositories.ingest_job_models import IngestJobRecord
-from rag.services.upload_status import build_job_status_response
+from rag.documents.upload_status import build_job_status_response
 
 
 def test_docling_progress_promotes_public_stage_and_step() -> None:

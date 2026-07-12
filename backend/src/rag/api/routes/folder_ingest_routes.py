@@ -35,11 +35,12 @@ from ...schemas.folder_ingest import (
     MinioPrefixScheduleCreateRequest,
     RecurrenceWindow,
 )
-from ...services.file_scanning import FileScanner, get_file_scanner
+from ...documents.dependencies import get_file_scanner, get_upload_storage
+from ...documents.scanning import FileScanner
 from ...services.folder_ingestion import create_local_folder_schedule, create_minio_prefix_schedule, create_snapshot_schedule
 from ...services.folder_sources import list_local_folder_directories
 from ...services.folder_schedule_time import next_run_for_schedule
-from ...services.upload_storage import UploadStorage, get_upload_storage
+from ...documents.storage import UploadStorage
 
 router = APIRouter(prefix="/folder-ingest", tags=["folder-ingest"])
 

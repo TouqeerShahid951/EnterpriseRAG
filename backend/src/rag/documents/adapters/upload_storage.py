@@ -1,45 +1,24 @@
-"""Raw upload storage adapters for the upload gate."""
+"""Local and MinIO adapters for uploaded document source files."""
 
 from __future__ import annotations
 
 from io import BytesIO
 import mimetypes
 import re
-from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
-from typing import Protocol
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
-from ..core.config import settings
-
-
-@dataclass(frozen=True)
-class StoredUpload:
-    object_path: str
-    size_bytes: int
-    content_type: str | None
-
-
-@dataclass(frozen=True)
-class StoredUploadContent:
-    content: bytes
-    content_type: str | None
-    filename: str
-
-
-class UploadStorage(Protocol):
-    def put(self, *, filename: str, content: bytes, content_type: str | None) -> StoredUpload: ...
-    def read(self, object_path: str) -> StoredUploadContent: ...
-    def delete(self, object_path: str) -> None: ...
+from ..storage import StoredUpload, StoredUploadContent
 
 
 class LocalUploadStorage:
     def __init__(self, root_dir: str) -> None:
         self.root_dir = Path(root_dir)
 
-    def put(self, *, filename: str, content: bytes, content_type: str | None) -> StoredUpload:
+    def put(
+        self, *, filename: str, content: bytes, content_type: str | None
+    ) -> StoredUpload:
         safe_name = _safe_filename(filename)
         object_name = f"{uuid4()}-{safe_name}"
         self.root_dir.mkdir(parents=True, exist_ok=True)
@@ -79,7 +58,9 @@ class LocalUploadStorage:
         try:
             target.relative_to(root)
         except ValueError as exc:
-            raise RuntimeError("refusing to access upload outside the configured storage directory") from exc
+            raise RuntimeError(
+                "refusing to access upload outside the configured storage directory"
+            ) from exc
         return target
 
 
@@ -96,7 +77,9 @@ class MinioUploadStorage:
         try:
             from minio import Minio
         except ImportError as exc:
-            raise RuntimeError("minio package is required for MinIO upload storage") from exc
+            raise RuntimeError(
+                "minio package is required for MinIO upload storage"
+            ) from exc
 
         self.bucket = bucket
         self.client = Minio(
@@ -106,7 +89,9 @@ class MinioUploadStorage:
             secure=secure,
         )
 
-    def put(self, *, filename: str, content: bytes, content_type: str | None) -> StoredUpload:
+    def put(
+        self, *, filename: str, content: bytes, content_type: str | None
+    ) -> StoredUpload:
         safe_name = _safe_filename(filename)
         object_name = f"raw/{uuid4()}-{safe_name}"
         if not self.client.bucket_exists(self.bucket):
@@ -138,7 +123,8 @@ class MinioUploadStorage:
             raise RuntimeError("unable to read MinIO upload") from exc
         return StoredUploadContent(
             content=content,
-            content_type=getattr(stat, "content_type", None) or _content_type_for(object_name),
+            content_type=getattr(stat, "content_type", None)
+            or _content_type_for(object_name),
             filename=_original_filename(Path(object_name).name),
         )
 
@@ -153,7 +139,9 @@ class MinioUploadStorage:
         parsed = urlparse(object_path)
         object_name = parsed.path.lstrip("/")
         if parsed.scheme != "minio" or parsed.netloc != self.bucket or not object_name:
-            raise RuntimeError("uploaded file path is not a valid MinIO object for this bucket")
+            raise RuntimeError(
+                "uploaded file path is not a valid MinIO object for this bucket"
+            )
         return parsed.netloc, object_name
 
 
@@ -187,22 +175,3 @@ def _content_type_for(filename: str) -> str:
     if lowered.endswith(".json"):
         return "application/json"
     return mimetypes.guess_type(filename)[0] or "application/octet-stream"
-
-
-@lru_cache
-def default_upload_storage() -> UploadStorage:
-    if settings.upload_storage_backend == "minio":
-        return MinioUploadStorage(
-            endpoint=settings.minio_endpoint,
-            access_key=settings.minio_access_key,
-            secret_key=settings.minio_secret_key,
-            bucket=settings.minio_bucket,
-            secure=settings.minio_secure,
-        )
-    if settings.upload_storage_backend != "local":
-        raise RuntimeError(f"unsupported upload storage backend: {settings.upload_storage_backend}")
-    return LocalUploadStorage(settings.upload_storage_dir)
-
-
-def get_upload_storage() -> UploadStorage:
-    return default_upload_storage()

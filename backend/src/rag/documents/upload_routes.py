@@ -15,29 +15,30 @@ from fastapi import (
     status,
 )
 
-from ...auth.dependencies import require_csrf, require_current_user
-from ...auth.document_access import can_read_document
-from ...core.config import settings
-from ...documents.upload_service import (
-    UploadDocument,
-    UploadDocumentCommand,
-    UploadRejected,
-)
-from ...ingestion.queue import IngestQueue, get_ingest_queue
-from ...repositories.documents import DocumentRepository, get_document_repository
-from ...repositories.ingest_job_models import IngestJobRepository
-from ...repositories.ingest_jobs import get_ingest_job_repository
-from ...repositories.identity import (
+from ..auth.dependencies import require_csrf, require_current_user
+from ..auth.document_access import can_read_document
+from ..core.config import settings
+from ..ingestion.queue import IngestQueue, get_ingest_queue
+from ..repositories.documents import DocumentRepository, get_document_repository
+from ..repositories.ingest_job_models import IngestJobRepository
+from ..repositories.ingest_jobs import get_ingest_job_repository
+from ..repositories.identity import (
     IdentityRepository,
     UserRecord,
     get_identity_repository,
 )
-from ...schemas.common import StubResponse
-from ...schemas.upload import JobStatusResponse, UploadResponse
-from ...shared.contracts.clearance import DEFAULT_CLEARANCE_LEVEL
-from ...services.file_scanning import FileScanner, get_file_scanner
-from ...services.upload_status import build_job_status_response
-from ...services.upload_storage import UploadStorage, get_upload_storage
+from ..schemas.common import StubResponse
+from ..shared.contracts.clearance import DEFAULT_CLEARANCE_LEVEL
+from .dependencies import get_file_scanner, get_upload_storage
+from .scanning import FileScanner
+from .storage import UploadStorage
+from .upload_schemas import JobStatusResponse, UploadResponse
+from .upload_service import (
+    UploadDocument,
+    UploadDocumentCommand,
+    UploadRejected,
+)
+from .upload_status import build_job_status_response
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 

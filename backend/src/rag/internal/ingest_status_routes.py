@@ -19,7 +19,7 @@ from ..schemas.internal import (
     InternalMutationResponse,
     ServiceTokenContext,
 )
-from ..services.upload_status import progress_for_status_update
+from ..documents.upload_status import progress_for_status_update
 from .service_token_auth import require_service_token
 
 router = APIRouter(tags=["internal-ingest"])

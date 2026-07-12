@@ -5,7 +5,7 @@ from pydantic import Field
 
 from ..shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
 from .common import ContractModel
-from .upload import DocType
+from ..documents.upload_schemas import DocType
 
 
 FolderSourceType = Literal[

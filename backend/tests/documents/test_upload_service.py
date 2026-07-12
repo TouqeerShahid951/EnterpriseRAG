@@ -11,15 +11,12 @@ from rag.documents.upload_service import (
     UploadDocumentCommand,
     UploadRejected,
 )
+from rag.documents.adapters.file_scanning import NoopFileScanner
+from rag.documents.scanning import MalwareDetectedError, ScannerUnavailableError
+from rag.documents.storage import StoredUpload
 from rag.ingestion.contracts import IngestJobPayload
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.identity import InMemoryIdentityRepository, UserRecord
-from rag.services.file_scanning import (
-    MalwareDetectedError,
-    NoopFileScanner,
-    ScannerUnavailableError,
-)
-from rag.services.upload_storage import StoredUpload
 
 PDF_CONTENT = b"%PDF-1.7\nservice upload\n%%EOF"
 

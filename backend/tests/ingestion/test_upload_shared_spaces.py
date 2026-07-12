@@ -10,12 +10,12 @@ from rag.documents.upload_service import (
     UploadDocumentResult,
     UploadRejected,
 )
+from rag.documents.adapters.file_scanning import NoopFileScanner
+from rag.documents.storage import StoredUpload
 from rag.ingestion.contracts import IngestJobPayload
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.ingest_job_models import IngestJobRepository
 from rag.repositories.identity import InMemoryIdentityRepository, UserRecord
-from rag.services.file_scanning import NoopFileScanner
-from rag.services.upload_storage import StoredUpload
 
 
 class FakeQueue:

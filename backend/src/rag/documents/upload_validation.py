@@ -8,11 +8,7 @@ import json
 from typing import Literal
 import zipfile
 
-from ..services.file_scanning import (
-    FileScanner,
-    MalwareDetectedError,
-    ScannerUnavailableError,
-)
+from .scanning import FileScanner, MalwareDetectedError, ScannerUnavailableError
 
 PDF_CONTENT_TYPE = "application/pdf"
 DOCX_CONTENT_TYPE = (

@@ -5,9 +5,12 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from rag.api.routes import upload_routes
 from rag.auth.dependencies import require_current_user
 from rag.core.config import settings
+from rag.documents import upload_routes
+from rag.documents.adapters.file_scanning import NoopFileScanner
+from rag.documents.dependencies import get_file_scanner, get_upload_storage
+from rag.documents.storage import StoredUpload
 from rag.ingestion.contracts import IngestJobPayload
 from rag.ingestion.queue import get_ingest_queue
 from rag.repositories.document_memory import InMemoryDocumentRepository
@@ -18,8 +21,6 @@ from rag.repositories.identity import (
     get_identity_repository,
 )
 from rag.repositories.ingest_jobs import get_ingest_job_repository
-from rag.services.file_scanning import NoopFileScanner, get_file_scanner
-from rag.services.upload_storage import StoredUpload, get_upload_storage
 
 PDF_CONTENT = b"%PDF-1.7\nroute contract\n%%EOF"
 

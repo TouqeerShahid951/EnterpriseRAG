@@ -3,11 +3,19 @@ from typing import Any, Literal
 
 from pydantic import Field
 
-from .common import ContractModel
+from ..schemas.common import ContractModel
 
 
 DocType = str
-UploadJobState = Literal["scheduled", "queued", "processing", "complete", "failed", "human_review", "cancelled"]
+UploadJobState = Literal[
+    "scheduled",
+    "queued",
+    "processing",
+    "complete",
+    "failed",
+    "human_review",
+    "cancelled",
+]
 UploadJobStage = Literal[
     "scheduled",
     "queued",
@@ -28,8 +36,12 @@ UploadJobStage = Literal[
     "human_review",
     "cancelled",
 ]
-UploadJobStepState = Literal["pending", "active", "complete", "failed", "needs_review", "cancelled"]
-UploadJobProgressUnit = Literal["pages", "chunks", "vectors", "files", "metadata", "images"]
+UploadJobStepState = Literal[
+    "pending", "active", "complete", "failed", "needs_review", "cancelled"
+]
+UploadJobProgressUnit = Literal[
+    "pages", "chunks", "vectors", "files", "metadata", "images"
+]
 
 
 class UploadResponse(ContractModel):

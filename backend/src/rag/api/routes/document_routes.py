@@ -11,6 +11,8 @@ from ...auth.dependencies import require_csrf, require_current_user
 from ...auth.document_access import can_manage_document_ingestion, can_read_document, can_write_document
 from ...auth.permissions import can_manage_group_path, is_global_admin
 from ...core.config import settings
+from ...documents.dependencies import get_upload_storage
+from ...documents.storage import UploadStorage
 from ...graphrag.cleanup import (
     GraphRAGCleanupError,
     GraphRAGDeletionService,
@@ -57,7 +59,6 @@ from ...services.graphrag_queue import (
     get_graphrag_maintenance_queue,
 )
 from ...services.document_image_asset_storage import DocumentImageAssetStorage, get_document_image_asset_storage
-from ...services.upload_storage import UploadStorage, get_upload_storage
 from ...shared.contracts.clearance import clearance_rank, normalize_clearance_level
 from ...connectors.models import CONNECTOR_RECORD_CONTENT_TYPE
 

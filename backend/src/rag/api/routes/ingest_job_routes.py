@@ -59,7 +59,7 @@ from ...ingestion.worker_control import (
     get_graphrag_worker_control,
     get_ingest_worker_control,
 )
-from ...services.upload_status import build_job_status_response
+from ...documents.upload_status import build_job_status_response
 
 
 router = APIRouter(prefix="/ingest-jobs", tags=["ingest-jobs"])

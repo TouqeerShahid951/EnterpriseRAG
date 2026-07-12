@@ -9,7 +9,7 @@ from pydantic import Field
 
 from .common import ContractModel
 from ..shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
-from .upload import JobStatusResponse, UploadJobState
+from ..documents.upload_schemas import JobStatusResponse, UploadJobState
 
 
 IngestJobOrigin = Literal["upload", "reingest", "restore", "folder", "connector", "unknown"]

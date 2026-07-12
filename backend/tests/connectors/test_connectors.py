@@ -36,7 +36,7 @@ from rag.repositories.identity_memory import InMemoryIdentityRepository
 from rag.services.folder_ingestion import create_local_folder_schedule, dispatch_due_schedules
 from rag.services.folder_sources import LocalFolderSource, list_local_folder_directories
 from rag.ingestion.queue import InMemoryIngestQueue
-from rag.services.upload_storage import StoredUpload
+from rag.documents.storage import StoredUpload
 from rag.ingestion.parsers.document import parse_document
 
 

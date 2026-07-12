@@ -8,6 +8,7 @@ from typing import NoReturn
 from fastapi import HTTPException, status
 
 from ..core.config import settings
+from ..documents.scanning import FileScanner
 from ..documents.upload_validation import (
     DOCX_CONTENT_TYPE as DOCX_CONTENT_TYPE,
     JPEG_CONTENT_TYPE as JPEG_CONTENT_TYPE,
@@ -28,7 +29,6 @@ from ..documents.upload_validation import (
     validate_json_content as _validate_json_content,
     validate_upload_size as _validate_upload_size,
 )
-from .file_scanning import FileScanner
 
 _HTTP_STATUS_BY_CATEGORY = {
     "invalid": status.HTTP_400_BAD_REQUEST,

@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..repositories.ingest_job_models import IngestJobRecord
-from ..schemas.upload import JobStatusResponse, UploadJobStage, UploadJobStep, UploadJobStepState
+from .upload_schemas import (
+    JobStatusResponse,
+    UploadJobStage,
+    UploadJobStep,
+    UploadJobStepState,
+)
 
 
 @dataclass(frozen=True)
@@ -18,35 +23,113 @@ class StepSpec:
 
 
 STEPS: tuple[StepSpec, ...] = (
-    StepSpec("scheduled", "Scheduled", "Waiting for the scheduled ingestion window.", 0, 0),
+    StepSpec(
+        "scheduled", "Scheduled", "Waiting for the scheduled ingestion window.", 0, 0
+    ),
     StepSpec("queued", "Queued", "Waiting for the ingestion worker to start.", 0, 5),
-    StepSpec("reading_file", "Read file", "Fetching the uploaded document from object storage.", 5, 20),
-    StepSpec("parsing_document", "Parse document", "Extracting text, layout, tables, and hierarchy.", 20, 35),
-    StepSpec("docling_repair", "Docling repair", "Repairing selected pages with Docling OCR and layout analysis.", 20, 35),
-    StepSpec("vision_layout_repair", "Vision repair", "Using the vision model to re-read complex PDF layout.", 20, 35),
-    StepSpec("image_analysis", "Image analysis", "Running OCR and descriptions for extracted document images.", 35, 36),
-    StepSpec("metadata_enrichment", "Metadata enrichment", "Creating document metadata for retrieval filters.", 36, 50),
-    StepSpec("chunking_document", "Build chunks", "Creating retrieval chunks and extracted claims.", 50, 60),
-    StepSpec("saving_claims", "Save claims", "Persisting extracted claims and conflict pairs.", 60, 65),
-    StepSpec("embedding_chunks", "Generate embeddings", "Creating dense and sparse vectors for each chunk.", 65, 78),
-    StepSpec("indexing_vectors", "Index vectors", "Writing document vectors to Qdrant.", 78, 92),
-    StepSpec("finalizing", "Finalize", "Applying supersession metadata and final job state.", 92, 100),
+    StepSpec(
+        "reading_file",
+        "Read file",
+        "Fetching the uploaded document from object storage.",
+        5,
+        20,
+    ),
+    StepSpec(
+        "parsing_document",
+        "Parse document",
+        "Extracting text, layout, tables, and hierarchy.",
+        20,
+        35,
+    ),
+    StepSpec(
+        "docling_repair",
+        "Docling repair",
+        "Repairing selected pages with Docling OCR and layout analysis.",
+        20,
+        35,
+    ),
+    StepSpec(
+        "vision_layout_repair",
+        "Vision repair",
+        "Using the vision model to re-read complex PDF layout.",
+        20,
+        35,
+    ),
+    StepSpec(
+        "image_analysis",
+        "Image analysis",
+        "Running OCR and descriptions for extracted document images.",
+        35,
+        36,
+    ),
+    StepSpec(
+        "metadata_enrichment",
+        "Metadata enrichment",
+        "Creating document metadata for retrieval filters.",
+        36,
+        50,
+    ),
+    StepSpec(
+        "chunking_document",
+        "Build chunks",
+        "Creating retrieval chunks and extracted claims.",
+        50,
+        60,
+    ),
+    StepSpec(
+        "saving_claims",
+        "Save claims",
+        "Persisting extracted claims and conflict pairs.",
+        60,
+        65,
+    ),
+    StepSpec(
+        "embedding_chunks",
+        "Generate embeddings",
+        "Creating dense and sparse vectors for each chunk.",
+        65,
+        78,
+    ),
+    StepSpec(
+        "indexing_vectors",
+        "Index vectors",
+        "Writing document vectors to Qdrant.",
+        78,
+        92,
+    ),
+    StepSpec(
+        "finalizing",
+        "Finalize",
+        "Applying supersession metadata and final job state.",
+        92,
+        100,
+    ),
 )
 PROCESSING_STEPS = STEPS[1:]
 
 TERMINAL_LABELS: dict[str, tuple[str, str]] = {
     "complete": ("Document indexed", "The document is available for retrieval."),
     "failed": ("Upload failed", "Ingestion stopped before the document was indexed."),
-    "human_review": ("Needs review", "The document needs manual review before ingestion can continue."),
-    "cancelled": ("Cancelled", "Ingestion was cancelled before the document was indexed."),
+    "human_review": (
+        "Needs review",
+        "The document needs manual review before ingestion can continue.",
+    ),
+    "cancelled": (
+        "Cancelled",
+        "Ingestion was cancelled before the document was indexed.",
+    ),
 }
 MAX_INGEST_ATTEMPTS = 3
 
 
 def build_job_status_response(job: IngestJobRecord) -> JobStatusResponse:
     progress_pct = _normalize_progress(job.progress_pct)
-    stage = stage_for_job_status(job.status, progress_pct, stage_progress=job.stage_progress)
-    stage_label, stage_detail = _stage_copy(job.status, stage, job.error_message_safe, job.warnings, job.stage_progress)
+    stage = stage_for_job_status(
+        job.status, progress_pct, stage_progress=job.stage_progress
+    )
+    stage_label, stage_detail = _stage_copy(
+        job.status, stage, job.error_message_safe, job.warnings, job.stage_progress
+    )
     return JobStatusResponse(
         job_id=job.id,
         status=job.status,
@@ -69,7 +152,9 @@ def build_job_status_response(job: IngestJobRecord) -> JobStatusResponse:
     )
 
 
-def progress_for_status_update(current: IngestJobRecord, *, next_status: str, next_progress_pct: int) -> int:
+def progress_for_status_update(
+    current: IngestJobRecord, *, next_status: str, next_progress_pct: int
+) -> int:
     progress_pct = _normalize_progress(next_progress_pct)
     if next_status == "failed" and progress_pct >= 100 and current.progress_pct < 100:
         return _normalize_progress(current.progress_pct)
@@ -105,14 +190,22 @@ def _stage_copy(
         return label, error_message or detail
     if status in TERMINAL_LABELS:
         if status == "complete" and warnings:
-            return "Indexed with warnings", "The document is available for retrieval, but optional enrichment was unavailable."
+            return (
+                "Indexed with warnings",
+                "The document is available for retrieval, but optional enrichment was unavailable.",
+            )
         return TERMINAL_LABELS[status]
     step = _step_by_id(stage)
     return step.label, _stage_progress_label(stage_progress) or step.detail
 
 
-def _build_steps(status: str, progress_pct: int, *, stage_progress: dict[str, object] | None) -> list[UploadJobStep]:
-    work_stage = _stage_from_progress_detail(stage_progress) or _active_processing_step(progress_pct).id
+def _build_steps(
+    status: str, progress_pct: int, *, stage_progress: dict[str, object] | None
+) -> list[UploadJobStep]:
+    work_stage = (
+        _stage_from_progress_detail(stage_progress)
+        or _active_processing_step(progress_pct).id
+    )
     steps = STEPS if status == "scheduled" else PROCESSING_STEPS
     return [
         UploadJobStep(
@@ -155,7 +248,11 @@ def _step_state(
         if step.id == work_stage:
             return "active"
         return "complete" if step_index < work_index else "pending"
-    if status in {"failed", "human_review", "cancelled"} and work_index is not None and step_index is not None:
+    if (
+        status in {"failed", "human_review", "cancelled"}
+        and work_index is not None
+        and step_index is not None
+    ):
         return "complete" if step_index < work_index else "pending"
     if progress_pct >= step.complete_at:
         return "complete"
@@ -173,7 +270,9 @@ def _active_processing_step(progress_pct: int) -> StepSpec:
     return PROCESSING_STEPS[-1]
 
 
-def _stage_from_progress_detail(stage_progress: dict[str, object] | None) -> UploadJobStage | None:
+def _stage_from_progress_detail(
+    stage_progress: dict[str, object] | None,
+) -> UploadJobStage | None:
     label = (_stage_progress_label(stage_progress) or "").lower()
     unit = str((stage_progress or {}).get("unit") or "").lower()
     if not label and not unit:
@@ -184,11 +283,22 @@ def _stage_from_progress_detail(stage_progress: dict[str, object] | None) -> Upl
         return "vision_layout_repair"
     if unit == "images" or label.startswith("image analysis"):
         return "image_analysis"
-    if unit == "metadata" or "metadata model" in label or label.startswith("requesting metadata") or label.startswith("waiting on"):
+    if (
+        unit == "metadata"
+        or "metadata model" in label
+        or label.startswith("requesting metadata")
+        or label.startswith("waiting on")
+    ):
         return "metadata_enrichment"
-    if label.startswith("embedding chunk") or label.startswith("generating sparse vectors"):
+    if label.startswith("embedding chunk") or label.startswith(
+        "generating sparse vectors"
+    ):
         return "embedding_chunks"
-    if "qdrant" in label or label.startswith("prepared vectors") or label.startswith("indexed vectors"):
+    if (
+        "qdrant" in label
+        or label.startswith("prepared vectors")
+        or label.startswith("indexed vectors")
+    ):
         return "indexing_vectors"
     if label.startswith("built retrieval chunks"):
         return "chunking_document"

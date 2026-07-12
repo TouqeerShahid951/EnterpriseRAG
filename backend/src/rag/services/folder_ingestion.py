@@ -27,10 +27,10 @@ from .document_uploads import (
     validate_declared_dates,
     validate_upload_size,
 )
-from .file_scanning import FileScanner
+from ..documents.scanning import FileScanner
 from .folder_schedule_time import next_recurring_window_after_current, next_run_for_schedule, normalize_timezone
 from .folder_sources import LocalFolderSource, MinioPrefixSource, resolve_local_folder_path
-from .upload_storage import UploadStorage
+from ..documents.storage import UploadStorage
 
 FOLDER_SNAPSHOT_MAX_FILES = settings.folder_snapshot_max_files
 FOLDER_SNAPSHOT_MAX_BYTES = settings.folder_snapshot_max_bytes
