@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import json
-from http.client import HTTPException as HttpClientException
-from urllib import error as urlerror
-from urllib import request as urlrequest
-
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ...auth.dependencies import require_platform_admin_user
-from ...core.config import settings
 from ...auth.identity_models import UserRecord
+from ...core.config import settings
+from ...deployment.application import (
+    VllmDeploymentApplyRejected,
+    VllmDeploymentApplyService,
+)
+from ...deployment.dependencies import get_vllm_deployment_apply_service
 from ...query.rag_config_repository import (
     RagConfigRecord,
     RagConfigRepository,
@@ -52,12 +52,6 @@ from ...shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL, SUPPORTE
 from ...shared.fastembed_dense import DEFAULT_FASTEMBED_DENSE_MODEL, has_fastembed_model_cache
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-VLLM_DEPLOYMENT_SERVICE_NAMES = {
-    "text": "vllm-text",
-    "embeddings": "vllm-embeddings",
-    "vision": "vllm-vision",
-}
 
 
 @router.get("/rag-config", response_model=RagConfigResponse, summary="Get workspace RAG model runtime config")
@@ -259,41 +253,28 @@ def update_vllm_deployment_config(
 def apply_vllm_deployment_config(
     payload: VllmDeploymentConfigRequest,
     user: UserRecord = Depends(require_platform_admin_user),
-    repo: VllmDeploymentConfigRepository = Depends(get_vllm_deployment_config_repository),
+    service: VllmDeploymentApplyService = Depends(
+        get_vllm_deployment_apply_service
+    ),
 ) -> VllmDeploymentConfigResponse:
-    requested_services = _deployment_services_from_request(payload)
-    service_message = _deployment_service_message(requested_services)
-    applying = repo.save_active(
-        _vllm_record_from_request(
-            payload,
-            apply_status="applying",
-            message=f"Deployment controller is recreating {service_message}.",
-            updated_by=user.id,
-        )
-    )
     try:
-        controller_message = _call_deployment_controller(applying, services=requested_services)
-    except RuntimeError as exc:
-        failed = repo.save_active(
+        saved = service.apply(
             _vllm_record_from_request(
                 payload,
-                apply_status="failed",
-                message=str(exc),
+                apply_status="restart_required",
+                message=None,
                 updated_by=user.id,
-            )
+            ),
+            requested_services=payload.services,
         )
+    except VllmDeploymentApplyRejected as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"code": "vllm_deployment_apply_failed", "message": failed.message},
+            detail={
+                "code": "vllm_deployment_apply_failed",
+                "message": exc.message,
+            },
         ) from exc
-    saved = repo.save_active(
-        _vllm_record_from_request(
-            payload,
-            apply_status="applied",
-            message=controller_message,
-            updated_by=user.id,
-        )
-    )
     return _vllm_deployment_response(saved)
 
 
@@ -455,79 +436,6 @@ def _service_limits_response(record: VllmServiceLimitsRecord) -> VllmServiceDepl
     )
 
 
-def _call_deployment_controller(record: VllmDeploymentConfigRecord, *, services: list[str]) -> str:
-    url = settings.deployment_controller_url.rstrip("/") + "/v1/vllm/apply"
-    request = urlrequest.Request(
-        url,
-        data=json.dumps(_deployment_controller_payload(record, services=services)).encode("utf-8"),
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            settings.service_token_header: settings.service_token,
-        },
-    )
-    try:
-        with urlrequest.urlopen(request, timeout=settings.deployment_controller_timeout_seconds) as response:
-            body = response.read().decode("utf-8", errors="replace")
-    except urlerror.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Deployment controller returned {exc.code}: {_truncate(error_body)}") from exc
-    except urlerror.URLError as exc:
-        raise RuntimeError(f"Deployment controller is unreachable: {exc.reason}") from exc
-    except (HttpClientException, OSError) as exc:
-        raise RuntimeError(f"Deployment controller connection failed: {exc}") from exc
-    except TimeoutError as exc:
-        raise RuntimeError("Deployment controller timed out while applying vLLM limits.") from exc
-
-    try:
-        parsed = json.loads(body or "{}")
-    except json.JSONDecodeError:
-        return "vLLM services were recreated; controller returned a non-JSON response."
-    message = parsed.get("message")
-    if isinstance(message, str) and message.strip():
-        return message.strip()
-    return f"{_deployment_service_message(services)} recreated with the saved deployment limits."
-
-
-def _deployment_controller_payload(record: VllmDeploymentConfigRecord, *, services: list[str]) -> dict[str, object]:
-    return {
-        "services": services,
-        "text": _service_limits_payload(record.text),
-        "embeddings": _service_limits_payload(record.embeddings),
-        "vision": _service_limits_payload(record.vision),
-    }
-
-
-def _deployment_services_from_request(payload: VllmDeploymentConfigRequest) -> list[str]:
-    requested = payload.services or ["text", "embeddings", "vision"]
-    services: list[str] = []
-    for key in requested:
-        service_name = VLLM_DEPLOYMENT_SERVICE_NAMES[key]
-        if service_name not in services:
-            services.append(service_name)
-    return services
-
-
-def _deployment_service_message(services: list[str]) -> str:
-    if len(services) == 1:
-        return services[0]
-    if len(services) == 2:
-        return f"{services[0]} and {services[1]}"
-    return ", ".join(services[:-1]) + f", and {services[-1]}"
-
-
-def _service_limits_payload(record: VllmServiceLimitsRecord) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "max_model_len": record.max_model_len,
-        "gpu_memory_utilization": record.gpu_memory_utilization,
-        "max_num_seqs": record.max_num_seqs,
-        "max_num_batched_tokens": record.max_num_batched_tokens,
-    }
-    if record.kv_cache_memory_bytes:
-        payload["kv_cache_memory_bytes"] = record.kv_cache_memory_bytes
-    return payload
-
-
 def _model_status_payload(status) -> dict[str, object]:
     return {
         "status": status.status,
@@ -536,11 +444,6 @@ def _model_status_payload(status) -> dict[str, object]:
         "message": status.message,
         "code": status.code,
     }
-
-
-def _truncate(value: str, limit: int = 1200) -> str:
-    clean = value.strip()
-    return clean if len(clean) <= limit else f"{clean[:limit]}..."
 
 
 def _record_from_discovery_request(payload: RagModelDiscoveryRequest) -> RagConfigRecord:

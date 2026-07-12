@@ -33,7 +33,14 @@ class Settings(BaseSettings):
     service_token_header: str = "X-Service-Token"
     service_token: str = "replace-with-local-service-token"
     deployment_controller_url: str = "http://deployment-controller:8080"
-    deployment_controller_timeout_seconds: float = Field(default=600.0, gt=0, le=1800)
+    deployment_controller_token: str = (
+        "replace-with-local-deployment-controller-token"
+    )
+    deployment_controller_timeout_seconds: float = Field(
+        default=930.0,
+        gt=0,
+        le=1800,
+    )
     jwt_secret_key: str = "replace-with-local-jwt-secret"
     jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 7
