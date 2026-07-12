@@ -14,8 +14,6 @@ from ...auth.dependencies import require_admin_user, require_csrf, require_curre
 from ...auth.document_access import can_manage_document_ingestion
 from ...auth.permissions import can_read_document_metadata, is_global_admin
 from ...core.config import settings
-from ...query.http import ServiceRequestError
-from ...query.qdrant import QdrantClient as RetrievalQdrantClient
 from ...shared.contracts.clearance import ClearanceLevel, clearance_levels_at_or_below
 from ...documents.repository import DocumentRepository, get_document_repository
 from ...ingestion.job_models import (
@@ -29,6 +27,12 @@ from ...ingestion.job_dependencies import get_ingest_job_repository
 from ...auth.identity_models import UserRecord
 from ...ingestion.configuration import IngestConfigRepository
 from ...ingestion.configuration_dependencies import effective_ingest_config, get_ingest_config_repository
+from ...ingestion.cancellation import (
+    CancelIngestJob,
+    DocumentVectorCleaner,
+    IngestCancellationError,
+)
+from ...ingestion.cancellation_dependencies import get_document_vector_cleaner
 from ...schemas.common import ErrorResponse
 from ...schemas.ingest_jobs import (
     GraphRAGActiveTask,
@@ -69,7 +73,11 @@ JOB_STATUSES = {"scheduled", "queued", "processing", "complete", "failed", "huma
 JOB_ORIGINS = {"upload", "reingest", "restore", "folder", "connector", "unknown"}
 ACTIVE_JOB_STATUSES = {"scheduled", "queued", "processing", "human_review"}
 ATTENTION_JOB_STATUSES = {*ACTIVE_JOB_STATUSES, "failed"}
-CANCELLABLE_JOB_STATUSES = {"scheduled", "queued", "processing", "human_review"}
+
+_INGEST_CANCELLATION_STATUS_BY_CATEGORY = {
+    "not_found": status.HTTP_404_NOT_FOUND,
+    "forbidden": status.HTTP_403_FORBIDDEN,
+}
 
 
 @router.get("", response_model=IngestJobListResponse, summary="List visible ingestion jobs")
@@ -263,66 +271,26 @@ async def cancel_ingest_job(
     repo: DocumentRepository = Depends(get_document_repository),
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     queue: IngestQueue = Depends(get_ingest_queue),
+    vector_cleaner: DocumentVectorCleaner = Depends(get_document_vector_cleaner),
 ) -> IngestJobCancelResponse:
     require_csrf(request)
-    job = job_repo.get_ingest_job(job_id)
-    if job is None:
+    try:
+        result = CancelIngestJob(
+            document_repo=repo,
+            job_repo=job_repo,
+            queue=queue,
+            vector_cleaner=vector_cleaner,
+        ).execute(job_id=job_id, actor=user)
+    except IngestCancellationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "job_not_found", "message": "Ingestion job was not found."},
-        )
-    document = repo.get_document(job.doc_id, include_deleted=True)
-    if document is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "document_not_found", "message": "Ingested document was not found."},
-        )
-    if not can_manage_document_ingestion(user, document):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "ingest_cancel_forbidden", "message": "Only the uploader or a scoped admin can cancel this ingestion job."},
-        )
-    if job.status not in CANCELLABLE_JOB_STATUSES:
-        return IngestJobCancelResponse(
-            job_id=job.id,
-            status=job.status,  # type: ignore[arg-type]
-            message=f"Job is already {job.status}.",
-        )
-
-    cancellation = job_repo.cancel_ingest_job(
-        job.id,
-        allowed_statuses=frozenset(CANCELLABLE_JOB_STATUSES),
+            status_code=_INGEST_CANCELLATION_STATUS_BY_CATEGORY[exc.category],
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    return IngestJobCancelResponse(
+        job_id=result.job_id,
+        status=result.status,  # type: ignore[arg-type]
+        message=result.message,
     )
-    if cancellation.job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "job_not_found", "message": "Ingestion job was not found."},
-        )
-    if not cancellation.changed:
-        return IngestJobCancelResponse(
-            job_id=cancellation.job.id,
-            status=cancellation.job.status,  # type: ignore[arg-type]
-            message=f"Job is already {cancellation.job.status}.",
-        )
-    updated = cancellation.job
-
-    revoke_error = _revoke_queued_ingest_task(queue, job.id)
-    vector_cleanup_error = _delete_document_vectors(document.id)
-    repo.append_audit_event(
-        event_type="ingest.cancelled",
-        actor_id=user.id,
-        target_type="ingest_job",
-        target_id=job.id,
-        payload={
-            "doc_id": document.id,
-            "status_before": job.status,
-            "progress_pct": job.progress_pct,
-            "review_items_closed": cancellation.review_items_closed,
-            "revoke_error": revoke_error,
-            "vector_cleanup_error": vector_cleanup_error,
-        },
-    )
-    return IngestJobCancelResponse(job_id=updated.id, status="cancelled", message="Ingestion job cancelled.")
 
 
 @router.get(
@@ -682,27 +650,3 @@ def _safe_status_error(exc: Exception) -> str:
     message = str(exc).strip()
     detail = f": {message[:220]}" if message else ""
     return f"{exc.__class__.__name__}{detail}"
-
-
-def _revoke_queued_ingest_task(queue: IngestQueue, job_id: str) -> str | None:
-    cancel = getattr(queue, "cancel", None)
-    if not callable(cancel):
-        return "queue_cancel_unavailable"
-    try:
-        cancel(job_id)
-    except RuntimeError as exc:
-        return str(exc)[:300]
-    return None
-
-
-def _delete_document_vectors(doc_id: str) -> str | None:
-    qdrant = RetrievalQdrantClient(
-        base_url=settings.qdrant_url,
-        collection=settings.qdrant_collection,
-        timeout_seconds=settings.rag_http_timeout_seconds,
-    )
-    try:
-        qdrant.delete_document_points(doc_id)
-    except ServiceRequestError as exc:
-        return exc.message[:300]
-    return None

@@ -23,16 +23,29 @@ class FakeQueue:
         self.cancelled.append(job_id)
 
 
-def test_cancel_active_ingest_job_marks_cancelled_and_cleans_vectors(monkeypatch: pytest.MonkeyPatch) -> None:
+class FakeVectorCleaner:
+    def __init__(self) -> None:
+        self.deleted: list[str] = []
+
+    def delete_document_vectors(self, document_id: str) -> None:
+        self.deleted.append(document_id)
+
+
+def test_cancel_active_ingest_job_marks_cancelled_and_cleans_vectors() -> None:
     repo = InMemoryDocumentRepository()
     user = _user("contributor", group_paths=("/ops",))
     document = _document(repo, user=user, status="processing")
     job = repo.create_ingest_job(doc_id=document.id, status="processing", progress_pct=34, origin="upload")
     queue = FakeQueue()
-    deleted_docs: list[str] = []
-    monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda doc_id: deleted_docs.append(doc_id) or None)
+    vector_cleaner = FakeVectorCleaner()
 
-    response = _cancel(repo, job.id, user=user, queue=queue)
+    response = _cancel(
+        repo,
+        job.id,
+        user=user,
+        queue=queue,
+        vector_cleaner=vector_cleaner,
+    )
 
     updated = repo.get_ingest_job(job.id)
     assert response.status == "cancelled"
@@ -42,11 +55,11 @@ def test_cancel_active_ingest_job_marks_cancelled_and_cleans_vectors(monkeypatch
     assert updated.completed_at is not None
     assert repo.get_document(document.id).ingest_status == "cancelled"  # type: ignore[union-attr]
     assert queue.cancelled == [job.id]
-    assert deleted_docs == [document.id]
+    assert vector_cleaner.deleted == [document.id]
     assert repo.audit_events[-1]["event_type"] == "ingest.cancelled"
 
 
-def test_cancel_human_review_job_closes_pending_review_items(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cancel_human_review_job_closes_pending_review_items() -> None:
     repo = InMemoryDocumentRepository()
     user = _user("contributor", group_paths=("/ops",))
     document = _document(repo, user=user, status="human_review")
@@ -58,8 +71,6 @@ def test_cancel_human_review_job_closes_pending_review_items(monkeypatch: pytest
         resume_payload={"job_id": job.id, "doc_id": document.id, "file_path": "memory://doc", "group_path": "/ops"},
         review_items=[{"item_index": 0, "partial_text": "uncertain", "confidence": 0.4}],
     )
-    monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda _doc_id: None)
-
     _cancel(repo, job.id, user=user, queue=FakeQueue())
 
     assert repo.get_ingest_job(job.id).status == "cancelled"  # type: ignore[union-attr]
@@ -67,7 +78,7 @@ def test_cancel_human_review_job_closes_pending_review_items(monkeypatch: pytest
     assert len(repo.list_review_items(status="rejected")) == 1
 
 
-def test_cancel_image_review_job_closes_pending_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cancel_image_review_job_closes_pending_candidates() -> None:
     repo = InMemoryDocumentRepository()
     user = _user("contributor", group_paths=("/ops",))
     document = _document(repo, user=user, status="human_review")
@@ -85,8 +96,6 @@ def test_cancel_image_review_job_closes_pending_candidates(monkeypatch: pytest.M
             }
         ],
     )
-    monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda _doc_id: None)
-
     _cancel(repo, job.id, user=user, queue=FakeQueue())
 
     assert repo.get_ingest_job(job.id).status == "cancelled"  # type: ignore[union-attr]
@@ -96,14 +105,12 @@ def test_cancel_image_review_job_closes_pending_candidates(monkeypatch: pytest.M
     assert [candidate.skip_reason for candidate in candidates] == ["ingest_cancelled"]
 
 
-def test_cancel_ingest_job_requires_write_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cancel_ingest_job_requires_write_scope() -> None:
     repo = InMemoryDocumentRepository()
     uploader = _user("contributor", group_paths=("/ops",))
     reader = _user("member", group_paths=("/ops",))
     document = _document(repo, user=uploader, status="queued")
     job = repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin="upload")
-    monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda _doc_id: None)
-
     with pytest.raises(HTTPException) as exc_info:
         _cancel(repo, job.id, user=reader, queue=FakeQueue())
 
@@ -111,14 +118,30 @@ def test_cancel_ingest_job_requires_write_scope(monkeypatch: pytest.MonkeyPatch)
     assert repo.get_ingest_job(job.id).status == "queued"  # type: ignore[union-attr]
 
 
-def test_cancel_ingest_job_rejects_same_space_peer_contributor(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cancel_missing_job_maps_application_error_to_not_found() -> None:
+    repo = InMemoryDocumentRepository()
+
+    with pytest.raises(HTTPException) as exc_info:
+        _cancel(
+            repo,
+            "missing-job",
+            user=_user("contributor", group_paths=("/ops",)),
+            queue=FakeQueue(),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == {
+        "code": "job_not_found",
+        "message": "Ingestion job was not found.",
+    }
+
+
+def test_cancel_ingest_job_rejects_same_space_peer_contributor() -> None:
     repo = InMemoryDocumentRepository()
     uploader = _user("contributor", group_paths=("/ops",))
     peer = _user("contributor", group_paths=("/ops",))
     document = _document(repo, user=uploader, status="queued")
     job = repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin="upload")
-    monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda _doc_id: None)
-
     with pytest.raises(HTTPException) as exc_info:
         _cancel(repo, job.id, user=peer, queue=FakeQueue())
 
@@ -126,40 +149,42 @@ def test_cancel_ingest_job_rejects_same_space_peer_contributor(monkeypatch: pyte
     assert repo.get_ingest_job(job.id).status == "queued"  # type: ignore[union-attr]
 
 
-def test_cancel_ingest_job_allows_space_admin_in_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cancel_ingest_job_allows_space_admin_in_scope() -> None:
     repo = InMemoryDocumentRepository()
     uploader = _user("contributor", group_paths=("/ops",))
     space_admin = _user("space_admin", group_paths=("/ops",))
     document = _document(repo, user=uploader, status="queued")
     job = repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin="upload")
     queue = FakeQueue()
-    monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda _doc_id: None)
-
     response = _cancel(repo, job.id, user=space_admin, queue=queue)
 
     assert response.status == "cancelled"
     assert queue.cancelled == [job.id]
 
 
-def test_cancel_terminal_ingest_job_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cancel_terminal_ingest_job_is_idempotent() -> None:
     repo = InMemoryDocumentRepository()
     user = _user("contributor", group_paths=("/ops",))
     document = _document(repo, user=user, status="complete")
     job = repo.create_ingest_job(doc_id=document.id, status="complete", progress_pct=100, origin="upload")
     queue = FakeQueue()
-    deleted_docs: list[str] = []
-    monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda doc_id: deleted_docs.append(doc_id) or None)
+    vector_cleaner = FakeVectorCleaner()
 
-    response = _cancel(repo, job.id, user=user, queue=queue)
+    response = _cancel(
+        repo,
+        job.id,
+        user=user,
+        queue=queue,
+        vector_cleaner=vector_cleaner,
+    )
 
     assert response.status == "complete"
     assert repo.get_ingest_job(job.id).status == "complete"  # type: ignore[union-attr]
     assert queue.cancelled == []
-    assert deleted_docs == []
+    assert vector_cleaner.deleted == []
 
 
 def test_cancel_does_not_delete_vectors_when_completion_wins_status_race(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = InMemoryDocumentRepository()
     user = _user("contributor", group_paths=("/ops",))
@@ -171,12 +196,7 @@ def test_cancel_does_not_delete_vectors_when_completion_wins_status_race(
         origin="upload",
     )
     queue = FakeQueue()
-    deleted_docs: list[str] = []
-    monkeypatch.setattr(
-        ingest_job_routes,
-        "_delete_document_vectors",
-        lambda doc_id: deleted_docs.append(doc_id) or None,
-    )
+    vector_cleaner = FakeVectorCleaner()
 
     response = _cancel(
         repo,
@@ -184,12 +204,13 @@ def test_cancel_does_not_delete_vectors_when_completion_wins_status_race(
         user=user,
         queue=queue,
         job_repo=_CompleteBeforeCancelRepository(repo),
+        vector_cleaner=vector_cleaner,
     )
 
     assert response.status == "complete"
     assert repo.get_ingest_job(job.id).status == "complete"  # type: ignore[union-attr]
     assert queue.cancelled == []
-    assert deleted_docs == []
+    assert vector_cleaner.deleted == []
     assert not any(event["event_type"] == "ingest.cancelled" for event in repo.audit_events)
 
 
@@ -268,6 +289,7 @@ def _cancel(
     user: UserRecord,
     queue: FakeQueue,
     job_repo: object | None = None,
+    vector_cleaner: FakeVectorCleaner | None = None,
 ):
     return asyncio.run(
         ingest_job_routes.cancel_ingest_job(
@@ -277,6 +299,7 @@ def _cancel(
             repo=repo,
             job_repo=job_repo or repo,  # type: ignore[arg-type]
             queue=queue,
+            vector_cleaner=vector_cleaner or FakeVectorCleaner(),
         )
     )
 
