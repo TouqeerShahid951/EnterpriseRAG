@@ -12,10 +12,15 @@ from rag.core.config import settings
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.documents.adapters.metadata_index import QdrantDocumentMetadataIndex
 from rag.documents.metadata_service import DocumentMetadataService
+from rag.documents.reingestion_service import DocumentReingestionService
 from rag.documents.storage import StoredUploadContent
 from rag.graphrag.cleanup import GraphRAGCleanupResult
-from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
-from rag.ingestion.configuration import IngestConfigRecord
+from rag.graphrag.adapters.document_enrichment_queue import (
+    GraphRAGDocumentEnrichmentQueue,
+)
+from rag.graphrag.document_enrichment_service import (
+    DocumentGraphEnrichmentService,
+)
 from rag.ingestion.contracts import IngestJobPayload
 from rag.query.http import ServiceRequestError
 from rag.schemas.docs import DocumentClearanceUpdateRequest, DocumentTopicsUpdateRequest
@@ -241,10 +246,7 @@ def test_reingest_queues_source_payload_and_audits_success() -> None:
             document.id,
             _csrf_request("POST"),
             user=user,
-            repo=repo,
-            job_repo=repo,
-            storage=FakeStorage(),  # type: ignore[arg-type]
-            queue=queue,  # type: ignore[arg-type]
+            service=_reingestion_service(repo, FakeStorage(), queue),
         )
     )
 
@@ -266,10 +268,11 @@ def test_reingest_queue_failure_marks_job_failed_and_audits_failure() -> None:
                 document.id,
                 _csrf_request("POST"),
                 user=user,
-                repo=repo,
-                job_repo=repo,
-                storage=FakeStorage(),  # type: ignore[arg-type]
-                queue=FakeIngestQueue(error="redis unavailable"),  # type: ignore[arg-type]
+                service=_reingestion_service(
+                    repo,
+                    FakeStorage(),
+                    FakeIngestQueue(error="redis unavailable"),
+                ),
             )
         )
 
@@ -292,10 +295,11 @@ def test_active_reingest_is_rejected_without_creating_another_job() -> None:
                 document.id,
                 _csrf_request("POST"),
                 user=user,
-                repo=repo,
-                job_repo=repo,
-                storage=FakeStorage(),  # type: ignore[arg-type]
-                queue=FakeIngestQueue(),  # type: ignore[arg-type]
+                service=_reingestion_service(
+                    repo,
+                    FakeStorage(),
+                    FakeIngestQueue(),
+                ),
             )
         )
 
@@ -310,19 +314,17 @@ def test_graph_enqueue_failure_returns_503_and_audits_diagnostic(monkeypatch: py
     user = _user("contributor")
     document = _document(repo, user=user, ingest_status="complete")
     job = repo.create_ingest_job(doc_id=document.id, status="complete", progress_pct=100, origin="upload")
-    config_repo = InMemoryIngestConfigRepository()
-    config_repo.save_active(IngestConfigRecord(graph_enrichment_enabled=True))
-
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
             document_routes.queue_document_graph_enrichment(
                 document.id,
                 _csrf_request("POST"),
                 user=user,
-                repo=repo,
-                job_repo=repo,
-                queue=FakeGraphQueue(document_error="broker unavailable"),  # type: ignore[arg-type]
-                config_repo=config_repo,
+                service=_graph_enrichment_service(
+                    repo,
+                    FakeGraphQueue(document_error="broker unavailable"),
+                    enabled=True,
+                ),
             )
         )
 
@@ -330,6 +332,33 @@ def test_graph_enqueue_failure_returns_503_and_audits_diagnostic(monkeypatch: py
     assert exc_info.value.detail["code"] == "graphrag_enqueue_failed"
     assert repo.audit_events[-1]["event_type"] == "documents.graph_enrichment.enqueue_failed"
     assert repo.audit_events[-1]["payload"] == {"job_id": job.id, "error": "broker unavailable"}
+
+
+def _reingestion_service(
+    repo: InMemoryDocumentRepository,
+    storage: FakeStorage,
+    queue: FakeIngestQueue,
+) -> DocumentReingestionService:
+    return DocumentReingestionService(
+        document_repo=repo,
+        job_repo=repo,
+        storage=storage,  # type: ignore[arg-type]
+        queue=queue,  # type: ignore[arg-type]
+    )
+
+
+def _graph_enrichment_service(
+    repo: InMemoryDocumentRepository,
+    queue: FakeGraphQueue,
+    *,
+    enabled: bool,
+) -> DocumentGraphEnrichmentService:
+    return DocumentGraphEnrichmentService(
+        document_repo=repo,
+        job_repo=repo,
+        queue=GraphRAGDocumentEnrichmentQueue(queue),  # type: ignore[arg-type]
+        enrichment_enabled=lambda: enabled,
+    )
 
 
 def test_soft_delete_removes_indexes_marks_deleted_and_audits_success(

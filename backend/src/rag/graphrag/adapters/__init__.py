@@ -1,1 +1,1 @@
-"""Concrete GraphRAG adapters."""
+"""External adapters owned by the GraphRAG feature."""

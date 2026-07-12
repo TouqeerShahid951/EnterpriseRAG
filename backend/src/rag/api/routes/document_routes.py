@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from ...auth.abac import normalize_group_path
 from ...auth.dependencies import require_csrf, require_current_user
-from ...auth.document_access import can_manage_document_ingestion, can_read_document, can_write_document
+from ...auth.document_access import can_read_document, can_write_document
 from ...auth.permissions import can_manage_group_path, is_global_admin
 from ...core.config import settings
 from ...documents.access_scope_dependencies import (
@@ -25,12 +25,28 @@ from ...documents.metadata_service import (
     DocumentMetadataRejected,
     DocumentMetadataService,
 )
+from ...documents.reingestion_dependencies import (
+    get_document_reingestion_service,
+)
+from ...documents.reingestion_service import (
+    DocumentReingestionRejected,
+    DocumentReingestionResult,
+    DocumentReingestionService,
+)
 from ...documents.storage import UploadStorage
 from ...graphrag.cleanup import (
     GraphRAGCleanupError,
     GraphRAGDeletionService,
     deletion_service_from_settings,
     partition_key_for_document,
+)
+from ...graphrag.document_enrichment_dependencies import (
+    get_document_graph_enrichment_service,
+)
+from ...graphrag.document_enrichment_service import (
+    DocumentGraphEnrichmentRejected,
+    DocumentGraphEnrichmentResult,
+    DocumentGraphEnrichmentService,
 )
 from ...ingestion.contracts import IngestJobPayload
 from ...ingestion.queue import IngestQueue, get_ingest_queue
@@ -41,8 +57,6 @@ from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
 from ...documents.repository import DocumentRecord, DocumentRepository, get_document_repository
 from ...auth.identity_models import UserRecord
-from ...ingestion.configuration import IngestConfigRepository
-from ...ingestion.configuration_dependencies import effective_ingest_config, get_ingest_config_repository
 from ...ingestion.job_dependencies import get_ingest_job_repository
 from ...ingestion.job_models import IngestJobRecord, IngestJobRepository
 from ...schemas.common import ErrorResponse
@@ -68,7 +82,6 @@ from ...schemas.docs import (
 )
 from ...schemas.query import SourceAnchor
 from ...services.graphrag_queue import (
-    GraphRAGDocumentIndexMessage,
     GraphRAGMaintenanceQueue,
     GraphRAGPartitionRebuildMessage,
     get_graphrag_maintenance_queue,
@@ -94,6 +107,13 @@ _METADATA_STATUS_BY_CATEGORY = {
     "invalid": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "bad_request": status.HTTP_400_BAD_REQUEST,
     "upstream": status.HTTP_502_BAD_GATEWAY,
+}
+
+_DOCUMENT_OPERATION_STATUS_BY_CATEGORY = {
+    "not_found": status.HTTP_404_NOT_FOUND,
+    "forbidden": status.HTTP_403_FORBIDDEN,
+    "conflict": status.HTTP_409_CONFLICT,
+    "unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
 }
 
 MetadataResult = TypeVar("MetadataResult")
@@ -131,6 +151,30 @@ def _metadata_result(
     except DocumentMetadataRejected as exc:
         raise HTTPException(
             status_code=_METADATA_STATUS_BY_CATEGORY[exc.category],
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+
+
+def _reingestion_result(
+    action: Callable[[], DocumentReingestionResult],
+) -> DocumentReingestionResult:
+    try:
+        return action()
+    except DocumentReingestionRejected as exc:
+        raise HTTPException(
+            status_code=_DOCUMENT_OPERATION_STATUS_BY_CATEGORY[exc.category],
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+
+
+def _graph_enrichment_result(
+    action: Callable[[], DocumentGraphEnrichmentResult],
+) -> DocumentGraphEnrichmentResult:
+    try:
+        return action()
+    except DocumentGraphEnrichmentRejected as exc:
+        raise HTTPException(
+            status_code=_DOCUMENT_OPERATION_STATUS_BY_CATEGORY[exc.category],
             detail={"code": exc.code, "message": exc.message},
         ) from exc
 
@@ -530,25 +574,22 @@ async def reingest_document(
     request: Request,
     payload: DocumentReingestRequest | None = None,
     user: UserRecord = Depends(require_current_user),
-    repo: DocumentRepository = Depends(get_document_repository),
-    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
-    storage: UploadStorage = Depends(get_upload_storage),
-    queue: IngestQueue = Depends(get_ingest_queue),
+    service: DocumentReingestionService = Depends(
+        get_document_reingestion_service
+    ),
 ) -> DocumentReingestResponse:
     require_csrf(request)
-    document = require_ingestion_manager_document(user, repo.get_document(document_id))
-    retry_of_job_id = _validated_retry_of_job_id(job_repo, document, payload.retry_of_job_id if payload else None)
-    job = _queue_document_reingest(
-        document,
-        action="reingest",
-        repo=repo,
-        job_repo=job_repo,
-        storage=storage,
-        queue=queue,
-        actor_id=user.id,
-        retry_of_job_id=retry_of_job_id,
+    result = _reingestion_result(
+        lambda: service.reingest(
+            document_id,
+            actor=user,
+            retry_of_job_id=payload.retry_of_job_id if payload else None,
+        )
     )
-    return DocumentReingestResponse(document_id=document.id, job_id=job.id)
+    return DocumentReingestResponse(
+        document_id=result.document_id,
+        job_id=result.job_id,
+    )
 
 
 @router.post(
@@ -568,52 +609,18 @@ async def queue_document_graph_enrichment(
     document_id: str,
     request: Request,
     user: UserRecord = Depends(require_current_user),
-    repo: DocumentRepository = Depends(get_document_repository),
-    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
-    queue: GraphRAGMaintenanceQueue = Depends(get_graphrag_maintenance_queue),
-    config_repo: IngestConfigRepository = Depends(get_ingest_config_repository),
+    service: DocumentGraphEnrichmentService = Depends(
+        get_document_graph_enrichment_service
+    ),
 ) -> DocumentGraphEnrichmentResponse:
     require_csrf(request)
-    document = require_ingestion_manager_document(user, repo.get_document(document_id))
-    ingest_config = effective_ingest_config(repo=config_repo)
-    if not (settings.graphrag_enabled and ingest_config.graph_enrichment_enabled):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "graphrag_disabled", "message": "Graph enrichment is disabled for this workspace."},
-        )
-    job = job_repo.get_latest_ingest_job_for_document(
-        document.id,
-        statuses=frozenset({"complete"}),
+    result = _graph_enrichment_result(
+        lambda: service.enqueue(document_id, actor=user)
     )
-    if document.ingest_status != "complete" or job is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "document_not_indexed", "message": "Graph enrichment is available after document indexing completes."},
-        )
-    try:
-        queue.enqueue_document_index(
-            GraphRAGDocumentIndexMessage(doc_id=document.id, job_id=job.id, reason="user_request")
-        )
-    except Exception as exc:
-        repo.append_audit_event(
-            event_type="documents.graph_enrichment.enqueue_failed",
-            actor_id=user.id,
-            target_type="document",
-            target_id=document.id,
-            payload={"job_id": job.id, "error": str(exc)[:300]},
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "graphrag_enqueue_failed", "message": "Graph enrichment could not be queued."},
-        ) from exc
-    repo.append_audit_event(
-        event_type="documents.graph_enrichment.queued",
-        actor_id=user.id,
-        target_type="document",
-        target_id=document.id,
-        payload={"job_id": job.id, "reason": "user_request"},
+    return DocumentGraphEnrichmentResponse(
+        document_id=result.document_id,
+        job_id=result.job_id,
     )
-    return DocumentGraphEnrichmentResponse(document_id=document.id, job_id=job.id)
 
 
 @router.post(
@@ -975,27 +982,6 @@ def _queue_document_reingest(
     return job
 
 
-def _validated_retry_of_job_id(
-    job_repo: IngestJobRepository,
-    document: DocumentRecord,
-    retry_of_job_id: str | None,
-) -> str | None:
-    if not retry_of_job_id:
-        return None
-    retry_job = job_repo.get_ingest_job(retry_of_job_id)
-    if retry_job is None or retry_job.doc_id != document.id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "retry_job_not_found", "message": "The ingestion job being retried was not found for this document."},
-        )
-    if retry_job.status not in {"failed", "cancelled"}:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "retry_job_not_retryable", "message": "Only failed or cancelled ingestion jobs can be linked as retries."},
-        )
-    return retry_job.id
-
-
 def _read_reingest_source(document: DocumentRecord, storage: UploadStorage) -> object:
     if not document.file_path:
         raise HTTPException(
@@ -1144,16 +1130,6 @@ def require_writable_document(user: UserRecord, document: DocumentRecord | None)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "document_forbidden", "message": "User cannot modify this document."},
-        )
-    return visible
-
-
-def require_ingestion_manager_document(user: UserRecord, document: DocumentRecord | None) -> DocumentRecord:
-    visible = require_visible_document(user, document)
-    if not can_manage_document_ingestion(user, visible):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "document_ingestion_forbidden", "message": "Only the uploader or a scoped admin can manage this ingestion job."},
         )
     return visible
 

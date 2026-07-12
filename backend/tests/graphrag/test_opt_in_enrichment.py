@@ -10,6 +10,8 @@ from starlette.requests import Request
 from rag.api.routes import document_routes, ingest_job_routes
 from rag.core.config import settings
 from rag.graphrag import tasks as graphrag_tasks
+from rag.graphrag.adapters.document_enrichment_queue import GraphRAGDocumentEnrichmentQueue
+from rag.graphrag.document_enrichment_service import DocumentGraphEnrichmentService
 from rag.ingestion import tasks as ingestion_tasks
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.identity_models import UserRecord
@@ -54,10 +56,7 @@ def test_graph_enrichment_is_queued_only_after_user_request(monkeypatch: pytest.
             document.id,
             _csrf_request(),
             user=user,
-            repo=repo,
-            job_repo=repo,
-            queue=queue,
-            config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
+            service=_graph_service(repo, queue, enabled=True),
         )
     )
 
@@ -83,10 +82,7 @@ def test_graph_enrichment_rejects_disabled_workspace_config(monkeypatch: pytest.
                 document.id,
                 _csrf_request(),
                 user=user,
-                repo=repo,
-                job_repo=repo,
-                queue=queue,
-                config_repo=_ingest_config_repo(graph_enrichment_enabled=False),
+                service=_graph_service(repo, queue, enabled=False),
             )
         )
 
@@ -133,10 +129,11 @@ def test_graph_enrichment_requires_completed_indexing(monkeypatch: pytest.Monkey
                 document.id,
                 _csrf_request(),
                 user=user,
-                repo=repo,
-                job_repo=repo,
-                queue=InMemoryGraphRAGMaintenanceQueue(),
-                config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
+                service=_graph_service(
+                    repo,
+                    InMemoryGraphRAGMaintenanceQueue(),
+                    enabled=True,
+                ),
             )
         )
 
@@ -158,10 +155,11 @@ def test_graph_enrichment_requires_document_write_access(monkeypatch: pytest.Mon
                 document.id,
                 _csrf_request(),
                 user=reader,
-                repo=repo,
-                job_repo=repo,
-                queue=InMemoryGraphRAGMaintenanceQueue(),
-                config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
+                service=_graph_service(
+                    repo,
+                    InMemoryGraphRAGMaintenanceQueue(),
+                    enabled=True,
+                ),
             )
         )
 
@@ -182,10 +180,11 @@ def test_graph_enrichment_rejects_same_space_peer_contributor(monkeypatch: pytes
                 document.id,
                 _csrf_request(),
                 user=peer,
-                repo=repo,
-                job_repo=repo,
-                queue=InMemoryGraphRAGMaintenanceQueue(),
-                config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
+                service=_graph_service(
+                    repo,
+                    InMemoryGraphRAGMaintenanceQueue(),
+                    enabled=True,
+                ),
             )
         )
 
@@ -264,6 +263,20 @@ def _ingest_config_repo(*, graph_enrichment_enabled: bool) -> InMemoryIngestConf
     repo = InMemoryIngestConfigRepository()
     repo.save_active(IngestConfigRecord(graph_enrichment_enabled=graph_enrichment_enabled))
     return repo
+
+
+def _graph_service(
+    repo: InMemoryDocumentRepository,
+    queue: InMemoryGraphRAGMaintenanceQueue,
+    *,
+    enabled: bool,
+) -> DocumentGraphEnrichmentService:
+    return DocumentGraphEnrichmentService(
+        document_repo=repo,
+        job_repo=repo,
+        queue=GraphRAGDocumentEnrichmentQueue(queue),
+        enrichment_enabled=lambda: enabled,
+    )
 
 
 def _document(repo: InMemoryDocumentRepository, *, user: UserRecord, status: str):
