@@ -7,13 +7,20 @@ import pytest
 from fastapi import HTTPException, Request
 
 from rag.api.routes import document_routes
+from rag.documents.access_scope_service import DocumentAccessScopeService
+from rag.documents.adapters.access_scope_graph import (
+    GraphRAGDocumentIndexQueue,
+    GraphRAGDocumentStore,
+)
+from rag.documents.adapters.access_scope_index import (
+    QdrantDocumentAccessScopeIndex,
+)
 from rag.core.config import settings
 from rag.graphrag.cleanup import GraphRAGCleanupResult
 from rag.query.http import ServiceRequestError
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
 from rag.auth.identity_models import UserRecord
-from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
 from rag.schemas.docs import DocumentOwnerUpdateRequest
 from rag.services.graphrag_queue import InMemoryGraphRAGMaintenanceQueue
 
@@ -21,6 +28,7 @@ from rag.services.graphrag_queue import InMemoryGraphRAGMaintenanceQueue
 class FakeQdrant:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
+        self.collection = settings.qdrant_collection
         self.access_updates: list[tuple[str, str, list[str]]] = []
 
     def set_document_access_scope(self, doc_id: str, *, group_path: str, acl_group_paths: list[str]) -> None:
@@ -181,12 +189,19 @@ def _transfer(
             DocumentOwnerUpdateRequest(group_path=group_path),
             _csrf_request(),
             user=user,
-            repo=repo,
-            identity_repo=identity_repo,
-            qdrant=qdrant,  # type: ignore[arg-type]
-            graphrag=FakeGraphRAGDeletionService(),  # type: ignore[arg-type]
-            graphrag_queue=InMemoryGraphRAGMaintenanceQueue(),
-            config_repo=InMemoryIngestConfigRepository(),
+            service=DocumentAccessScopeService(
+                document_repo=repo,
+                identity_repo=identity_repo,
+                job_repo=repo,
+                index=QdrantDocumentAccessScopeIndex(qdrant),  # type: ignore[arg-type]
+                graph_store=GraphRAGDocumentStore(
+                    FakeGraphRAGDeletionService()  # type: ignore[arg-type]
+                ),
+                graph_queue=GraphRAGDocumentIndexQueue(
+                    InMemoryGraphRAGMaintenanceQueue()
+                ),
+                graph_refresh_enabled=lambda: False,
+            ),
         )
     )
 
