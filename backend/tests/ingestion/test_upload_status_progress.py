@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 
-from rag.api.routes.ingest_job_routes import _graphrag_queued_task_from_redis_item
+from rag.graphrag.monitoring import parse_queued_graphrag_task
 from rag.ingestion.job_models import IngestJobRecord
 from rag.documents.upload_status import build_job_status_response
 
@@ -113,7 +113,7 @@ def test_graphrag_queue_preview_decodes_celery_task_payload() -> None:
         "body": body,
     }).encode("utf-8")
 
-    task = _graphrag_queued_task_from_redis_item(raw_message)
+    task = parse_queued_graphrag_task(raw_message)
 
     assert task is not None
     assert task.task_id == "task-1"

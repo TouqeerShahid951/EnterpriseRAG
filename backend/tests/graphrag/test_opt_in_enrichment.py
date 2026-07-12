@@ -7,7 +7,8 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from rag.api.routes import document_routes, ingest_job_routes
+from rag.graphrag import document_routes
+from rag.graphrag import job_routes as ingest_job_routes
 from rag.core.config import settings
 from rag.graphrag import tasks as graphrag_tasks
 from rag.graphrag.adapters.document_enrichment_queue import GraphRAGDocumentEnrichmentQueue
@@ -42,7 +43,6 @@ def test_successful_ingestion_does_not_automatically_queue_graph_enrichment(monk
 
 
 def test_graph_enrichment_is_queued_only_after_user_request(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(document_routes.settings, "graphrag_enabled", True)
     repo = InMemoryDocumentRepository()
     user = _user("contributor", group_paths=("/ops",))
     document = _document(repo, user=user, status="complete")
@@ -69,7 +69,6 @@ def test_graph_enrichment_is_queued_only_after_user_request(monkeypatch: pytest.
 
 
 def test_graph_enrichment_rejects_disabled_workspace_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(document_routes.settings, "graphrag_enabled", True)
     repo = InMemoryDocumentRepository()
     user = _user("contributor", group_paths=("/ops",))
     document = _document(repo, user=user, status="complete")
@@ -117,7 +116,6 @@ def test_graphrag_status_uses_workspace_enrichment_config(monkeypatch: pytest.Mo
 
 
 def test_graph_enrichment_requires_completed_indexing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(document_routes.settings, "graphrag_enabled", True)
     repo = InMemoryDocumentRepository()
     user = _user("contributor", group_paths=("/ops",))
     document = _document(repo, user=user, status="processing")
@@ -142,7 +140,6 @@ def test_graph_enrichment_requires_completed_indexing(monkeypatch: pytest.Monkey
 
 
 def test_graph_enrichment_requires_document_write_access(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(document_routes.settings, "graphrag_enabled", True)
     repo = InMemoryDocumentRepository()
     uploader = _user("contributor", group_paths=("/ops",))
     reader = _user("member", group_paths=("/ops",))
@@ -167,7 +164,6 @@ def test_graph_enrichment_requires_document_write_access(monkeypatch: pytest.Mon
 
 
 def test_graph_enrichment_rejects_same_space_peer_contributor(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(document_routes.settings, "graphrag_enabled", True)
     repo = InMemoryDocumentRepository()
     uploader = _user("contributor", group_paths=("/ops",))
     peer = _user("contributor", group_paths=("/ops",))

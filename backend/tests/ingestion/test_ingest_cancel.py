@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from rag.api.routes import ingest_job_routes
+from rag.ingestion import job_routes as ingest_job_routes
 from rag.core.config import settings
 from rag.internal.ingest_status_routes import update_ingest_job_status
 from rag.documents.adapters.memory import InMemoryDocumentRepository

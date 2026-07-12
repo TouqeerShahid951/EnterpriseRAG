@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException, Request
 
-from rag.api.routes import document_routes
+from rag.documents import routes as document_routes
 from rag.documents.access_scope_service import DocumentAccessScopeService
 from rag.documents.adapters.access_scope_graph import (
     GraphRAGDocumentIndexQueue,

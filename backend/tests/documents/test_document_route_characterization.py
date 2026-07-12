@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException, Request
 
-from rag.api.routes import document_routes
+from rag.documents import routes as document_routes
 from rag.auth.identity_models import UserRecord
 from rag.core.config import settings
 from rag.documents.adapters.memory import InMemoryDocumentRepository
@@ -21,6 +21,8 @@ from rag.documents.metadata_service import DocumentMetadataService
 from rag.documents.reingestion_service import DocumentReingestionService
 from rag.documents.storage import StoredUploadContent
 from rag.graphrag.cleanup import GraphRAGCleanupResult
+from rag.graphrag import document_routes as graphrag_document_routes
+from rag.ingestion import document_routes as ingestion_document_routes
 from rag.graphrag.adapters.document_enrichment_queue import (
     GraphRAGDocumentEnrichmentQueue,
 )
@@ -248,7 +250,7 @@ def test_reingest_queues_source_payload_and_audits_success() -> None:
     queue = FakeIngestQueue()
 
     response = asyncio.run(
-        document_routes.reingest_document(
+        ingestion_document_routes.reingest_document(
             document.id,
             _csrf_request("POST"),
             user=user,
@@ -270,7 +272,7 @@ def test_reingest_queue_failure_marks_job_failed_and_audits_failure() -> None:
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
-            document_routes.reingest_document(
+            ingestion_document_routes.reingest_document(
                 document.id,
                 _csrf_request("POST"),
                 user=user,
@@ -297,7 +299,7 @@ def test_active_reingest_is_rejected_without_creating_another_job() -> None:
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
-            document_routes.reingest_document(
+            ingestion_document_routes.reingest_document(
                 document.id,
                 _csrf_request("POST"),
                 user=user,
@@ -315,14 +317,13 @@ def test_active_reingest_is_rejected_without_creating_another_job() -> None:
 
 
 def test_graph_enqueue_failure_returns_503_and_audits_diagnostic(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(document_routes.settings, "graphrag_enabled", True)
     repo = InMemoryDocumentRepository()
     user = _user("contributor")
     document = _document(repo, user=user, ingest_status="complete")
     job = repo.create_ingest_job(doc_id=document.id, status="complete", progress_pct=100, origin="upload")
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(
-            document_routes.queue_document_graph_enrichment(
+            graphrag_document_routes.queue_document_graph_enrichment(
                 document.id,
                 _csrf_request("POST"),
                 user=user,

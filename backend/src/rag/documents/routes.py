@@ -1,3 +1,5 @@
+"""Public document routes."""
+
 from collections.abc import Callable
 from pathlib import Path
 import re
@@ -7,66 +9,48 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
-from ...auth.abac import normalize_group_path
-from ...auth.dependencies import require_csrf, require_current_user
-from ...auth.document_access import can_read_document, can_write_document
-from ...core.config import settings
-from ...documents.access_scope_dependencies import (
+from ..auth.abac import normalize_group_path
+from ..auth.dependencies import require_csrf, require_current_user
+from ..auth.document_access import can_read_document, can_write_document
+from ..core.config import settings
+from .access_scope_dependencies import (
     get_document_access_scope_service,
 )
-from ...documents.access_scope_service import (
+from .access_scope_service import (
     DocumentAccessScopeRejected,
     DocumentAccessScopeService,
 )
-from ...documents.dependencies import get_upload_storage
-from ...documents.lifecycle_dependencies import get_document_lifecycle_service
-from ...documents.lifecycle_service import (
+from .dependencies import get_upload_storage
+from .lifecycle_dependencies import get_document_lifecycle_service
+from .lifecycle_service import (
     DeleteDocumentCommand,
     DocumentLifecycleRejected,
     DocumentLifecycleService,
     RestoreDocumentCommand,
 )
-from ...documents.metadata_dependencies import get_document_metadata_service
-from ...documents.metadata_service import (
+from .metadata_dependencies import get_document_metadata_service
+from .metadata_service import (
     DocumentMetadataRejected,
     DocumentMetadataService,
 )
-from ...documents.reingestion_dependencies import (
-    get_document_reingestion_service,
-)
-from ...documents.reingestion_service import (
-    DocumentReingestionRejected,
-    DocumentReingestionResult,
-    DocumentReingestionService,
-)
-from ...documents.storage import UploadStorage
-from ...graphrag.document_enrichment_dependencies import (
-    get_document_graph_enrichment_service,
-)
-from ...graphrag.document_enrichment_service import (
-    DocumentGraphEnrichmentRejected,
-    DocumentGraphEnrichmentResult,
-    DocumentGraphEnrichmentService,
-)
-from ...documents.claim_dependencies import get_claim_repository
-from ...documents.claim_models import ClaimRepository
-from ...query.sources import source_from_hit
-from ...query.http import ServiceRequestError
-from ...query.qdrant import QdrantClient
-from ...documents.repository import DocumentRecord, DocumentRepository, get_document_repository
-from ...auth.identity_models import UserRecord
-from ...schemas.common import ErrorResponse
-from ...schemas.docs import (
+from .storage import UploadStorage
+from .claim_dependencies import get_claim_repository
+from .claim_models import ClaimRepository
+from ..query.sources import source_from_hit
+from ..query.http import ServiceRequestError
+from ..query.qdrant import QdrantClient
+from .repository import DocumentRecord, DocumentRepository, get_document_repository
+from ..auth.identity_models import UserRecord
+from ..schemas.common import ErrorResponse
+from ..schemas.docs import (
     DeleteDocumentResponse,
     Document,
     DocumentClaim,
     DocumentClearanceUpdateRequest,
     DocumentCrossReference,
     DocumentEntity,
-    DocumentGraphEnrichmentResponse,
     DocumentListResponse,
     DocumentOwnerUpdateRequest,
-    DocumentReingestRequest,
     DocumentReingestResponse,
     DocumentSharesResponse,
     DocumentSharesUpdateRequest,
@@ -76,9 +60,9 @@ from ...schemas.docs import (
     VersionNode,
     VersionChainResponse,
 )
-from ...schemas.query import SourceAnchor
-from ...services.document_image_asset_storage import DocumentImageAssetStorage, get_document_image_asset_storage
-from ...connectors.models import CONNECTOR_RECORD_CONTENT_TYPE
+from ..schemas.query import SourceAnchor
+from ..services.document_image_asset_storage import DocumentImageAssetStorage, get_document_image_asset_storage
+from ..connectors.models import CONNECTOR_RECORD_CONTENT_TYPE
 
 router = APIRouter(prefix="/docs", tags=["documents"])
 
@@ -140,30 +124,6 @@ def _metadata_result(
     except DocumentMetadataRejected as exc:
         raise HTTPException(
             status_code=_METADATA_STATUS_BY_CATEGORY[exc.category],
-            detail={"code": exc.code, "message": exc.message},
-        ) from exc
-
-
-def _reingestion_result(
-    action: Callable[[], DocumentReingestionResult],
-) -> DocumentReingestionResult:
-    try:
-        return action()
-    except DocumentReingestionRejected as exc:
-        raise HTTPException(
-            status_code=_DOCUMENT_OPERATION_STATUS_BY_CATEGORY[exc.category],
-            detail={"code": exc.code, "message": exc.message},
-        ) from exc
-
-
-def _graph_enrichment_result(
-    action: Callable[[], DocumentGraphEnrichmentResult],
-) -> DocumentGraphEnrichmentResult:
-    try:
-        return action()
-    except DocumentGraphEnrichmentRejected as exc:
-        raise HTTPException(
-            status_code=_DOCUMENT_OPERATION_STATUS_BY_CATEGORY[exc.category],
             detail={"code": exc.code, "message": exc.message},
         ) from exc
 
@@ -555,73 +515,6 @@ async def supersede_documents(
         )
     )
     return VersionChainResponse(document_id=document_id, chain=[version_node(node) for node in chain])
-
-
-@router.post(
-    "/{document_id}/reingest",
-    response_model=DocumentReingestResponse,
-    responses={
-        status.HTTP_202_ACCEPTED: {"model": DocumentReingestResponse},
-        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
-        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
-        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
-    },
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Reingest a document from its stored source file",
-)
-async def reingest_document(
-    document_id: str,
-    request: Request,
-    payload: DocumentReingestRequest | None = None,
-    user: UserRecord = Depends(require_current_user),
-    service: DocumentReingestionService = Depends(
-        get_document_reingestion_service
-    ),
-) -> DocumentReingestResponse:
-    require_csrf(request)
-    result = _reingestion_result(
-        lambda: service.reingest(
-            document_id,
-            actor=user,
-            retry_of_job_id=payload.retry_of_job_id if payload else None,
-        )
-    )
-    return DocumentReingestResponse(
-        document_id=result.document_id,
-        job_id=result.job_id,
-    )
-
-
-@router.post(
-    "/{document_id}/graph-enrichment",
-    response_model=DocumentGraphEnrichmentResponse,
-    responses={
-        status.HTTP_202_ACCEPTED: {"model": DocumentGraphEnrichmentResponse},
-        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
-        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
-        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
-        status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ErrorResponse},
-    },
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Queue optional graph enrichment for an indexed document",
-)
-async def queue_document_graph_enrichment(
-    document_id: str,
-    request: Request,
-    user: UserRecord = Depends(require_current_user),
-    service: DocumentGraphEnrichmentService = Depends(
-        get_document_graph_enrichment_service
-    ),
-) -> DocumentGraphEnrichmentResponse:
-    require_csrf(request)
-    result = _graph_enrichment_result(
-        lambda: service.enqueue(document_id, actor=user)
-    )
-    return DocumentGraphEnrichmentResponse(
-        document_id=result.document_id,
-        job_id=result.job_id,
-    )
 
 
 @router.post(

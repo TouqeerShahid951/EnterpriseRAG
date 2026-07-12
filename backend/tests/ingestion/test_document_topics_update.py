@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from fastapi import Request
 
-from rag.api.routes import document_routes
+from rag.documents import routes as document_routes
 from rag.core.config import settings
 from rag.documents.adapters.metadata_index import QdrantDocumentMetadataIndex
 from rag.documents.adapters.memory import InMemoryDocumentRepository
