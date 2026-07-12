@@ -11,6 +11,7 @@ from ..repositories.documents import (
     get_image_review_repository,
 )
 from ..schemas.internal import (
+    ImageReviewApprovedKeysResponse,
     ImageReviewBatchCreateRequest,
     ImageReviewBatchCreateResponse,
     ImageReviewCandidatePayload,
@@ -98,6 +99,33 @@ async def create_image_review_batch(
         candidates=[candidate.model_dump() for candidate in payload.candidates],
     )
     return ImageReviewBatchCreateResponse(image_review_batch_id=batch.id)
+
+
+@router.get(
+    "/image-review-batches/{batch_id}/approved-keys",
+    response_model=ImageReviewApprovedKeysResponse,
+    summary="Read approved PDF image review candidate keys",
+)
+async def get_image_review_approved_keys(
+    batch_id: str,
+    image_review_repo: ImageReviewRepository = Depends(get_image_review_repository),
+    service: ServiceTokenContext = Depends(require_service_token),
+) -> ImageReviewApprovedKeysResponse:
+    _ = service
+    batch = image_review_repo.get_image_review_batch(batch_id)
+    if batch is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "image_review_batch_not_found", "message": "Image review batch was not found."},
+        )
+    if batch.status != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "image_review_batch_not_approved", "message": "Image review batch is not approved yet."},
+        )
+    return ImageReviewApprovedKeysResponse(
+        candidate_keys=image_review_repo.get_image_review_approved_keys(batch.id)
+    )
 
 
 @router.get(

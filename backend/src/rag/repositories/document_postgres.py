@@ -15,6 +15,14 @@ from .document_models import (
     DocumentImageAssetRecord,
     DocumentRecord,
 )
+from .human_review_postgres import (
+    review_batch_from_row as review_batch_from_row,
+    review_item_from_row as review_item_from_row,
+)
+from .image_review_postgres import (
+    image_review_batch_from_row as image_review_batch_from_row,
+    image_review_candidate_from_row as image_review_candidate_from_row,
+)
 from .postgres import PostgresConnectionMixin
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from ..shared.contracts.clearance import ClearanceLevel
 from .ingest_job_models import IngestJobRecord as IngestJobRecord
@@ -203,6 +203,7 @@ class DocumentImageAssetRecord:
     created_at: datetime | None
 
 
+@runtime_checkable
 class HumanReviewRepository(Protocol):
     def create_review_batch(
         self,
@@ -226,6 +227,7 @@ class HumanReviewRepository(Protocol):
     def reject_review_item(self, item_id: str, *, reviewer_id: str) -> ReviewDecisionRecord | None: ...
 
 
+@runtime_checkable
 class ImageReviewRepository(Protocol):
     def create_image_review_batch(
         self,
@@ -255,6 +257,7 @@ class ImageReviewRepository(Protocol):
         approve_recommended: bool = False,
         skip_remaining: bool = False,
     ) -> ImageReviewDecisionRecord | None: ...
+    def get_image_review_approved_keys(self, batch_id: str) -> list[str]: ...
 
 
 class DocumentRepository(Protocol):
