@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import base64
-import json
-from typing import Literal, cast
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
@@ -16,6 +14,16 @@ from ...auth.permissions import can_read_document_metadata, is_global_admin
 from ...core.config import settings
 from ...shared.contracts.clearance import ClearanceLevel, clearance_levels_at_or_below
 from ...documents.repository import DocumentRepository, get_document_repository
+from ...graphrag.monitoring import (
+    GraphRAGQueueMonitor,
+    active_task_record,
+    inspect_graphrag_status,
+    observe_queue_length,
+    observe_queued_tasks,
+    parse_queued_graphrag_task,
+    snapshot_graphrag_worker,
+)
+from ...graphrag.monitoring_dependencies import get_graphrag_queue_monitor
 from ...ingestion.job_models import (
     IngestJobAccess,
     IngestJobFilters,
@@ -55,8 +63,13 @@ from ...services.graphrag_queue import GraphRAGMaintenanceQueue, get_graphrag_ma
 from ...ingestion.recovery import (
     IngestRecoveryError,
     MAX_INGEST_ATTEMPTS,
-    list_stale_ingest_jobs,
-    requeue_stale_ingest_job,
+)
+from ...ingestion.monitoring import (
+    IngestWorkerStatusUnavailable,
+    inspect_stale_ingest_jobs,
+    requeue_stale_job as requeue_stale_ingest_job,
+    search_visible_ingest_jobs,
+    summarize_visible_ingest_jobs,
 )
 from ...ingestion.worker_control import (
     IngestWorkerControl,
@@ -71,8 +84,6 @@ router = APIRouter(prefix="/ingest-jobs", tags=["ingest-jobs"])
 
 JOB_STATUSES = {"scheduled", "queued", "processing", "complete", "failed", "human_review", "cancelled"}
 JOB_ORIGINS = {"upload", "reingest", "restore", "folder", "connector", "unknown"}
-ACTIVE_JOB_STATUSES = {"scheduled", "queued", "processing", "human_review"}
-ATTENTION_JOB_STATUSES = {*ACTIVE_JOB_STATUSES, "failed"}
 
 _INGEST_CANCELLATION_STATUS_BY_CATEGORY = {
     "not_found": status.HTTP_404_NOT_FOUND,
@@ -97,16 +108,25 @@ async def list_ingest_jobs(
     status_filter = _job_status(job_status)
     origin_filter = _job_origin(origin)
     normalized_group = normalize_group_path(group_path) if group_path else None
-    return _repository_visible_job_response(
-        user,
-        job_repo,
-        status_filter=status_filter,
-        origin_filter=origin_filter,
-        group_path=normalized_group,
-        search=search,
-        created_from=created_from,
-        created_to=created_to,
-        uploaded_by_user_id=user.id if uploaded_by_me else None,
+    page = search_visible_ingest_jobs(
+        repo=job_repo,
+        access=_ingest_job_access(user),
+        filters=IngestJobFilters(
+            status=status_filter,
+            origin=origin_filter,
+            group_path=normalized_group,
+            search=search,
+            created_from=created_from,
+            created_to=created_to,
+            uploaded_by_user_id=user.id if uploaded_by_me else None,
+        ),
+        can_view=can_read_document_metadata(user),
+        limit=limit,
+        offset=offset,
+    )
+    return IngestJobListResponse(
+        items=[_ingest_job_item_from_view(view) for view in page.items],
+        total=page.total,
         limit=limit,
         offset=offset,
     )
@@ -121,12 +141,23 @@ async def summarize_ingest_jobs(
     job_repo: IngestJobSearchRepository = Depends(get_ingest_job_repository),
 ) -> IngestJobSummaryResponse:
     normalized_group = normalize_group_path(group_path) if group_path else None
-    return _repository_ingest_job_summary(
-        user,
-        job_repo,
-        group_path=normalized_group,
-        created_from=created_from,
-        created_to=created_to,
+    summary = summarize_visible_ingest_jobs(
+        repo=job_repo,
+        access=_ingest_job_access(user),
+        filters=IngestJobFilters(
+            group_path=normalized_group,
+            created_from=created_from,
+            created_to=created_to,
+        ),
+        can_view=can_read_document_metadata(user),
+    )
+    return IngestJobSummaryResponse(
+        total=summary.total,
+        active=summary.active,
+        needs_attention=summary.needs_attention,
+        status_counts=summary.status_counts,
+        stage_counts=summary.stage_counts,
+        origin_counts=summary.origin_counts,
     )
 
 
@@ -139,6 +170,7 @@ async def get_graphrag_status(
     user: UserRecord = Depends(require_current_user),
     control: IngestWorkerControl = Depends(get_graphrag_worker_control),
     config_repo: IngestConfigRepository = Depends(get_ingest_config_repository),
+    queue_monitor: GraphRAGQueueMonitor = Depends(get_graphrag_queue_monitor),
 ) -> GraphRAGStatusResponse:
     if not can_read_document_metadata(user):
         raise HTTPException(
@@ -146,28 +178,46 @@ async def get_graphrag_status(
             detail={"code": "graphrag_status_forbidden", "message": "User cannot view ingestion health."},
         )
     config = effective_ingest_config(repo=config_repo)
-    snapshot, worker_error = _graphrag_worker_snapshot(control)
-    queued_jobs, queue_error = _redis_queue_length(settings.graphrag_queue_name)
-    queued_tasks = _redis_queued_graphrag_tasks(settings.graphrag_queue_name)
-    now = datetime.now(timezone.utc)
-    return GraphRAGStatusResponse(
+    snapshot = inspect_graphrag_status(
         enabled=settings.graphrag_enabled and config.graph_enrichment_enabled,
         queue_name=settings.graphrag_queue_name,
-        queued_jobs=queued_jobs,
-        queue_error=queue_error,
-        worker_online=bool(snapshot and snapshot.worker_online),
-        worker_error=worker_error,
-        active_jobs=snapshot.active_jobs if snapshot else 0,
-        observed_pool_size=snapshot.observed_pool_size if snapshot else 0,
+        control=control,
+        queue_monitor=queue_monitor,
+    )
+    return GraphRAGStatusResponse(
+        enabled=snapshot.enabled,
+        queue_name=snapshot.queue_name,
+        queued_jobs=snapshot.queued_jobs,
+        queue_error=snapshot.queue_error,
+        worker_online=snapshot.worker_online,
+        worker_error=snapshot.worker_error,
+        active_jobs=snapshot.active_jobs,
+        observed_pool_size=snapshot.observed_pool_size,
         workers=[
             GraphRAGWorkerState(name=worker.name, pool_size=worker.pool_size, active_jobs=worker.active_jobs)
-            for worker in (snapshot.workers if snapshot else ())
+            for worker in snapshot.workers
         ],
         active_tasks=[
-            _graphrag_active_task_response(task, now)
-            for task in (snapshot.active_tasks if snapshot else ())
+            GraphRAGActiveTask(
+                task_id=task.task_id,
+                task_name=task.task_name,
+                worker=task.worker,
+                job_id=task.job_id,
+                document_id=task.document_id,
+                started_at=task.started_at,
+                elapsed_seconds=task.elapsed_seconds,
+            )
+            for task in snapshot.active_tasks
         ],
-        queued_tasks=queued_tasks,
+        queued_tasks=[
+            GraphRAGQueuedTask(
+                task_id=task.task_id,
+                task_name=task.task_name,
+                job_id=task.job_id,
+                document_id=task.document_id,
+            )
+            for task in snapshot.queued_tasks
+        ],
     )
 
 
@@ -307,13 +357,16 @@ async def list_stale_jobs(
 ) -> StaleIngestJobListResponse:
     _ = user
     config = effective_ingest_config(repo=config_repo)
-    snapshot = _worker_snapshot(control, config.worker_concurrency)
-    candidates = list_stale_ingest_jobs(
-        document_repo=repo,
-        job_repo=job_repo,
-        active_job_ids=snapshot.active_job_ids,
-        stale_after_seconds=settings.ingest_stale_after_seconds,
-    )
+    try:
+        overview = inspect_stale_ingest_jobs(
+            document_repo=repo,
+            job_repo=job_repo,
+            control=control,
+            desired_concurrency=config.worker_concurrency,
+            stale_after_seconds=settings.ingest_stale_after_seconds,
+        )
+    except IngestWorkerStatusUnavailable as exc:
+        raise _worker_status_unavailable() from exc
     items = [
         StaleIngestJobItem(
             job_id=candidate.job.id,
@@ -329,13 +382,13 @@ async def list_stale_jobs(
             recovery_code=candidate.recovery_code,
             recovery_message=candidate.recovery_message,
         )
-        for candidate in candidates
+        for candidate in overview.candidates
     ]
     return StaleIngestJobListResponse(
         items=items,
         total=len(items),
-        recoverable=sum(1 for item in items if item.recoverable),
-        stale_after_seconds=settings.ingest_stale_after_seconds,
+        recoverable=overview.recoverable,
+        stale_after_seconds=overview.stale_after_seconds,
     )
 
 
@@ -354,18 +407,20 @@ async def requeue_stale_job(
     control: IngestWorkerControl = Depends(get_ingest_worker_control),
 ) -> IngestJobRecoveryResponse:
     config = effective_ingest_config(repo=config_repo)
-    snapshot = _worker_snapshot(control, config.worker_concurrency)
     try:
         job = requeue_stale_ingest_job(
             document_repo=repo,
             job_repo=job_repo,
             queue=queue,
+            control=control,
+            desired_concurrency=config.worker_concurrency,
             job_id=job_id,
-            active_job_ids=snapshot.active_job_ids,
             stale_after_seconds=settings.ingest_stale_after_seconds,
             actor_id=user.id,
             audit_event_type="admin.ingest.requeued",
         )
+    except IngestWorkerStatusUnavailable as exc:
+        raise _worker_status_unavailable() from exc
     except IngestRecoveryError as exc:
         response_status = status.HTTP_404_NOT_FOUND if exc.code == "job_not_found" else status.HTTP_409_CONFLICT
         raise HTTPException(
@@ -376,77 +431,6 @@ async def requeue_stale_job(
         job_id=job.id,
         next_attempt=job.attempt_count + 1,
         message=f"Job requeued. The worker will start attempt {job.attempt_count + 1} of {MAX_INGEST_ATTEMPTS}.",
-    )
-
-
-def _repository_ingest_job_summary(
-    user: UserRecord,
-    job_repo: IngestJobSearchRepository,
-    *,
-    group_path: str | None,
-    created_from: datetime | None,
-    created_to: datetime | None,
-) -> IngestJobSummaryResponse:
-    if not can_read_document_metadata(user):
-        return IngestJobSummaryResponse()
-    page = job_repo.search_visible_ingest_jobs(
-        access=_ingest_job_access(user),
-        filters=IngestJobFilters(
-            group_path=group_path,
-            created_from=created_from,
-            created_to=created_to,
-        ),
-        limit=None,
-        offset=0,
-    )
-    items = [_ingest_job_item_from_view(view) for view in page.items]
-    status_counts = _count_by(items, "status")
-
-    return IngestJobSummaryResponse(
-        total=page.total,
-        active=sum(status_counts.get(value, 0) for value in ACTIVE_JOB_STATUSES),
-        needs_attention=_latest_attention_count(items),
-        status_counts=status_counts,
-        stage_counts=_count_by(items, "stage"),
-        origin_counts=_count_by(items, "origin"),
-    )
-
-
-def _repository_visible_job_response(
-    user: UserRecord,
-    job_repo: IngestJobSearchRepository,
-    *,
-    status_filter: str | None = None,
-    origin_filter: IngestJobOrigin | None = None,
-    group_path: str | None = None,
-    search: str | None = None,
-    created_from: datetime | None = None,
-    created_to: datetime | None = None,
-    limit: int,
-    offset: int,
-    uploaded_by_user_id: str | None = None,
-) -> IngestJobListResponse:
-    if not can_read_document_metadata(user):
-        return IngestJobListResponse(items=[], total=0, limit=limit, offset=offset)
-    page = job_repo.search_visible_ingest_jobs(
-        access=_ingest_job_access(user),
-        filters=IngestJobFilters(
-            status=status_filter,
-            origin=origin_filter,
-            group_path=group_path,
-            search=search,
-            created_from=created_from,
-            created_to=created_to,
-            uploaded_by_user_id=uploaded_by_user_id,
-        ),
-        limit=limit,
-        offset=offset,
-    )
-    return IngestJobListResponse(
-        items=[_ingest_job_item_from_view(view) for view in page.items],
-        total=page.total,
-        limit=limit,
-        offset=offset,
     )
 
 
@@ -498,134 +482,52 @@ def _job_origin(value: str | None) -> IngestJobOrigin | None:
     return cast(IngestJobOrigin, value)
 
 
-def _count_by(items: list[IngestJobItem], field: Literal["status", "stage", "origin"]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for item in items:
-        value = str(getattr(item, field))
-        counts[value] = counts.get(value, 0) + 1
-    return counts
-
-
-def _latest_attention_count(items: list[IngestJobItem]) -> int:
-    latest_by_doc: dict[str, IngestJobItem] = {}
-    for item in sorted(items, key=lambda value: (_latest_timestamp(value.created_at, value.updated_at), value.job_id), reverse=True):
-        latest_by_doc.setdefault(item.document_id, item)
-    return sum(1 for item in latest_by_doc.values() if item.status in ATTENTION_JOB_STATUSES)
-
-
-def _latest_timestamp(*values: object) -> datetime | None:
-    datetimes = [value for value in values if isinstance(value, datetime)]
-    return max(datetimes) if datetimes else None
-
-
-def _worker_snapshot(control: IngestWorkerControl, desired_concurrency: int) -> WorkerControlResult:
-    try:
-        return control.snapshot(desired_concurrency)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "ingest_worker_status_unavailable",
-                "message": "Worker activity could not be verified, so stale-job recovery is temporarily disabled.",
-            },
-        ) from exc
-
-
 def _graphrag_worker_snapshot(control: IngestWorkerControl) -> tuple[WorkerControlResult | None, str | None]:
-    try:
-        return control.snapshot(desired_concurrency=1), None
-    except Exception as exc:
-        return None, _safe_status_error(exc)
+    return snapshot_graphrag_worker(control)
 
 
 def _redis_queue_length(queue_name: str) -> tuple[int | None, str | None]:
-    if settings.ingest_queue_backend == "memory":
-        return 0, None
-    try:
-        from redis import Redis
-    except ImportError as exc:
-        return None, _safe_status_error(exc)
-    try:
-        client = Redis.from_url(settings.celery_broker_url or settings.redis_url, decode_responses=False)
-        return int(client.llen(queue_name)), None
-    except Exception as exc:
-        return None, _safe_status_error(exc)
+    return observe_queue_length(get_graphrag_queue_monitor(), queue_name)
 
 
 def _redis_queued_graphrag_tasks(queue_name: str, *, limit: int = 25) -> list[GraphRAGQueuedTask]:
-    if settings.ingest_queue_backend == "memory":
-        return []
-    try:
-        from redis import Redis
-    except ImportError:
-        return []
-    try:
-        client = Redis.from_url(settings.celery_broker_url or settings.redis_url, decode_responses=False)
-        raw_items = client.lrange(queue_name, 0, max(0, limit - 1))
-    except Exception:
-        return []
-    tasks: list[GraphRAGQueuedTask] = []
-    for raw_item in raw_items:
-        task = _graphrag_queued_task_from_redis_item(raw_item)
-        if task is not None:
-            tasks.append(task)
-    return tasks
+    return [
+        GraphRAGQueuedTask(
+            task_id=task.task_id,
+            task_name=task.task_name,
+            job_id=task.job_id,
+            document_id=task.document_id,
+        )
+        for task in observe_queued_tasks(
+            get_graphrag_queue_monitor(),
+            queue_name,
+            limit=limit,
+        )
+    ]
 
 
 def _graphrag_queued_task_from_redis_item(raw_item: object) -> GraphRAGQueuedTask | None:
-    if isinstance(raw_item, bytes):
-        raw_text = raw_item.decode("utf-8", errors="ignore")
-    else:
-        raw_text = str(raw_item)
-    try:
-        message = json.loads(raw_text)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(message, dict):
-        return None
-    headers = message.get("headers") if isinstance(message.get("headers"), dict) else {}
-    task_name = str(headers.get("task") or message.get("task") or "")
-    payload = _celery_message_payload(message)
-    if not payload:
+    task = parse_queued_graphrag_task(raw_item)
+    if task is None:
         return None
     return GraphRAGQueuedTask(
-        task_id=str(headers.get("id") or message.get("id") or ""),
-        task_name=task_name,
-        job_id=str(payload["job_id"]) if payload.get("job_id") else None,
-        document_id=str(payload["doc_id"]) if payload.get("doc_id") else None,
+        task_id=task.task_id,
+        task_name=task.task_name,
+        job_id=task.job_id,
+        document_id=task.document_id,
     )
 
 
-def _celery_message_payload(message: dict[str, object]) -> dict[str, object] | None:
-    body = message.get("body")
-    decoded: object
-    if isinstance(body, str):
-        try:
-            decoded_bytes = base64.b64decode(body)
-            decoded = json.loads(decoded_bytes.decode("utf-8"))
-        except Exception:
-            return None
-    else:
-        decoded = body
-    if isinstance(decoded, list) and decoded:
-        args = decoded[0]
-        payload = args[0] if isinstance(args, list | tuple) and args else None
-        return payload if isinstance(payload, dict) else None
-    return decoded if isinstance(decoded, dict) else None
-
-
 def _graphrag_active_task_response(task: object, now: datetime) -> GraphRAGActiveTask:
-    time_start = getattr(task, "time_start", None)
-    started_at = datetime.fromtimestamp(time_start, tz=timezone.utc) if isinstance(time_start, int | float) else None
-    elapsed_seconds = max(0, int(now.timestamp() - time_start)) if isinstance(time_start, int | float) else None
+    record = active_task_record(task, now)
     return GraphRAGActiveTask(
-        task_id=str(getattr(task, "task_id", "")),
-        task_name=str(getattr(task, "task_name", "")),
-        worker=str(getattr(task, "worker", "")),
-        job_id=getattr(task, "job_id", None),
-        document_id=getattr(task, "doc_id", None),
-        started_at=started_at,
-        elapsed_seconds=elapsed_seconds,
+        task_id=record.task_id,
+        task_name=record.task_name,
+        worker=record.worker,
+        job_id=record.job_id,
+        document_id=record.document_id,
+        started_at=record.started_at,
+        elapsed_seconds=record.elapsed_seconds,
     )
 
 
@@ -646,7 +548,11 @@ def _cancel_task_matches(
     )
 
 
-def _safe_status_error(exc: Exception) -> str:
-    message = str(exc).strip()
-    detail = f": {message[:220]}" if message else ""
-    return f"{exc.__class__.__name__}{detail}"
+def _worker_status_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": "ingest_worker_status_unavailable",
+            "message": "Worker activity could not be verified, so stale-job recovery is temporarily disabled.",
+        },
+    )
