@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from rag.artifact_jobs.publisher import ArtifactPublisher
-from rag.repositories.artifact_jobs import InMemoryArtifactJobRepository
-from rag.repositories.generated_artifact_memory import (
+from rag.artifact_jobs.adapters.generated_memory import (
     InMemoryGeneratedArtifactRepository,
 )
+from rag.artifact_jobs.publisher import ArtifactPublisher
+from rag.artifact_jobs.repository import InMemoryArtifactJobRepository
 from rag.services.generated_artifact_storage import LocalGeneratedArtifactStorage
 
 

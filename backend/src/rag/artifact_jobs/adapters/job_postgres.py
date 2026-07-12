@@ -8,9 +8,10 @@ import json
 from typing import Any
 from uuid import uuid4
 
-from ..schemas.query import ArtifactJobStatus
-from ..shared.contracts.clearance import normalize_clearance_level
-from .artifact_job_models import (
+from ...repositories.postgres import PostgresConnectionMixin
+from ...schemas.query import ArtifactJobStatus
+from ...shared.contracts.clearance import normalize_clearance_level
+from ..job_models import (
     ACTIVE_ARTIFACT_JOB_STATUSES,
     DEFAULT_ARTIFACT_JOB_LEASE_TIMEOUT,
     TERMINAL_ARTIFACT_JOB_STATUSES,
@@ -21,7 +22,6 @@ from .artifact_job_models import (
     _validate_changes,
     _validate_expiry_query,
 )
-from .postgres import PostgresConnectionMixin
 
 
 class PostgresArtifactJobRepository(PostgresConnectionMixin):

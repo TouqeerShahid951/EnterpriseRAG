@@ -9,9 +9,9 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from ..schemas.query import ArtifactJobStatus
-from ..shared.contracts.clearance import normalize_clearance_level
-from .artifact_job_models import (
+from ...schemas.query import ArtifactJobStatus
+from ...shared.contracts.clearance import normalize_clearance_level
+from ..job_models import (
     ACTIVE_ARTIFACT_JOB_STATUSES,
     DEFAULT_ARTIFACT_JOB_LEASE_TIMEOUT,
     TERMINAL_ARTIFACT_JOB_STATUSES,

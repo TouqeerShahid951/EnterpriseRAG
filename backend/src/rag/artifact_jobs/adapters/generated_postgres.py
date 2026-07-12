@@ -6,9 +6,9 @@ from datetime import datetime
 import json
 from typing import Any
 
-from .generated_artifact_models import GeneratedArtifactRecord
-from .artifact_jobs import ARTIFACT_JOB_SCHEMA_SQL
-from .postgres import PostgresConnectionMixin
+from ...repositories.postgres import PostgresConnectionMixin
+from ..generated_models import GeneratedArtifactRecord
+from .job_postgres import ARTIFACT_JOB_SCHEMA_SQL
 
 
 class PostgresGeneratedArtifactRepository(PostgresConnectionMixin):

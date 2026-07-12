@@ -5,9 +5,9 @@ from __future__ import annotations
 from functools import lru_cache
 
 from ..core.config import settings
-from .generated_artifact_memory import InMemoryGeneratedArtifactRepository
-from .generated_artifact_models import GeneratedArtifactRecord, GeneratedArtifactRepository
-from .generated_artifact_postgres import PostgresGeneratedArtifactRepository
+from .adapters.generated_memory import InMemoryGeneratedArtifactRepository
+from .adapters.generated_postgres import PostgresGeneratedArtifactRepository
+from .generated_models import GeneratedArtifactRecord, GeneratedArtifactRepository
 
 
 @lru_cache

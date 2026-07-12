@@ -14,15 +14,19 @@ from ...auth.context import UserContext
 from ...auth.document_access import can_read_document
 from ...auth.dependencies import require_csrf, require_current_user
 from ...auth.permissions import can_query, has_exact_group_scope, is_global_admin
+from ...artifact_jobs.generated_repository import (
+    GeneratedArtifactRepository,
+    get_generated_artifact_repository,
+)
+from ...artifact_jobs.repository import (
+    ArtifactJobRepository,
+    get_artifact_job_repository,
+)
 from ...artifact_jobs.service import ArtifactJobActionError
 from ...repositories.identity import (
     IdentityRepository,
     UserRecord,
     get_identity_repository,
-)
-from ...repositories.artifact_jobs import (
-    ArtifactJobRepository,
-    get_artifact_job_repository,
 )
 from ...repositories.chat_history import (
     ChatHistoryRepository,
@@ -30,10 +34,6 @@ from ...repositories.chat_history import (
 )
 from ...repositories.chat_history_models import ChatSessionRecord
 from ...repositories.documents import DocumentRepository, get_document_repository
-from ...repositories.generated_artifacts import (
-    GeneratedArtifactRepository,
-    get_generated_artifact_repository,
-)
 from ...repositories.folder_schedule_models import FolderScheduleRepository
 from ...repositories.folder_schedules import get_folder_schedule_repository
 from ...connectors.repositories import (

@@ -5,16 +5,16 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ..schemas.evaluations import EvaluationCase
-from ..shared.contracts.clearance import normalize_clearance_level
-from .evaluation_models import (
+from ...repositories.postgres import PostgresConnectionMixin
+from ...schemas.evaluations import EvaluationCase
+from ...shared.contracts.clearance import normalize_clearance_level
+from ..models import (
     EvaluationCaseResultRecord,
     EvaluationDatasetRecord,
     EvaluationRunRecord,
     _RUN_JSON_FIELDS,
     _RUN_UPDATABLE_FIELDS,
 )
-from .postgres import PostgresConnectionMixin
 
 
 class PostgresEvaluationRepository(PostgresConnectionMixin):

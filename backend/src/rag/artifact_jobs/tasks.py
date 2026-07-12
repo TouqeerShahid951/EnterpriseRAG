@@ -16,11 +16,11 @@ from billiard.exceptions import SoftTimeLimitExceeded
 from celery import shared_task
 
 from ..core.config import settings
-from ..repositories.artifact_jobs import (
+from .job_models import (
     ACTIVE_ARTIFACT_JOB_STATUSES,
     DEFAULT_ARTIFACT_JOB_LEASE_TIMEOUT,
-    get_artifact_job_repository,
 )
+from .repository import get_artifact_job_repository
 from .execution import (
     ArtifactEvidenceUnavailable,
     ArtifactJobCancelled,

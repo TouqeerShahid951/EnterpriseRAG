@@ -8,8 +8,8 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from ..shared.contracts.clearance import normalize_clearance_level
-from .evaluation_models import (
+from ...shared.contracts.clearance import normalize_clearance_level
+from ..models import (
     EvaluationCaseResultRecord,
     EvaluationDatasetRecord,
     EvaluationRunRecord,

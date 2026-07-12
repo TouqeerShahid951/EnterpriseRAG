@@ -6,8 +6,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from ..auth.context import UserContext
-from ..repositories.artifact_jobs import ArtifactJobRecord, ArtifactJobRepository
-from ..repositories.generated_artifact_models import GeneratedArtifactRepository
 from ..schemas.artifact_jobs import ArtifactJobDetail
 from ..schemas.query import (
     ArtifactFormat,
@@ -17,6 +15,8 @@ from ..schemas.query import (
     QueryRequest,
 )
 from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
+from .generated_models import GeneratedArtifactRepository
+from .job_models import ArtifactJobRecord, ArtifactJobRepository
 from .queue import ArtifactJobQueue
 
 
@@ -315,9 +315,9 @@ class ArtifactJobService:
 
 def default_artifact_job_service() -> ArtifactJobService:
     from ..core.config import settings
-    from ..repositories.artifact_jobs import get_artifact_job_repository
-    from ..repositories.generated_artifacts import get_generated_artifact_repository
+    from .generated_repository import get_generated_artifact_repository
     from .queue import get_artifact_job_queue
+    from .repository import get_artifact_job_repository
 
     return ArtifactJobService(
         repo_factory=get_artifact_job_repository,

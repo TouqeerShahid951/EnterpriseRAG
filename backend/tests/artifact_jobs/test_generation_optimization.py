@@ -5,6 +5,9 @@ from io import BytesIO
 import json
 import zipfile
 
+from rag.artifact_jobs.adapters.generated_memory import (
+    InMemoryGeneratedArtifactRepository,
+)
 from rag.artifact_jobs.composer import (
     COMPOSITION_RECORD_TEXT_LIMIT,
     _compose_section,
@@ -35,13 +38,12 @@ from rag.artifact_jobs.layout_profiles import select_layout_profile
 from rag.artifact_jobs.planner import plan_document
 from rag.artifact_jobs.renderer import render_document
 from rag.artifact_jobs.retrieval import retrieve_document_evidence
+from rag.artifact_jobs.repository import InMemoryArtifactJobRepository
 from rag.artifact_jobs.service import ArtifactJobService, _public_stage_timings
 from rag.auth.context import UserContext
 from rag.core.config import Settings
 from rag.query.qdrant import SearchHit
-from rag.repositories.artifact_jobs import InMemoryArtifactJobRepository
 from rag.repositories.document_models import DocumentRecord
-from rag.repositories.generated_artifact_memory import InMemoryGeneratedArtifactRepository
 from rag.repositories.identity_models import UserRecord
 from rag.repositories.rag_config_models import RagConfigRecord
 from rag.services.generated_artifact_storage import LocalGeneratedArtifactStorage

@@ -16,7 +16,7 @@ from rag.artifact_jobs.execution import (
     ArtifactPermissionChanged,
 )
 from rag.artifact_jobs import tasks
-from rag.repositories.artifact_jobs import InMemoryArtifactJobRepository
+from rag.artifact_jobs.repository import InMemoryArtifactJobRepository
 
 
 def test_celery_delivery_retries_are_unbounded_while_job_attempts_remain_bounded() -> (

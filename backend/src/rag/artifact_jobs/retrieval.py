@@ -21,7 +21,6 @@ from ..query.reranker import rerank_hits
 from ..query.intent_router import route_query
 from ..query.sources import dedupe_hits
 from ..query.temporal import add_effective_date_scope, target_date_for_query
-from ..repositories.artifact_jobs import ArtifactJobRecord
 from ..repositories.document_models import DocumentRecord, DocumentRepository
 from ..repositories.rag_config_models import RagConfigRecord
 from ..schemas.query import QueryRequest
@@ -32,6 +31,7 @@ from .contracts import (
     EvidenceRecord,
     EvidenceSection,
 )
+from .job_models import ArtifactJobRecord
 
 
 SELECTED_DOCUMENT_SCAN_LIMIT = 4000

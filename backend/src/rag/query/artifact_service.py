@@ -10,21 +10,21 @@ import logging
 import re
 from typing import Any
 
+from ..artifact_jobs.adapters.generated_memory import InMemoryGeneratedArtifactRepository
+from ..artifact_jobs.adapters.generated_postgres import (
+    PostgresGeneratedArtifactRepository,
+)
+from ..artifact_jobs.generated_models import (
+    GeneratedArtifactRecord,
+    GeneratedArtifactRepository,
+)
+from ..artifact_jobs.generated_repository import get_generated_artifact_repository
 from ..auth.context import UserContext
 from ..core.config import Settings, settings as global_settings
 from ..repositories.document_memory import InMemoryDocumentRepository
 from ..repositories.document_models import DocumentRepository
 from ..repositories.document_postgres import PostgresDocumentRepository
 from ..repositories.documents import get_document_repository
-from ..repositories.generated_artifact_memory import InMemoryGeneratedArtifactRepository
-from ..repositories.generated_artifact_models import (
-    GeneratedArtifactRecord,
-    GeneratedArtifactRepository,
-)
-from ..repositories.generated_artifact_postgres import (
-    PostgresGeneratedArtifactRepository,
-)
-from ..repositories.generated_artifacts import get_generated_artifact_repository
 from ..schemas.query import GeneratedArtifact, RAGResponse
 from ..services.generated_artifact_storage import (
     GeneratedArtifactStorage,

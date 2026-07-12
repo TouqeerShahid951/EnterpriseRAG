@@ -12,7 +12,6 @@ import threading
 
 from billiard.exceptions import SoftTimeLimitExceeded
 
-from ..repositories.artifact_jobs import ArtifactJobRecord
 from .contracts import (
     ArtifactContentBundle,
     ContentBlock,
@@ -30,6 +29,7 @@ from .contracts import (
     PresentationSlide,
     PresentationSpec,
 )
+from .job_models import ArtifactJobRecord
 from .llm_json import generate_contract
 
 

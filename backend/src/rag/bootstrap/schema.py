@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from rag.artifact_jobs.adapters.generated_postgres import GENERATED_ARTIFACT_SCHEMA_SQL
+from rag.artifact_jobs.repository import ARTIFACT_JOB_SCHEMA_SQL
 from rag.core.config import Settings, settings
+from rag.evaluations.repository import EVALUATION_SCHEMA_SQL
 from rag.ops.migrate_folder_ingest_cli import MIGRATION_SQL as FOLDER_INGEST_MIGRATION_SQL
 from rag.ops.migrate_ingest_job_origin_cli import MIGRATION_SQL as INGEST_JOB_ORIGIN_MIGRATION_SQL
 from rag.ops.migrate_ingest_progress_cli import DDL as INGEST_PROGRESS_DDL
@@ -11,10 +14,7 @@ from rag.ops.migrate_image_review_cli import DDL as IMAGE_REVIEW_DDL
 from rag.ops.migrate_ocr_review_cli import DDL as OCR_REVIEW_DDL
 from rag.ops.migrate_parser_provenance_cli import DDL as PARSER_PROVENANCE_DDL
 from rag.ops.migrate_user_deletion_cli import MIGRATION_SQL as USER_DELETION_MIGRATION_SQL
-from rag.repositories.artifact_jobs import ARTIFACT_JOB_SCHEMA_SQL
 from rag.repositories.chat_history_postgres import CHAT_HISTORY_SCHEMA_SQL
-from rag.repositories.evaluations import EVALUATION_SCHEMA_SQL
-from rag.repositories.generated_artifact_postgres import GENERATED_ARTIFACT_SCHEMA_SQL
 from rag.repositories.ingest_config import PostgresIngestConfigRepository
 from rag.repositories.postgres import PostgresConnectionMixin
 from rag.repositories.rag_config_postgres import PostgresRagConfigRepository

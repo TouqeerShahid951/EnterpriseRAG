@@ -7,12 +7,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..auth.context import UserContext
-from ..repositories.evaluations import (
-    EvaluationCaseResultRecord,
-    EvaluationDatasetRecord,
-    EvaluationRepository,
-    EvaluationRunRecord,
-)
 from ..repositories.rag_config import effective_rag_config
 from ..query.rag_config_mapping import rag_config_response
 from ..schemas.evaluations import (
@@ -23,6 +17,12 @@ from ..schemas.evaluations import (
     EvaluationRunSummary,
 )
 from .datasets import EvaluationDatasetError, normalize_dataset_content
+from .models import (
+    EvaluationCaseResultRecord,
+    EvaluationDatasetRecord,
+    EvaluationRepository,
+    EvaluationRunRecord,
+)
 from .queue import EvaluationRunQueue
 
 
@@ -309,8 +309,8 @@ def _iso(value: datetime | None) -> str | None:
 
 def default_evaluation_service() -> EvaluationService:
     from ..core.config import settings
-    from ..repositories.evaluations import get_evaluation_repository
     from .queue import get_evaluation_run_queue
+    from .repository import get_evaluation_repository
 
     return EvaluationService(
         repo_factory=get_evaluation_repository,

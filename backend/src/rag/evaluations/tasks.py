@@ -8,8 +8,8 @@ from typing import Any
 from billiard.exceptions import SoftTimeLimitExceeded
 from celery import shared_task
 
-from ..repositories.evaluations import get_evaluation_repository
 from .execution import EvaluationRunCancelled, default_evaluation_run_executor
+from .repository import get_evaluation_repository
 
 
 @shared_task(bind=True, name="rag.evaluations.tasks.run_evaluation")

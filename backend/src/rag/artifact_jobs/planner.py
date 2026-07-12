@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import re
 
-from ..repositories.artifact_jobs import ArtifactJobRecord
 from ..query.artifact_intent import cleaned_content_query
 from ..query.http import ServiceRequestError
 from .contracts import DocumentPlan, DocumentPlanSection
+from .job_models import ArtifactJobRecord
 from .llm_json import LlmContractError, generate_contract
 
 

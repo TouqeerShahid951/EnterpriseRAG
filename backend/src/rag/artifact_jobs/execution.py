@@ -15,9 +15,7 @@ from ..auth.document_access import can_read_document
 from ..core.config import Settings
 from ..query.inference import InferenceClient
 from ..query.qdrant import QdrantClient
-from ..repositories.artifact_jobs import ArtifactJobRecord, ArtifactJobRepository
 from ..repositories.document_models import DocumentRepository
-from ..repositories.generated_artifact_models import GeneratedArtifactRepository
 from ..repositories.identity_models import IdentityRepository, UserRecord
 from ..repositories.rag_config_models import RagConfigRecord
 from ..services.generated_artifact_storage import GeneratedArtifactStorage
@@ -31,6 +29,8 @@ from .composer import (
 )
 from .llm_json import LlmContractError
 from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
+from .generated_models import GeneratedArtifactRepository
+from .job_models import ArtifactJobRecord, ArtifactJobRepository
 from .planner import PLANNER_PROMPT_VERSION, plan_document
 from .publisher import ArtifactPublisher
 from .renderer import render_document
@@ -851,12 +851,12 @@ def default_artifact_job_executor(
 ) -> ArtifactJobExecutor:
     from ..core.config import settings
     from ..query.inference import build_inference_client
-    from ..repositories.artifact_jobs import get_artifact_job_repository
     from ..repositories.documents import get_document_repository
-    from ..repositories.generated_artifacts import get_generated_artifact_repository
     from ..repositories.identity import get_identity_repository
     from ..repositories.rag_config import effective_rag_config
     from ..services.generated_artifact_storage import get_generated_artifact_storage
+    from .generated_repository import get_generated_artifact_repository
+    from .repository import get_artifact_job_repository
 
     selected = config or settings
     rag_config = effective_rag_config(config=selected)

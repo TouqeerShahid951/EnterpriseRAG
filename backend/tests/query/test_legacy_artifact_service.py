@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rag.artifact_jobs.adapters.generated_memory import (
+    InMemoryGeneratedArtifactRepository,
+)
 from rag.auth.context import UserContext
 from rag.query.artifact_intent import ArtifactRequest
 from rag.query.artifact_renderer import RenderedArtifact
 from rag.query.artifact_service import GeneratedArtifactService
-from rag.repositories.generated_artifact_memory import InMemoryGeneratedArtifactRepository
 from rag.schemas.query import RAGResponse
 from rag.services.generated_artifact_storage import LocalGeneratedArtifactStorage
 

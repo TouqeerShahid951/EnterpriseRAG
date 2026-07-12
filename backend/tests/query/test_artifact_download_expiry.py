@@ -8,10 +8,10 @@ from fastapi import HTTPException
 import pytest
 
 from rag.api.routes.query_routes import get_generated_artifact_content
-from rag.repositories.artifact_jobs import InMemoryArtifactJobRepository
-from rag.repositories.generated_artifact_memory import (
+from rag.artifact_jobs.adapters.generated_memory import (
     InMemoryGeneratedArtifactRepository,
 )
+from rag.artifact_jobs.repository import InMemoryArtifactJobRepository
 
 
 def test_expired_artifact_download_is_rejected_before_storage_read() -> None:

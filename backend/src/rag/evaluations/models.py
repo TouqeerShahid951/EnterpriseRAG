@@ -1,4 +1,4 @@
-"""Evaluation repository contracts and records."""
+"""Evaluation persistence contracts and records."""
 
 from __future__ import annotations
 
@@ -106,6 +106,7 @@ class EvaluationRepository(Protocol):
         user_email: str,
         account_type: str,
         group_paths: list[str],
+        clearance_level: str,
         group_path: str | None,
         document_ids: list[str],
         selected_case_ids: list[str],

@@ -7,13 +7,13 @@ from dataclasses import dataclass
 from hashlib import sha256
 import logging
 
-from ..repositories.artifact_jobs import ArtifactJobRecord
 from ..repositories.document_models import DocumentRepository
-from ..repositories.generated_artifact_models import (
+from ..services.generated_artifact_storage import GeneratedArtifactStorage
+from .generated_models import (
     GeneratedArtifactRecord,
     GeneratedArtifactRepository,
 )
-from ..services.generated_artifact_storage import GeneratedArtifactStorage
+from .job_models import ArtifactJobRecord
 
 
 logger = logging.getLogger("rag.artifact_jobs.publisher")

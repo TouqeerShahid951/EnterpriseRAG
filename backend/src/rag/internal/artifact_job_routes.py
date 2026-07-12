@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from ..artifact_jobs.repository import ArtifactJobRepository, get_artifact_job_repository
 from ..auth.document_access import can_read_document
-from ..repositories.artifact_jobs import ArtifactJobRepository, get_artifact_job_repository
 from ..repositories.documents import DocumentRepository, get_document_repository
 from ..repositories.identity import IdentityRepository, get_identity_repository
 from ..schemas.internal import ServiceTokenContext
@@ -48,4 +48,3 @@ async def artifact_job_context(
         "original_request": job.original_request,
         "requested_formats": list(job.requested_formats),
     }
-

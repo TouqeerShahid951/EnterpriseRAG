@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from threading import RLock
 from uuid import uuid4
 
-from .generated_artifact_models import GeneratedArtifactRecord
+from ..generated_models import GeneratedArtifactRecord
 
 
 class InMemoryGeneratedArtifactRepository:

@@ -17,11 +17,11 @@ from ..query.service import LocalRagService
 from ..query.sparse import embed_sparse_text
 from ..repositories.documents import get_document_repository
 from ..repositories.document_models import DocumentRepository
-from ..repositories.evaluations import EvaluationRepository, EvaluationRunRecord
 from ..schemas.evaluations import EvaluationCase
 from ..schemas.query import QueryRequest, RAGResponse
 from ..shared.evaluation.answer_checks import LiteralCheckResult
 from .answer_verifier import verify_answer_content_with_llm
+from .models import EvaluationRepository, EvaluationRunRecord
 from .scoring import score_case_result, summarize_results
 
 
@@ -396,7 +396,7 @@ def _optional_str_list(value: object) -> list[str] | None:
 
 
 def default_evaluation_run_executor(config: Settings | None = None) -> EvaluationRunExecutor:
-    from ..repositories.evaluations import get_evaluation_repository
+    from .repository import get_evaluation_repository
 
     return EvaluationRunExecutor(
         repo_factory=get_evaluation_repository,

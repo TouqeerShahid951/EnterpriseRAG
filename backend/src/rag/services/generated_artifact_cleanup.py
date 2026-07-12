@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from ..repositories.artifact_jobs import ArtifactJobRepository
-from ..repositories.generated_artifact_models import GeneratedArtifactRepository
+from ..artifact_jobs.generated_models import GeneratedArtifactRepository
+from ..artifact_jobs.job_models import ArtifactJobRepository
 from .generated_artifact_storage import GeneratedArtifactStorage
 
 
@@ -257,8 +257,8 @@ class GeneratedArtifactCleanupService:
 
 
 def default_generated_artifact_cleanup_service() -> GeneratedArtifactCleanupService:
-    from ..repositories.artifact_jobs import get_artifact_job_repository
-    from ..repositories.generated_artifacts import get_generated_artifact_repository
+    from ..artifact_jobs.generated_repository import get_generated_artifact_repository
+    from ..artifact_jobs.repository import get_artifact_job_repository
     from .generated_artifact_storage import get_generated_artifact_storage
 
     return GeneratedArtifactCleanupService(
