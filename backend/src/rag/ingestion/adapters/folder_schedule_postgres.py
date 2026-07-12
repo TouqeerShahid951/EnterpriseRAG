@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from ...auth.abac import normalize_group_path
-from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.persistence import PostgresConnectionMixin
 from ...shared.contracts.clearance import normalize_clearance_level
 from ..folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord
 

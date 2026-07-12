@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 from typing import Any
 
-from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.persistence import PostgresConnectionMixin
 from ..generated_models import GeneratedArtifactRecord
 from .job_postgres import ARTIFACT_JOB_SCHEMA_SQL
 

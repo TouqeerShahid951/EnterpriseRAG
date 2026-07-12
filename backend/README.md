@@ -51,9 +51,11 @@ entrypoints, and reusable code under `src/rag` never imports `apps`.
 - Add abstractions and subdirectories only when current complexity justifies
   them.
 
-The global `rag.repositories`, `rag.services`, and `rag.schemas` packages are
-transitional. Move their contents only as an owning feature is migrated and its
-behavior is protected by tests.
+The former global `rag.repositories` package has been removed. Feature packages
+own their repository contracts and adapters; only shared PostgreSQL connection
+mechanics live in `rag.shared.persistence`. The global `rag.services` and
+`rag.schemas` packages remain transitional and should move only with a tested
+feature migration.
 
 ## Runtime processes
 

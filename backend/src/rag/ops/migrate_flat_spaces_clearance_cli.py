@@ -6,7 +6,7 @@ import argparse
 from typing import Any
 
 from rag.core.config import settings
-from rag.repositories.postgres import PostgresConnectionMixin
+from rag.shared.persistence import PostgresConnectionMixin
 
 
 CLEARANCE_CHECK = "('NATO_UNCLASSIFIED','NATO_RESTRICTED','NATO_CONFIDENTIAL','NATO_SECRET','COSMIC_TOP_SECRET')"

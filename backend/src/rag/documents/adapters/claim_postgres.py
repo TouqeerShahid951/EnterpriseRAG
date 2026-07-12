@@ -7,7 +7,7 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.persistence import PostgresConnectionMixin
 from ...schemas.internal import ClaimRecord
 from ...schemas.query import ConflictPair, SourceAnchor
 from ..claim_models import IngestClaimsResult

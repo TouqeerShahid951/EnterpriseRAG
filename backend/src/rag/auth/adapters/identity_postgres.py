@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.persistence import PostgresConnectionMixin
 from ...shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
 from ...shared.contracts.group_paths import require_flat_group_path
 from ..abac import normalize_group_path

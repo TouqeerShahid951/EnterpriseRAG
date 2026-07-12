@@ -18,7 +18,7 @@ from rag.query.adapters.chat_history_postgres import CHAT_HISTORY_SCHEMA_SQL
 from rag.query.adapters.rag_config_postgres import PostgresRagConfigRepository
 from rag.query.adapters.vllm_config_postgres import PostgresVllmDeploymentConfigRepository
 from rag.ingestion.adapters.configuration_postgres import PostgresIngestConfigRepository
-from rag.repositories.postgres import PostgresConnectionMixin
+from rag.shared.persistence import PostgresConnectionMixin
 
 
 class _SchemaBootstrap(PostgresConnectionMixin):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.persistence import PostgresConnectionMixin
 from .job_postgres_lifecycle import PostgresIngestJobLifecycleMixin
 from .job_postgres_search import PostgresIngestJobSearchMixin
 

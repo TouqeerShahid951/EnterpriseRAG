@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.persistence import PostgresConnectionMixin
 from ..configuration import IngestConfigRecord
 from ..quality import normalize_ingestion_quality_preset
 

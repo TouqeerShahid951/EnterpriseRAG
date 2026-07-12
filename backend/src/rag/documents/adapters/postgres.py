@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from ...audit.adapters.postgres import audit_event_from_row
 from ...auth.abac import normalize_group_path
-from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.persistence import PostgresConnectionMixin
 from ...shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
 from ..models import (
     AuditEventRecord,

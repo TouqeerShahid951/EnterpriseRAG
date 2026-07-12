@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.persistence import PostgresConnectionMixin
 from ..vllm_config_models import (
     ACTIVE_CONFIG_KEY,
     VllmDeploymentConfigRecord,

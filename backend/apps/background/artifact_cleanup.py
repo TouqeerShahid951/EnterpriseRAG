@@ -7,7 +7,7 @@ import logging
 import time
 
 from rag.core.config import settings
-from rag.repositories.postgres import PostgresConnectionMixin
+from rag.shared.persistence import PostgresConnectionMixin
 from rag.services.generated_artifact_cleanup import (
     GeneratedArtifactCleanupError,
     GeneratedArtifactCleanupResult,

@@ -7,7 +7,7 @@ import time
 
 from rag.core.config import settings
 from rag.ingestion.maintenance import reconcile_ingestion_jobs
-from rag.repositories.postgres import PostgresConnectionMixin
+from rag.shared.persistence import PostgresConnectionMixin
 
 
 ADVISORY_LOCK_ID = 867530902

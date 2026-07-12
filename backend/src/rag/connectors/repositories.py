@@ -10,7 +10,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from rag.core.config import settings
-from rag.repositories.postgres import PostgresConnectionMixin
+from rag.shared.persistence import PostgresConnectionMixin
 
 from .models import ConnectorProfileRecord, ConnectorSchemaCatalogRecord, ConnectorSchemaSnapshot
 

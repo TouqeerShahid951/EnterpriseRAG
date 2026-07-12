@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from rag.core.config import settings
 from rag.query.http import request_json
-from rag.repositories.postgres import PostgresConnectionMixin
+from rag.shared.persistence import PostgresConnectionMixin
 from rag.shared.contracts.clearance import clearance_rank, normalize_clearance_level
 from rag.shared.contracts.group_paths import normalize_group_path
 

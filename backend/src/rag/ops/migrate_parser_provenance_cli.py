@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from rag.core.config import settings
-from rag.repositories.postgres import PostgresConnectionMixin
+from rag.shared.persistence import PostgresConnectionMixin
 
 
 DDL = """

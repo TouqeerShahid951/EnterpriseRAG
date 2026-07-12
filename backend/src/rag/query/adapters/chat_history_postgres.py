@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.persistence import PostgresConnectionMixin
 from ..chat_history_models import ChatSessionRecord
 
 

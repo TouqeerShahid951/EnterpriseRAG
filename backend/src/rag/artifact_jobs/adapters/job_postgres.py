@@ -8,7 +8,7 @@ import json
 from typing import Any
 from uuid import uuid4
 
-from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.persistence import PostgresConnectionMixin
 from ...schemas.query import ArtifactJobStatus
 from ...shared.contracts.clearance import normalize_clearance_level
 from ..job_models import (

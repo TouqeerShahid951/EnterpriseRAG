@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.persistence import PostgresConnectionMixin
 from ...shared.contracts.clearance import clearance_levels_at_or_below
 from ..models import (
     AuditEventRecord,
