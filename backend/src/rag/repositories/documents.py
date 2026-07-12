@@ -14,12 +14,12 @@ from .document_models import (
     ImageReviewBatchRecord,
     ImageReviewCandidateRecord,
     ImageReviewDecisionRecord,
-    IngestJobRecord,
     ReviewBatchRecord,
     ReviewDecisionRecord,
     ReviewItemRecord,
 )
 from .document_postgres import PostgresDocumentRepository
+from .ingest_job_models import IngestJobRecord
 
 
 @lru_cache

@@ -53,6 +53,7 @@ def test_graph_enrichment_is_queued_only_after_user_request(monkeypatch: pytest.
             _csrf_request(),
             user=user,
             repo=repo,
+            job_repo=repo,
             queue=queue,
             config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
         )
@@ -81,6 +82,7 @@ def test_graph_enrichment_rejects_disabled_workspace_config(monkeypatch: pytest.
                 _csrf_request(),
                 user=user,
                 repo=repo,
+                job_repo=repo,
                 queue=queue,
                 config_repo=_ingest_config_repo(graph_enrichment_enabled=False),
             )
@@ -130,6 +132,7 @@ def test_graph_enrichment_requires_completed_indexing(monkeypatch: pytest.Monkey
                 _csrf_request(),
                 user=user,
                 repo=repo,
+                job_repo=repo,
                 queue=InMemoryGraphRAGMaintenanceQueue(),
                 config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
             )
@@ -154,6 +157,7 @@ def test_graph_enrichment_requires_document_write_access(monkeypatch: pytest.Mon
                 _csrf_request(),
                 user=reader,
                 repo=repo,
+                job_repo=repo,
                 queue=InMemoryGraphRAGMaintenanceQueue(),
                 config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
             )
@@ -177,6 +181,7 @@ def test_graph_enrichment_rejects_same_space_peer_contributor(monkeypatch: pytes
                 _csrf_request(),
                 user=peer,
                 repo=repo,
+                job_repo=repo,
                 queue=InMemoryGraphRAGMaintenanceQueue(),
                 config_repo=_ingest_config_repo(graph_enrichment_enabled=True),
             )
@@ -211,6 +216,7 @@ def test_running_graph_enrichment_can_be_cancelled(monkeypatch: pytest.MonkeyPat
             _csrf_request(),
             user=user,
             repo=repo,
+            job_repo=repo,
             control=control,  # type: ignore[arg-type]
             queue=queue,
         )

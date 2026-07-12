@@ -21,9 +21,11 @@ from ...repositories.claims import ClaimRepository, get_claim_repository
 from ...query.sources import source_from_hit
 from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
-from ...repositories.documents import DocumentRecord, DocumentRepository, IngestJobRecord, get_document_repository
+from ...repositories.documents import DocumentRecord, DocumentRepository, get_document_repository
 from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
 from ...repositories.ingest_config import IngestConfigRepository, effective_ingest_config, get_ingest_config_repository
+from ...repositories.ingest_job_models import IngestJobRecord, IngestJobRepository
+from ...repositories.ingest_jobs import get_ingest_job_repository
 from ...schemas.common import ErrorResponse
 from ...schemas.docs import (
     DeleteDocumentResponse,
@@ -154,6 +156,7 @@ async def transfer_document_owner(
     request: Request,
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     identity_repo: IdentityRepository = Depends(get_identity_repository),
     qdrant: QdrantClient = Depends(get_document_qdrant_client),
     graphrag: GraphRAGDeletionService = Depends(get_document_graphrag_deletion_service),
@@ -188,6 +191,7 @@ async def transfer_document_owner(
         updated_document=updated,
         actor_id=user.id,
         repo=repo,
+        job_repo=job_repo,
         graphrag=graphrag,
         queue=graphrag_queue,
         enabled=settings.graphrag_enabled and ingest_config.graph_enrichment_enabled,
@@ -634,16 +638,18 @@ async def reingest_document(
     payload: DocumentReingestRequest | None = None,
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     storage: UploadStorage = Depends(get_upload_storage),
     queue: IngestQueue = Depends(get_ingest_queue),
 ) -> DocumentReingestResponse:
     require_csrf(request)
     document = require_ingestion_manager_document(user, repo.get_document(document_id))
-    retry_of_job_id = _validated_retry_of_job_id(repo, document, payload.retry_of_job_id if payload else None)
+    retry_of_job_id = _validated_retry_of_job_id(job_repo, document, payload.retry_of_job_id if payload else None)
     job = _queue_document_reingest(
         document,
         action="reingest",
         repo=repo,
+        job_repo=job_repo,
         storage=storage,
         queue=queue,
         actor_id=user.id,
@@ -670,6 +676,7 @@ async def queue_document_graph_enrichment(
     request: Request,
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     queue: GraphRAGMaintenanceQueue = Depends(get_graphrag_maintenance_queue),
     config_repo: IngestConfigRepository = Depends(get_ingest_config_repository),
 ) -> DocumentGraphEnrichmentResponse:
@@ -682,7 +689,7 @@ async def queue_document_graph_enrichment(
             detail={"code": "graphrag_disabled", "message": "Graph enrichment is disabled for this workspace."},
         )
     job = next(
-        (candidate for candidate in repo.list_ingest_jobs() if candidate.doc_id == document.id and candidate.status == "complete"),
+        (candidate for candidate in job_repo.list_ingest_jobs() if candidate.doc_id == document.id and candidate.status == "complete"),
         None,
     )
     if document.ingest_status != "complete" or job is None:
@@ -734,6 +741,7 @@ async def restore_document(
     request: Request,
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     storage: UploadStorage = Depends(get_upload_storage),
     queue: IngestQueue = Depends(get_ingest_queue),
 ) -> DocumentReingestResponse:
@@ -744,7 +752,7 @@ async def restore_document(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "document_not_deleted", "message": "Document is not in Trash."},
         )
-    if repo.get_active_ingest_job_for_document(document.id):
+    if job_repo.get_active_ingest_job_for_document(document.id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "document_ingest_active", "message": "Document already has an active ingestion job."},
@@ -757,6 +765,7 @@ async def restore_document(
         restored,
         action="restore",
         repo=repo,
+        job_repo=job_repo,
         storage=storage,
         queue=queue,
         actor_id=user.id,
@@ -1129,13 +1138,14 @@ def _refresh_graphrag_after_owner_transfer(
     updated_document: DocumentRecord,
     actor_id: str,
     repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     graphrag: GraphRAGDeletionService,
     queue: GraphRAGMaintenanceQueue,
     enabled: bool,
 ) -> None:
     if not enabled or updated_document.ingest_status != "complete":
         return
-    job = next((candidate for candidate in repo.list_ingest_jobs() if candidate.doc_id == updated_document.id and candidate.status == "complete"), None)
+    job = next((candidate for candidate in job_repo.list_ingest_jobs() if candidate.doc_id == updated_document.id and candidate.status == "complete"), None)
     if job is None:
         return
     cleanup_status = "skipped"
@@ -1321,6 +1331,7 @@ def _queue_document_reingest(
     *,
     action: str,
     repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     storage: UploadStorage,
     queue: IngestQueue,
     actor_id: str | None,
@@ -1328,18 +1339,18 @@ def _queue_document_reingest(
     source: object | None = None,
     retry_of_job_id: str | None = None,
 ) -> IngestJobRecord:
-    if not skip_active_job_check and repo.get_active_ingest_job_for_document(document.id):
+    if not skip_active_job_check and job_repo.get_active_ingest_job_for_document(document.id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "document_ingest_active", "message": "Document already has an active ingestion job."},
         )
     stored = source or _read_reingest_source(document, storage)
-    job = repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin=action, retry_of_job_id=retry_of_job_id)
+    job = job_repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin=action, retry_of_job_id=retry_of_job_id)
     message = _ingest_message_for_document(document, job.id, stored, repo)
     try:
         queue.enqueue(message)
     except RuntimeError as exc:
-        repo.update_ingest_job(job.id, status="failed", progress_pct=0, error_code="queue_unavailable", error_message_safe=str(exc))
+        job_repo.update_ingest_job(job.id, status="failed", progress_pct=0, error_code="queue_unavailable", error_message_safe=str(exc))
         repo.append_audit_event(
             event_type=f"documents.{action}",
             actor_id=actor_id,
@@ -1361,10 +1372,10 @@ def _queue_document_reingest(
     return job
 
 
-def _validated_retry_of_job_id(repo: DocumentRepository, document: DocumentRecord, retry_of_job_id: str | None) -> str | None:
+def _validated_retry_of_job_id(job_repo: IngestJobRepository, document: DocumentRecord, retry_of_job_id: str | None) -> str | None:
     if not retry_of_job_id:
         return None
-    retry_job = repo.get_ingest_job(retry_of_job_id)
+    retry_job = job_repo.get_ingest_job(retry_of_job_id)
     if retry_job is None or retry_job.doc_id != document.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

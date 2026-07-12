@@ -6,6 +6,8 @@ from ...core.config import settings
 from ...repositories.document_models import ImageReviewBatchRecord, ImageReviewCandidateRecord, ReviewItemRecord
 from ...repositories.documents import DocumentRepository, get_document_repository
 from ...repositories.identity import UserRecord
+from ...repositories.ingest_job_models import IngestJobRepository
+from ...repositories.ingest_jobs import get_ingest_job_repository
 from ...schemas.review import (
     ImageReviewBatch,
     ImageReviewCandidate,
@@ -88,6 +90,7 @@ async def decide_image_review_batch(
     payload: ImageReviewDecisionRequest,
     user: UserRecord = Depends(require_review_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     queue: IngestQueue = Depends(get_ingest_queue),
 ) -> ImageReviewDecisionResponse:
     if not (payload.approve_candidate_ids or payload.skip_candidate_ids or payload.approve_recommended or payload.skip_remaining):
@@ -116,7 +119,7 @@ async def decide_image_review_batch(
             detail={"code": "image_review_batch_not_found", "message": "Image review batch was not found."},
         )
     if decision.batch_complete:
-        job = document_repo.get_ingest_job(decision.batch.job_id)
+        job = job_repo.get_ingest_job(decision.batch.job_id)
         if job is not None and job.status == "cancelled":
             document_repo.append_audit_event(
                 event_type="image_review.resume_skipped",
@@ -130,7 +133,7 @@ async def decide_image_review_batch(
             resume_payload["image_review_batch_id"] = decision.batch.id
             try:
                 queue.enqueue(IngestJobPayload.from_dict(resume_payload))
-                document_repo.update_ingest_job(decision.batch.job_id, status="queued", progress_pct=0)
+                job_repo.update_ingest_job(decision.batch.job_id, status="queued", progress_pct=0)
             except RuntimeError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -163,6 +166,7 @@ async def approve_review_item(
     payload: ReviewApproveRequest,
     user: UserRecord = Depends(require_review_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     queue: IngestQueue = Depends(get_ingest_queue),
 ) -> ReviewDecisionResponse:
     _require_visible_pending_review_item(user, document_repo, item_id)
@@ -170,7 +174,7 @@ async def approve_review_item(
     if decision is None:
         raise HTTPException(status_code=404, detail={"code": "review_item_not_found", "message": "Review item was not found."})
     if decision.batch_complete:
-        job = document_repo.get_ingest_job(decision.batch.job_id)
+        job = job_repo.get_ingest_job(decision.batch.job_id)
         if job is not None and job.status == "cancelled":
             document_repo.append_audit_event(
                 event_type="review.resume_skipped",
@@ -190,7 +194,7 @@ async def approve_review_item(
         resume_payload["review_batch_id"] = decision.batch.id
         try:
             queue.enqueue(IngestJobPayload.from_dict(resume_payload))
-            document_repo.update_ingest_job(decision.batch.job_id, status="queued", progress_pct=0)
+            job_repo.update_ingest_job(decision.batch.job_id, status="queued", progress_pct=0)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail={"code": "queue_unavailable", "message": "Upload queue is unavailable."}) from exc
     document_repo.append_audit_event(
@@ -220,12 +224,13 @@ async def reject_review_item(
     item_id: str,
     user: UserRecord = Depends(require_review_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
 ) -> ReviewDecisionResponse:
     _require_visible_pending_review_item(user, document_repo, item_id)
     decision = document_repo.reject_review_item(item_id, reviewer_id=user.id)
     if decision is None:
         raise HTTPException(status_code=404, detail={"code": "review_item_not_found", "message": "Review item was not found."})
-    document_repo.update_ingest_job(
+    job_repo.update_ingest_job(
         decision.batch.job_id,
         status="failed",
         progress_pct=35,

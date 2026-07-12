@@ -681,6 +681,7 @@ def test_dispatch_cancels_legacy_connector_schedules_without_syncing() -> None:
     dispatched = dispatch_due_schedules(
         schedule_repo=schedule_repo,
         document_repo=document_repo,
+        job_repo=document_repo,
         queue=queue,
         minio_source=FakeMinioSource(),
         now=now,
@@ -727,6 +728,7 @@ def test_local_folder_watcher_syncs_new_and_changed_files(tmp_path) -> None:
     dispatched = dispatch_due_schedules(
         schedule_repo=schedule_repo,
         document_repo=document_repo,
+        job_repo=document_repo,
         queue=queue,
         minio_source=FakeMinioSource(),
         local_folder_source=LocalFolderSource(),
@@ -743,6 +745,7 @@ def test_local_folder_watcher_syncs_new_and_changed_files(tmp_path) -> None:
     dispatch_due_schedules(
         schedule_repo=schedule_repo,
         document_repo=document_repo,
+        job_repo=document_repo,
         queue=queue,
         minio_source=FakeMinioSource(),
         local_folder_source=LocalFolderSource(),
@@ -758,6 +761,7 @@ def test_local_folder_watcher_syncs_new_and_changed_files(tmp_path) -> None:
     dispatch_due_schedules(
         schedule_repo=schedule_repo,
         document_repo=document_repo,
+        job_repo=document_repo,
         queue=queue,
         minio_source=FakeMinioSource(),
         local_folder_source=LocalFolderSource(),

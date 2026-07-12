@@ -13,6 +13,8 @@ from ...auth.dependencies import require_csrf, require_current_user
 from ...auth.document_access import can_read_document, can_write_document
 from ...auth.permissions import can_manage_group_path, can_upload_to_group, is_global_admin
 from ...repositories.documents import DocumentRepository, get_document_repository
+from ...repositories.ingest_job_models import IngestJobRepository
+from ...repositories.ingest_jobs import get_ingest_job_repository
 from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
 from ...schemas.common import StubResponse
 from ...schemas.upload import JobStatusResponse, UploadResponse
@@ -60,6 +62,7 @@ async def create_upload(
     user: UserRecord = Depends(require_current_user),
     identity_repo: IdentityRepository = Depends(get_identity_repository),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     storage: UploadStorage = Depends(get_upload_storage),
     scanner: FileScanner = Depends(get_file_scanner),
     queue: IngestQueue = Depends(get_ingest_queue),
@@ -103,9 +106,9 @@ async def create_upload(
         shared_document = document_repo.replace_document_shares(document.id, group_paths=normalized_shared_groups, actor_id=user.id)
         if shared_document is not None:
             document = shared_document
-    job = document_repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin="upload")
+    job = job_repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin="upload")
     _audit_upload(document_repo, user, document.id, job.id, file.filename, stored.size_bytes, normalized_group, normalized_shared_groups, normalized_clearance, content_type, normalized_quality_preset)
-    _enqueue_upload(queue, document_repo, job.id, document.id, stored.object_path, normalized_group, list(document.access_group_paths), normalized_clearance, initial_doc_type, effective_date, expiry_date, normalized_description, supersedes_ids, content_type, normalized_quality_preset)
+    _enqueue_upload(queue, job_repo, job.id, document.id, stored.object_path, normalized_group, list(document.access_group_paths), normalized_clearance, initial_doc_type, effective_date, expiry_date, normalized_description, supersedes_ids, content_type, normalized_quality_preset)
     return UploadResponse(job_id=job.id)
 
 
@@ -121,8 +124,9 @@ async def get_upload_status(
     job_id: str,
     user: UserRecord = Depends(require_current_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
 ) -> JobStatusResponse:
-    job = document_repo.get_ingest_job(job_id)
+    job = job_repo.get_ingest_job(job_id)
     if job is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -259,7 +263,7 @@ def _audit_upload(repo: DocumentRepository, user: UserRecord, doc_id: str, job_i
 
 def _enqueue_upload(
     queue: IngestQueue,
-    repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     job_id: str,
     doc_id: str,
     file_path: str,
@@ -293,5 +297,5 @@ def _enqueue_upload(
             )
         )
     except RuntimeError as exc:
-        repo.update_ingest_job(job_id, status="failed", progress_pct=0, error_code="queue_unavailable", error_message_safe=str(exc))
+        job_repo.update_ingest_job(job_id, status="failed", progress_pct=0, error_code="queue_unavailable", error_message_safe=str(exc))
         raise HTTPException(status_code=503, detail={"code": "queue_unavailable", "message": "Upload queue is unavailable."}) from exc

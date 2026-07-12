@@ -49,6 +49,7 @@ def test_contributor_can_approve_peer_document_in_same_space() -> None:
             ReviewApproveRequest(corrected_text="Corrected text"),
             user=reviewer,
             document_repo=repo,
+            job_repo=repo,
             queue=queue,  # type: ignore[arg-type]
         )
     )
@@ -73,6 +74,7 @@ def test_review_approval_rejects_out_of_scope_document_before_mutation() -> None
                 ReviewApproveRequest(corrected_text="Corrected text"),
                 user=reviewer,
                 document_repo=repo,
+                job_repo=repo,
                 queue=queue,  # type: ignore[arg-type]
             )
         )
@@ -101,6 +103,7 @@ def test_image_review_queue_and_decisions_are_scoped() -> None:
                 ImageReviewDecisionRequest(approve_recommended=True),
                 user=reviewer,
                 document_repo=repo,
+                job_repo=repo,
                 queue=FakeQueue(),  # type: ignore[arg-type]
             )
         )

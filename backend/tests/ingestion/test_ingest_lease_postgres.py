@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from rag.repositories.document_postgres import PostgresDocumentRepository
+from rag.repositories.ingest_job_postgres import PostgresIngestJobRepository
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
@@ -18,8 +19,9 @@ TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 )
 def test_postgres_attempt_fencing_and_terminal_race() -> None:
     assert TEST_DATABASE_URL is not None
-    repo = PostgresDocumentRepository(TEST_DATABASE_URL)
-    with repo._connect() as conn:
+    document_repo = PostgresDocumentRepository(TEST_DATABASE_URL)
+    repo = PostgresIngestJobRepository(TEST_DATABASE_URL)
+    with document_repo._connect() as conn:
         conn.execute(
             "ALTER TABLE ingest_jobs ADD COLUMN IF NOT EXISTS run_token TEXT NULL"
         )
@@ -30,7 +32,7 @@ def test_postgres_attempt_fencing_and_terminal_race() -> None:
             (group_path, "Lease integration test"),
         )
     source_id = f"lease-test:{uuid4()}"
-    document = repo.create_document(
+    document = document_repo.create_document(
         title="Lease integration test",
         source_id=source_id,
         group_path=group_path,
@@ -54,7 +56,7 @@ def test_postgres_attempt_fencing_and_terminal_race() -> None:
 
     try:
         def claim(worker: int):
-            worker_repo = PostgresDocumentRepository(TEST_DATABASE_URL)
+            worker_repo = PostgresIngestJobRepository(TEST_DATABASE_URL)
             return worker_repo.start_ingest_attempt(
                 job.id,
                 max_attempts=3,
@@ -145,7 +147,7 @@ def test_postgres_attempt_fencing_and_terminal_race() -> None:
         assert monotonic.stage_progress == {"label": "newer"}
 
         def complete():
-            worker_repo = PostgresDocumentRepository(TEST_DATABASE_URL)
+            worker_repo = PostgresIngestJobRepository(TEST_DATABASE_URL)
             return worker_repo.update_ingest_job(
                 job.id,
                 status="complete",
@@ -155,7 +157,7 @@ def test_postgres_attempt_fencing_and_terminal_race() -> None:
             )
 
         def cancel():
-            worker_repo = PostgresDocumentRepository(TEST_DATABASE_URL)
+            worker_repo = PostgresIngestJobRepository(TEST_DATABASE_URL)
             return worker_repo.cancel_ingest_job(
                 job.id,
                 allowed_statuses=frozenset(
@@ -175,7 +177,7 @@ def test_postgres_attempt_fencing_and_terminal_race() -> None:
         assert final.status in {"complete", "cancelled"}
         assert final.run_token is None
     finally:
-        with repo._connect() as conn:
+        with document_repo._connect() as conn:
             with conn.transaction():
                 conn.execute(
                     "DELETE FROM audit_log WHERE target_id = %s",

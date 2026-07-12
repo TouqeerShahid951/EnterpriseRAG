@@ -7,8 +7,10 @@ import time
 from datetime import UTC, datetime, timedelta
 
 from rag.core.config import settings
-from rag.repositories.document_models import DocumentRepository, IngestJobRecord
+from rag.repositories.document_models import DocumentRepository
 from rag.repositories.documents import get_document_repository
+from rag.repositories.ingest_job_models import IngestJobRecord, IngestJobRepository
+from rag.repositories.ingest_jobs import ingest_job_repository_for
 from rag.repositories.ingest_config import (
     IngestConfigRepository,
     effective_ingest_config,
@@ -66,12 +68,14 @@ def _run_with_lock() -> list[str]:
 def reconcile_ingestion_jobs(
     *,
     document_repo: DocumentRepository | None = None,
+    job_repo: IngestJobRepository | None = None,
     queue: IngestQueue | None = None,
     control: IngestWorkerControl | None = None,
     config_repo: IngestConfigRepository | None = None,
     now: datetime | None = None,
 ) -> list[str]:
     document_repo = document_repo or get_document_repository()
+    job_repo = job_repo or ingest_job_repository_for(document_repo)
     queue = queue or get_ingest_queue()
     control = control or get_ingest_worker_control()
     config = effective_ingest_config(repo=config_repo or get_ingest_config_repository())
@@ -84,6 +88,7 @@ def reconcile_ingestion_jobs(
 
     stale_jobs = list_stale_ingest_jobs(
         document_repo=document_repo,
+        job_repo=job_repo,
         active_job_ids=snapshot.active_job_ids,
         stale_after_seconds=settings.ingest_stale_after_seconds,
         max_attempts=MAX_ATTEMPTS,
@@ -92,7 +97,7 @@ def reconcile_ingestion_jobs(
     for candidate in stale_jobs:
         job = candidate.job
         if job.attempt_count >= MAX_ATTEMPTS:
-            mutation = document_repo.update_ingest_job(
+            mutation = job_repo.update_ingest_job(
                 job.id,
                 status="failed",
                 progress_pct=100,
@@ -114,7 +119,7 @@ def reconcile_ingestion_jobs(
             continue
 
         if not candidate.recoverable:
-            mutation = document_repo.update_ingest_job(
+            mutation = job_repo.update_ingest_job(
                 job.id,
                 status="failed",
                 progress_pct=100,
@@ -138,6 +143,7 @@ def reconcile_ingestion_jobs(
         try:
             requeue_stale_ingest_job(
                 document_repo=document_repo,
+                job_repo=job_repo,
                 queue=queue,
                 job_id=job.id,
                 active_job_ids=snapshot.active_job_ids,

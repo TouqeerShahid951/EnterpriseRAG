@@ -10,6 +10,7 @@ from rag.connectors.repositories import get_connector_profile_repository
 from rag.query.qdrant import QdrantClient
 from rag.repositories.documents import get_document_repository
 from rag.repositories.folder_schedules import get_folder_schedule_repository
+from rag.repositories.ingest_jobs import ingest_job_repository_for
 from rag.repositories.postgres import PostgresConnectionMixin
 from rag.services.folder_ingestion import dispatch_due_schedules
 from rag.services.folder_sources import get_local_folder_source, get_minio_prefix_source
@@ -57,9 +58,11 @@ def _dispatch_with_lock() -> list[str]:
 
 
 def _dispatch() -> list[str]:
+    document_repo = get_document_repository()
     return dispatch_due_schedules(
         schedule_repo=get_folder_schedule_repository(),
-        document_repo=get_document_repository(),
+        document_repo=document_repo,
+        job_repo=ingest_job_repository_for(document_repo),
         queue=get_ingest_queue(),
         minio_source=get_minio_prefix_source(),
         local_folder_source=get_local_folder_source(),

@@ -18,8 +18,10 @@ from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient as RetrievalQdrantClient
 from ...shared.contracts.clearance import ClearanceLevel, clearance_levels_at_or_below
 from ...repositories.documents import DocumentRepository, get_document_repository
-from ...repositories.document_postgres import PostgresDocumentRepository, job_from_row
 from ...repositories.identity import UserRecord
+from ...repositories.ingest_job_models import IngestJobRepository
+from ...repositories.ingest_job_postgres import PostgresIngestJobRepository, job_from_row
+from ...repositories.ingest_jobs import get_ingest_job_repository
 from ...repositories.ingest_config import IngestConfigRepository, effective_ingest_config, get_ingest_config_repository
 from ...schemas.common import ErrorResponse
 from ...schemas.ingest_jobs import (
@@ -77,13 +79,14 @@ async def list_ingest_jobs(
     offset: int = Query(default=0, ge=0),
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
 ) -> IngestJobListResponse:
     status_filter = _job_status(job_status)
     origin_filter = _job_origin(origin)
     normalized_group = normalize_group_path(group_path) if group_path else None
     fast_response = _postgres_visible_job_response(
         user,
-        repo,
+        job_repo,
         status_filter=status_filter,
         origin_filter=origin_filter,
         group_path=normalized_group,
@@ -99,6 +102,7 @@ async def list_ingest_jobs(
     items = _visible_job_items(
         user,
         repo,
+        job_repo,
         status_filter=status_filter,
         origin_filter=origin_filter,
         group_path=normalized_group,
@@ -117,11 +121,12 @@ async def summarize_ingest_jobs(
     created_to: datetime | None = Query(default=None),
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
 ) -> IngestJobSummaryResponse:
     normalized_group = normalize_group_path(group_path) if group_path else None
     fast_summary = _postgres_ingest_job_summary(
         user,
-        repo,
+        job_repo,
         group_path=normalized_group,
         created_from=created_from,
         created_to=created_to,
@@ -132,6 +137,7 @@ async def summarize_ingest_jobs(
     items = _visible_job_items(
         user,
         repo,
+        job_repo,
         group_path=normalized_group,
         created_from=created_from,
         created_to=created_to,
@@ -206,11 +212,12 @@ async def cancel_graph_enrichment(
     request: Request,
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     control: IngestWorkerControl = Depends(get_graphrag_worker_control),
     queue: GraphRAGMaintenanceQueue = Depends(get_graphrag_maintenance_queue),
 ) -> GraphRAGCancelResponse:
     require_csrf(request)
-    job = repo.get_ingest_job(job_id)
+    job = job_repo.get_ingest_job(job_id)
     if job is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -285,10 +292,11 @@ async def cancel_ingest_job(
     request: Request,
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     queue: IngestQueue = Depends(get_ingest_queue),
 ) -> IngestJobCancelResponse:
     require_csrf(request)
-    job = repo.get_ingest_job(job_id)
+    job = job_repo.get_ingest_job(job_id)
     if job is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -312,7 +320,7 @@ async def cancel_ingest_job(
             message=f"Job is already {job.status}.",
         )
 
-    cancellation = repo.cancel_ingest_job(
+    cancellation = job_repo.cancel_ingest_job(
         job.id,
         allowed_statuses=frozenset(CANCELLABLE_JOB_STATUSES),
     )
@@ -356,6 +364,7 @@ async def cancel_ingest_job(
 async def list_stale_jobs(
     user: UserRecord = Depends(require_admin_user),
     repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     config_repo: IngestConfigRepository = Depends(get_ingest_config_repository),
     control: IngestWorkerControl = Depends(get_ingest_worker_control),
 ) -> StaleIngestJobListResponse:
@@ -364,6 +373,7 @@ async def list_stale_jobs(
     snapshot = _worker_snapshot(control, config.worker_concurrency)
     candidates = list_stale_ingest_jobs(
         document_repo=repo,
+        job_repo=job_repo,
         active_job_ids=snapshot.active_job_ids,
         stale_after_seconds=settings.ingest_stale_after_seconds,
     )
@@ -401,6 +411,7 @@ async def requeue_stale_job(
     job_id: str,
     user: UserRecord = Depends(require_admin_user),
     repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     queue: IngestQueue = Depends(get_ingest_queue),
     config_repo: IngestConfigRepository = Depends(get_ingest_config_repository),
     control: IngestWorkerControl = Depends(get_ingest_worker_control),
@@ -410,6 +421,7 @@ async def requeue_stale_job(
     try:
         job = requeue_stale_ingest_job(
             document_repo=repo,
+            job_repo=job_repo,
             queue=queue,
             job_id=job_id,
             active_job_ids=snapshot.active_job_ids,
@@ -432,13 +444,13 @@ async def requeue_stale_job(
 
 def _postgres_ingest_job_summary(
     user: UserRecord,
-    repo: DocumentRepository,
+    repo: IngestJobRepository,
     *,
     group_path: str | None,
     created_from: datetime | None,
     created_to: datetime | None,
 ) -> IngestJobSummaryResponse | None:
-    if not isinstance(repo, PostgresDocumentRepository):
+    if not isinstance(repo, PostgresIngestJobRepository):
         return None
     if not can_read_document_metadata(user):
         return IngestJobSummaryResponse()
@@ -500,7 +512,7 @@ def _postgres_ingest_job_summary(
 
 def _postgres_visible_job_response(
     user: UserRecord,
-    repo: DocumentRepository,
+    repo: IngestJobRepository,
     *,
     status_filter: str | None = None,
     origin_filter: IngestJobOrigin | None = None,
@@ -512,7 +524,7 @@ def _postgres_visible_job_response(
     offset: int,
     uploaded_by_user_id: str | None = None,
 ) -> IngestJobListResponse | None:
-    if not isinstance(repo, PostgresDocumentRepository):
+    if not isinstance(repo, PostgresIngestJobRepository):
         return None
     if not can_read_document_metadata(user):
         return IngestJobListResponse(items=[], total=0, limit=limit, offset=offset)
@@ -661,6 +673,7 @@ def _ingest_job_item_from_postgres_row(row: dict[str, object]) -> IngestJobItem:
 def _visible_job_items(
     user: UserRecord,
     repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     *,
     status_filter: str | None = None,
     origin_filter: IngestJobOrigin | None = None,
@@ -672,7 +685,7 @@ def _visible_job_items(
 ) -> list[IngestJobItem]:
     query = (search or "").strip().lower()
     items: list[IngestJobItem] = []
-    for job in repo.list_ingest_jobs():
+    for job in job_repo.list_ingest_jobs():
         document = repo.get_document(job.doc_id, include_deleted=True)
         if document is None or not can_read_document(user, document):
             continue

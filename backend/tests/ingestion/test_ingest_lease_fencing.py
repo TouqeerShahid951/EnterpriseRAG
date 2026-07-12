@@ -134,6 +134,7 @@ def test_status_route_rejects_stale_token_after_takeover() -> None:
                     progress_pct=100,
                 ),
                 document_repo=repo,
+                job_repo=repo,
                 service=ServiceTokenContext(service_name="ingestion-worker"),
             )
         )
@@ -165,7 +166,8 @@ def test_status_route_rechecks_token_when_takeover_wins_update_race() -> None:
                     status="processing",
                     progress_pct=50,
                 ),
-                document_repo=racing_repo,  # type: ignore[arg-type]
+                document_repo=repo,
+                job_repo=racing_repo,  # type: ignore[arg-type]
                 service=ServiceTokenContext(service_name="ingestion-worker"),
             )
         )
@@ -220,7 +222,7 @@ def test_attempt_route_reports_live_final_attempt_as_busy() -> None:
         start_ingest_job_attempt(
             job_id,
             InternalJobAttemptRequest(run_token="worker-4"),
-            document_repo=repo,
+            job_repo=repo,
             service=ServiceTokenContext(service_name="ingestion-worker"),
         )
     )

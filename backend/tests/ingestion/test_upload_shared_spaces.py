@@ -142,6 +142,7 @@ def _upload(
             user=user,
             identity_repo=identity_repo,
             document_repo=document_repo,
+            job_repo=document_repo,
             storage=FakeStorage(),  # type: ignore[arg-type]
             scanner=NoopFileScanner(),
             queue=queue,

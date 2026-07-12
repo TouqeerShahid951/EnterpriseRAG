@@ -18,6 +18,8 @@ from ...repositories.documents import DocumentRepository, get_document_repositor
 from ...repositories.folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord, FolderScheduleRepository
 from ...repositories.folder_schedules import get_folder_schedule_repository
 from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
+from ...repositories.ingest_job_models import IngestJobRepository
+from ...repositories.ingest_jobs import get_ingest_job_repository
 from ...schemas.folder_ingest import (
     FolderRun,
     FolderRunItem,
@@ -99,6 +101,7 @@ async def create_snapshot_folder_schedule(
     user: UserRecord = Depends(require_current_user),
     identity_repo: IdentityRepository = Depends(get_identity_repository),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     schedule_repo: FolderScheduleRepository = Depends(get_folder_schedule_repository),
     storage: UploadStorage = Depends(get_upload_storage),
     scanner: FileScanner = Depends(get_file_scanner),
@@ -122,6 +125,7 @@ async def create_snapshot_folder_schedule(
         user=user,
         identity_repo=identity_repo,
         document_repo=document_repo,
+        job_repo=job_repo,
         schedule_repo=schedule_repo,
         storage=storage,
         scanner=scanner,

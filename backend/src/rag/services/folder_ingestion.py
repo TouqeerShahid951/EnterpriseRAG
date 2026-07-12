@@ -21,6 +21,7 @@ from ..core.config import settings
 from ..repositories.document_models import DocumentRepository
 from ..repositories.folder_schedule_models import FolderRunItemRecord, FolderScheduleRecord, FolderScheduleRepository
 from ..repositories.identity import IdentityRepository, UserRecord
+from ..repositories.ingest_job_models import IngestJobRepository
 from ..shared.contracts.clearance import clearance_rank, normalize_clearance_level
 from .document_uploads import (
     default_title,
@@ -92,6 +93,7 @@ async def create_snapshot_schedule(
     user: UserRecord,
     identity_repo: IdentityRepository,
     document_repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     schedule_repo: FolderScheduleRepository,
     storage: UploadStorage,
     scanner: FileScanner,
@@ -247,7 +249,7 @@ async def create_snapshot_schedule(
             pending_supersedes=[],
             ingest_status="scheduled",
         )
-        job = document_repo.create_ingest_job(doc_id=document.id, status="scheduled", progress_pct=0, origin="folder")
+        job = job_repo.create_ingest_job(doc_id=document.id, status="scheduled", progress_pct=0, origin="folder")
         schedule_repo.create_run_item(
             run_id=run.id,
             schedule_id=schedule.id,
@@ -460,6 +462,7 @@ def dispatch_due_schedules(
     *,
     schedule_repo: FolderScheduleRepository,
     document_repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     queue: IngestQueue,
     minio_source: MinioPrefixSource,
     local_folder_source: LocalFolderSource | None = None,
@@ -479,7 +482,7 @@ def dispatch_due_schedules(
         run = _active_run_for_schedule(schedule, schedule_repo=schedule_repo, current=current)
         try:
             if schedule.source_type == "snapshot":
-                _dispatch_snapshot(schedule, run.id, schedule_repo=schedule_repo, document_repo=document_repo, queue=queue)
+                _dispatch_snapshot(schedule, run.id, schedule_repo=schedule_repo, document_repo=document_repo, job_repo=job_repo, queue=queue)
                 next_run_at = None
                 next_status = "complete"
             elif schedule.source_type == "local_folder":
@@ -488,6 +491,7 @@ def dispatch_due_schedules(
                     run.id,
                     schedule_repo=schedule_repo,
                     document_repo=document_repo,
+                    job_repo=job_repo,
                     queue=queue,
                     local_folder_source=local_folder_source or LocalFolderSource(),
                     storage=storage,
@@ -499,7 +503,7 @@ def dispatch_due_schedules(
                 )
                 next_status = "active" if schedule.schedule_type == "recurring" else "complete"
             else:
-                _dispatch_minio_prefix(schedule, run.id, schedule_repo=schedule_repo, document_repo=document_repo, queue=queue, minio_source=minio_source)
+                _dispatch_minio_prefix(schedule, run.id, schedule_repo=schedule_repo, document_repo=document_repo, job_repo=job_repo, queue=queue, minio_source=minio_source)
                 next_run_at = (
                     next_recurring_window_after_current(schedule.recurrence, timezone_name=schedule.timezone, now=current)
                     if schedule.schedule_type == "recurring"
@@ -536,11 +540,12 @@ def _dispatch_snapshot(
     *,
     schedule_repo: FolderScheduleRepository,
     document_repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     queue: IngestQueue,
 ) -> None:
     _ = run_id
     for item in schedule_repo.list_pending_items_for_schedule(schedule.id):
-        _queue_item(schedule, item, document_repo=document_repo, schedule_repo=schedule_repo, queue=queue)
+        _queue_item(schedule, item, document_repo=document_repo, job_repo=job_repo, schedule_repo=schedule_repo, queue=queue)
 
 
 def _dispatch_local_folder(
@@ -549,6 +554,7 @@ def _dispatch_local_folder(
     *,
     schedule_repo: FolderScheduleRepository,
     document_repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     queue: IngestQueue,
     local_folder_source: LocalFolderSource,
     storage: UploadStorage | None,
@@ -650,7 +656,7 @@ def _dispatch_local_folder(
             pending_supersedes=supersedes,
             ingest_status="scheduled",
         )
-        job = document_repo.create_ingest_job(doc_id=document.id, status="scheduled", progress_pct=0, origin="folder")
+        job = job_repo.create_ingest_job(doc_id=document.id, status="scheduled", progress_pct=0, origin="folder")
         item = schedule_repo.create_run_item(
             run_id=run_id,
             schedule_id=schedule.id,
@@ -664,7 +670,7 @@ def _dispatch_local_folder(
             document_id=document.id,
             job_id=job.id,
         )
-        _queue_item(schedule, item, document_repo=document_repo, schedule_repo=schedule_repo, queue=queue, supersedes=supersedes)
+        _queue_item(schedule, item, document_repo=document_repo, job_repo=job_repo, schedule_repo=schedule_repo, queue=queue, supersedes=supersedes)
 
     for source_path in sorted(schedule_repo.known_source_paths(schedule.id) - seen_paths):
         schedule_repo.create_run_item(
@@ -684,6 +690,7 @@ def _dispatch_minio_prefix(
     *,
     schedule_repo: FolderScheduleRepository,
     document_repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     queue: IngestQueue,
     minio_source: MinioPrefixSource,
 ) -> None:
@@ -780,7 +787,7 @@ def _dispatch_minio_prefix(
             pending_supersedes=supersedes,
             ingest_status="scheduled",
         )
-        job = document_repo.create_ingest_job(doc_id=document.id, status="scheduled", progress_pct=0, origin="folder")
+        job = job_repo.create_ingest_job(doc_id=document.id, status="scheduled", progress_pct=0, origin="folder")
         item = schedule_repo.create_run_item(
             run_id=run_id,
             schedule_id=schedule.id,
@@ -794,7 +801,7 @@ def _dispatch_minio_prefix(
             document_id=document.id,
             job_id=job.id,
         )
-        _queue_item(schedule, item, document_repo=document_repo, schedule_repo=schedule_repo, queue=queue, supersedes=supersedes)
+        _queue_item(schedule, item, document_repo=document_repo, job_repo=job_repo, schedule_repo=schedule_repo, queue=queue, supersedes=supersedes)
 
     for source_path in sorted(schedule_repo.known_source_paths(schedule.id) - seen_paths):
         schedule_repo.create_run_item(
@@ -814,6 +821,7 @@ def _dispatch_connector(
     *,
     schedule_repo: FolderScheduleRepository,
     document_repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     queue: IngestQueue,
     connector_profile_repo: ConnectorProfileRepository | None,
     connector_registry: ConnectorRegistry,
@@ -895,7 +903,7 @@ def _dispatch_connector(
             pending_supersedes=supersedes,
             ingest_status="scheduled",
         )
-        job = document_repo.create_ingest_job(doc_id=document.id, status="scheduled", progress_pct=0, origin="connector")
+        job = job_repo.create_ingest_job(doc_id=document.id, status="scheduled", progress_pct=0, origin="connector")
         item = schedule_repo.create_run_item(
             run_id=run_id,
             schedule_id=schedule.id,
@@ -909,7 +917,7 @@ def _dispatch_connector(
             document_id=document.id,
             job_id=job.id,
         )
-        _queue_item(schedule, item, document_repo=document_repo, schedule_repo=schedule_repo, queue=queue, supersedes=supersedes)
+        _queue_item(schedule, item, document_repo=document_repo, job_repo=job_repo, schedule_repo=schedule_repo, queue=queue, supersedes=supersedes)
 
     for source_path in sorted(schedule_repo.known_source_paths(schedule.id) - seen_paths):
         previous = schedule_repo.latest_document_for_source(schedule.id, source_path)
@@ -938,6 +946,7 @@ def _queue_item(
     item: FolderRunItemRecord,
     *,
     document_repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     schedule_repo: FolderScheduleRepository,
     queue: IngestQueue,
     supersedes: list[str] | None = None,
@@ -949,7 +958,7 @@ def _queue_item(
     if document is None:
         schedule_repo.update_run_item_status(item.id, status="failed", skip_code="document_not_found", skip_message="Scheduled document was not found.")
         return
-    document_repo.update_ingest_job(item.job_id, status="queued", progress_pct=0)
+    job_repo.update_ingest_job(item.job_id, status="queued", progress_pct=0)
     queue.enqueue(
         IngestJobPayload(
             job_id=item.job_id,

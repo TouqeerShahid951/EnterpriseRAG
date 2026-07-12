@@ -6,7 +6,8 @@ import mimetypes
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from ..repositories.document_models import DocumentRecord, DocumentRepository, IngestJobRecord
+from ..repositories.document_models import DocumentRecord, DocumentRepository
+from ..repositories.ingest_job_models import IngestJobRecord, IngestJobRepository
 from .contracts import IngestJobPayload
 from .queue import IngestQueue
 
@@ -34,6 +35,7 @@ class IngestRecoveryError(Exception):
 def list_stale_ingest_jobs(
     *,
     document_repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     active_job_ids: frozenset[str] = frozenset(),
     stale_after_seconds: int,
     max_attempts: int = MAX_INGEST_ATTEMPTS,
@@ -42,7 +44,7 @@ def list_stale_ingest_jobs(
     observed_at = now or datetime.now(UTC)
     cutoff = observed_at - timedelta(seconds=stale_after_seconds)
     stale_jobs: list[StaleIngestJob] = []
-    for job in document_repo.list_ingest_jobs():
+    for job in job_repo.list_ingest_jobs():
         if job.status != "processing" or job.id in active_job_ids or not is_stale_ingest_job(job, cutoff):
             continue
         document = document_repo.get_document(job.doc_id, include_deleted=True)
@@ -75,6 +77,7 @@ def list_stale_ingest_jobs(
 def requeue_stale_ingest_job(
     *,
     document_repo: DocumentRepository,
+    job_repo: IngestJobRepository,
     queue: IngestQueue,
     job_id: str,
     active_job_ids: frozenset[str] = frozenset(),
@@ -85,7 +88,7 @@ def requeue_stale_ingest_job(
     now: datetime | None = None,
 ) -> IngestJobRecord:
     observed_at = now or datetime.now(UTC)
-    job = document_repo.get_ingest_job(job_id)
+    job = job_repo.get_ingest_job(job_id)
     if job is None:
         raise IngestRecoveryError("job_not_found", "Ingestion job was not found.")
     if job.status != "processing":
@@ -106,7 +109,7 @@ def requeue_stale_ingest_job(
             "The source document is unavailable for ingestion recovery.",
         )
 
-    requeued = document_repo.requeue_stale_ingest_job(
+    requeued = job_repo.requeue_stale_ingest_job(
         job.id,
         stale_before=cutoff,
         max_attempts=max_attempts,

@@ -32,7 +32,7 @@ def test_cancel_active_ingest_job_marks_cancelled_and_cleans_vectors(monkeypatch
     deleted_docs: list[str] = []
     monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda doc_id: deleted_docs.append(doc_id) or None)
 
-    response = asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=user, repo=repo, queue=queue))
+    response = asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=user, repo=repo, job_repo=repo, queue=queue))
 
     updated = repo.get_ingest_job(job.id)
     assert response.status == "cancelled"
@@ -60,7 +60,7 @@ def test_cancel_human_review_job_closes_pending_review_items(monkeypatch: pytest
     )
     monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda _doc_id: None)
 
-    asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=user, repo=repo, queue=FakeQueue()))
+    asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=user, repo=repo, job_repo=repo, queue=FakeQueue()))
 
     assert repo.get_ingest_job(job.id).status == "cancelled"  # type: ignore[union-attr]
     assert repo.list_review_items(status="pending") == []
@@ -76,7 +76,7 @@ def test_cancel_ingest_job_requires_write_scope(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda _doc_id: None)
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=reader, repo=repo, queue=FakeQueue()))
+        asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=reader, repo=repo, job_repo=repo, queue=FakeQueue()))
 
     assert exc_info.value.status_code == 403
     assert repo.get_ingest_job(job.id).status == "queued"  # type: ignore[union-attr]
@@ -91,7 +91,7 @@ def test_cancel_ingest_job_rejects_same_space_peer_contributor(monkeypatch: pyte
     monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda _doc_id: None)
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=peer, repo=repo, queue=FakeQueue()))
+        asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=peer, repo=repo, job_repo=repo, queue=FakeQueue()))
 
     assert exc_info.value.status_code == 403
     assert repo.get_ingest_job(job.id).status == "queued"  # type: ignore[union-attr]
@@ -106,7 +106,7 @@ def test_cancel_ingest_job_allows_space_admin_in_scope(monkeypatch: pytest.Monke
     queue = FakeQueue()
     monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda _doc_id: None)
 
-    response = asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=space_admin, repo=repo, queue=queue))
+    response = asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=space_admin, repo=repo, job_repo=repo, queue=queue))
 
     assert response.status == "cancelled"
     assert queue.cancelled == [job.id]
@@ -121,7 +121,7 @@ def test_cancel_terminal_ingest_job_is_idempotent(monkeypatch: pytest.MonkeyPatc
     deleted_docs: list[str] = []
     monkeypatch.setattr(ingest_job_routes, "_delete_document_vectors", lambda doc_id: deleted_docs.append(doc_id) or None)
 
-    response = asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=user, repo=repo, queue=queue))
+    response = asyncio.run(ingest_job_routes.cancel_ingest_job(job.id, _csrf_request(), user=user, repo=repo, job_repo=repo, queue=queue))
 
     assert response.status == "complete"
     assert repo.get_ingest_job(job.id).status == "complete"  # type: ignore[union-attr]
@@ -142,6 +142,7 @@ def test_internal_worker_status_update_does_not_resurrect_cancelled_job() -> Non
                 job.id,
                 InternalJobStatusRequest(status="processing", progress_pct=55),
                 document_repo=repo,
+                job_repo=repo,
                 service=ServiceTokenContext(service_name="ingestion-worker"),
             )
         )
@@ -161,7 +162,7 @@ def test_visible_ingest_job_items_include_completed_at_once() -> None:
     document = _document(repo, user=user, status="complete")
     job = repo.create_ingest_job(doc_id=document.id, status="complete", progress_pct=100, origin="upload")
 
-    items = ingest_job_routes._visible_job_items(user, repo)
+    items = ingest_job_routes._visible_job_items(user, repo, repo)
 
     assert len(items) == 1
     assert items[0].job_id == job.id
@@ -177,7 +178,7 @@ def test_visible_ingest_job_items_can_filter_to_current_uploader() -> None:
     own_job = repo.create_ingest_job(doc_id=own_document.id, status="processing", progress_pct=20, origin="upload")
     repo.create_ingest_job(doc_id=other_document.id, status="processing", progress_pct=20, origin="upload")
 
-    items = ingest_job_routes._visible_job_items(user, repo, origin_filter="upload", uploaded_by_user_id=user.id)
+    items = ingest_job_routes._visible_job_items(user, repo, repo, origin_filter="upload", uploaded_by_user_id=user.id)
 
     assert [item.job_id for item in items] == [own_job.id]
     assert items[0].uploaded_by == user.id

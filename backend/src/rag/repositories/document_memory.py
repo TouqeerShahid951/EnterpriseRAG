@@ -19,13 +19,15 @@ from .document_models import (
     ImageReviewBatchRecord,
     ImageReviewCandidateRecord,
     ImageReviewDecisionRecord,
+    ReviewBatchRecord,
+    ReviewDecisionRecord,
+    ReviewItemRecord,
+)
+from .ingest_job_models import (
     IngestAttemptResult,
     IngestJobCancellationResult,
     IngestJobMutationResult,
     IngestJobRecord,
-    ReviewBatchRecord,
-    ReviewDecisionRecord,
-    ReviewItemRecord,
 )
 
 
