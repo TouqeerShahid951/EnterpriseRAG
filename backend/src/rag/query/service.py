@@ -12,7 +12,6 @@ from ..repositories.claims import claim_repository_from_settings
 from ..repositories.document_memory import InMemoryDocumentRepository
 from ..repositories.document_models import DocumentRepository
 from ..repositories.document_postgres import PostgresDocumentRepository
-from ..repositories.rag_config import RagConfigRepository, effective_rag_config, env_rag_config
 from ..schemas.query import QueryRequest, QueryStreamEvent, RAGResponse
 from .artifact_service import GeneratedArtifactService
 from .artifact_intent import parse_artifact_request
@@ -20,6 +19,8 @@ from .cancellation import QueryCancellationToken
 from .conflicts import ConflictChecker
 from .inference import InferenceClient, build_inference_client
 from .qdrant import QdrantClient
+from .rag_config_models import RagConfigRepository
+from .rag_config_repository import effective_rag_config, env_rag_config
 from .state import initial_state
 from .graph import QueryGraphRunner
 from .query_memory import QuerySessionStore, default_query_session_store

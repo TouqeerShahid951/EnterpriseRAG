@@ -9,12 +9,12 @@ from time import perf_counter
 from typing import Any
 
 from ..core.config import Settings, settings
-from ..repositories.rag_config import RagConfigRecord
 from ..shared.contracts.reranker_models import is_supported_reranker_model
 from ..shared.fastembed_dense import FastEmbedDenseError, embed_dense_texts, list_supported_dense_models
 from ..shared.ollama_models import is_ollama_cloud_model
 from .http import ServiceRequestError, request_json
 from .qdrant import QdrantClient
+from .rag_config_models import RagConfigRecord
 
 
 @dataclass(frozen=True)

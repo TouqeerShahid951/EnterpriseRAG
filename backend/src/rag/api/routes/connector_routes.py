@@ -28,8 +28,9 @@ from ...connectors.schema_enrichment import (
 )
 from ...core.config import settings
 from ...query.inference import build_inference_client
-from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
-from ...repositories.rag_config import effective_rag_config
+from ...auth.identity_models import IdentityRepository, UserRecord
+from ...auth.identity_repository import get_identity_repository
+from ...query.rag_config_repository import effective_rag_config
 from ...schemas.connectors import (
     ConnectorSchemaCatalog,
     ConnectorSchemaCatalogAiDraftRequest,

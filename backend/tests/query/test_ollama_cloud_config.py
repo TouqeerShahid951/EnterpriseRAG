@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from rag.query import rag_config_service
-from rag.repositories.rag_config_models import RagConfigRecord
+from rag.query.rag_config_models import RagConfigRecord
 
 
 @pytest.mark.parametrize(

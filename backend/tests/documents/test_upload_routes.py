@@ -5,7 +5,10 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
 from rag.auth.dependencies import require_current_user
+from rag.auth.identity_models import UserRecord
+from rag.auth.identity_repository import get_identity_repository
 from rag.core.config import settings
 from rag.documents import upload_routes
 from rag.documents.adapters.file_scanning import NoopFileScanner
@@ -15,11 +18,6 @@ from rag.ingestion.contracts import IngestJobPayload
 from rag.ingestion.queue import get_ingest_queue
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.documents import get_document_repository
-from rag.repositories.identity import (
-    InMemoryIdentityRepository,
-    UserRecord,
-    get_identity_repository,
-)
 from rag.repositories.ingest_jobs import get_ingest_job_repository
 
 PDF_CONTENT = b"%PDF-1.7\nroute contract\n%%EOF"

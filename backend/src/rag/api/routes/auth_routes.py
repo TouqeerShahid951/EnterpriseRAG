@@ -6,7 +6,8 @@ from ...auth.passwords import hash_password, verify_password
 from ...auth.refresh_sessions import RefreshSessionStore, auth_idle_ttl_seconds, get_refresh_session_store
 from ...core.config import settings
 from ...repositories.documents import DocumentRepository, get_document_repository
-from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
+from ...auth.identity_models import IdentityRepository, UserRecord
+from ...auth.identity_repository import get_identity_repository
 from ...schemas.auth import (
     AuthUser,
     ChangePasswordRequest,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.folder_schedule_memory import InMemoryFolderScheduleRepository
+from rag.ingestion.adapters.folder_schedule_memory import InMemoryFolderScheduleRepository
 from rag.services.connector_schedule_retirement import retire_connector_schedules
 
 

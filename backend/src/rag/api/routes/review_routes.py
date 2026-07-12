@@ -16,7 +16,7 @@ from ...repositories.documents import (
 )
 from ...repositories.ingest_job_models import IngestJobRepository
 from ...repositories.ingest_jobs import get_ingest_job_repository
-from ...repositories.identity import UserRecord
+from ...auth.identity_models import UserRecord
 from ...schemas.review import (
     ImageReviewBatch,
     ImageReviewCandidate,

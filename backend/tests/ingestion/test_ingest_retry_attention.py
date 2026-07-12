@@ -4,7 +4,7 @@ import asyncio
 
 from rag.api.routes.ingest_job_routes import summarize_ingest_jobs
 from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.identity import UserRecord
+from rag.auth.identity_models import UserRecord
 
 
 def test_retry_job_keeps_failed_history_but_links_new_job() -> None:

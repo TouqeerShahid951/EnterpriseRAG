@@ -15,7 +15,8 @@ from rag.documents.storage import StoredUpload
 from rag.ingestion.contracts import IngestJobPayload
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.ingest_job_models import IngestJobRepository
-from rag.repositories.identity import InMemoryIdentityRepository, UserRecord
+from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
+from rag.auth.identity_models import UserRecord
 
 
 class FakeQueue:

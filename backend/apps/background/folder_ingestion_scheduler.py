@@ -7,7 +7,7 @@ import time
 
 from rag.core.config import settings
 from rag.repositories.documents import get_document_repository
-from rag.repositories.folder_schedules import get_folder_schedule_repository
+from rag.ingestion.folder_schedule_dependencies import get_folder_schedule_repository
 from rag.repositories.ingest_jobs import ingest_job_repository_for
 from rag.repositories.postgres import PostgresConnectionMixin
 from rag.services.folder_ingestion import dispatch_due_schedules

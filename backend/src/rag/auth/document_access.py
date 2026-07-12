@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from ..repositories.document_models import DocumentRecord
-from ..repositories.identity import UserRecord
+from .identity_models import UserRecord
 from ..shared.contracts.clearance import can_access_clearance
 from .abac import normalize_group_path
 from .permissions import can_manage_group_path, can_read_document_metadata, can_write_document_scope, is_global_admin

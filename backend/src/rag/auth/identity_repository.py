@@ -5,9 +5,9 @@ from __future__ import annotations
 from functools import lru_cache
 
 from ..core.config import settings
-from .identity_memory import InMemoryIdentityRepository
+from .adapters.identity_memory import InMemoryIdentityRepository
+from .adapters.identity_postgres import PostgresIdentityRepository
 from .identity_models import GroupRecord, IdentityRepository, UserRecord
-from .identity_postgres import PostgresIdentityRepository
 
 
 @lru_cache

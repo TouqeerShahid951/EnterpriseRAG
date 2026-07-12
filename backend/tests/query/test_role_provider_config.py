@@ -1,19 +1,45 @@
 from __future__ import annotations
 
 from rag.core.config import Settings
+from rag.query.adapters.rag_config_memory import InMemoryRagConfigRepository
+from rag.query.adapters.vllm_config_memory import (
+    InMemoryVllmDeploymentConfigRepository,
+)
 from rag.query import ollama as query_ollama
 from rag.query import openai_compatible as query_openai
 from rag.query.inference import build_inference_client
 from rag.query.http import ServiceRequestError
 from rag.query.rag_config_service import discover_runtime_models, list_runtime_models
-from rag.repositories.rag_config_models import RagConfigRecord
-from rag.repositories.rag_config_validation import env_rag_config
+from rag.query.rag_config_models import RagConfigRecord
+from rag.query.rag_config_repository import (
+    effective_rag_config,
+    rag_config_repository_from_settings,
+)
+from rag.query.rag_config_validation import env_rag_config
+from rag.query.vllm_config_repository import (
+    effective_vllm_deployment_config,
+    vllm_deployment_config_repository_from_settings,
+)
 
 
 class _Settings:
     rag_http_timeout_seconds = 45
     rag_dense_cache_dir = "/models/fastembed"
     ollama_num_ctx = 16384
+
+
+def test_query_config_providers_honor_memory_persistence_setting() -> None:
+    config = Settings(document_repository="memory", vllm_text_max_model_len=8192)
+
+    rag_repo = rag_config_repository_from_settings(config)
+    vllm_repo = vllm_deployment_config_repository_from_settings(config)
+
+    assert isinstance(rag_repo, InMemoryRagConfigRepository)
+    assert isinstance(vllm_repo, InMemoryVllmDeploymentConfigRepository)
+    assert effective_rag_config(config=config, repo=rag_repo).source == "env"
+    vllm_config = effective_vllm_deployment_config(config=config, repo=vllm_repo)
+    assert vllm_config.source == "environment"
+    assert vllm_config.text.max_model_len == 8192
 
 
 def test_env_rag_config_supports_mixed_role_providers() -> None:

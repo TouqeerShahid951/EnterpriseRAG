@@ -11,8 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from ...auth.dependencies import require_platform_admin_user
 from ...core.config import settings
-from ...repositories.identity import UserRecord
-from ...repositories.rag_config import (
+from ...auth.identity_models import UserRecord
+from ...query.rag_config_repository import (
     RagConfigRecord,
     RagConfigRepository,
     effective_rag_config,
@@ -20,7 +20,7 @@ from ...repositories.rag_config import (
     normalize_inference_base_url,
     normalize_ollama_base_url,
 )
-from ...repositories.vllm_deployment_config import (
+from ...query.vllm_config_repository import (
     VllmDeploymentConfigRecord,
     VllmDeploymentConfigRepository,
     VllmServiceLimitsRecord,

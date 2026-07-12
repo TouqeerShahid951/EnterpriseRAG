@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..repositories.rag_config import RagConfigRecord
+from .rag_config_models import RagConfigRecord
 from ..schemas.rag_config import RagConfigHealth, RagConfigResponse
 
 

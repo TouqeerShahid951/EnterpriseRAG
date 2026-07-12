@@ -19,7 +19,7 @@ from rag.internal import (
     rag_config_routes,
     review_batch_routes,
 )
-from rag.repositories.identity import get_identity_repository
+from rag.auth.identity_repository import get_identity_repository
 from rag.schemas.common import ErrorDetail, ErrorResponse, HealthResponse
 from rag.services.bootstrap_admin import ensure_initial_platform_admin
 

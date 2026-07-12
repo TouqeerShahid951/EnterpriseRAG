@@ -2,7 +2,7 @@ from uuid import uuid4
 
 from rag.auth.document_access import can_read_document, can_write_document
 from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.identity_models import UserRecord
+from rag.auth.identity_models import UserRecord
 
 
 def test_shared_document_is_readable_from_shared_space_with_clearance() -> None:

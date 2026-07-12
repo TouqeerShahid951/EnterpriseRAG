@@ -7,8 +7,8 @@ from datetime import UTC, datetime, timedelta
 from rag.core.config import settings
 from rag.repositories.document_models import DocumentRepository
 from rag.repositories.documents import get_document_repository
-from rag.repositories.ingest_config import (
-    IngestConfigRepository,
+from rag.ingestion.configuration import IngestConfigRepository
+from rag.ingestion.configuration_dependencies import (
     effective_ingest_config,
     get_ingest_config_repository,
 )

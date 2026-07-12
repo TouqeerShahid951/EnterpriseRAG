@@ -23,19 +23,16 @@ from ...artifact_jobs.repository import (
     get_artifact_job_repository,
 )
 from ...artifact_jobs.service import ArtifactJobActionError
-from ...repositories.identity import (
-    IdentityRepository,
-    UserRecord,
-    get_identity_repository,
-)
-from ...repositories.chat_history import (
+from ...auth.identity_models import IdentityRepository, UserRecord
+from ...auth.identity_repository import get_identity_repository
+from ...query.chat_history_repository import (
     ChatHistoryRepository,
     get_chat_history_repository,
 )
-from ...repositories.chat_history_models import ChatSessionRecord
+from ...query.chat_history_models import ChatSessionRecord
 from ...repositories.documents import DocumentRepository, get_document_repository
-from ...repositories.folder_schedule_models import FolderScheduleRepository
-from ...repositories.folder_schedules import get_folder_schedule_repository
+from ...ingestion.folder_schedule_dependencies import get_folder_schedule_repository
+from ...ingestion.folder_schedule_models import FolderScheduleRepository
 from ...connectors.repositories import (
     ConnectorProfileRepository,
     get_connector_profile_repository,

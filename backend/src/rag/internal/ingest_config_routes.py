@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from ..repositories.ingest_config import IngestConfigRepository, effective_ingest_config, get_ingest_config_repository
+from ..ingestion.configuration import IngestConfigRepository
+from ..ingestion.configuration_dependencies import effective_ingest_config, get_ingest_config_repository
 from ..schemas.ingest_config import IngestRuntimeConfigResponse
 from ..schemas.internal import ServiceTokenContext
 from .service_token_auth import require_service_token

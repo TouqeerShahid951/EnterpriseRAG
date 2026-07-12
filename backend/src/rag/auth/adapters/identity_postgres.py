@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from ..auth.abac import normalize_group_path
-from ..auth.permissions import AccountType, effective_clearance_level, normalize_account_type
-from ..shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
-from ..shared.contracts.group_paths import require_flat_group_path
-from .identity_models import GroupRecord, UserRecord
-from .postgres import PostgresConnectionMixin
+from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
+from ...shared.contracts.group_paths import require_flat_group_path
+from ..abac import normalize_group_path
+from ..identity_models import GroupRecord, UserRecord
+from ..permissions import AccountType, effective_clearance_level, normalize_account_type
 
 
 class PostgresIdentityRepository(PostgresConnectionMixin):

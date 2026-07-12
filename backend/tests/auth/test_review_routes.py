@@ -13,7 +13,7 @@ from rag.repositories.document_models import DocumentRecord, ReviewItemRecord
 from rag.repositories.document_postgres import PostgresDocumentRepository
 from rag.repositories.documents import get_document_repository, get_human_review_repository, get_image_review_repository
 from rag.repositories.human_review_postgres import PostgresHumanReviewRepository
-from rag.repositories.identity_models import UserRecord
+from rag.auth.identity_models import UserRecord
 from rag.repositories.image_review_postgres import PostgresImageReviewRepository
 from rag.repositories.ingest_job_postgres import PostgresIngestJobRepository
 from rag.repositories.ingest_jobs import get_ingest_job_repository

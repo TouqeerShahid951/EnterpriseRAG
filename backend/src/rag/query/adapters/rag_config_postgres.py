@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from .postgres import PostgresConnectionMixin
-from .rag_config_models import ACTIVE_CONFIG_KEY, RagConfigRecord
-from .rag_config_validation import record_from_row, with_updated_at
+from ...repositories.postgres import PostgresConnectionMixin
+from ..rag_config_models import ACTIVE_CONFIG_KEY, RagConfigRecord
+from ..rag_config_validation import record_from_row, with_updated_at
 
 
 class PostgresRagConfigRepository(PostgresConnectionMixin):

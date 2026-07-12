@@ -13,8 +13,8 @@ from rag.auth.dependencies import require_current_user
 from rag.repositories.audit_memory import RepositoryAuditRepository
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.documents import get_document_repository
-from rag.repositories.identity import get_identity_repository
-from rag.repositories.identity_models import UserRecord
+from rag.auth.identity_repository import get_identity_repository
+from rag.auth.identity_models import UserRecord
 
 
 class FakeIdentityRepository:

@@ -11,7 +11,7 @@ from rag.auth.dependencies import require_current_user
 from rag.auth.issued_tokens import create_auth_tokens
 from rag.auth.refresh_sessions import InMemoryRefreshSessionStore, auth_idle_ttl_seconds
 from rag.core.config import settings
-from rag.repositories.identity_models import UserRecord
+from rag.auth.identity_models import UserRecord
 
 
 class FakeIdentityRepository:

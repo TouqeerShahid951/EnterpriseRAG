@@ -26,8 +26,10 @@ from ...query.sources import source_from_hit
 from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
 from ...repositories.documents import DocumentRecord, DocumentRepository, get_document_repository
-from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
-from ...repositories.ingest_config import IngestConfigRepository, effective_ingest_config, get_ingest_config_repository
+from ...auth.identity_models import IdentityRepository, UserRecord
+from ...auth.identity_repository import get_identity_repository
+from ...ingestion.configuration import IngestConfigRepository
+from ...ingestion.configuration_dependencies import effective_ingest_config, get_ingest_config_repository
 from ...repositories.ingest_job_models import IngestJobRecord, IngestJobRepository
 from ...repositories.ingest_jobs import get_ingest_job_repository
 from ...schemas.common import ErrorResponse

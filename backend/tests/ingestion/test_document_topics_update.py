@@ -8,7 +8,7 @@ from fastapi import Request
 from rag.api.routes import document_routes
 from rag.core.config import settings
 from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.identity import UserRecord
+from rag.auth.identity_models import UserRecord
 from rag.schemas.docs import DocumentTopicsUpdateRequest
 
 

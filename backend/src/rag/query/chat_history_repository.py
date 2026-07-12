@@ -5,9 +5,9 @@ from __future__ import annotations
 from functools import lru_cache
 
 from ..core.config import settings
-from .chat_history_memory import InMemoryChatHistoryRepository
+from .adapters.chat_history_memory import InMemoryChatHistoryRepository
+from .adapters.chat_history_postgres import PostgresChatHistoryRepository
 from .chat_history_models import ChatHistoryRepository, ChatSessionRecord
-from .chat_history_postgres import PostgresChatHistoryRepository
 
 
 @lru_cache

@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from ...auth.abac import normalize_group_path
 from ...auth.context import UserContext
 from ...auth.dependencies import require_platform_admin_user
-from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
+from ...auth.identity_models import IdentityRepository, UserRecord
+from ...auth.identity_repository import get_identity_repository
 from ...schemas.evaluations import (
     EvaluationDatasetDetail,
     EvaluationDatasetImportRequest,

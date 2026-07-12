@@ -15,7 +15,7 @@ from .audit_models import (
     payload_document_title,
 )
 from .document_models import AuditEventRecord, DocumentRecord, DocumentRepository
-from .identity_models import IdentityRepository
+from ..auth.identity_models import IdentityRepository
 
 
 class RepositoryAuditRepository:

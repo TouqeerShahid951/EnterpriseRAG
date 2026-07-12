@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from ..auth.passwords import hash_password
-from ..repositories.identity import IdentityRepository, UserRecord
+from ..auth.identity_models import IdentityRepository, UserRecord
 
 
 logger = logging.getLogger(__name__)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rag.repositories.chat_history_memory import InMemoryChatHistoryRepository
+from rag.query.adapters.chat_history_memory import InMemoryChatHistoryRepository
 
 
 class ChatHistoryRepositoryTests(unittest.TestCase):

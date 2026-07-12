@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..auth.context import UserContext
-from ..repositories.rag_config import effective_rag_config
+from ..query.rag_config_repository import effective_rag_config
 from ..query.rag_config_mapping import rag_config_response
 from ..schemas.evaluations import (
     EvaluationCaseResult,

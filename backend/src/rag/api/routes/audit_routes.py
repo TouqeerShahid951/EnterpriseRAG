@@ -25,11 +25,8 @@ from ...repositories.audit_models import (
     MAX_AUDIT_SCAN_LIMIT,
 )
 from ...repositories.documents import DocumentRepository, get_document_repository
-from ...repositories.identity import (
-    IdentityRepository,
-    UserRecord,
-    get_identity_repository,
-)
+from ...auth.identity_models import IdentityRepository, UserRecord
+from ...auth.identity_repository import get_identity_repository
 from ...schemas.audit import AuditEvent, AuditEventListResponse, AuditSummary
 from ...schemas.common import ErrorResponse
 from ...shared.contracts.group_paths import normalize_group_path

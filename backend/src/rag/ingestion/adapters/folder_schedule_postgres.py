@@ -6,10 +6,10 @@ import json
 from datetime import datetime
 from typing import Any
 
-from ..auth.abac import normalize_group_path
-from ..shared.contracts.clearance import normalize_clearance_level
-from .folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord
-from .postgres import PostgresConnectionMixin
+from ...auth.abac import normalize_group_path
+from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.contracts.clearance import normalize_clearance_level
+from ..folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord
 
 
 class PostgresFolderScheduleRepository(PostgresConnectionMixin):

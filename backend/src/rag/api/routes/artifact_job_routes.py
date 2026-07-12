@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from ...auth.context import UserContext
 from ...auth.dependencies import require_csrf, require_current_user
-from ...repositories.identity_models import UserRecord
+from ...auth.identity_models import UserRecord
 from ...schemas.artifact_jobs import (
     ArtifactClarificationRequest,
     ArtifactJobDetail,

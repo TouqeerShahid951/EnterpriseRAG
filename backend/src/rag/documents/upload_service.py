@@ -18,7 +18,7 @@ from ..ingestion.contracts import IngestJobPayload
 from ..ingestion.quality import normalize_ingestion_quality_preset
 from ..ingestion.queue import IngestQueue
 from ..repositories.document_models import DocumentRepository
-from ..repositories.identity_models import IdentityRepository, UserRecord
+from ..auth.identity_models import IdentityRepository, UserRecord
 from ..repositories.ingest_job_models import IngestJobRepository
 from ..shared.contracts.clearance import clearance_rank, normalize_clearance_level
 from .scanning import FileScanner

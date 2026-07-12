@@ -31,8 +31,8 @@ from rag.connectors.sql_safety import (
     validate_read_only_sql,
 )
 from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.folder_schedule_memory import InMemoryFolderScheduleRepository
-from rag.repositories.identity_memory import InMemoryIdentityRepository
+from rag.ingestion.adapters.folder_schedule_memory import InMemoryFolderScheduleRepository
+from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
 from rag.services.folder_ingestion import create_local_folder_schedule, dispatch_due_schedules
 from rag.services.folder_sources import LocalFolderSource, list_local_folder_directories
 from rag.ingestion.queue import InMemoryIngestQueue

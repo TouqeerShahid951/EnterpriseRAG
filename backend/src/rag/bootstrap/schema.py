@@ -14,11 +14,11 @@ from rag.ops.migrate_image_review_cli import DDL as IMAGE_REVIEW_DDL
 from rag.ops.migrate_ocr_review_cli import DDL as OCR_REVIEW_DDL
 from rag.ops.migrate_parser_provenance_cli import DDL as PARSER_PROVENANCE_DDL
 from rag.ops.migrate_user_deletion_cli import MIGRATION_SQL as USER_DELETION_MIGRATION_SQL
-from rag.repositories.chat_history_postgres import CHAT_HISTORY_SCHEMA_SQL
-from rag.repositories.ingest_config import PostgresIngestConfigRepository
+from rag.query.adapters.chat_history_postgres import CHAT_HISTORY_SCHEMA_SQL
+from rag.query.adapters.rag_config_postgres import PostgresRagConfigRepository
+from rag.query.adapters.vllm_config_postgres import PostgresVllmDeploymentConfigRepository
+from rag.ingestion.adapters.configuration_postgres import PostgresIngestConfigRepository
 from rag.repositories.postgres import PostgresConnectionMixin
-from rag.repositories.rag_config_postgres import PostgresRagConfigRepository
-from rag.repositories.vllm_deployment_config import PostgresVllmDeploymentConfigRepository
 
 
 class _SchemaBootstrap(PostgresConnectionMixin):

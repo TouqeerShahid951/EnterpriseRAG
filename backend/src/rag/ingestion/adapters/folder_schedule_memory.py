@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from ..auth.abac import normalize_group_path
-from ..shared.contracts.clearance import normalize_clearance_level
-from .folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord
+from ...auth.abac import normalize_group_path
+from ...shared.contracts.clearance import normalize_clearance_level
+from ..folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord
 
 
 class InMemoryFolderScheduleRepository:

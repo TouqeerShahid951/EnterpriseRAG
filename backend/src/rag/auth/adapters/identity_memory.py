@@ -6,10 +6,10 @@ from datetime import UTC, datetime
 from threading import RLock
 from uuid import uuid4
 
-from ..auth.permissions import AccountType, effective_clearance_level, normalize_account_type
-from ..shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
-from ..shared.contracts.group_paths import normalize_group_path, require_flat_group_path
-from .identity_models import GroupRecord, UserRecord
+from ...shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
+from ...shared.contracts.group_paths import normalize_group_path, require_flat_group_path
+from ..identity_models import GroupRecord, UserRecord
+from ..permissions import AccountType, effective_clearance_level, normalize_account_type
 
 
 class InMemoryIdentityRepository:

@@ -22,11 +22,8 @@ from ..ingestion.queue import IngestQueue, get_ingest_queue
 from ..repositories.documents import DocumentRepository, get_document_repository
 from ..repositories.ingest_job_models import IngestJobRepository
 from ..repositories.ingest_jobs import get_ingest_job_repository
-from ..repositories.identity import (
-    IdentityRepository,
-    UserRecord,
-    get_identity_repository,
-)
+from ..auth.identity_models import IdentityRepository, UserRecord
+from ..auth.identity_repository import get_identity_repository
 from ..schemas.common import StubResponse
 from ..shared.contracts.clearance import DEFAULT_CLEARANCE_LEVEL
 from .dependencies import get_file_scanner, get_upload_storage

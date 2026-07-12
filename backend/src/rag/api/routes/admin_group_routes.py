@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from ...auth.dependencies import require_admin_user, require_csrf, require_current_user
 from ...auth.permissions import can_manage_spaces, can_manage_users
 from ...auth.refresh_sessions import RefreshSessionStore, get_refresh_session_store
-from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
+from ...auth.identity_models import IdentityRepository, UserRecord
+from ...auth.identity_repository import get_identity_repository
 from ...schemas.admin import Group, GroupCreateRequest, GroupDeleteRequest, GroupListResponse, GroupUpdateRequest
 from ...schemas.common import ErrorResponse, StubResponse
 from .route_responses import not_implemented

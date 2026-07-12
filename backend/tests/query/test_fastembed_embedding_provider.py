@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from rag.query import rag_config_service
 from rag.query.rag_config_service import validate_rag_config
-from rag.repositories.rag_config_models import RagConfigRecord
+from rag.query.rag_config_models import RagConfigRecord
 
 
 class _Qdrant:

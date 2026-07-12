@@ -1,48 +1,12 @@
-"""Persistent workspace ingestion worker configuration."""
+"""PostgreSQL adapter for workspace ingestion configuration."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime
-from functools import lru_cache
-from typing import Protocol
-
-from rag.ingestion.quality import DEFAULT_INGESTION_QUALITY_PRESET, normalize_ingestion_quality_preset
-
-from ..core.config import Settings, settings
-from .postgres import PostgresConnectionMixin
+from ...repositories.postgres import PostgresConnectionMixin
+from ..configuration import IngestConfigRecord
+from ..quality import normalize_ingestion_quality_preset
 
 ACTIVE_CONFIG_KEY = "active"
-
-
-@dataclass(frozen=True)
-class IngestConfigRecord:
-    worker_concurrency: int = 1
-    quality_preset: str = DEFAULT_INGESTION_QUALITY_PRESET
-    ocr_review_confidence_threshold: float = 0.9
-    pdf_image_review_threshold: int = 64
-    vision_layout_repair_enabled: bool = False
-    graph_enrichment_enabled: bool = False
-    updated_by: str | None = None
-    updated_at: datetime | None = None
-    source: str = "workspace"
-
-
-class IngestConfigRepository(Protocol):
-    def get_active(self) -> IngestConfigRecord | None: ...
-    def save_active(self, config: IngestConfigRecord) -> IngestConfigRecord: ...
-
-
-class InMemoryIngestConfigRepository:
-    def __init__(self) -> None:
-        self.active: IngestConfigRecord | None = None
-
-    def get_active(self) -> IngestConfigRecord | None:
-        return self.active
-
-    def save_active(self, config: IngestConfigRecord) -> IngestConfigRecord:
-        self.active = replace(config, updated_at=datetime.now(UTC))
-        return self.active
 
 
 class PostgresIngestConfigRepository(PostgresConnectionMixin):
@@ -215,35 +179,3 @@ class PostgresIngestConfigRepository(PostgresConnectionMixin):
                 )
                 """
             )
-
-
-def effective_ingest_config(
-    *,
-    config: Settings = settings,
-    repo: IngestConfigRepository | None = None,
-) -> IngestConfigRecord:
-    repository = repo or ingest_config_repository_from_settings(config)
-    return repository.get_active() or IngestConfigRecord(
-        worker_concurrency=config.ingest_worker_boot_concurrency,
-        quality_preset=normalize_ingestion_quality_preset(config.ingestion_quality_preset),
-        ocr_review_confidence_threshold=config.ocr_review_confidence_threshold,
-        pdf_image_review_threshold=config.pdf_image_review_threshold,
-        vision_layout_repair_enabled=False,
-        graph_enrichment_enabled=False,
-        source="env",
-    )
-
-
-def ingest_config_repository_from_settings(config: Settings) -> IngestConfigRepository:
-    if config.document_repository == "memory":
-        return InMemoryIngestConfigRepository()
-    return PostgresIngestConfigRepository(config.database_url)
-
-
-@lru_cache
-def default_ingest_config_repository() -> IngestConfigRepository:
-    return ingest_config_repository_from_settings(settings)
-
-
-def get_ingest_config_repository() -> IngestConfigRepository:
-    return default_ingest_config_repository()

@@ -10,7 +10,7 @@ from rag.repositories.audit_models import AuditFilters, AuditViewerScope
 from rag.repositories.audit_postgres import PostgresAuditRepository
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.document_postgres import PostgresDocumentRepository
-from rag.repositories.identity_memory import InMemoryIdentityRepository
+from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
 
 
 class CapturingPostgresAuditRepository(PostgresAuditRepository):

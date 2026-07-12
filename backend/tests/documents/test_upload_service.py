@@ -16,7 +16,8 @@ from rag.documents.scanning import MalwareDetectedError, ScannerUnavailableError
 from rag.documents.storage import StoredUpload
 from rag.ingestion.contracts import IngestJobPayload
 from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.identity import InMemoryIdentityRepository, UserRecord
+from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
+from rag.auth.identity_models import UserRecord
 
 PDF_CONTENT = b"%PDF-1.7\nservice upload\n%%EOF"
 

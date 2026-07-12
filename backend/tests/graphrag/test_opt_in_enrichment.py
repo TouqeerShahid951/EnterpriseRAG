@@ -12,8 +12,9 @@ from rag.core.config import settings
 from rag.graphrag import tasks as graphrag_tasks
 from rag.ingestion import tasks as ingestion_tasks
 from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.identity_models import UserRecord
-from rag.repositories.ingest_config import IngestConfigRecord, InMemoryIngestConfigRepository
+from rag.auth.identity_models import UserRecord
+from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
+from rag.ingestion.configuration import IngestConfigRecord
 from rag.schemas.ingest_jobs import GraphRAGCancelRequest
 from rag.services.graphrag_queue import GraphRAGDocumentIndexMessage, InMemoryGraphRAGMaintenanceQueue
 from rag.ingestion.worker_control import WorkerActiveTask, WorkerCapacity, WorkerControlResult

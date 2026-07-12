@@ -5,9 +5,9 @@ from __future__ import annotations
 from functools import lru_cache
 
 from ..core.config import Settings, settings
-from .rag_config_memory import InMemoryRagConfigRepository
+from .adapters.rag_config_memory import InMemoryRagConfigRepository
+from .adapters.rag_config_postgres import PostgresRagConfigRepository
 from .rag_config_models import DEFAULT_OLLAMA_PORT, DEFAULT_VLLM_PORT, RagConfigRecord, RagConfigRepository
-from .rag_config_postgres import PostgresRagConfigRepository
 from .rag_config_validation import env_rag_config, normalize_inference_base_url, normalize_ollama_base_url
 
 

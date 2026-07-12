@@ -6,7 +6,7 @@ from datetime import timedelta
 from secrets import token_urlsafe
 
 from ..core.config import settings
-from ..repositories.identity import UserRecord
+from .identity_models import UserRecord
 from .tokens import create_token
 
 ACCESS_TOKEN_TYPE = "access"

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from ..auth.permissions import AccountType
+from .permissions import AccountType
 from ..shared.contracts.clearance import ClearanceLevel
 
 

@@ -1,4 +1,4 @@
-"""Folder ingestion schedule repository contracts."""
+"""Folder-ingestion schedule records and persistence contract."""
 
 from __future__ import annotations
 

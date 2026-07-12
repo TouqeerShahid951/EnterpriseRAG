@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
-from .chat_history_models import ChatSessionRecord
+from ..chat_history_models import ChatSessionRecord
 
 
 class InMemoryChatHistoryRepository:

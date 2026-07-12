@@ -14,8 +14,8 @@ from ..core.config import settings
 from ..ingestion.contracts import IngestJobPayload
 from ..ingestion.queue import IngestQueue
 from ..repositories.document_models import DocumentRepository
-from ..repositories.folder_schedule_models import FolderRunItemRecord, FolderScheduleRecord, FolderScheduleRepository
-from ..repositories.identity import IdentityRepository, UserRecord
+from ..ingestion.folder_schedule_models import FolderRunItemRecord, FolderScheduleRecord, FolderScheduleRepository
+from ..auth.identity_models import IdentityRepository, UserRecord
 from ..repositories.ingest_job_models import IngestJobRepository
 from ..shared.contracts.clearance import clearance_rank, normalize_clearance_level
 from .document_uploads import (

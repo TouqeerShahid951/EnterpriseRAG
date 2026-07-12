@@ -15,9 +15,10 @@ from ...core.config import settings
 from ...connectors.repositories import ConnectorProfileRepository, get_connector_profile_repository
 from ...shared.contracts.clearance import can_access_clearance
 from ...repositories.documents import DocumentRepository, get_document_repository
-from ...repositories.folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord, FolderScheduleRepository
-from ...repositories.folder_schedules import get_folder_schedule_repository
-from ...repositories.identity import IdentityRepository, UserRecord, get_identity_repository
+from ...ingestion.folder_schedule_dependencies import get_folder_schedule_repository
+from ...ingestion.folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord, FolderScheduleRepository
+from ...auth.identity_models import IdentityRepository, UserRecord
+from ...auth.identity_repository import get_identity_repository
 from ...repositories.ingest_job_models import IngestJobRepository
 from ...repositories.ingest_jobs import get_ingest_job_repository
 from ...schemas.folder_ingest import (

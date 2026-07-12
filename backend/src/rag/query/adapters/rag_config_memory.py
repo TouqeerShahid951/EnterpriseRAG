@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from .rag_config_models import RagConfigRecord
-from .rag_config_validation import with_updated_at
+from ..rag_config_models import RagConfigRecord
+from ..rag_config_validation import with_updated_at
 
 
 class InMemoryRagConfigRepository:

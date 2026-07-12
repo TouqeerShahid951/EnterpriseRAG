@@ -7,7 +7,7 @@ import json
 from rag.core.config import settings
 from rag.query.qdrant import QdrantClient
 from rag.repositories.documents import get_document_repository
-from rag.repositories.folder_schedules import get_folder_schedule_repository
+from rag.ingestion.folder_schedule_dependencies import get_folder_schedule_repository
 from rag.services.connector_schedule_retirement import retire_connector_schedules
 from rag.services.document_image_asset_storage import get_document_image_asset_storage
 from rag.documents.dependencies import get_upload_storage

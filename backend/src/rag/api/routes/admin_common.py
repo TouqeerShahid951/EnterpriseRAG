@@ -16,7 +16,7 @@ from ...auth.permissions import (
     filter_group_paths_for_user,
     is_global_admin,
 )
-from ...repositories.identity import GroupRecord, IdentityRepository, UserRecord
+from ...auth.identity_models import GroupRecord, IdentityRepository, UserRecord
 from ...schemas.admin import Group, UserAdmin
 
 

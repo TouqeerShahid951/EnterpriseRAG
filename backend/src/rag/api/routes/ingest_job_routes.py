@@ -26,8 +26,9 @@ from ...repositories.ingest_job_models import (
     IngestJobView,
 )
 from ...repositories.ingest_jobs import get_ingest_job_repository
-from ...repositories.identity import UserRecord
-from ...repositories.ingest_config import IngestConfigRepository, effective_ingest_config, get_ingest_config_repository
+from ...auth.identity_models import UserRecord
+from ...ingestion.configuration import IngestConfigRepository
+from ...ingestion.configuration_dependencies import effective_ingest_config, get_ingest_config_repository
 from ...schemas.common import ErrorResponse
 from ...schemas.ingest_jobs import (
     GraphRAGActiveTask,

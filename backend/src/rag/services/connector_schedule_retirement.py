@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ..repositories.document_models import DocumentRepository
-from ..repositories.folder_schedule_models import FolderScheduleRecord, FolderScheduleRepository
+from ..ingestion.folder_schedule_models import FolderScheduleRecord, FolderScheduleRepository
 
 
 class _VectorStore(Protocol):

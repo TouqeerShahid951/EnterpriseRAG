@@ -22,7 +22,7 @@ from ..query.intent_router import route_query
 from ..query.sources import dedupe_hits
 from ..query.temporal import add_effective_date_scope, target_date_for_query
 from ..repositories.document_models import DocumentRecord, DocumentRepository
-from ..repositories.rag_config_models import RagConfigRecord
+from ..query.rag_config_models import RagConfigRecord
 from ..schemas.query import QueryRequest
 from .contracts import (
     DocumentPlan,

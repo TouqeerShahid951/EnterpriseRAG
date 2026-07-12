@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from ..repositories.rag_config import RagConfigRepository, effective_rag_config, get_rag_config_repository
+from ..query.rag_config_repository import RagConfigRepository, effective_rag_config, get_rag_config_repository
 from ..query.rag_config_mapping import rag_config_response
 from ..schemas.internal import ServiceTokenContext
 from ..schemas.rag_config import RagConfigResponse

@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .chat_history_models import ChatSessionRecord
-from .postgres import PostgresConnectionMixin
+from ...repositories.postgres import PostgresConnectionMixin
+from ..chat_history_models import ChatSessionRecord
 
 
 class PostgresChatHistoryRepository(PostgresConnectionMixin):

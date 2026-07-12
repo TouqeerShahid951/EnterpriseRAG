@@ -16,8 +16,8 @@ from ..core.config import Settings
 from ..query.inference import InferenceClient
 from ..query.qdrant import QdrantClient
 from ..repositories.document_models import DocumentRepository
-from ..repositories.identity_models import IdentityRepository, UserRecord
-from ..repositories.rag_config_models import RagConfigRecord
+from ..auth.identity_models import IdentityRepository, UserRecord
+from ..query.rag_config_models import RagConfigRecord
 from ..services.generated_artifact_storage import GeneratedArtifactStorage
 from .composer import (
     COMPOSER_PROMPT_VERSION,
@@ -852,8 +852,8 @@ def default_artifact_job_executor(
     from ..core.config import settings
     from ..query.inference import build_inference_client
     from ..repositories.documents import get_document_repository
-    from ..repositories.identity import get_identity_repository
-    from ..repositories.rag_config import effective_rag_config
+    from ..auth.identity_repository import get_identity_repository
+    from ..query.rag_config_repository import effective_rag_config
     from ..services.generated_artifact_storage import get_generated_artifact_storage
     from .generated_repository import get_generated_artifact_repository
     from .repository import get_artifact_job_repository

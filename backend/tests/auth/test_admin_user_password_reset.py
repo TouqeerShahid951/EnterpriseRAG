@@ -7,8 +7,8 @@ from rag.api.routes import admin_user_routes
 from rag.auth.passwords import hash_password, verify_password
 from rag.auth.refresh_sessions import InMemoryRefreshSessionStore
 from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.identity_memory import InMemoryIdentityRepository
-from rag.repositories.identity_models import UserRecord
+from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
+from rag.auth.identity_models import UserRecord
 from rag.schemas.admin import UserPasswordResetRequest
 
 

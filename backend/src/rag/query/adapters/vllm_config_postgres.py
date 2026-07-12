@@ -1,54 +1,13 @@
-"""Persistent desired vLLM container deployment limits."""
+"""PostgreSQL adapter for desired vLLM deployment limits."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime
-from functools import lru_cache
-from typing import Protocol
-
-from ..core.config import Settings, settings
-from .postgres import PostgresConnectionMixin
-
-ACTIVE_CONFIG_KEY = "active"
-
-
-@dataclass(frozen=True)
-class VllmServiceLimitsRecord:
-    max_model_len: int
-    gpu_memory_utilization: float
-    max_num_seqs: int
-    max_num_batched_tokens: int
-    kv_cache_memory_bytes: str | None = None
-
-
-@dataclass(frozen=True)
-class VllmDeploymentConfigRecord:
-    text: VllmServiceLimitsRecord
-    embeddings: VllmServiceLimitsRecord
-    vision: VllmServiceLimitsRecord
-    apply_status: str = "restart_required"
-    message: str | None = None
-    updated_by: str | None = None
-    updated_at: datetime | None = None
-    source: str = "workspace"
-
-
-class VllmDeploymentConfigRepository(Protocol):
-    def get_active(self) -> VllmDeploymentConfigRecord | None: ...
-    def save_active(self, config: VllmDeploymentConfigRecord) -> VllmDeploymentConfigRecord: ...
-
-
-class InMemoryVllmDeploymentConfigRepository:
-    def __init__(self) -> None:
-        self.active: VllmDeploymentConfigRecord | None = None
-
-    def get_active(self) -> VllmDeploymentConfigRecord | None:
-        return self.active
-
-    def save_active(self, config: VllmDeploymentConfigRecord) -> VllmDeploymentConfigRecord:
-        self.active = replace(config, updated_at=datetime.now(UTC))
-        return self.active
+from ...repositories.postgres import PostgresConnectionMixin
+from ..vllm_config_models import (
+    ACTIVE_CONFIG_KEY,
+    VllmDeploymentConfigRecord,
+    VllmServiceLimitsRecord,
+)
 
 
 class PostgresVllmDeploymentConfigRepository(PostgresConnectionMixin):
@@ -167,56 +126,6 @@ class PostgresVllmDeploymentConfigRepository(PostgresConnectionMixin):
                 )
                 """
             )
-
-
-def effective_vllm_deployment_config(
-    *,
-    config: Settings = settings,
-    repo: VllmDeploymentConfigRepository | None = None,
-) -> VllmDeploymentConfigRecord:
-    repository = repo or vllm_deployment_config_repository_from_settings(config)
-    return repository.get_active() or env_vllm_deployment_config(config)
-
-
-def env_vllm_deployment_config(config: Settings = settings) -> VllmDeploymentConfigRecord:
-    return VllmDeploymentConfigRecord(
-        text=VllmServiceLimitsRecord(
-            max_model_len=config.vllm_text_max_model_len,
-            gpu_memory_utilization=config.vllm_text_gpu_memory_utilization,
-            kv_cache_memory_bytes=config.vllm_text_kv_cache_memory_bytes,
-            max_num_seqs=config.vllm_text_max_num_seqs,
-            max_num_batched_tokens=config.vllm_text_max_num_batched_tokens,
-        ),
-        embeddings=VllmServiceLimitsRecord(
-            max_model_len=config.vllm_embed_max_model_len,
-            gpu_memory_utilization=config.vllm_embed_gpu_memory_utilization,
-            max_num_seqs=config.vllm_embed_max_num_seqs,
-            max_num_batched_tokens=config.vllm_embed_max_num_batched_tokens,
-        ),
-        vision=VllmServiceLimitsRecord(
-            max_model_len=config.vllm_vision_max_model_len,
-            gpu_memory_utilization=config.vllm_vision_gpu_memory_utilization,
-            kv_cache_memory_bytes=config.vllm_vision_kv_cache_memory_bytes,
-            max_num_seqs=config.vllm_vision_max_num_seqs,
-            max_num_batched_tokens=config.vllm_vision_max_num_batched_tokens,
-        ),
-        source="environment",
-    )
-
-
-def vllm_deployment_config_repository_from_settings(config: Settings) -> VllmDeploymentConfigRepository:
-    if config.document_repository == "memory":
-        return InMemoryVllmDeploymentConfigRepository()
-    return PostgresVllmDeploymentConfigRepository(config.database_url)
-
-
-@lru_cache
-def default_vllm_deployment_config_repository() -> VllmDeploymentConfigRepository:
-    return vllm_deployment_config_repository_from_settings(settings)
-
-
-def get_vllm_deployment_config_repository() -> VllmDeploymentConfigRepository:
-    return default_vllm_deployment_config_repository()
 
 
 def _record_from_row(row: dict[str, object]) -> VllmDeploymentConfigRecord:

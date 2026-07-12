@@ -5,7 +5,8 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, Request, Response, status
 
 from ..core.config import settings
-from ..repositories.identity import IdentityRepository, UserRecord, get_identity_repository
+from .identity_models import IdentityRepository, UserRecord
+from .identity_repository import get_identity_repository
 from ..schemas.auth import AuthUser
 from .issued_tokens import ACCESS_TOKEN_TYPE, REFRESH_TOKEN_TYPE
 from .permissions import can_manage_users, can_manage_workspace_config, can_review, is_global_admin

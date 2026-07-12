@@ -44,8 +44,8 @@ from rag.auth.context import UserContext
 from rag.core.config import Settings
 from rag.query.qdrant import SearchHit
 from rag.repositories.document_models import DocumentRecord
-from rag.repositories.identity_models import UserRecord
-from rag.repositories.rag_config_models import RagConfigRecord
+from rag.auth.identity_models import UserRecord
+from rag.query.rag_config_models import RagConfigRecord
 from rag.services.generated_artifact_storage import LocalGeneratedArtifactStorage
 
 

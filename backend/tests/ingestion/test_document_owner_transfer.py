@@ -11,8 +11,9 @@ from rag.core.config import settings
 from rag.graphrag.cleanup import GraphRAGCleanupResult
 from rag.query.http import ServiceRequestError
 from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.identity import InMemoryIdentityRepository, UserRecord
-from rag.repositories.ingest_config import InMemoryIngestConfigRepository
+from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
+from rag.auth.identity_models import UserRecord
+from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
 from rag.schemas.docs import DocumentOwnerUpdateRequest
 from rag.services.graphrag_queue import InMemoryGraphRAGMaintenanceQueue
 

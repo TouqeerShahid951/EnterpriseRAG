@@ -21,8 +21,8 @@ from rag.query.source_resolution import (
     validate_query_source_access,
 )
 from rag.query.state import initial_state
-from rag.repositories.folder_schedule_memory import InMemoryFolderScheduleRepository
-from rag.repositories.identity_memory import InMemoryIdentityRepository
+from rag.ingestion.adapters.folder_schedule_memory import InMemoryFolderScheduleRepository
+from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
 from rag.schemas.query import QueryRequest
 
 

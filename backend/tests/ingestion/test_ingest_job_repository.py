@@ -13,7 +13,7 @@ from rag.internal.ingest_status_routes import start_ingest_job_attempt, update_i
 from rag.ingestion import maintenance as ingest_maintenance
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.document_postgres import PostgresDocumentRepository
-from rag.repositories.ingest_config import InMemoryIngestConfigRepository
+from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
 from rag.repositories.ingest_job_models import (
     IngestJobAccess,
     IngestJobFilters,

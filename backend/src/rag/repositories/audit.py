@@ -7,7 +7,7 @@ from .audit_models import AuditRepository
 from .audit_postgres import PostgresAuditRepository
 from .document_models import DocumentRepository
 from .document_postgres import PostgresDocumentRepository
-from .identity_models import IdentityRepository
+from ..auth.identity_models import IdentityRepository
 
 
 def audit_repository_for(
