@@ -474,9 +474,11 @@ docker compose --env-file .env.windows-airgap up -d --no-build --pull never --fo
 ```
 
 The `deployment-controller` service is profile-gated with `vllm` and is present
-only for later vLLM apply/recreate actions. On Windows, its Docker CLI bind
-mounts may need adjustment before using the in-app vLLM deployment controls. The
-Ollama-only path does not require those controls.
+only for later vLLM apply/recreate actions. It uses its own minimal image and the
+dedicated `DEPLOYMENT_CONTROLLER_TOKEN`; keep that value identical in the API
+and controller environments. On Windows, its Docker CLI bind mounts may need
+adjustment before using the in-app vLLM deployment controls. The Ollama-only
+path does not require those controls.
 
 ## Troubleshooting
 

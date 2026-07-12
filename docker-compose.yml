@@ -32,7 +32,8 @@ x-backend-env: &backend-env
   EVALUATION_ANSWER_LLM_VERIFIER_ENABLED: ${EVALUATION_ANSWER_LLM_VERIFIER_ENABLED:-true}
   EVALUATION_ANSWER_LLM_VERIFIER_MODEL: ${EVALUATION_ANSWER_LLM_VERIFIER_MODEL:-}
   DATABASE_URL: ${DATABASE_URL:-postgresql://agenticrag:agenticrag-local-password@postgres:5432/agenticrag}
-  DEPLOYMENT_CONTROLLER_TIMEOUT_SECONDS: ${DEPLOYMENT_CONTROLLER_TIMEOUT_SECONDS:-600}
+  DEPLOYMENT_CONTROLLER_TIMEOUT_SECONDS: ${DEPLOYMENT_CONTROLLER_TIMEOUT_SECONDS:-930}
+  DEPLOYMENT_CONTROLLER_TOKEN: ${DEPLOYMENT_CONTROLLER_TOKEN:-replace-with-local-deployment-controller-token}
   DEPLOYMENT_CONTROLLER_URL: ${DEPLOYMENT_CONTROLLER_URL:-http://deployment-controller:8080}
   DOCUMENT_REPOSITORY: ${DOCUMENT_REPOSITORY:-postgres}
   DO_NOT_TRACK: ${DO_NOT_TRACK:-1}
@@ -429,24 +430,27 @@ services:
       retries: 120
 
   deployment-controller:
-    image: agenticrag-api
+    image: agenticrag-deployment-controller
+    build:
+      context: ./backend
+      dockerfile: apps/deployment_controller/Dockerfile
     restart: unless-stopped
     profiles: ["vllm"]
     user: "0:0"
-    command: ["python", "/workspace/deployment-controller/server.py"]
+    command: ["python", "-m", "apps.deployment_controller.main"]
     environment:
       DEPLOYMENT_ALLOWED_SERVICES: vllm-text,vllm-embeddings,vllm-vision
       DEPLOYMENT_COMPOSE_FILE: /workspace/docker-compose.yml
       DEPLOYMENT_COMPOSE_PROJECT_DIR: /workspace
       DEPLOYMENT_COMPOSE_PROJECT_NAME: agenticrag
       DEPLOYMENT_COMPOSE_TIMEOUT_SECONDS: ${DEPLOYMENT_COMPOSE_TIMEOUT_SECONDS:-900}
-      DEPLOYMENT_CONTROLLER_TOKEN: ${SERVICE_TOKEN:-replace-with-local-service-token}
+      DEPLOYMENT_CONTROLLER_TOKEN: ${DEPLOYMENT_CONTROLLER_TOKEN:-replace-with-local-deployment-controller-token}
       PORT: 8080
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/workspace:ro
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health/live\", timeout=2)'"]
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health/ready\", timeout=2)'"]
       interval: 10s
       timeout: 5s
       start_period: 5s

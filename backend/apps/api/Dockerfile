@@ -36,8 +36,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         poppler-utils \
         fonts-dejavu \
         libgssapi-krb5-2 \
-        docker-cli \
-        docker-compose \
     && . /etc/os-release \
     && debian_version="${VERSION_ID%%.*}" \
     && curl -fSL -o packages-microsoft-prod.deb "https://packages.microsoft.com/config/debian/${debian_version}/packages-microsoft-prod.deb" \

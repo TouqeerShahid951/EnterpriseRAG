@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+REPOSITORY_ROOT = BACKEND_ROOT.parent
 SRC_ROOT = BACKEND_ROOT / "src"
 RAG_ROOT = BACKEND_ROOT / "src" / "rag"
 
@@ -103,6 +104,13 @@ def test_legacy_feature_route_modules_are_absent_and_not_imported() -> None:
     )
 
     _assert_no_violations(violations)
+
+
+def test_deployment_controller_uses_backend_composition_root() -> None:
+    assert (
+        BACKEND_ROOT / "apps" / "deployment_controller" / "main.py"
+    ).is_file()
+    assert not (REPOSITORY_ROOT / "deployment-controller").exists()
 
 
 def _find_violations(

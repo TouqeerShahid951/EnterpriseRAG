@@ -59,7 +59,7 @@ feature migration.
 
 ## Runtime processes
 
-The deployment has three kinds of long-running process:
+The deployment has four kinds of long-running process:
 
 - **API:** `api` serves HTTP through the FastAPI composition root in `apps/api`.
 - **Queue workers:** `artifact-worker`, `ingestion-worker`, `graphrag-worker`,
@@ -70,6 +70,10 @@ The deployment has three kinds of long-running process:
   `ingest-maintenance` are separate containers and operating-system processes,
   not Celery workers. They periodically clean expired artifacts, enqueue due
   folder ingestions, and recover or fail stale ingestion jobs, respectively.
+- **Deployment control:** `deployment-controller` is an internal, request-driven
+  control-plane service. It serializes authenticated vLLM apply requests and
+  recreates only allowlisted Compose services through the Docker socket. It is
+  packaged separately from the API and does not process user requests directly.
 
 Workers react to individual queued messages. Background services wake on a
 schedule, inspect system state, perform one maintenance cycle under a PostgreSQL
@@ -83,6 +87,8 @@ placement, not a precedent for feature code to depend on deployment wiring.
 
 The ingestion package has a more detailed ownership map in
 [`src/rag/ingestion/README.md`](src/rag/ingestion/README.md).
+Deployment control has its ownership and privilege boundary documented in
+[`src/rag/deployment/README.md`](src/rag/deployment/README.md).
 
 ## Development checks
 
