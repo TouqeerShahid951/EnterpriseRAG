@@ -61,6 +61,7 @@ flowchart LR
 | Artifact worker | `backend/apps/workers/artifact/*`, `backend/src/rag/artifact_jobs/*` | Durable document generation workflow. Plans, retrieves evidence, composes content, validates grounding, renders files, stores outputs, and reports progress. |
 | Evaluation worker | `backend/apps/workers/evaluation/*`, `backend/src/rag/evaluations/*` | Runs imported evaluation datasets against the current RAG configuration and stores per-case diagnostics. |
 | Background services | `backend/apps/background/*` | Runs artifact cleanup, scheduled folder dispatch, and ingestion recovery/capacity maintenance on independent loops. |
+| Deployment controller | `backend/apps/deployment_controller/*`, `backend/src/rag/deployment/*` | Authenticated internal control-plane service that serializes and applies allowlisted vLLM Compose launch-limit changes. |
 | Model services | `docker-compose.yml` | Optional vLLM text, embedding, and vision services, plus host Ollama support through `host.docker.internal`. |
 
 ## Persistent State

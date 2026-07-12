@@ -15,6 +15,8 @@ Docker Compose deployment.
 | `infra/` | Runtime initialization or recovery files mounted by infrastructure containers. |
 | `scripts/` | Repository-level validation and documentation builders. |
 | `folder-sources/` | Local folder-ingestion mount point; contents are intentionally ignored. |
+| `model-cache/` | Ignored local model artifacts required for offline execution. |
+| `backups/` | Ignored local runtime recovery data; manage it with an explicit retention policy. |
 | `docker-compose.yml` | Complete local deployment topology. |
 
 `model-cache/`, `tmp/`, build outputs, local virtual environments, dependency
