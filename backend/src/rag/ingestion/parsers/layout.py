@@ -3,17 +3,9 @@
 from __future__ import annotations
 
 from importlib import import_module
-from importlib import metadata
 from typing import Any
 
 from ..errors import WorkerStepError
-
-
-def layout_package_version() -> str | None:
-    try:
-        return metadata.version("pymupdf-layout")
-    except metadata.PackageNotFoundError:
-        return None
 
 
 def prepare_page_layout(page: Any) -> list[list[Any]]:

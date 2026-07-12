@@ -156,10 +156,6 @@ def _unmatched_table_entries(tables: list[TableEntry], used_table_ids: set[int])
     ]
 
 
-def best_table_text(region_text: str, structured_text: str | None) -> str:
-    return table_text_choice(region_text, structured_text, 0)[0]
-
-
 def table_text_choice(region_text: str, structured_text: str | None, structured_row_count: int) -> tuple[str, list[str]]:
     flags: list[str] = []
     if not structured_text:

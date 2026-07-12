@@ -1,4 +1,4 @@
-"""Shared ingestion quality preset definitions."""
+"""Ingestion quality preset definitions."""
 
 from __future__ import annotations
 

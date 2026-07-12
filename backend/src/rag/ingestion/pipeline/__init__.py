@@ -1,10 +1,5 @@
-"""Ingestion pipeline public entrypoint."""
+"""LangGraph ingestion workflow package."""
 
-from __future__ import annotations
-
-from ..contracts import IngestJobPayload
 from .graph import IngestDependencies, run_ingest_graph
 
-
-def run_ingestion_pipeline(payload: IngestJobPayload, dependencies: IngestDependencies):
-    return run_ingest_graph(payload, dependencies)
+__all__ = ["IngestDependencies", "run_ingest_graph"]

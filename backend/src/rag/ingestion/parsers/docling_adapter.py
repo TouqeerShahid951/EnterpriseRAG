@@ -13,7 +13,8 @@ import time
 from typing import Any, Iterable, Iterator
 
 from rag.shared.runtime_offline import apply_runtime_offline_defaults, runtime_offline_enabled
-from rag.ingestion.parsers.docling_models import (
+
+from .docling_models import (
     build_rapidocr_options,
     configured_docling_artifacts_path,
     verify_docling_offline_artifacts,
@@ -160,14 +161,6 @@ def docling_layout_blocks(document: Any, *, pages: set[int] | None = None) -> li
             continue
         blocks.append(block)
     return blocks
-
-
-def is_docling_available() -> bool:
-    try:
-        _docling_imports(allow_ocr=False, input_format="pdf")
-    except ImportError:
-        return False
-    return True
 
 
 def _docling_imports(*, allow_ocr: bool, input_format: str) -> tuple[Any, type[Any]]:
@@ -492,11 +485,6 @@ def _bounded_page_groups(pages: set[int], page_batch_size: int | None) -> list[s
         for offset in range(0, len(ordered), batch_size):
             bounded.append(set(ordered[offset : offset + batch_size]))
     return bounded
-
-
-def _is_contiguous_pages(pages: set[int]) -> bool:
-    ordered = sorted(pages)
-    return all(right == left + 1 for left, right in zip(ordered, ordered[1:]))
 
 
 def _renumber_items(items: list[ParsedPdfItem]) -> list[ParsedPdfItem]:

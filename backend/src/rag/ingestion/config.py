@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from urllib.parse import urlsplit, urlunsplit
 
-from rag.ingestion.quality import DEFAULT_INGESTION_QUALITY_PRESET, normalize_ingestion_quality_preset
+from .quality import DEFAULT_INGESTION_QUALITY_PRESET, normalize_ingestion_quality_preset
 
 TRUE_VALUES = {"1", "true", "yes", "on", "y"}
 FALSE_VALUES = {"0", "false", "no", "off", "n"}
@@ -252,14 +251,6 @@ class WorkerConfig:
                 ollama_num_ctx=_bounded_int("OLLAMA_VISION_NUM_CTX", 8192, minimum=1024, maximum=262144),
             ),
         )
-
-
-def redact_url(value: str) -> str:
-    parsed = urlsplit(value)
-    if not parsed.scheme or not parsed.netloc:
-        return value.split("?", 1)[0].split("#", 1)[0]
-    netloc = parsed.netloc.rsplit("@", 1)[-1]
-    return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
 
 
 def _token_setting(name: str, legacy_name: str, default: int) -> int:

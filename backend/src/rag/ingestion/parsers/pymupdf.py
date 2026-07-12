@@ -70,10 +70,6 @@ def parse_pymupdf_pdf_with_metadata(file_bytes: bytes, *, page_progress_callback
         raise WorkerStepError("pdf_parse_failed", "PyMuPDF failed to parse PDF.") from exc
 
 
-def _document_items(document: Any) -> list[ParsedPdfItem]:
-    return _document_items_with_metadata(document).items
-
-
 def _document_items_with_metadata(document: Any, *, page_progress_callback: PageProgressCallback | None = None) -> PymuPDFParseResult:
     parsed: list[ParsedPdfItem] = []
     current_section: str | None = None
@@ -130,10 +126,6 @@ def _page_entries(page: Any, page_no: int, profile: PageProfile | None = None) -
         bbox_for=lambda item: item.bbox,
         page_width_value=_page_width(page),
     )
-
-
-def _text_entries(page: Any, page_no: int, table_boxes: list[tuple[float, float, float, float]]) -> list[PageEntry]:
-    return _text_entries_from_blocks(_text_blocks(_page_blocks(page)), page_no, table_boxes)
 
 
 def _text_entries_from_blocks(
@@ -215,10 +207,6 @@ def _from_layout_entry(entry: LayoutEntry) -> PageEntry:
     return PageEntry(entry.y, entry.text, entry.item_type, entry.page_no, entry.bbox, entry.quality_flags, entry.table_json)
 
 
-def _page_text_char_count(page: Any) -> int:
-    return _page_profile(page).text_chars
-
-
 def _page_text_char_count_from_text(page: Any) -> int:
     get_text = getattr(page, "get_text", None)
     if get_text is None:
@@ -227,10 +215,6 @@ def _page_text_char_count_from_text(page: Any) -> int:
         return len(" ".join(str(get_text("text")).split()))
     except Exception:
         return 0
-
-
-def _page_quality_flags(page: Any) -> list[str]:
-    return _page_profile(page).quality_flags
 
 
 def _page_profile(page: Any) -> PageProfile:

@@ -35,6 +35,3 @@ class IngestJobCancelled(RuntimeError):
 class EmbeddingUnavailable(WorkerStepError):
     def __init__(self, message: str = "The embedding model is temporarily unavailable.") -> None:
         super().__init__("embedding_unavailable", message)
-
-
-OllamaEmbeddingUnavailable = EmbeddingUnavailable

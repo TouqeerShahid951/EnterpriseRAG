@@ -95,10 +95,6 @@ def _entity_texts(value: Any) -> list[str]:
     return _unique(texts)
 
 
-def _string_list(value: Any) -> list[str]:
-    return [str(item).strip() for item in value if str(item).strip()] if isinstance(value, list) else []
-
-
 def _terms(value: str) -> list[str]:
     return _TERM_RE.findall(value.lower())
 
