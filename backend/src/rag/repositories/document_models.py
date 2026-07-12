@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from ..shared.contracts.clearance import ClearanceLevel
 from .ingest_job_models import (
@@ -201,6 +201,75 @@ class DocumentImageAssetRecord:
     created_at: datetime | None
 
 
+@runtime_checkable
+class HumanReviewRepository(Protocol):
+    def create_review_batch(
+        self,
+        *,
+        job_id: str,
+        doc_id: str,
+        parsed_items: list[dict[str, Any]],
+        resume_payload: dict[str, Any],
+        review_items: list[dict[str, Any]],
+    ) -> ReviewBatchRecord: ...
+    def get_review_batch(self, batch_id: str) -> ReviewBatchRecord | None: ...
+    def list_review_items(self, *, status: str = "pending") -> list[ReviewItemRecord]: ...
+    def list_review_items_for_batch(self, batch_id: str) -> list[ReviewItemRecord]: ...
+    def approve_review_item(
+        self,
+        item_id: str,
+        *,
+        corrected_text: str,
+        reviewer_id: str,
+    ) -> ReviewDecisionRecord | None: ...
+    def reject_review_item(
+        self,
+        item_id: str,
+        *,
+        reviewer_id: str,
+    ) -> ReviewDecisionRecord | None: ...
+
+
+@runtime_checkable
+class ImageReviewRepository(Protocol):
+    def create_image_review_batch(
+        self,
+        *,
+        job_id: str,
+        doc_id: str,
+        parsed_items: list[dict[str, Any]],
+        resume_payload: dict[str, Any],
+        candidates: list[dict[str, Any]],
+    ) -> ImageReviewBatchRecord: ...
+    def get_image_review_batch(self, batch_id: str) -> ImageReviewBatchRecord | None: ...
+    def list_image_review_batches(
+        self,
+        *,
+        status: str = "pending",
+    ) -> list[ImageReviewBatchRecord]: ...
+    def list_image_review_candidates_for_batch(
+        self,
+        batch_id: str,
+        *,
+        status: str | None = None,
+    ) -> list[ImageReviewCandidateRecord]: ...
+    def get_image_review_candidate(
+        self,
+        candidate_id: str,
+    ) -> ImageReviewCandidateRecord | None: ...
+    def apply_image_review_decisions(
+        self,
+        batch_id: str,
+        *,
+        approve_candidate_ids: list[str],
+        skip_candidate_ids: list[str],
+        reviewer_id: str,
+        approve_recommended: bool = False,
+        skip_remaining: bool = False,
+    ) -> ImageReviewDecisionRecord | None: ...
+    def get_image_review_approved_keys(self, batch_id: str) -> list[str]: ...
+
+
 class DocumentRepository(Protocol):
     def create_document(self, **kwargs: Any) -> DocumentRecord: ...
     def list_documents(self, *, state: Literal["active", "deleted"] = "active") -> list[DocumentRecord]: ...
@@ -273,49 +342,6 @@ class DocumentRepository(Protocol):
         payload: dict[str, Any],
     ) -> None: ...
     def list_audit_events(self, *, limit: int = 100) -> list[AuditEventRecord]: ...
-    def create_review_batch(
-        self,
-        *,
-        job_id: str,
-        doc_id: str,
-        parsed_items: list[dict[str, Any]],
-        resume_payload: dict[str, Any],
-        review_items: list[dict[str, Any]],
-    ) -> ReviewBatchRecord: ...
-    def get_review_batch(self, batch_id: str) -> ReviewBatchRecord | None: ...
-    def list_review_items(self, *, status: str = "pending") -> list[ReviewItemRecord]: ...
-    def list_review_items_for_batch(self, batch_id: str) -> list[ReviewItemRecord]: ...
-    def approve_review_item(self, item_id: str, *, corrected_text: str, reviewer_id: str) -> ReviewDecisionRecord | None: ...
-    def reject_review_item(self, item_id: str, *, reviewer_id: str) -> ReviewDecisionRecord | None: ...
-    def create_image_review_batch(
-        self,
-        *,
-        job_id: str,
-        doc_id: str,
-        parsed_items: list[dict[str, Any]],
-        resume_payload: dict[str, Any],
-        candidates: list[dict[str, Any]],
-    ) -> ImageReviewBatchRecord: ...
-    def get_image_review_batch(self, batch_id: str) -> ImageReviewBatchRecord | None: ...
-    def list_image_review_batches(self, *, status: str = "pending") -> list[ImageReviewBatchRecord]: ...
-    def list_image_review_candidates_for_batch(
-        self,
-        batch_id: str,
-        *,
-        status: str | None = None,
-    ) -> list[ImageReviewCandidateRecord]: ...
-    def get_image_review_candidate(self, candidate_id: str) -> ImageReviewCandidateRecord | None: ...
-    def apply_image_review_decisions(
-        self,
-        batch_id: str,
-        *,
-        approve_candidate_ids: list[str],
-        skip_candidate_ids: list[str],
-        reviewer_id: str,
-        approve_recommended: bool = False,
-        skip_remaining: bool = False,
-    ) -> ImageReviewDecisionRecord | None: ...
-    def get_image_review_approved_keys(self, batch_id: str) -> list[str]: ...
     def replace_document_image_assets(
         self,
         *,

@@ -3,11 +3,21 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from ...auth.document_access import can_write_document
 from ...auth.dependencies import require_review_user
 from ...core.config import settings
-from ...repositories.document_models import ImageReviewBatchRecord, ImageReviewCandidateRecord, ReviewItemRecord
+from ...repositories.document_models import (
+    HumanReviewRepository,
+    ImageReviewBatchRecord,
+    ImageReviewCandidateRecord,
+    ImageReviewRepository,
+    ReviewItemRecord,
+)
 from ...repositories.documents import DocumentRepository, get_document_repository
 from ...repositories.identity import UserRecord
 from ...repositories.ingest_job_models import IngestJobRepository
 from ...repositories.ingest_jobs import get_ingest_job_repository
+from ...repositories.reviews import (
+    get_human_review_repository,
+    get_image_review_repository,
+)
 from ...schemas.review import (
     ImageReviewBatch,
     ImageReviewCandidate,
@@ -30,10 +40,11 @@ router = APIRouter(prefix="/review-queue", tags=["review-queue"])
 async def list_review_queue(
     user: UserRecord = Depends(require_review_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    review_repo: HumanReviewRepository = Depends(get_human_review_repository),
 ) -> ReviewQueueResponse:
     items = [
         _review_item_response(item)
-        for item in document_repo.list_review_items(status="pending")
+        for item in review_repo.list_review_items(status="pending")
         if _can_review_document(user, document_repo, item.doc_id)
     ]
     return ReviewQueueResponse(items=items, total=len(items))
@@ -43,13 +54,14 @@ async def list_review_queue(
 async def list_image_review_batches(
     user: UserRecord = Depends(require_review_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    image_review_repo: ImageReviewRepository = Depends(get_image_review_repository),
 ) -> ImageReviewQueueResponse:
     batches = []
     candidate_total = 0
-    for batch in document_repo.list_image_review_batches(status="pending"):
+    for batch in image_review_repo.list_image_review_batches(status="pending"):
         if not _can_review_document(user, document_repo, batch.doc_id):
             continue
-        candidates = document_repo.list_image_review_candidates_for_batch(batch.id)
+        candidates = image_review_repo.list_image_review_candidates_for_batch(batch.id)
         candidate_total += len(candidates)
         batches.append(_image_review_batch_response(batch, candidates))
     return ImageReviewQueueResponse(batches=batches, total=len(batches), candidate_total=candidate_total)
@@ -60,9 +72,10 @@ async def get_image_review_candidate_content(
     candidate_id: str,
     user: UserRecord = Depends(require_review_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    image_review_repo: ImageReviewRepository = Depends(get_image_review_repository),
     image_storage: DocumentImageAssetStorage = Depends(get_document_image_asset_storage),
 ) -> Response:
-    candidate = document_repo.get_image_review_candidate(candidate_id)
+    candidate = image_review_repo.get_image_review_candidate(candidate_id)
     if candidate is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -90,6 +103,7 @@ async def decide_image_review_batch(
     payload: ImageReviewDecisionRequest,
     user: UserRecord = Depends(require_review_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    image_review_repo: ImageReviewRepository = Depends(get_image_review_repository),
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     queue: IngestQueue = Depends(get_ingest_queue),
 ) -> ImageReviewDecisionResponse:
@@ -98,14 +112,14 @@ async def decide_image_review_batch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "empty_image_review_decision", "message": "Choose at least one image review decision."},
         )
-    batch = document_repo.get_image_review_batch(batch_id)
+    batch = image_review_repo.get_image_review_batch(batch_id)
     if batch is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "image_review_batch_not_found", "message": "Image review batch was not found."},
         )
     _require_review_document_scope(user, document_repo, batch.doc_id)
-    decision = document_repo.apply_image_review_decisions(
+    decision = image_review_repo.apply_image_review_decisions(
         batch_id,
         approve_candidate_ids=payload.approve_candidate_ids,
         skip_candidate_ids=payload.skip_candidate_ids,
@@ -150,7 +164,7 @@ async def decide_image_review_batch(
             "changed_count": len(decision.candidates),
         },
     )
-    candidates = document_repo.list_image_review_candidates_for_batch(decision.batch.id)
+    candidates = image_review_repo.list_image_review_candidates_for_batch(decision.batch.id)
     return _image_review_decision_response(decision.batch.id, decision.batch.status, decision.batch_complete, candidates)
 
 
@@ -166,11 +180,12 @@ async def approve_review_item(
     payload: ReviewApproveRequest,
     user: UserRecord = Depends(require_review_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    review_repo: HumanReviewRepository = Depends(get_human_review_repository),
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     queue: IngestQueue = Depends(get_ingest_queue),
 ) -> ReviewDecisionResponse:
-    _require_visible_pending_review_item(user, document_repo, item_id)
-    decision = document_repo.approve_review_item(item_id, corrected_text=payload.corrected_text, reviewer_id=user.id)
+    _require_visible_pending_review_item(user, document_repo, review_repo, item_id)
+    decision = review_repo.approve_review_item(item_id, corrected_text=payload.corrected_text, reviewer_id=user.id)
     if decision is None:
         raise HTTPException(status_code=404, detail={"code": "review_item_not_found", "message": "Review item was not found."})
     if decision.batch_complete:
@@ -224,10 +239,11 @@ async def reject_review_item(
     item_id: str,
     user: UserRecord = Depends(require_review_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
+    review_repo: HumanReviewRepository = Depends(get_human_review_repository),
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
 ) -> ReviewDecisionResponse:
-    _require_visible_pending_review_item(user, document_repo, item_id)
-    decision = document_repo.reject_review_item(item_id, reviewer_id=user.id)
+    _require_visible_pending_review_item(user, document_repo, review_repo, item_id)
+    decision = review_repo.reject_review_item(item_id, reviewer_id=user.id)
     if decision is None:
         raise HTTPException(status_code=404, detail={"code": "review_item_not_found", "message": "Review item was not found."})
     job_repo.update_ingest_job(
@@ -253,8 +269,13 @@ async def reject_review_item(
     )
 
 
-def _require_visible_pending_review_item(user: UserRecord, document_repo: DocumentRepository, item_id: str) -> ReviewItemRecord:
-    item = next((item for item in document_repo.list_review_items(status="pending") if item.id == item_id), None)
+def _require_visible_pending_review_item(
+    user: UserRecord,
+    document_repo: DocumentRepository,
+    review_repo: HumanReviewRepository,
+    item_id: str,
+) -> ReviewItemRecord:
+    item = next((item for item in review_repo.list_review_items(status="pending") if item.id == item_id), None)
     if item is None:
         raise HTTPException(status_code=404, detail={"code": "review_item_not_found", "message": "Review item was not found."})
     _require_review_document_scope(user, document_repo, item.doc_id)

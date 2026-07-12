@@ -29,7 +29,13 @@ def test_review_queue_filters_to_reviewer_document_scope() -> None:
     other_doc = _document(repo, user=_user("contributor", group_paths=("/finance",)), group_path="/finance")
     _review_item(repo, other_doc)
 
-    response = asyncio.run(review_routes.list_review_queue(user=reviewer, document_repo=repo))
+    response = asyncio.run(
+        review_routes.list_review_queue(
+            user=reviewer,
+            document_repo=repo,
+            review_repo=repo,
+        )
+    )
 
     assert response.total == 1
     assert [item.doc_id for item in response.items] == [own_doc.id]
@@ -49,6 +55,7 @@ def test_contributor_can_approve_peer_document_in_same_space() -> None:
             ReviewApproveRequest(corrected_text="Corrected text"),
             user=reviewer,
             document_repo=repo,
+            review_repo=repo,
             job_repo=repo,
             queue=queue,  # type: ignore[arg-type]
         )
@@ -74,6 +81,7 @@ def test_review_approval_rejects_out_of_scope_document_before_mutation() -> None
                 ReviewApproveRequest(corrected_text="Corrected text"),
                 user=reviewer,
                 document_repo=repo,
+                review_repo=repo,
                 job_repo=repo,
                 queue=queue,  # type: ignore[arg-type]
             )
@@ -92,7 +100,13 @@ def test_image_review_queue_and_decisions_are_scoped() -> None:
     other_doc = _document(repo, user=_user("contributor", group_paths=("/finance",)), group_path="/finance")
     other_batch = _image_review_batch(repo, other_doc)
 
-    response = asyncio.run(review_routes.list_image_review_batches(user=reviewer, document_repo=repo))
+    response = asyncio.run(
+        review_routes.list_image_review_batches(
+            user=reviewer,
+            document_repo=repo,
+            image_review_repo=repo,
+        )
+    )
 
     assert response.total == 1
     assert [batch.id for batch in response.batches] == [own_batch.id]
@@ -103,6 +117,7 @@ def test_image_review_queue_and_decisions_are_scoped() -> None:
                 ImageReviewDecisionRequest(approve_recommended=True),
                 user=reviewer,
                 document_repo=repo,
+                image_review_repo=repo,
                 job_repo=repo,
                 queue=FakeQueue(),  # type: ignore[arg-type]
             )

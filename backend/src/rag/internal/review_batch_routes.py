@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..repositories.documents import DocumentRepository, get_document_repository
+from ..repositories.document_models import HumanReviewRepository, ImageReviewRepository
+from ..repositories.reviews import (
+    get_human_review_repository,
+    get_image_review_repository,
+)
 from ..schemas.internal import (
     ImageReviewApprovedKeysResponse,
     ImageReviewBatchCreateRequest,
@@ -24,7 +28,7 @@ router = APIRouter(tags=["internal-review"])
 @router.post("/review-batches", response_model=ReviewBatchCreateResponse, summary="Create OCR review batch")
 async def create_review_batch(
     payload: ReviewBatchCreateRequest,
-    document_repo: DocumentRepository = Depends(get_document_repository),
+    review_repo: HumanReviewRepository = Depends(get_human_review_repository),
     service: ServiceTokenContext = Depends(require_service_token),
 ) -> ReviewBatchCreateResponse:
     _ = service
@@ -33,7 +37,7 @@ async def create_review_batch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "empty_review_batch", "message": "Review batch must contain at least one block."},
         )
-    batch = document_repo.create_review_batch(
+    batch = review_repo.create_review_batch(
         job_id=payload.job_id,
         doc_id=payload.doc_id,
         parsed_items=payload.parsed_items,
@@ -46,11 +50,11 @@ async def create_review_batch(
 @router.get("/review-batches/{batch_id}/parsed-items", response_model=ReviewBatchParsedItemsResponse, summary="Read approved review batch parsed items")
 async def get_review_batch_parsed_items(
     batch_id: str,
-    document_repo: DocumentRepository = Depends(get_document_repository),
+    review_repo: HumanReviewRepository = Depends(get_human_review_repository),
     service: ServiceTokenContext = Depends(require_service_token),
 ) -> ReviewBatchParsedItemsResponse:
     _ = service
-    batch = document_repo.get_review_batch(batch_id)
+    batch = review_repo.get_review_batch(batch_id)
     if batch is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -62,7 +66,7 @@ async def get_review_batch_parsed_items(
             detail={"code": "review_batch_not_approved", "message": "Review batch is not approved yet."},
         )
     items = [dict(item) for item in batch.parsed_items]
-    for review_item in document_repo.list_review_items_for_batch(batch.id):
+    for review_item in review_repo.list_review_items_for_batch(batch.id):
         if review_item.status == "approved" and review_item.corrected_text is not None:
             for parsed in items:
                 if int(parsed.get("index", -1)) == review_item.item_index:
@@ -77,7 +81,7 @@ async def get_review_batch_parsed_items(
 @router.post("/image-review-batches", response_model=ImageReviewBatchCreateResponse, summary="Create PDF image review batch")
 async def create_image_review_batch(
     payload: ImageReviewBatchCreateRequest,
-    document_repo: DocumentRepository = Depends(get_document_repository),
+    image_review_repo: ImageReviewRepository = Depends(get_image_review_repository),
     service: ServiceTokenContext = Depends(require_service_token),
 ) -> ImageReviewBatchCreateResponse:
     _ = service
@@ -86,7 +90,7 @@ async def create_image_review_batch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "empty_image_review_batch", "message": "Image review batch must contain at least one candidate."},
         )
-    batch = document_repo.create_image_review_batch(
+    batch = image_review_repo.create_image_review_batch(
         job_id=payload.job_id,
         doc_id=payload.doc_id,
         parsed_items=payload.parsed_items,
@@ -103,11 +107,11 @@ async def create_image_review_batch(
 )
 async def get_image_review_approved_keys(
     batch_id: str,
-    document_repo: DocumentRepository = Depends(get_document_repository),
+    image_review_repo: ImageReviewRepository = Depends(get_image_review_repository),
     service: ServiceTokenContext = Depends(require_service_token),
 ) -> ImageReviewApprovedKeysResponse:
     _ = service
-    batch = document_repo.get_image_review_batch(batch_id)
+    batch = image_review_repo.get_image_review_batch(batch_id)
     if batch is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -118,7 +122,7 @@ async def get_image_review_approved_keys(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "image_review_batch_not_approved", "message": "Image review batch is not approved yet."},
         )
-    return ImageReviewApprovedKeysResponse(candidate_keys=document_repo.get_image_review_approved_keys(batch.id))
+    return ImageReviewApprovedKeysResponse(candidate_keys=image_review_repo.get_image_review_approved_keys(batch.id))
 
 
 @router.get(
@@ -128,11 +132,11 @@ async def get_image_review_approved_keys(
 )
 async def get_image_review_resume(
     batch_id: str,
-    document_repo: DocumentRepository = Depends(get_document_repository),
+    image_review_repo: ImageReviewRepository = Depends(get_image_review_repository),
     service: ServiceTokenContext = Depends(require_service_token),
 ) -> ImageReviewResumeResponse:
     _ = service
-    batch = document_repo.get_image_review_batch(batch_id)
+    batch = image_review_repo.get_image_review_batch(batch_id)
     if batch is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -147,7 +151,7 @@ async def get_image_review_resume(
         parsed_items=[dict(item) for item in batch.parsed_items],
         candidates=[
             _image_review_candidate_payload(candidate)
-            for candidate in document_repo.list_image_review_candidates_for_batch(batch.id, status="approved")
+            for candidate in image_review_repo.list_image_review_candidates_for_batch(batch.id, status="approved")
         ],
         candidate_count=batch.candidate_count,
     )
