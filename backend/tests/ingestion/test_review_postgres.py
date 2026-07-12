@@ -6,9 +6,9 @@ from uuid import uuid4
 import pytest
 
 from rag.repositories.document_postgres import PostgresDocumentRepository
-from rag.repositories.human_review_postgres import PostgresHumanReviewRepository
-from rag.repositories.image_review_postgres import PostgresImageReviewRepository
-from rag.repositories.ingest_job_postgres import PostgresIngestJobRepository
+from rag.ingestion.adapters.human_review_postgres import PostgresHumanReviewRepository
+from rag.ingestion.adapters.image_review_postgres import PostgresImageReviewRepository
+from rag.ingestion.adapters.job_postgres import PostgresIngestJobRepository
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")

@@ -8,7 +8,7 @@ from functools import wraps
 from typing import Any
 from uuid import uuid4
 
-from .ingest_job_models import (
+from ..job_models import (
     IngestAttemptResult,
     IngestJobAccess,
     IngestJobCancellationResult,
@@ -401,5 +401,4 @@ def _next_run_token(
     if current.run_token is None and run_token is not None:
         return run_token
     return current.run_token
-
 

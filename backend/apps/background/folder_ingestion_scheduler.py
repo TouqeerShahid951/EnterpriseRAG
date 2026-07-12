@@ -6,9 +6,9 @@ import argparse
 import time
 
 from rag.core.config import settings
-from rag.repositories.documents import get_document_repository
 from rag.ingestion.folder_schedule_dependencies import get_folder_schedule_repository
-from rag.repositories.ingest_jobs import ingest_job_repository_for
+from rag.ingestion.job_dependencies import ingest_job_repository_for
+from rag.repositories.documents import get_document_repository
 from rag.repositories.postgres import PostgresConnectionMixin
 from rag.services.folder_ingestion import dispatch_due_schedules
 from rag.services.folder_sources import get_local_folder_source, get_minio_prefix_source

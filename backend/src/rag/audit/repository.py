@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from .audit_memory import RepositoryAuditRepository
-from .audit_models import AuditRepository
-from .audit_postgres import PostgresAuditRepository
-from .document_models import DocumentRepository
-from .document_postgres import PostgresDocumentRepository
 from ..auth.identity_models import IdentityRepository
+from ..repositories.document_models import DocumentRepository
+from ..repositories.document_postgres import PostgresDocumentRepository
+from .adapters.memory import RepositoryAuditRepository
+from .adapters.postgres import PostgresAuditRepository
+from .models import AuditRepository
 
 
 def audit_repository_for(

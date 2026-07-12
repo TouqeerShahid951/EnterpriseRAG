@@ -12,8 +12,8 @@ from rag.ingestion.configuration_dependencies import (
     effective_ingest_config,
     get_ingest_config_repository,
 )
-from rag.repositories.ingest_job_models import IngestJobRecord, IngestJobRepository
-from rag.repositories.ingest_jobs import ingest_job_repository_for
+from rag.ingestion.job_dependencies import ingest_job_repository_for
+from rag.ingestion.job_models import IngestJobRecord, IngestJobRepository
 
 from .queue import IngestQueue, get_ingest_queue
 from .recovery import (

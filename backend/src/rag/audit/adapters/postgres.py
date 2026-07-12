@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from ..shared.contracts.clearance import clearance_levels_at_or_below
-from .audit_models import (
+from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.contracts.clearance import clearance_levels_at_or_below
+from ..models import (
+    AuditEventRecord,
     AuditFilters,
     AuditViewerScope,
     EnrichedAuditEvent,
     MAX_AUDIT_SCAN_LIMIT,
-    audit_event_from_row,
     payload_document_title,
 )
-from .postgres import PostgresConnectionMixin
 
 
 class PostgresAuditRepository(PostgresConnectionMixin):
@@ -69,6 +70,27 @@ class PostgresAuditRepository(PostgresConnectionMixin):
         )
         rows = self._execute_all(_audit_query(where_sql), tuple(params))
         return [_enriched_event_from_row(row) for row in rows]
+
+
+def audit_event_from_row(row: dict[str, Any]) -> AuditEventRecord:
+    payload = row.get("payload") or {}
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    return AuditEventRecord(
+        id=str(row["id"]),
+        event_type=str(row["event_type"]),
+        actor_id=str(row["actor_id"])
+        if row.get("actor_id") is not None
+        else None,
+        target_type=str(row["target_type"])
+        if row.get("target_type") is not None
+        else None,
+        target_id=str(row["target_id"])
+        if row.get("target_id") is not None
+        else None,
+        payload=dict(payload),
+        created_at=row.get("created_at"),
+    )
 
 
 def _append_filter_clauses(

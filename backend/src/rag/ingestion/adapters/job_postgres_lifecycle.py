@@ -6,15 +6,15 @@ import json
 from datetime import datetime
 from typing import Any
 
-from .ingest_job_models import (
+from ..job_models import (
     IngestAttemptResult,
     IngestJobCancellationResult,
     IngestJobMutationResult,
     IngestJobRecord,
 )
-from .ingest_job_postgres_review import _close_pending_review_items
-from .ingest_job_postgres_rows import _job_from_row, _require_row
-from .ingest_job_postgres_tokens import _next_run_token, _run_token_can_update
+from .job_postgres_review import _close_pending_review_items
+from .job_postgres_rows import _job_from_row, _require_row
+from .job_postgres_tokens import _next_run_token, _run_token_can_update
 
 
 class PostgresIngestJobLifecycleMixin:

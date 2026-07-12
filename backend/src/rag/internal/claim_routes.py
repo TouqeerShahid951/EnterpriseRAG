@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 
-from ..repositories.claims import ClaimRepository, get_claim_repository
+from ..documents.claim_dependencies import get_claim_repository
+from ..documents.claim_models import ClaimRepository
 from ..schemas.internal import (
     ClaimsLookupResponse,
     ClaimsIngestResponse,

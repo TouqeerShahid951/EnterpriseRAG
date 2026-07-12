@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..auth.abac import normalize_group_path
-from ..shared.contracts.clearance import can_access_clearance
-from .audit_models import (
+from ...auth.abac import normalize_group_path
+from ...auth.identity_models import IdentityRepository
+from ...repositories.document_models import (
+    AuditEventRecord,
+    DocumentRecord,
+    DocumentRepository,
+)
+from ...shared.contracts.clearance import can_access_clearance
+from ..models import (
     AuditFilters,
     AuditViewerScope,
     EnrichedAuditEvent,
@@ -14,8 +20,6 @@ from .audit_models import (
     audit_event_category,
     payload_document_title,
 )
-from .document_models import AuditEventRecord, DocumentRecord, DocumentRepository
-from ..auth.identity_models import IdentityRepository
 
 
 class RepositoryAuditRepository:

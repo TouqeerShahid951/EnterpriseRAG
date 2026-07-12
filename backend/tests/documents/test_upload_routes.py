@@ -18,7 +18,7 @@ from rag.ingestion.contracts import IngestJobPayload
 from rag.ingestion.queue import get_ingest_queue
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.documents import get_document_repository
-from rag.repositories.ingest_jobs import get_ingest_job_repository
+from rag.ingestion.job_dependencies import get_ingest_job_repository
 
 PDF_CONTENT = b"%PDF-1.7\nroute contract\n%%EOF"
 

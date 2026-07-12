@@ -1,13 +1,13 @@
-"""Public claim repository dependency."""
+"""Composition provider for document claim persistence."""
 
 from __future__ import annotations
 
 from functools import lru_cache
 
 from ..core.config import Settings, settings
-from .claim_memory import InMemoryClaimRepository
+from .adapters.claim_memory import InMemoryClaimRepository
+from .adapters.claim_postgres import PostgresClaimRepository
 from .claim_models import ClaimRepository
-from .claim_postgres import PostgresClaimRepository
 
 
 def claim_repository_from_settings(config: Settings) -> ClaimRepository:

@@ -8,20 +8,16 @@ from fastapi import HTTPException
 
 from rag.internal.review_batch_routes import get_image_review_approved_keys
 from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.document_postgres import (
-    PostgresDocumentRepository,
-    image_review_batch_from_row as legacy_image_review_batch_from_row,
-    review_batch_from_row as legacy_review_batch_from_row,
-)
-from rag.repositories.human_review_postgres import (
+from rag.repositories.document_postgres import PostgresDocumentRepository
+from rag.ingestion.adapters.human_review_postgres import (
     PostgresHumanReviewRepository,
     review_batch_from_row,
 )
-from rag.repositories.image_review_postgres import (
+from rag.ingestion.adapters.image_review_postgres import (
     PostgresImageReviewRepository,
     image_review_batch_from_row,
 )
-from rag.repositories.reviews import (
+from rag.ingestion.review_dependencies import (
     human_review_repository_for,
     image_review_repository_for,
 )
@@ -56,9 +52,9 @@ def test_review_providers_reject_unsupported_document_adapter() -> None:
         image_review_repository_for(unsupported)  # type: ignore[arg-type]
 
 
-def test_legacy_postgres_review_row_mappers_remain_compatible() -> None:
-    assert legacy_review_batch_from_row is review_batch_from_row
-    assert legacy_image_review_batch_from_row is image_review_batch_from_row
+def test_postgres_review_row_mappers_are_feature_owned() -> None:
+    assert review_batch_from_row.__module__ == "rag.ingestion.adapters.human_review_postgres"
+    assert image_review_batch_from_row.__module__ == "rag.ingestion.adapters.image_review_postgres"
 
 
 def test_approved_keys_internal_contract_is_preserved() -> None:

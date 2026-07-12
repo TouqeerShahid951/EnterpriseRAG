@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .ingest_job_models import IngestJobAccess, IngestJobFilters, IngestJobPage
-from .ingest_job_postgres_rows import _job_view_from_row
+from ..job_models import IngestJobAccess, IngestJobFilters, IngestJobPage
+from .job_postgres_rows import _job_view_from_row
 
 
 class PostgresIngestJobSearchMixin:

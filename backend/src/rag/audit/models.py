@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
 from ..shared.contracts.clearance import ClearanceLevel
-from .document_models import AuditEventRecord
 
 MAX_AUDIT_SCAN_LIMIT = 5000
 AUDIT_CATEGORIES = frozenset(
@@ -34,6 +32,17 @@ class AuditViewerScope:
     global_access: bool
     group_paths: tuple[str, ...]
     clearance_level: ClearanceLevel
+
+
+@dataclass(frozen=True)
+class AuditEventRecord:
+    id: str
+    event_type: str
+    actor_id: str | None
+    target_type: str | None
+    target_id: str | None
+    payload: dict[str, Any]
+    created_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -66,23 +75,6 @@ class AuditRepository(Protocol):
         viewer: AuditViewerScope,
         scan_limit: int,
     ) -> list[EnrichedAuditEvent]: ...
-
-
-def audit_event_from_row(row: dict[str, Any]) -> AuditEventRecord:
-    payload = row.get("payload") or {}
-    if isinstance(payload, str):
-        payload = json.loads(payload)
-    return AuditEventRecord(
-        id=str(row["id"]),
-        event_type=str(row["event_type"]),
-        actor_id=str(row["actor_id"]) if row.get("actor_id") is not None else None,
-        target_type=str(row["target_type"])
-        if row.get("target_type") is not None
-        else None,
-        target_id=str(row["target_id"]) if row.get("target_id") is not None else None,
-        payload=dict(payload),
-        created_at=row.get("created_at"),
-    )
 
 
 def audit_event_category(event: AuditEventRecord) -> str:

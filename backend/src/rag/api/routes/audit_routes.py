@@ -14,8 +14,7 @@ from fastapi.responses import Response
 
 from ...auth.dependencies import require_current_user
 from ...auth.permissions import can_view_audit, is_global_admin
-from ...repositories.audit import audit_repository_for
-from ...repositories.audit_models import (
+from ...audit.models import (
     AUDIT_CATEGORIES,
     AuditEventWriter,
     AuditFilters,
@@ -24,6 +23,7 @@ from ...repositories.audit_models import (
     EnrichedAuditEvent,
     MAX_AUDIT_SCAN_LIMIT,
 )
+from ...audit.repository import audit_repository_for
 from ...repositories.documents import DocumentRepository, get_document_repository
 from ...auth.identity_models import IdentityRepository, UserRecord
 from ...auth.identity_repository import get_identity_repository

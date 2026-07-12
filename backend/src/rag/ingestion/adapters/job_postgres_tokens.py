@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .ingest_job_models import IngestJobRecord
+from ..job_models import IngestJobRecord
 
 
 def _run_token_can_update(

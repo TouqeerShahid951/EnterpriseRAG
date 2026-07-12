@@ -9,6 +9,15 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from ..auth.abac import normalize_group_path
+from ..ingestion.adapters.job_memory import InMemoryIngestJobRepositoryMixin
+from ..ingestion.adapters.review_memory import InMemoryReviewRepositoryMixin
+from ..ingestion.job_models import IngestJobRecord
+from ..ingestion.review_models import (
+    ImageReviewBatchRecord,
+    ImageReviewCandidateRecord,
+    ReviewBatchRecord,
+    ReviewItemRecord,
+)
 from ..shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
 from .document_models import (
     AuditEventRecord,
@@ -16,15 +25,8 @@ from .document_models import (
     DocumentEntityRecord,
     DocumentImageAssetRecord,
     DocumentRecord,
-    ImageReviewBatchRecord,
-    ImageReviewCandidateRecord,
-    ReviewBatchRecord,
-    ReviewItemRecord,
 )
-from .document_memory_ingest import InMemoryIngestJobRepositoryMixin
-from .document_memory_reviews import InMemoryReviewRepositoryMixin
 from .document_memory_values import _bbox_list, _int_or_none
-from .ingest_job_models import IngestJobRecord
 
 
 class InMemoryDocumentRepository(

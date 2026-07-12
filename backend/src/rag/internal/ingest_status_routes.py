@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..core.config import settings
 from ..repositories.documents import DocumentRepository, get_document_repository
-from ..repositories.ingest_job_models import IngestJobRecord, IngestJobRepository
-from ..repositories.ingest_jobs import get_ingest_job_repository
+from ..ingestion.job_dependencies import get_ingest_job_repository
+from ..ingestion.job_models import IngestJobRecord, IngestJobRepository
 from ..schemas.internal import (
     InternalJobAttemptRequest,
     InternalJobAttemptResponse,

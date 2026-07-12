@@ -7,21 +7,13 @@ from typing import Any, Literal
 
 from ..auth.abac import normalize_group_path
 from ..shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
-from .audit_models import audit_event_from_row
+from ..audit.adapters.postgres import audit_event_from_row
 from .document_models import (
     AuditEventRecord,
     DocumentCrossReferenceRecord,
     DocumentEntityRecord,
     DocumentImageAssetRecord,
     DocumentRecord,
-)
-from .human_review_postgres import (
-    review_batch_from_row as review_batch_from_row,
-    review_item_from_row as review_item_from_row,
-)
-from .image_review_postgres import (
-    image_review_batch_from_row as image_review_batch_from_row,
-    image_review_candidate_from_row as image_review_candidate_from_row,
 )
 from .postgres import PostgresConnectionMixin
 

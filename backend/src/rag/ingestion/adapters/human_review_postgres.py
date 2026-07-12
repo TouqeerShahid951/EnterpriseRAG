@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .document_models import ReviewBatchRecord, ReviewDecisionRecord, ReviewItemRecord
-from .postgres import PostgresConnectionMixin
+from ...repositories.postgres import PostgresConnectionMixin
+from ..review_models import ReviewBatchRecord, ReviewDecisionRecord, ReviewItemRecord
 
 
 class PostgresHumanReviewRepository(PostgresConnectionMixin):

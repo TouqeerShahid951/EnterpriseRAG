@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..repositories.documents import (
-    HumanReviewRepository,
-    ImageReviewRepository,
+from ..ingestion.review_dependencies import (
     get_human_review_repository,
     get_image_review_repository,
+)
+from ..ingestion.review_models import (
+    HumanReviewRepository,
+    ImageReviewRepository,
 )
 from ..schemas.internal import (
     ImageReviewApprovedKeysResponse,

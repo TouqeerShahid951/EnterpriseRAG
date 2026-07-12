@@ -20,8 +20,8 @@ from ..auth.document_access import can_read_document
 from ..core.config import settings
 from ..ingestion.queue import IngestQueue, get_ingest_queue
 from ..repositories.documents import DocumentRepository, get_document_repository
-from ..repositories.ingest_job_models import IngestJobRepository
-from ..repositories.ingest_jobs import get_ingest_job_repository
+from ..ingestion.job_dependencies import get_ingest_job_repository
+from ..ingestion.job_models import IngestJobRepository
 from ..auth.identity_models import IdentityRepository, UserRecord
 from ..auth.identity_repository import get_identity_repository
 from ..schemas.common import StubResponse

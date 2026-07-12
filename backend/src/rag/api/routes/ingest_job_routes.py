@@ -18,14 +18,14 @@ from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient as RetrievalQdrantClient
 from ...shared.contracts.clearance import ClearanceLevel, clearance_levels_at_or_below
 from ...repositories.documents import DocumentRepository, get_document_repository
-from ...repositories.ingest_job_models import (
+from ...ingestion.job_models import (
     IngestJobAccess,
     IngestJobFilters,
     IngestJobRepository,
     IngestJobSearchRepository,
     IngestJobView,
 )
-from ...repositories.ingest_jobs import get_ingest_job_repository
+from ...ingestion.job_dependencies import get_ingest_job_repository
 from ...auth.identity_models import UserRecord
 from ...ingestion.configuration import IngestConfigRepository
 from ...ingestion.configuration_dependencies import effective_ingest_config, get_ingest_config_repository

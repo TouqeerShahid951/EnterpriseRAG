@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import uuid4
 
-from ..auth.document_access import can_read_group_path
-from ..schemas.internal import ClaimRecord
-from ..schemas.query import ConflictPair, SourceAnchor
-from .claim_models import IngestClaimsResult
+from ...auth.document_access import can_read_group_path
+from ...schemas.internal import ClaimRecord
+from ...schemas.query import ConflictPair, SourceAnchor
+from ..claim_models import IngestClaimsResult
 
 
 class InMemoryClaimRepository:

@@ -5,17 +5,24 @@ from ...auth.dependencies import require_review_user
 from ...core.config import settings
 from ...ingestion.contracts import IngestJobPayload
 from ...ingestion.queue import IngestQueue, get_ingest_queue
-from ...repositories.document_models import ImageReviewBatchClosedError, ImageReviewBatchRecord, ImageReviewCandidateRecord, ReviewItemRecord
-from ...repositories.documents import (
-    DocumentRepository,
-    HumanReviewRepository,
-    ImageReviewRepository,
-    get_document_repository,
+from ...ingestion.review_dependencies import (
     get_human_review_repository,
     get_image_review_repository,
 )
-from ...repositories.ingest_job_models import IngestJobRepository
-from ...repositories.ingest_jobs import get_ingest_job_repository
+from ...ingestion.review_models import (
+    HumanReviewRepository,
+    ImageReviewBatchClosedError,
+    ImageReviewBatchRecord,
+    ImageReviewCandidateRecord,
+    ImageReviewRepository,
+    ReviewItemRecord,
+)
+from ...repositories.documents import (
+    DocumentRepository,
+    get_document_repository,
+)
+from ...ingestion.job_dependencies import get_ingest_job_repository
+from ...ingestion.job_models import IngestJobRepository
 from ...auth.identity_models import UserRecord
 from ...schemas.review import (
     ImageReviewBatch,

@@ -21,7 +21,8 @@ from ...graphrag.cleanup import (
 )
 from ...ingestion.contracts import IngestJobPayload
 from ...ingestion.queue import IngestQueue, get_ingest_queue
-from ...repositories.claims import ClaimRepository, get_claim_repository
+from ...documents.claim_dependencies import get_claim_repository
+from ...documents.claim_models import ClaimRepository
 from ...query.sources import source_from_hit
 from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
@@ -30,8 +31,8 @@ from ...auth.identity_models import IdentityRepository, UserRecord
 from ...auth.identity_repository import get_identity_repository
 from ...ingestion.configuration import IngestConfigRepository
 from ...ingestion.configuration_dependencies import effective_ingest_config, get_ingest_config_repository
-from ...repositories.ingest_job_models import IngestJobRecord, IngestJobRepository
-from ...repositories.ingest_jobs import get_ingest_job_repository
+from ...ingestion.job_dependencies import get_ingest_job_repository
+from ...ingestion.job_models import IngestJobRecord, IngestJobRepository
 from ...schemas.common import ErrorResponse
 from ...schemas.docs import (
     DeleteDocumentResponse,

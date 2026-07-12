@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from .document_memory_values import _bbox_list, _int_or_none
-from .document_models import (
+from ...repositories.document_memory_values import _bbox_list, _int_or_none
+from ..review_models import (
     ImageReviewBatchClosedError,
     ImageReviewBatchRecord,
     ImageReviewCandidateRecord,

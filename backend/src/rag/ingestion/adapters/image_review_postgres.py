@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .document_models import (
+from ...repositories.postgres import PostgresConnectionMixin
+from ..review_models import (
     ImageReviewBatchClosedError,
     ImageReviewBatchRecord,
     ImageReviewCandidateRecord,
     ImageReviewDecisionRecord,
 )
-from .postgres import PostgresConnectionMixin
 
 
 class PostgresImageReviewRepository(PostgresConnectionMixin):

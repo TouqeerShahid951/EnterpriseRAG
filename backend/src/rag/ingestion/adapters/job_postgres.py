@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from .ingest_job_postgres_lifecycle import PostgresIngestJobLifecycleMixin
-from .ingest_job_postgres_search import PostgresIngestJobSearchMixin
-from .postgres import PostgresConnectionMixin
+from ...repositories.postgres import PostgresConnectionMixin
+from .job_postgres_lifecycle import PostgresIngestJobLifecycleMixin
+from .job_postgres_search import PostgresIngestJobSearchMixin
 
 
 class PostgresIngestJobRepository(

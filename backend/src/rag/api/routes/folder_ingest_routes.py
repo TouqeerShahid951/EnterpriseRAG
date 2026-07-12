@@ -19,8 +19,8 @@ from ...ingestion.folder_schedule_dependencies import get_folder_schedule_reposi
 from ...ingestion.folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord, FolderScheduleRepository
 from ...auth.identity_models import IdentityRepository, UserRecord
 from ...auth.identity_repository import get_identity_repository
-from ...repositories.ingest_job_models import IngestJobRepository
-from ...repositories.ingest_jobs import get_ingest_job_repository
+from ...ingestion.job_dependencies import get_ingest_job_repository
+from ...ingestion.job_models import IngestJobRepository
 from ...schemas.folder_ingest import (
     FolderRun,
     FolderRunItem,

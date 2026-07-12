@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .ingest_job_models import IngestJobRecord, IngestJobView
+from ..job_models import IngestJobRecord, IngestJobView
 
 
 def _job_view_from_row(row: dict[str, Any]) -> IngestJobView:

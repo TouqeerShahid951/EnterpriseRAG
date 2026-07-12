@@ -8,15 +8,17 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from rag.api.routes import review_routes
+from rag.ingestion.review_dependencies import get_human_review_repository, get_image_review_repository
+from rag.ingestion.review_models import ReviewItemRecord
 from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.document_models import DocumentRecord, ReviewItemRecord
+from rag.repositories.document_models import DocumentRecord
 from rag.repositories.document_postgres import PostgresDocumentRepository
-from rag.repositories.documents import get_document_repository, get_human_review_repository, get_image_review_repository
-from rag.repositories.human_review_postgres import PostgresHumanReviewRepository
+from rag.repositories.documents import get_document_repository
+from rag.ingestion.adapters.human_review_postgres import PostgresHumanReviewRepository
 from rag.auth.identity_models import UserRecord
-from rag.repositories.image_review_postgres import PostgresImageReviewRepository
-from rag.repositories.ingest_job_postgres import PostgresIngestJobRepository
-from rag.repositories.ingest_jobs import get_ingest_job_repository
+from rag.ingestion.adapters.image_review_postgres import PostgresImageReviewRepository
+from rag.ingestion.adapters.job_postgres import PostgresIngestJobRepository
+from rag.ingestion.job_dependencies import get_ingest_job_repository
 from rag.schemas.review import ImageReviewDecisionRequest, ReviewApproveRequest
 
 

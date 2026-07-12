@@ -7,10 +7,10 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from ..schemas.internal import ClaimRecord
-from ..schemas.query import ConflictPair, SourceAnchor
-from .claim_models import IngestClaimsResult
-from .postgres import PostgresConnectionMixin
+from ...repositories.postgres import PostgresConnectionMixin
+from ...schemas.internal import ClaimRecord
+from ...schemas.query import ConflictPair, SourceAnchor
+from ..claim_models import IngestClaimsResult
 
 CONFLICT_LOOKUP_QUERY = """
 SELECT ca.id claim_a_id, cb.id claim_b_id, ca.doc_id doc_a_id, cb.doc_id doc_b_id,
