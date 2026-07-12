@@ -10,7 +10,6 @@ from fastapi.responses import StreamingResponse
 from ...auth.abac import normalize_group_path
 from ...auth.dependencies import require_csrf, require_current_user
 from ...auth.document_access import can_read_document, can_write_document
-from ...auth.permissions import can_manage_group_path, is_global_admin
 from ...core.config import settings
 from ...documents.access_scope_dependencies import (
     get_document_access_scope_service,
@@ -20,6 +19,13 @@ from ...documents.access_scope_service import (
     DocumentAccessScopeService,
 )
 from ...documents.dependencies import get_upload_storage
+from ...documents.lifecycle_dependencies import get_document_lifecycle_service
+from ...documents.lifecycle_service import (
+    DeleteDocumentCommand,
+    DocumentLifecycleRejected,
+    DocumentLifecycleService,
+    RestoreDocumentCommand,
+)
 from ...documents.metadata_dependencies import get_document_metadata_service
 from ...documents.metadata_service import (
     DocumentMetadataRejected,
@@ -34,12 +40,6 @@ from ...documents.reingestion_service import (
     DocumentReingestionService,
 )
 from ...documents.storage import UploadStorage
-from ...graphrag.cleanup import (
-    GraphRAGCleanupError,
-    GraphRAGDeletionService,
-    deletion_service_from_settings,
-    partition_key_for_document,
-)
 from ...graphrag.document_enrichment_dependencies import (
     get_document_graph_enrichment_service,
 )
@@ -48,8 +48,6 @@ from ...graphrag.document_enrichment_service import (
     DocumentGraphEnrichmentResult,
     DocumentGraphEnrichmentService,
 )
-from ...ingestion.contracts import IngestJobPayload
-from ...ingestion.queue import IngestQueue, get_ingest_queue
 from ...documents.claim_dependencies import get_claim_repository
 from ...documents.claim_models import ClaimRepository
 from ...query.sources import source_from_hit
@@ -57,8 +55,6 @@ from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
 from ...documents.repository import DocumentRecord, DocumentRepository, get_document_repository
 from ...auth.identity_models import UserRecord
-from ...ingestion.job_dependencies import get_ingest_job_repository
-from ...ingestion.job_models import IngestJobRecord, IngestJobRepository
 from ...schemas.common import ErrorResponse
 from ...schemas.docs import (
     DeleteDocumentResponse,
@@ -81,11 +77,6 @@ from ...schemas.docs import (
     VersionChainResponse,
 )
 from ...schemas.query import SourceAnchor
-from ...services.graphrag_queue import (
-    GraphRAGMaintenanceQueue,
-    GraphRAGPartitionRebuildMessage,
-    get_graphrag_maintenance_queue,
-)
 from ...services.document_image_asset_storage import DocumentImageAssetStorage, get_document_image_asset_storage
 from ...connectors.models import CONNECTOR_RECORD_CONTENT_TYPE
 
@@ -114,9 +105,11 @@ _DOCUMENT_OPERATION_STATUS_BY_CATEGORY = {
     "forbidden": status.HTTP_403_FORBIDDEN,
     "conflict": status.HTTP_409_CONFLICT,
     "unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
+    "bad_gateway": status.HTTP_502_BAD_GATEWAY,
 }
 
 MetadataResult = TypeVar("MetadataResult")
+LifecycleResult = TypeVar("LifecycleResult")
 
 
 def get_document_qdrant_client() -> QdrantClient:
@@ -125,10 +118,6 @@ def get_document_qdrant_client() -> QdrantClient:
         collection=settings.qdrant_collection,
         timeout_seconds=settings.rag_http_timeout_seconds,
     )
-
-
-def get_document_graphrag_deletion_service() -> GraphRAGDeletionService:
-    return deletion_service_from_settings(settings)
 
 
 def _access_scope_result(
@@ -173,6 +162,18 @@ def _graph_enrichment_result(
     try:
         return action()
     except DocumentGraphEnrichmentRejected as exc:
+        raise HTTPException(
+            status_code=_DOCUMENT_OPERATION_STATUS_BY_CATEGORY[exc.category],
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+
+
+def _lifecycle_result(
+    action: Callable[[], LifecycleResult],
+) -> LifecycleResult:
+    try:
+        return action()
+    except DocumentLifecycleRejected as exc:
         raise HTTPException(
             status_code=_DOCUMENT_OPERATION_STATUS_BY_CATEGORY[exc.category],
             detail={"code": exc.code, "message": exc.message},
@@ -640,42 +641,18 @@ async def restore_document(
     document_id: str,
     request: Request,
     user: UserRecord = Depends(require_current_user),
-    repo: DocumentRepository = Depends(get_document_repository),
-    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
-    storage: UploadStorage = Depends(get_upload_storage),
-    queue: IngestQueue = Depends(get_ingest_queue),
+    service: DocumentLifecycleService = Depends(get_document_lifecycle_service),
 ) -> DocumentReingestResponse:
     require_csrf(request)
-    document = require_writable_document(user, repo.get_document(document_id, include_deleted=True))
-    if document.deleted_at is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "document_not_deleted", "message": "Document is not in Trash."},
+    result = _lifecycle_result(
+        lambda: service.restore(
+            RestoreDocumentCommand(document_id=document_id, actor=user)
         )
-    if job_repo.get_latest_ingest_job_for_document(
-        document.id,
-        statuses=frozenset({"scheduled", "queued", "processing", "human_review"}),
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "document_ingest_active", "message": "Document already has an active ingestion job."},
-        )
-    source = _read_reingest_source(document, storage)
-    restored = repo.restore_document(document.id)
-    if restored is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "document_not_found", "message": "Document was not found."})
-    job = _queue_document_reingest(
-        restored,
-        action="restore",
-        repo=repo,
-        job_repo=job_repo,
-        storage=storage,
-        queue=queue,
-        actor_id=user.id,
-        skip_active_job_check=True,
-        source=source,
     )
-    return DocumentReingestResponse(document_id=restored.id, job_id=job.id)
+    return DocumentReingestResponse(
+        document_id=result.document_id,
+        job_id=result.job_id,
+    )
 
 
 @router.delete(
@@ -691,60 +668,15 @@ async def delete_document(
     document_id: str,
     request: Request,
     user: UserRecord = Depends(require_current_user),
-    repo: DocumentRepository = Depends(get_document_repository),
-    qdrant: QdrantClient = Depends(get_document_qdrant_client),
-    graphrag: GraphRAGDeletionService = Depends(get_document_graphrag_deletion_service),
-    graphrag_queue: GraphRAGMaintenanceQueue = Depends(get_graphrag_maintenance_queue),
+    service: DocumentLifecycleService = Depends(get_document_lifecycle_service),
 ) -> DeleteDocumentResponse:
     require_csrf(request)
-    document = require_writable_document(user, repo.get_document(document_id))
-    graph_cleanup = _delete_document_graphrag(
-        document,
-        event_type="documents.delete",
-        actor_id=user.id,
-        repo=repo,
-        graphrag=graphrag,
-    )
-    try:
-        qdrant.delete_document_points(document.id)
-    except ServiceRequestError as exc:
-        repo.append_audit_event(
-            event_type="documents.delete",
-            actor_id=user.id,
-            target_type="document",
-            target_id=document.id,
-            payload={"group_path": document.group_path, "action_result": "failed", "error_code": "document_vectors_delete_failed"},
+    result = _lifecycle_result(
+        lambda: service.soft_delete(
+            DeleteDocumentCommand(document_id=document_id, actor=user)
         )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"code": "document_vectors_delete_failed", "message": f"Unable to delete indexed document vectors: {exc}"},
-        ) from exc
-    deleted = repo.soft_delete_document(document.id)
-    if deleted is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "document_not_found", "message": "Document was not found."})
-    graph_rebuild_status = _enqueue_graphrag_partition_rebuild(
-        document,
-        event_type="documents.delete",
-        actor_id=user.id,
-        repo=repo,
-        queue=graphrag_queue,
-        partition_key=graph_cleanup.partition_key,
     )
-    repo.append_audit_event(
-        event_type="documents.delete",
-        actor_id=user.id,
-        target_type="document",
-        target_id=document.id,
-        payload={
-            "group_path": document.group_path,
-            "action_result": "success",
-            "qdrant_collection": settings.qdrant_collection,
-            "graphrag_cleanup_status": graph_cleanup.status,
-            "graphrag_partition_key": graph_cleanup.partition_key,
-            "graphrag_rebuild_status": graph_rebuild_status,
-        },
-    )
-    return DeleteDocumentResponse(id=document.id)
+    return DeleteDocumentResponse(id=result.document_id, status=result.status)
 
 
 @router.delete(
@@ -761,71 +693,15 @@ async def permanently_delete_document(
     document_id: str,
     request: Request,
     user: UserRecord = Depends(require_current_user),
-    repo: DocumentRepository = Depends(get_document_repository),
-    storage: UploadStorage = Depends(get_upload_storage),
-    image_storage: DocumentImageAssetStorage = Depends(get_document_image_asset_storage),
-    qdrant: QdrantClient = Depends(get_document_qdrant_client),
-    graphrag: GraphRAGDeletionService = Depends(get_document_graphrag_deletion_service),
-    graphrag_queue: GraphRAGMaintenanceQueue = Depends(get_graphrag_maintenance_queue),
+    service: DocumentLifecycleService = Depends(get_document_lifecycle_service),
 ) -> DeleteDocumentResponse:
     require_csrf(request)
-    document = require_visible_document(user, repo.get_document(document_id, include_deleted=True))
-    if not _can_permanently_delete_document(user, document):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "document_forbidden", "message": "Only platform admins and scoped Space Admins can permanently delete documents."},
+    result = _lifecycle_result(
+        lambda: service.permanently_delete(
+            DeleteDocumentCommand(document_id=document_id, actor=user)
         )
-    graph_cleanup = _delete_document_graphrag(
-        document,
-        event_type="documents.permanent_delete",
-        actor_id=user.id,
-        repo=repo,
-        graphrag=graphrag,
     )
-    try:
-        qdrant.delete_document_points(document.id)
-        for asset in repo.list_document_image_assets(document.id):
-            image_storage.delete(asset.object_path)
-        if document.file_path:
-            storage.delete(document.file_path)
-    except ServiceRequestError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"code": "document_vectors_delete_failed", "message": f"Unable to delete indexed document vectors: {exc}"},
-        ) from exc
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"code": "document_file_delete_failed", "message": f"Unable to delete uploaded document file: {exc}"},
-        ) from exc
-
-    deleted = repo.permanently_delete_document(document.id)
-    if deleted is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "document_not_found", "message": "Document was not found."})
-    graph_rebuild_status = _enqueue_graphrag_partition_rebuild(
-        document,
-        event_type="documents.permanent_delete",
-        actor_id=user.id,
-        repo=repo,
-        queue=graphrag_queue,
-        partition_key=graph_cleanup.partition_key,
-    )
-    repo.append_audit_event(
-        event_type="documents.permanent_delete",
-        actor_id=user.id,
-        target_type="document",
-        target_id=document.id,
-        payload={
-            "file_path": document.file_path,
-            "group_path": document.group_path,
-            "qdrant_collection": settings.qdrant_collection,
-            "action_result": "success",
-            "graphrag_cleanup_status": graph_cleanup.status,
-            "graphrag_partition_key": graph_cleanup.partition_key,
-            "graphrag_rebuild_status": graph_rebuild_status,
-        },
-    )
-    return DeleteDocumentResponse(id=document.id, status="permanently_deleted")
+    return DeleteDocumentResponse(id=result.document_id, status=result.status)
 
 
 def _document_state(value: str) -> Literal["active", "deleted"]:
@@ -841,180 +717,6 @@ def _matches_group_filter(document_group_paths: tuple[str, ...], group_path: str
     if group_path is None:
         return True
     return any(normalize_group_path(document_group_path) == group_path for document_group_path in document_group_paths)
-
-
-def _can_permanently_delete_document(user: UserRecord, document: DocumentRecord) -> bool:
-    if document.shared_group_paths:
-        return is_global_admin(user)
-    return can_manage_group_path(user, document.group_path)
-
-
-def _delete_document_graphrag(
-    document: DocumentRecord,
-    *,
-    event_type: str,
-    actor_id: str,
-    repo: DocumentRepository,
-    graphrag: GraphRAGDeletionService,
-):
-    partition_key = partition_key_for_document(document)
-    try:
-        return graphrag.delete_document(doc_id=document.id, partition_key=partition_key)
-    except GraphRAGCleanupError as exc:
-        repo.append_audit_event(
-            event_type=event_type,
-            actor_id=actor_id,
-            target_type="document",
-            target_id=document.id,
-            payload={
-                "group_path": document.group_path,
-                "action_result": "failed",
-                "error_code": "document_graphrag_delete_failed",
-                "graphrag_partition_key": partition_key,
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "code": "document_graphrag_delete_failed",
-                "message": f"Unable to delete GraphRAG document data: {exc}",
-            },
-        ) from exc
-
-
-def _enqueue_graphrag_partition_rebuild(
-    document: DocumentRecord,
-    *,
-    event_type: str,
-    actor_id: str,
-    repo: DocumentRepository,
-    queue: GraphRAGMaintenanceQueue,
-    partition_key: str | None,
-) -> str:
-    if not settings.graphrag_enabled:
-        return "skipped"
-    if not partition_key:
-        return "skipped_missing_partition"
-    try:
-        queue.enqueue_partition_rebuild(
-            GraphRAGPartitionRebuildMessage(
-                doc_id=document.id,
-                partition_key=partition_key,
-                reason=event_type,
-            )
-        )
-    except RuntimeError as exc:
-        repo.append_audit_event(
-            event_type=event_type,
-            actor_id=actor_id,
-            target_type="document",
-            target_id=document.id,
-            payload={
-                "group_path": document.group_path,
-                "action_result": "warning",
-                "warning_code": "graphrag_rebuild_enqueue_failed",
-                "graphrag_partition_key": partition_key,
-                "message": str(exc)[:240],
-            },
-        )
-        return "enqueue_failed"
-    return "queued"
-
-
-def _queue_document_reingest(
-    document: DocumentRecord,
-    *,
-    action: str,
-    repo: DocumentRepository,
-    job_repo: IngestJobRepository,
-    storage: UploadStorage,
-    queue: IngestQueue,
-    actor_id: str | None,
-    skip_active_job_check: bool = False,
-    source: object | None = None,
-    retry_of_job_id: str | None = None,
-) -> IngestJobRecord:
-    if not skip_active_job_check and job_repo.get_latest_ingest_job_for_document(
-        document.id,
-        statuses=frozenset({"scheduled", "queued", "processing", "human_review"}),
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "document_ingest_active", "message": "Document already has an active ingestion job."},
-        )
-    stored = source or _read_reingest_source(document, storage)
-    job = job_repo.create_ingest_job(
-        doc_id=document.id,
-        status="queued",
-        progress_pct=0,
-        origin=action,
-        retry_of_job_id=retry_of_job_id,
-    )
-    message = _ingest_message_for_document(document, job.id, stored, repo)
-    try:
-        queue.enqueue(message)
-    except RuntimeError as exc:
-        job_repo.update_ingest_job(
-            job.id,
-            status="failed",
-            progress_pct=0,
-            error_code="queue_unavailable",
-            error_message_safe=str(exc),
-        )
-        repo.append_audit_event(
-            event_type=f"documents.{action}",
-            actor_id=actor_id,
-            target_type="document",
-            target_id=document.id,
-            payload={"group_path": document.group_path, "clearance_level": document.clearance_level, "job_id": job.id, "retry_of_job_id": retry_of_job_id, "action_result": "failed", "error_code": "queue_unavailable"},
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "queue_unavailable", "message": "Ingestion queue is unavailable."},
-        ) from exc
-    repo.append_audit_event(
-        event_type=f"documents.{action}",
-        actor_id=actor_id,
-        target_type="document",
-        target_id=document.id,
-        payload={"group_path": document.group_path, "clearance_level": document.clearance_level, "job_id": job.id, "retry_of_job_id": retry_of_job_id, "action_result": "success"},
-    )
-    return job
-
-
-def _read_reingest_source(document: DocumentRecord, storage: UploadStorage) -> object:
-    if not document.file_path:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "document_source_missing", "message": "Document does not have a stored source file."},
-        )
-    try:
-        return storage.read(document.file_path)
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "document_source_missing", "message": "Document source file was not found."},
-        ) from exc
-
-
-def _ingest_message_for_document(document: DocumentRecord, job_id: str, stored: object, repo: DocumentRepository) -> IngestJobPayload:
-    filename = str(getattr(stored, "filename", "") or _filename_for_document(document))
-    content_type = getattr(stored, "content_type", None) or _content_type_for_filename(filename)
-    supersedes = repo.list_superseded_document_ids(document.id) or list(document.pending_supersedes)
-    return IngestJobPayload(
-        job_id=job_id,
-        doc_id=document.id,
-        file_path=str(document.file_path),
-        group_path=document.group_path,
-        acl_group_paths=list(document.access_group_paths),
-        clearance_level=document.clearance_level,
-        doc_type=document.doc_type,
-        effective_date=document.effective_date.isoformat() if document.effective_date else None,
-        supersedes=supersedes,
-        expiry_date=document.expiry_date.isoformat() if document.expiry_date else None,
-        description=document.description,
-        content_type=str(content_type) if content_type else None,
-    )
 
 
 def document_to_schema(

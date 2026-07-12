@@ -1,15 +1,15 @@
 import pytest
-from fastapi import HTTPException
 
-from rag.api.routes import document_routes
-from rag.api.routes.document_routes import _delete_document_graphrag, _enqueue_graphrag_partition_rebuild
-from rag.graphrag.cleanup import GraphRAGCleanupError, GraphRAGDeletionService, partition_key_for_document
+from rag.graphrag.cleanup import (
+    GraphRAGCleanupError,
+    GraphRAGDeletionService,
+    partition_key_for_document,
+)
 from rag.graphrag.indexing import GraphRAGRuntimeConfig
 from rag.graphrag.indexing import GraphRAGIndexingService
 from rag.graphrag.models import GraphCommunity, SourceRef
 from rag.graphrag.neo4j_store import Neo4jGraphStoreError
 from rag.graphrag.qdrant import QdrantGraphRAGError
-from rag.services.graphrag_queue import GraphRAGPartitionRebuildMessage
 
 
 def _config(enabled: bool = True) -> GraphRAGRuntimeConfig:
@@ -111,30 +111,6 @@ class FakeDocument:
     clearance_level = "NATO_CONFIDENTIAL"
 
 
-class FakeRepo:
-    def __init__(self):
-        self.events: list[dict[str, object]] = []
-
-    def append_audit_event(self, **kwargs) -> None:
-        self.events.append(kwargs)
-
-
-class FailingRouteCleanup:
-    def delete_document(self, *, doc_id: str, partition_key: str):
-        raise GraphRAGCleanupError("neo4j unavailable")
-
-
-class FakeRebuildQueue:
-    def __init__(self, error: RuntimeError | None = None):
-        self.error = error
-        self.messages: list[GraphRAGPartitionRebuildMessage] = []
-
-    def enqueue_partition_rebuild(self, message: GraphRAGPartitionRebuildMessage) -> None:
-        if self.error:
-            raise self.error
-        self.messages.append(message)
-
-
 def test_delete_document_cleans_neo4j_and_community_summaries() -> None:
     store = FakeStore()
     qdrant = FakeQdrant()
@@ -193,25 +169,6 @@ def test_partition_key_for_document_uses_group_and_clearance_rank() -> None:
     assert partition_key_for_document(FakeDocument()) == "/ops|clearance:2"
 
 
-def test_route_cleanup_helper_records_audit_and_raises_502() -> None:
-    repo = FakeRepo()
-
-    with pytest.raises(HTTPException) as exc_info:
-        _delete_document_graphrag(
-            FakeDocument(),  # type: ignore[arg-type]
-            event_type="documents.delete",
-            actor_id="user-1",
-            repo=repo,  # type: ignore[arg-type]
-            graphrag=FailingRouteCleanup(),  # type: ignore[arg-type]
-        )
-
-    assert exc_info.value.status_code == 502
-    assert exc_info.value.detail["code"] == "document_graphrag_delete_failed"
-    assert repo.events[0]["event_type"] == "documents.delete"
-    assert repo.events[0]["payload"]["error_code"] == "document_graphrag_delete_failed"
-    assert repo.events[0]["payload"]["graphrag_partition_key"] == "/ops|clearance:2"
-
-
 def test_partition_rebuild_replaces_summaries_for_remaining_entities() -> None:
     store = FakeRebuildStore(entity_count=1)
     qdrant = FakeRebuildQdrant()
@@ -246,43 +203,3 @@ def test_partition_rebuild_clears_empty_partition() -> None:
     assert result.communities_indexed == 0
     assert store.deleted_partitions == ["/ops|clearance:2"]
     assert qdrant.deleted_partitions == ["/ops|clearance:2"]
-
-
-def test_route_enqueue_helper_queues_partition_rebuild(monkeypatch) -> None:
-    monkeypatch.setattr(document_routes.settings, "graphrag_enabled", True)
-    queue = FakeRebuildQueue()
-
-    status = _enqueue_graphrag_partition_rebuild(
-        FakeDocument(),  # type: ignore[arg-type]
-        event_type="documents.delete",
-        actor_id="user-1",
-        repo=FakeRepo(),  # type: ignore[arg-type]
-        queue=queue,  # type: ignore[arg-type]
-        partition_key="/ops|clearance:2",
-    )
-
-    assert status == "queued"
-    assert queue.messages == [
-        GraphRAGPartitionRebuildMessage(
-            doc_id="doc-1",
-            partition_key="/ops|clearance:2",
-            reason="documents.delete",
-        )
-    ]
-
-
-def test_route_enqueue_helper_records_warning_on_enqueue_failure(monkeypatch) -> None:
-    monkeypatch.setattr(document_routes.settings, "graphrag_enabled", True)
-    repo = FakeRepo()
-
-    status = _enqueue_graphrag_partition_rebuild(
-        FakeDocument(),  # type: ignore[arg-type]
-        event_type="documents.delete",
-        actor_id="user-1",
-        repo=repo,  # type: ignore[arg-type]
-        queue=FakeRebuildQueue(error=RuntimeError("redis unavailable")),  # type: ignore[arg-type]
-        partition_key="/ops|clearance:2",
-    )
-
-    assert status == "enqueue_failed"
-    assert repo.events[0]["payload"]["warning_code"] == "graphrag_rebuild_enqueue_failed"

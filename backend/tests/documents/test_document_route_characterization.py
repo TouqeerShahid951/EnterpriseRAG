@@ -11,6 +11,12 @@ from rag.auth.identity_models import UserRecord
 from rag.core.config import settings
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.documents.adapters.metadata_index import QdrantDocumentMetadataIndex
+from rag.documents.adapters.access_scope_graph import GraphRAGDocumentStore
+from rag.documents.adapters.lifecycle import (
+    GraphRAGPartitionRebuildQueue,
+    QdrantDocumentVectorIndex,
+)
+from rag.documents.lifecycle_service import DocumentLifecycleService
 from rag.documents.metadata_service import DocumentMetadataService
 from rag.documents.reingestion_service import DocumentReingestionService
 from rag.documents.storage import StoredUploadContent
@@ -361,6 +367,32 @@ def _graph_enrichment_service(
     )
 
 
+def _lifecycle_service(
+    repo: InMemoryDocumentRepository,
+    *,
+    storage: FakeStorage | None = None,
+    image_storage: FakeImageStorage | None = None,
+    ingest_queue: FakeIngestQueue | None = None,
+    qdrant: FakeQdrant | None = None,
+    graphrag: FakeGraphRAG | None = None,
+    graph_queue: FakeGraphQueue | None = None,
+) -> DocumentLifecycleService:
+    return DocumentLifecycleService(
+        documents=repo,
+        jobs=repo,
+        storage=storage or FakeStorage(),  # type: ignore[arg-type]
+        image_storage=image_storage or FakeImageStorage(),
+        ingest_queue=ingest_queue or FakeIngestQueue(),  # type: ignore[arg-type]
+        vectors=QdrantDocumentVectorIndex(qdrant or FakeQdrant()),  # type: ignore[arg-type]
+        graph_cleanup=GraphRAGDocumentStore(graphrag or FakeGraphRAG()),  # type: ignore[arg-type]
+        graph_queue=GraphRAGPartitionRebuildQueue(
+            graph_queue or FakeGraphQueue()  # type: ignore[arg-type]
+        ),
+        graphrag_enabled=True,
+        qdrant_collection=settings.qdrant_collection,
+    )
+
+
 def test_soft_delete_removes_indexes_marks_deleted_and_audits_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -377,10 +409,12 @@ def test_soft_delete_removes_indexes_marks_deleted_and_audits_success(
             document.id,
             _csrf_request("DELETE"),
             user=user,
-            repo=repo,
-            qdrant=qdrant,  # type: ignore[arg-type]
-            graphrag=graphrag,  # type: ignore[arg-type]
-            graphrag_queue=graph_queue,  # type: ignore[arg-type]
+            service=_lifecycle_service(
+                repo,
+                qdrant=qdrant,
+                graphrag=graphrag,
+                graph_queue=graph_queue,
+            ),
         )
     )
 
@@ -403,10 +437,11 @@ def test_soft_delete_vector_failure_leaves_document_active_and_audits_failure() 
                 document.id,
                 _csrf_request("DELETE"),
                 user=user,
-                repo=repo,
-                qdrant=FakeQdrant(fail_delete=True),  # type: ignore[arg-type]
-                graphrag=graphrag,  # type: ignore[arg-type]
-                graphrag_queue=FakeGraphQueue(),  # type: ignore[arg-type]
+                service=_lifecycle_service(
+                    repo,
+                    qdrant=FakeQdrant(fail_delete=True),
+                    graphrag=graphrag,
+                ),
             )
         )
 
@@ -428,10 +463,10 @@ def test_restore_queue_failure_leaves_document_restored_and_failed_job_recorded(
                 document.id,
                 _csrf_request("POST"),
                 user=user,
-                repo=repo,
-                job_repo=repo,
-                storage=FakeStorage(),  # type: ignore[arg-type]
-                queue=FakeIngestQueue(error="redis unavailable"),  # type: ignore[arg-type]
+                service=_lifecycle_service(
+                    repo,
+                    ingest_queue=FakeIngestQueue(error="redis unavailable"),
+                ),
             )
         )
 
@@ -456,12 +491,11 @@ def test_permanent_delete_rejects_contributor_before_external_cleanup() -> None:
                 document.id,
                 _csrf_request("DELETE"),
                 user=user,
-                repo=repo,
-                storage=FakeStorage(),  # type: ignore[arg-type]
-                image_storage=FakeImageStorage(),  # type: ignore[arg-type]
-                qdrant=qdrant,  # type: ignore[arg-type]
-                graphrag=graphrag,  # type: ignore[arg-type]
-                graphrag_queue=FakeGraphQueue(),  # type: ignore[arg-type]
+                service=_lifecycle_service(
+                    repo,
+                    qdrant=qdrant,
+                    graphrag=graphrag,
+                ),
             )
         )
 
@@ -482,12 +516,13 @@ def test_permanent_delete_storage_failure_preserves_database_record() -> None:
                 document.id,
                 _csrf_request("DELETE"),
                 user=admin,
-                repo=repo,
-                storage=FakeStorage(delete_error="object store unavailable"),  # type: ignore[arg-type]
-                image_storage=FakeImageStorage(),  # type: ignore[arg-type]
-                qdrant=qdrant,  # type: ignore[arg-type]
-                graphrag=FakeGraphRAG(),  # type: ignore[arg-type]
-                graphrag_queue=FakeGraphQueue(),  # type: ignore[arg-type]
+                service=_lifecycle_service(
+                    repo,
+                    storage=FakeStorage(
+                        delete_error="object store unavailable"
+                    ),
+                    qdrant=qdrant,
+                ),
             )
         )
 
