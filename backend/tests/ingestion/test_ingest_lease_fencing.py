@@ -19,7 +19,7 @@ from rag.internal.ingest_status_routes import (
     start_ingest_job_attempt,
     update_ingest_job_status,
 )
-from rag.ops import ingest_maintenance_cli
+from rag.ingestion import maintenance as ingest_maintenance
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.ingest_config import InMemoryIngestConfigRepository
 from rag.schemas.internal import (
@@ -410,12 +410,12 @@ def test_maintenance_does_not_fail_job_heartbeat_after_stale_scan(
     assert job is not None
     stale_job = replace(job, attempt_count=3)
     monkeypatch.setattr(
-        ingest_maintenance_cli,
+        ingest_maintenance,
         "list_stale_ingest_jobs",
         lambda **_kwargs: [SimpleNamespace(job=stale_job)],
     )
 
-    recovered = ingest_maintenance_cli.reconcile_ingestion_jobs(
+    recovered = ingest_maintenance.reconcile_ingestion_jobs(
         document_repo=repo,
         queue=object(),  # type: ignore[arg-type]
         control=_MaintenanceControl(),  # type: ignore[arg-type]
@@ -449,12 +449,12 @@ def test_maintenance_uses_observed_token_to_fail_stale_exhausted_job(
     )
     repo._jobs[job_id] = stale_job
     monkeypatch.setattr(
-        ingest_maintenance_cli,
+        ingest_maintenance,
         "list_stale_ingest_jobs",
         lambda **_kwargs: [SimpleNamespace(job=stale_job)],
     )
 
-    recovered = ingest_maintenance_cli.reconcile_ingestion_jobs(
+    recovered = ingest_maintenance.reconcile_ingestion_jobs(
         document_repo=repo,
         queue=object(),  # type: ignore[arg-type]
         control=_MaintenanceControl(),  # type: ignore[arg-type]

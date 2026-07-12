@@ -1,4 +1,4 @@
-"""Delete expired generated artifacts from metadata and object storage."""
+"""Run scheduled cleanup of expired generated artifacts."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import argparse
 import logging
 import time
 
-from ..core.config import settings
-from ..repositories.postgres import PostgresConnectionMixin
-from ..services.generated_artifact_cleanup import (
+from rag.core.config import settings
+from rag.repositories.postgres import PostgresConnectionMixin
+from rag.services.generated_artifact_cleanup import (
     GeneratedArtifactCleanupError,
     GeneratedArtifactCleanupResult,
     cleanup_expired_generated_artifacts,

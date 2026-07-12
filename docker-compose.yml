@@ -557,7 +557,7 @@ services:
   artifact-worker:
     image: agenticrag-api
     restart: unless-stopped
-    command: ["celery", "-A", "rag.artifact_jobs.celery_app", "worker", "--loglevel=INFO", "--queues=${ARTIFACT_QUEUE_NAME:-artifact:jobs}"]
+    command: ["celery", "-A", "apps.workers.artifact.celery_app", "worker", "--loglevel=INFO", "--queues=${ARTIFACT_QUEUE_NAME:-artifact:jobs}"]
     healthcheck:
       disable: true
     environment:
@@ -584,7 +584,7 @@ services:
   artifact-maintenance:
     image: agenticrag-api
     restart: unless-stopped
-    command: ["python", "-m", "rag.ops.artifact_maintenance_cli", "--loop"]
+    command: ["python", "-m", "apps.background.artifact_cleanup", "--loop"]
     healthcheck:
       disable: true
     environment:
@@ -604,10 +604,10 @@ services:
   ingestion-worker:
     image: agenticrag-ingestion-worker
     restart: unless-stopped
-    command: ["celery", "-A", "apps.ingestion.celery_app", "worker", "--loglevel=info", "--hostname=ingestion-worker@%h", "--queues=${INGEST_QUEUE_NAME:-ingest:jobs}"]
+    command: ["celery", "-A", "apps.workers.document_pipeline.celery_app", "worker", "--loglevel=info", "--hostname=ingestion-worker@%h", "--queues=${INGEST_QUEUE_NAME:-ingest:jobs}"]
     build:
       context: ./backend
-      dockerfile: apps/ingestion/Dockerfile
+      dockerfile: apps/workers/document_pipeline/Dockerfile
       args:
         PREWARM_FASTEMBED: ${PREWARM_FASTEMBED:-false}
         PREWARM_DOCLING: ${PREWARM_DOCLING:-false}
@@ -669,7 +669,7 @@ services:
       neo4j:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -m apps.ingestion.healthcheck && python -m rag.shared.model_cache_health --fastembed --docling"]
+      test: ["CMD-SHELL", "python -m apps.workers.document_pipeline.healthcheck && python -m rag.shared.model_cache_health --fastembed --docling"]
       interval: 10s
       timeout: 5s
       start_period: 10s
@@ -678,7 +678,7 @@ services:
   graphrag-worker:
     image: agenticrag-ingestion-worker
     restart: unless-stopped
-    command: ["celery", "-A", "apps.ingestion.celery_app", "worker", "--loglevel=info", "--hostname=graphrag-worker@%h", "--queues=${GRAPHRAG_QUEUE_NAME:-graphrag:jobs}"]
+    command: ["celery", "-A", "apps.workers.document_pipeline.celery_app", "worker", "--loglevel=info", "--hostname=graphrag-worker@%h", "--queues=${GRAPHRAG_QUEUE_NAME:-graphrag:jobs}"]
     environment:
       <<: *ingestion-worker-env
       INGEST_TASK_SOFT_TIME_LIMIT_SECONDS: ${GRAPHRAG_TASK_SOFT_TIME_LIMIT_SECONDS:-3600}
@@ -703,7 +703,7 @@ services:
       neo4j:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -m apps.ingestion.healthcheck && python -m rag.shared.model_cache_health --fastembed"]
+      test: ["CMD-SHELL", "python -m apps.workers.document_pipeline.healthcheck && python -m rag.shared.model_cache_health --fastembed"]
       interval: 10s
       timeout: 5s
       start_period: 10s
@@ -730,7 +730,7 @@ services:
   evaluation-worker:
     image: agenticrag-api
     restart: unless-stopped
-    command: ["celery", "-A", "rag.evaluations.celery_app", "worker", "--loglevel=INFO", "--queues=evaluation:jobs"]
+    command: ["celery", "-A", "apps.workers.evaluation.celery_app", "worker", "--loglevel=INFO", "--queues=evaluation:jobs"]
     healthcheck:
       disable: true
     environment:
@@ -762,7 +762,7 @@ services:
   folder-scheduler:
     image: agenticrag-api
     restart: unless-stopped
-    command: ["python", "-m", "rag.ops.folder_ingest_scheduler_cli", "--loop"]
+    command: ["python", "-m", "apps.background.folder_ingestion_scheduler", "--loop"]
     healthcheck:
       disable: true
     environment:
@@ -788,7 +788,7 @@ services:
   ingest-maintenance:
     image: agenticrag-api
     restart: unless-stopped
-    command: ["python", "-m", "rag.ops.ingest_maintenance_cli", "--loop"]
+    command: ["python", "-m", "apps.background.ingestion_maintenance", "--loop"]
     healthcheck:
       disable: true
     environment:

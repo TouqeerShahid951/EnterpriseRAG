@@ -1,4 +1,4 @@
-"""Container healthcheck for the Celery ingestion worker."""
+"""Redis healthcheck shared by document-pipeline workers."""
 
 from __future__ import annotations
 

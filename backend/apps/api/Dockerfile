@@ -59,6 +59,10 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
 COPY src /app/src
 COPY apps/__init__.py /app/apps/__init__.py
 COPY apps/api /app/apps/api
+COPY apps/workers/__init__.py /app/apps/workers/__init__.py
+COPY apps/workers/artifact /app/apps/workers/artifact
+COPY apps/workers/evaluation /app/apps/workers/evaluation
+COPY apps/background /app/apps/background
 
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     python -m pip install --no-deps /app \

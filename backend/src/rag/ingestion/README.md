@@ -1,7 +1,8 @@
 # Ingestion capability
 
 This package owns the complete document-ingestion lifecycle. Runtime entrypoints
-under `backend/apps/ingestion` should only configure Celery and call this package.
+under `backend/apps/workers/document_pipeline` should only configure Celery and
+call this package.
 
 - `contracts.py` defines the producer/worker wire payload.
 - `queue.py`, `recovery.py`, and `worker_control.py` manage dispatch and recovery.

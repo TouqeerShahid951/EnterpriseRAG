@@ -7,9 +7,10 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from apps.ingestion import tasks as ingestion_tasks
 from rag.api.routes import document_routes, ingest_job_routes
 from rag.core.config import settings
+from rag.graphrag import tasks as graphrag_tasks
+from rag.ingestion import tasks as ingestion_tasks
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.identity_models import UserRecord
 from rag.repositories.ingest_config import IngestConfigRecord, InMemoryIngestConfigRepository
@@ -26,7 +27,7 @@ def test_successful_ingestion_does_not_automatically_queue_graph_enrichment(monk
         lambda _task, payload: {"status": "complete", "doc_id": payload["doc_id"], "job_id": payload["job_id"]},
     )
     monkeypatch.setattr(
-        ingestion_tasks.index_document_graphrag,
+        graphrag_tasks.index_document_graphrag,
         "apply_async",
         lambda *args, **kwargs: graph_dispatches.append((args, kwargs)),
     )

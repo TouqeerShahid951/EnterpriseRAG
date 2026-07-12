@@ -1,36 +1,45 @@
-"""Celery task entrypoints for the ingestion runtime."""
+"""Execute GraphRAG worker workflows independently of Celery composition."""
 
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Callable
 from dataclasses import asdict
 from hashlib import sha256
 from typing import Any
 
-from apps.ingestion.celery_app import celery_app
-from rag.graphrag.indexing import GraphRAGIndexingService, config_from_mapping
-from rag.ingestion.config import WorkerConfig
 from rag.ingestion.adapters.http import ServiceRequestError
 from rag.ingestion.adapters.inference import build_ingestion_inference_client
-from rag.ingestion.execution import _build_backend, run_ingest_document
+from rag.ingestion.config import WorkerConfig
+from rag.ingestion.execution import build_backend_client
+
+from .indexing import GraphRAGIndexingService, config_from_mapping
 
 
-@celery_app.task(bind=True, name="apps.ingestion.tasks.ingest_document")
-def ingest_document(self: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    return run_ingest_document(self, payload)
+logger = logging.getLogger("rag.graphrag.task_execution")
+PartitionRebuildDispatcher = Callable[[dict[str, Any], str, int], None]
 
 
-@celery_app.task(bind=True, name="apps.ingestion.tasks.index_document_graphrag")
-def index_document_graphrag(self: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    del self
+def run_document_graph_index(
+    payload: dict[str, Any],
+    *,
+    dispatch_partition_rebuild: PartitionRebuildDispatcher,
+) -> dict[str, Any]:
     doc_id = str(payload.get("doc_id", "")).strip()
     job_id = str(payload.get("job_id", "")).strip()
     if not doc_id:
         return {"status": "skipped", "degraded_reason": "missing_doc_id"}
+
     config = WorkerConfig.from_env()
     if not config.graphrag_enabled:
-        return {"status": "skipped", "doc_id": doc_id, "degraded_reason": "graphrag_disabled"}
-    backend = _build_backend(config)
+        return {
+            "status": "skipped",
+            "doc_id": doc_id,
+            "degraded_reason": "graphrag_disabled",
+        }
+
+    backend = build_backend_client(config)
     runtime_config = backend.get_rag_config()
     inference = build_ingestion_inference_client(
         runtime_config,
@@ -44,33 +53,46 @@ def index_document_graphrag(self: Any, payload: dict[str, Any]) -> dict[str, Any
         config=graph_config,
         inference=inference,
     ).index_document(doc_id)
-    payload_out = asdict(result)
-    if result.status == "complete" and result.partition_key and not graph_config.summarize_after_document:
-        payload_out["partition_rebuild_status"] = _enqueue_partition_rebuild(
+    result_payload = asdict(result)
+    if (
+        result.status == "complete"
+        and result.partition_key
+        and not graph_config.summarize_after_document
+    ):
+        result_payload["partition_rebuild_status"] = _enqueue_partition_rebuild(
             config,
             partition_key=result.partition_key,
             doc_id=doc_id,
             job_id=job_id,
+            dispatch=dispatch_partition_rebuild,
         )
     if job_id:
-        _record_graphrag_event(config, job_id=job_id, result=payload_out)
-    return payload_out
+        _record_graphrag_event(config, job_id=job_id, result=result_payload)
+    return result_payload
 
 
-@celery_app.task(bind=True, name="apps.ingestion.tasks.rebuild_graphrag_partition")
-def rebuild_graphrag_partition(self: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    del self
+def run_partition_rebuild(payload: dict[str, Any]) -> dict[str, Any]:
     partition_key = str(payload.get("partition_key", "")).strip()
     doc_id = str(payload.get("doc_id", "")).strip()
     job_id = str(payload.get("job_id", "")).strip()
     dedupe_key = str(payload.get("dedupe_key", "")).strip()
     if not partition_key:
-        return {"status": "skipped", "doc_id": doc_id, "degraded_reason": "missing_partition_key"}
+        return {
+            "status": "skipped",
+            "doc_id": doc_id,
+            "degraded_reason": "missing_partition_key",
+        }
+
     config = WorkerConfig.from_env()
     try:
         if not config.graphrag_enabled:
-            return {"status": "skipped", "doc_id": doc_id, "partition_key": partition_key, "degraded_reason": "graphrag_disabled"}
-        backend = _build_backend(config)
+            return {
+                "status": "skipped",
+                "doc_id": doc_id,
+                "partition_key": partition_key,
+                "degraded_reason": "graphrag_disabled",
+            }
+        backend = build_backend_client(config)
         runtime_config = backend.get_rag_config()
         inference = build_ingestion_inference_client(
             runtime_config,
@@ -83,33 +105,13 @@ def rebuild_graphrag_partition(self: Any, payload: dict[str, Any]) -> dict[str, 
             config=config_from_mapping(config),
             inference=inference,
         ).rebuild_partition(partition_key, doc_id=doc_id)
-        payload_out = asdict(result)
+        result_payload = asdict(result)
         if job_id:
-            _record_graphrag_event(config, job_id=job_id, result=payload_out)
-        return payload_out
+            _record_graphrag_event(config, job_id=job_id, result=result_payload)
+        return result_payload
     finally:
         if dedupe_key:
             _clear_rebuild_marker(config, dedupe_key)
-
-
-@celery_app.task(bind=True, name="apps.ingestion.tasks.reextract_document_metadata")
-def reextract_document_metadata(self: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    return run_ingest_document(self, payload)
-
-
-@celery_app.task(bind=True, name="apps.ingestion.tasks.reextract_document_topics")
-def reextract_document_topics(self: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    return run_ingest_document(self, payload)
-
-
-@celery_app.task(bind=True, name="apps.ingestion.tasks.reextract_document_claims")
-def reextract_document_claims(self: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    return run_ingest_document(self, payload)
-
-
-@celery_app.task(bind=True, name="apps.ingestion.tasks.reextract_document_type")
-def reextract_document_type(self: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    return run_ingest_document(self, payload)
 
 
 def _enqueue_partition_rebuild(
@@ -118,6 +120,7 @@ def _enqueue_partition_rebuild(
     partition_key: str,
     doc_id: str,
     job_id: str,
+    dispatch: PartitionRebuildDispatcher,
 ) -> str:
     dedupe_key = _rebuild_marker_key(partition_key)
     delay = config.graphrag_partition_rebuild_delay_seconds
@@ -128,27 +131,41 @@ def _enqueue_partition_rebuild(
         "dedupe_key": dedupe_key,
         "reason": "document_index",
     }
-    marker_set = False
     try:
         marker_set = _set_rebuild_marker(config, dedupe_key, payload)
     except Exception:
+        logger.warning(
+            "GraphRAG rebuild deduplication unavailable; scheduling without a marker "
+            "doc_id=%s job_id=%s marker_key=%s",
+            doc_id,
+            job_id,
+            dedupe_key,
+            exc_info=True,
+        )
         marker_set = True
         payload.pop("dedupe_key", None)
     if not marker_set:
         return "already_scheduled"
+
     try:
-        rebuild_graphrag_partition.apply_async(
-            args=[payload],
-            queue=config.graphrag_queue_name,
-            countdown=delay,
-        )
+        dispatch(payload, config.graphrag_queue_name, delay)
     except Exception:
+        logger.exception(
+            "GraphRAG partition rebuild enqueue failed doc_id=%s job_id=%s marker_key=%s",
+            doc_id,
+            job_id,
+            dedupe_key,
+        )
         _clear_rebuild_marker(config, dedupe_key)
         return "enqueue_failed"
     return "queued"
 
 
-def _set_rebuild_marker(config: WorkerConfig, key: str, payload: dict[str, Any]) -> bool:
+def _set_rebuild_marker(
+    config: WorkerConfig,
+    key: str,
+    payload: dict[str, Any],
+) -> bool:
     from redis import Redis
 
     ttl = max(600, config.graphrag_partition_rebuild_delay_seconds + 600)
@@ -162,7 +179,11 @@ def _clear_rebuild_marker(config: WorkerConfig, key: str) -> None:
 
         Redis.from_url(config.redis_url, decode_responses=True).delete(key)
     except Exception:
-        pass
+        logger.warning(
+            "GraphRAG rebuild marker cleanup failed marker_key=%s",
+            key,
+            exc_info=True,
+        )
 
 
 def _rebuild_marker_key(partition_key: str) -> str:
@@ -170,12 +191,22 @@ def _rebuild_marker_key(partition_key: str) -> str:
     return f"graphrag:partition-rebuild:scheduled:{digest}"
 
 
-def _record_graphrag_event(config: WorkerConfig, *, job_id: str, result: dict[str, Any]) -> None:
+def _record_graphrag_event(
+    config: WorkerConfig,
+    *,
+    job_id: str,
+    result: dict[str, Any],
+) -> None:
     try:
-        _build_backend(config).record_event(
+        build_backend_client(config).record_event(
             job_id=job_id,
             event_type="graphrag_index",
             payload=result,
         )
     except ServiceRequestError:
-        pass
+        logger.warning(
+            "GraphRAG indexing event could not be recorded job_id=%s status=%s",
+            job_id,
+            result.get("status", "unknown"),
+            exc_info=True,
+        )

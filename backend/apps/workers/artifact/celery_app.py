@@ -1,17 +1,17 @@
-"""Celery application for RAG evaluation runs."""
+"""Celery application for artifact-generation jobs."""
 
 from celery import Celery
 
-from ..core.config import settings
+from rag.core.config import settings
 
 
 celery_app = Celery(
-    "rag-evaluation-worker",
+    "artifact-generation-worker",
     broker=settings.celery_broker_url or settings.redis_url,
-    include=["rag.evaluations.tasks"],
+    include=["rag.artifact_jobs.tasks"],
 )
 celery_app.conf.update(
-    task_default_queue=settings.evaluation_queue_name,
+    task_default_queue=settings.artifact_queue_name,
     task_serializer="json",
     accept_content=["json"],
     result_backend=None,
@@ -21,7 +21,7 @@ celery_app.conf.update(
     broker_transport_options={"visibility_timeout": 7200},
     worker_concurrency=1,
     worker_max_tasks_per_child=10,
-    task_soft_time_limit=int(settings.evaluation_worker_timeout_seconds),
-    task_time_limit=int(settings.evaluation_worker_timeout_seconds + 60),
+    task_soft_time_limit=int(settings.artifact_worker_timeout_seconds),
+    task_time_limit=int(settings.artifact_worker_timeout_seconds + 60),
 )
 app = celery_app

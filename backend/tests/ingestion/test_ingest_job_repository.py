@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from rag.internal.ingest_status_routes import start_ingest_job_attempt, update_ingest_job_status
-from rag.ops import ingest_maintenance_cli
+from rag.ingestion import maintenance as ingest_maintenance
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.document_postgres import PostgresDocumentRepository
 from rag.repositories.ingest_config import InMemoryIngestConfigRepository
@@ -325,12 +325,12 @@ def test_maintenance_does_not_fail_or_audit_job_heartbeat_after_stale_scan(
     stale_job = replace(job, attempt_count=3)
     racing_repo = _HeartbeatBeforeMaintenanceRepository(repo)
     monkeypatch.setattr(
-        ingest_maintenance_cli,
+        ingest_maintenance,
         "list_stale_ingest_jobs",
         lambda **_kwargs: [SimpleNamespace(job=stale_job)],
     )
 
-    recovered = ingest_maintenance_cli.reconcile_ingestion_jobs(
+    recovered = ingest_maintenance.reconcile_ingestion_jobs(
         document_repo=repo,
         job_repo=racing_repo,  # type: ignore[arg-type]
         queue=object(),  # type: ignore[arg-type]

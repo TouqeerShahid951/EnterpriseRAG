@@ -57,11 +57,10 @@ flowchart LR
 | Frontend | `frontend/src/App.tsx`, `frontend/src/routes.ts`, `frontend/src/api/*` | Browser application, role-gated navigation, chat, uploads, document library, review queue, audit, settings, evaluations, SSE query streaming. |
 | Public API | `backend/apps/api/main.py`, `backend/src/rag/api/routes/*` | Authenticated REST and streaming API under `/api/v1`. Handles auth, upload, documents, query, review, audit, admin, evaluations, and artifact job endpoints. |
 | Internal API | `backend/src/rag/internal/*` | Service-token protected endpoints under `/internal` used by workers for job state, config snapshots, review batches, ABAC context, claims, and supersession. |
-| Ingestion worker | `backend/apps/ingestion/tasks.py`, `backend/src/rag/ingestion/*` | Celery worker that parses documents, enriches metadata, chunks content, embeds text, indexes Qdrant, saves claims, and updates ingestion status. |
-| Artifact worker | `backend/src/rag/artifact_jobs/*` | Durable document generation workflow. Plans, retrieves evidence, composes content, validates grounding, renders files, stores outputs, and reports progress. |
-| Evaluation worker | `backend/src/rag/evaluations/*` | Runs imported evaluation datasets against the current RAG configuration and stores per-case diagnostics. |
-| Folder scheduler | `backend/src/rag/ops/folder_ingest_scheduler_cli.py` | Polls scheduled folder or MinIO-prefix ingestion plans and dispatches due work. |
-| Ingest maintenance | `backend/src/rag/ops/ingest_maintenance_cli.py` | Recovers stale ingestion jobs and coordinates worker capacity. |
+| Ingestion and GraphRAG workers | `backend/apps/workers/document_pipeline/*`, `backend/src/rag/ingestion/*`, `backend/src/rag/graphrag/*` | Shared Celery runtime whose separately deployed services consume the ingestion and GraphRAG queues. |
+| Artifact worker | `backend/apps/workers/artifact/*`, `backend/src/rag/artifact_jobs/*` | Durable document generation workflow. Plans, retrieves evidence, composes content, validates grounding, renders files, stores outputs, and reports progress. |
+| Evaluation worker | `backend/apps/workers/evaluation/*`, `backend/src/rag/evaluations/*` | Runs imported evaluation datasets against the current RAG configuration and stores per-case diagnostics. |
+| Background services | `backend/apps/background/*` | Runs artifact cleanup, scheduled folder dispatch, and ingestion recovery/capacity maintenance on independent loops. |
 | Model services | `docker-compose.yml` | Optional vLLM text, embedding, and vision services, plus host Ollama support through `host.docker.internal`. |
 
 ## Persistent State

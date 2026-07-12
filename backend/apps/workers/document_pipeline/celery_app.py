@@ -1,4 +1,4 @@
-"""Celery application for ingestion tasks."""
+"""Celery application shared by ingestion and GraphRAG workers."""
 
 from __future__ import annotations
 
@@ -11,7 +11,11 @@ from rag.ingestion.config import WorkerConfig
 config = WorkerConfig.from_env()
 soft_time_limit = int(os.getenv("INGEST_TASK_SOFT_TIME_LIMIT_SECONDS", "1800"))
 hard_time_limit = int(os.getenv("INGEST_TASK_TIME_LIMIT_SECONDS", str(soft_time_limit + 120)))
-celery_app = Celery("rag-ingestion-worker", broker=config.redis_url, include=["apps.ingestion.tasks"])
+celery_app = Celery(
+    "rag-ingestion-worker",
+    broker=config.redis_url,
+    include=["rag.ingestion.tasks", "rag.graphrag.tasks"],
+)
 celery_app.conf.update(
     task_default_queue=config.ingest_queue_name,
     task_routes={

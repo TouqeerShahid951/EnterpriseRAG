@@ -6,13 +6,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from billiard.exceptions import SoftTimeLimitExceeded
+from celery import shared_task
 
 from ..repositories.evaluations import get_evaluation_repository
-from .celery_app import celery_app
 from .execution import EvaluationRunCancelled, default_evaluation_run_executor
 
 
-@celery_app.task(bind=True, name="rag.evaluations.tasks.run_evaluation")
+@shared_task(bind=True, name="rag.evaluations.tasks.run_evaluation")
 def run_evaluation(self: Any, run_id: str) -> dict[str, object]:
     repo = get_evaluation_repository()
     try:

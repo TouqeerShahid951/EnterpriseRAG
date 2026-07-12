@@ -1,68 +1,31 @@
-"""Recover orphaned ingestion jobs and enforce saved worker capacity."""
+"""Recover stale ingestion jobs and enforce saved worker capacity."""
 
 from __future__ import annotations
 
-import argparse
-import time
 from datetime import UTC, datetime, timedelta
 
 from rag.core.config import settings
 from rag.repositories.document_models import DocumentRepository
 from rag.repositories.documents import get_document_repository
-from rag.repositories.ingest_job_models import IngestJobRecord, IngestJobRepository
-from rag.repositories.ingest_jobs import ingest_job_repository_for
 from rag.repositories.ingest_config import (
     IngestConfigRepository,
     effective_ingest_config,
     get_ingest_config_repository,
 )
-from rag.repositories.postgres import PostgresConnectionMixin
-from rag.ingestion.queue import IngestQueue, get_ingest_queue
-from rag.ingestion.recovery import (
+from rag.repositories.ingest_job_models import IngestJobRecord, IngestJobRepository
+from rag.repositories.ingest_jobs import ingest_job_repository_for
+
+from .queue import IngestQueue, get_ingest_queue
+from .recovery import (
     IngestRecoveryError,
     MAX_INGEST_ATTEMPTS,
     list_stale_ingest_jobs,
     requeue_stale_ingest_job,
 )
-from rag.ingestion.worker_control import IngestWorkerControl, get_ingest_worker_control
+from .worker_control import IngestWorkerControl, get_ingest_worker_control
 
-ADVISORY_LOCK_ID = 867530902
+
 MAX_ATTEMPTS = MAX_INGEST_ATTEMPTS
-
-
-class _LockConnection(PostgresConnectionMixin):
-    def __init__(self, database_url: str) -> None:
-        self.database_url = database_url
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Maintain ingestion worker capacity and recover stale jobs.")
-    parser.add_argument("--loop", action="store_true")
-    parser.add_argument("--once", action="store_true")
-    args = parser.parse_args()
-    if not args.loop and not args.once:
-        args.once = True
-    while True:
-        recovered = _run_with_lock()
-        if recovered:
-            print(f"recovered_ingest_jobs={','.join(recovered)}", flush=True)
-        if not args.loop:
-            return
-        time.sleep(settings.ingest_maintenance_interval_seconds)
-
-
-def _run_with_lock() -> list[str]:
-    if settings.document_repository != "postgres":
-        return reconcile_ingestion_jobs()
-    lock = _LockConnection(settings.database_url)
-    with lock._connect() as conn:
-        acquired = conn.execute("SELECT pg_try_advisory_lock(%s) AS acquired", (ADVISORY_LOCK_ID,)).fetchone()["acquired"]
-        if not acquired:
-            return []
-        try:
-            return reconcile_ingestion_jobs()
-        finally:
-            conn.execute("SELECT pg_advisory_unlock(%s)", (ADVISORY_LOCK_ID,))
 
 
 def reconcile_ingestion_jobs(
@@ -78,10 +41,14 @@ def reconcile_ingestion_jobs(
     job_repo = job_repo or ingest_job_repository_for(document_repo)
     queue = queue or get_ingest_queue()
     control = control or get_ingest_worker_control()
-    config = effective_ingest_config(repo=config_repo or get_ingest_config_repository())
+    config = effective_ingest_config(
+        repo=config_repo or get_ingest_config_repository()
+    )
     snapshot = control.apply(config.worker_concurrency)
     observed_at = now or datetime.now(UTC)
-    stale_before = observed_at - timedelta(seconds=settings.ingest_stale_after_seconds)
+    stale_before = observed_at - timedelta(
+        seconds=settings.ingest_stale_after_seconds
+    )
     recovered: list[str] = []
 
     stale_jobs = list_stale_ingest_jobs(
@@ -108,7 +75,12 @@ def reconcile_ingestion_jobs(
                 run_token=job.run_token,
             )
             if mutation.changed:
-                _audit(document_repo, job, "exhausted", {"attempt_count": job.attempt_count})
+                _audit(
+                    document_repo,
+                    job,
+                    "exhausted",
+                    {"attempt_count": job.attempt_count},
+                )
             continue
 
         if not candidate.recoverable:
@@ -119,13 +91,20 @@ def reconcile_ingestion_jobs(
                 stage_progress=job.stage_progress,
                 warnings=list(job.warnings),
                 error_code="recovery_source_unavailable",
-                error_message_safe="The source document is unavailable for ingestion recovery.",
+                error_message_safe=(
+                    "The source document is unavailable for ingestion recovery."
+                ),
                 expected_statuses=frozenset({"processing"}),
                 stale_before=stale_before,
                 run_token=job.run_token,
             )
             if mutation.changed:
-                _audit(document_repo, job, "unrecoverable", {"reason": candidate.recovery_code})
+                _audit(
+                    document_repo,
+                    job,
+                    "unrecoverable",
+                    {"reason": candidate.recovery_code},
+                )
             continue
 
         try:
@@ -143,12 +122,16 @@ def reconcile_ingestion_jobs(
             )
         except IngestRecoveryError:
             continue
-        else:
-            recovered.append(job.id)
+        recovered.append(job.id)
     return recovered
 
 
-def _audit(repo: DocumentRepository, job: IngestJobRecord, event_type: str, payload: dict[str, object]) -> None:
+def _audit(
+    repo: DocumentRepository,
+    job: IngestJobRecord,
+    event_type: str,
+    payload: dict[str, object],
+) -> None:
     repo.append_audit_event(
         event_type=f"internal.ingest.{event_type}",
         actor_id=None,
@@ -156,7 +139,3 @@ def _audit(repo: DocumentRepository, job: IngestJobRecord, event_type: str, payl
         target_id=job.id,
         payload={"doc_id": job.doc_id, **payload},
     )
-
-
-if __name__ == "__main__":
-    main()

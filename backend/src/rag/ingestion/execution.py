@@ -27,7 +27,7 @@ from .quality import parser_tuning_for_quality_preset
 def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
     job = IngestJobPayload.from_dict(payload)
     config = WorkerConfig.from_env()
-    backend = _build_backend(config)
+    backend = build_backend_client(config)
     run_token = str(uuid4())
     attempt = _start_attempt(task, backend, job.job_id, run_token)
     if not attempt.accepted:
@@ -414,7 +414,7 @@ def _job_heartbeat(
         thread.join(timeout=1)
 
 
-def _build_backend(config: WorkerConfig) -> BackendInternalClient:
+def build_backend_client(config: WorkerConfig) -> BackendInternalClient:
     return BackendInternalClient(
         base_url=config.backend.internal_url,
         service_token=config.backend.service_token,
@@ -428,7 +428,7 @@ def _build_dependencies(
     backend: BackendInternalClient | None = None,
     quality_preset: str | None = None,
 ) -> IngestDependencies:
-    backend = backend or _build_backend(config)
+    backend = backend or build_backend_client(config)
     inference_config = backend.get_rag_config()
     ingest_config = backend.get_ingest_config()
     parser_tuning = parser_tuning_for_quality_preset(

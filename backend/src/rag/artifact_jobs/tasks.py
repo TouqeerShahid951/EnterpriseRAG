@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from billiard.exceptions import SoftTimeLimitExceeded
+from celery import shared_task
 
 from ..core.config import settings
 from ..repositories.artifact_jobs import (
@@ -20,7 +21,6 @@ from ..repositories.artifact_jobs import (
     DEFAULT_ARTIFACT_JOB_LEASE_TIMEOUT,
     get_artifact_job_repository,
 )
-from .celery_app import celery_app
 from .execution import (
     ArtifactEvidenceUnavailable,
     ArtifactJobCancelled,
@@ -46,7 +46,7 @@ class ArtifactContextRejected(RuntimeError):
     pass
 
 
-@celery_app.task(
+@shared_task(
     bind=True,
     name=settings.artifact_task_name,
     max_retries=None,

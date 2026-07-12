@@ -1,4 +1,4 @@
-"""Dispatch due scheduled folder ingestion jobs."""
+"""Run the scheduled-folder ingestion dispatcher."""
 
 from __future__ import annotations
 

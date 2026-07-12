@@ -171,7 +171,7 @@ docker buildx build \
 
 docker buildx build \
   --platform linux/amd64 \
-  --file backend/apps/ingestion/Dockerfile \
+  --file backend/apps/workers/document_pipeline/Dockerfile \
   --tag "agenticrag-ingestion-worker:${RELEASE}" \
   --build-arg PREWARM_FASTEMBED=false \
   --build-arg PREWARM_DOCLING=false \

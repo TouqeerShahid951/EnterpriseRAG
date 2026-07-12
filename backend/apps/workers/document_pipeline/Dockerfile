@@ -41,12 +41,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && mkdir -p /models/fastembed /models/docling /models/huggingface \
     && chown -R appuser:appuser /models
 
-COPY apps/ingestion/pyproject.toml apps/ingestion/constraints.txt /app/apps/ingestion/
+COPY apps/workers/document_pipeline/pyproject.toml apps/workers/document_pipeline/constraints.txt /app/apps/workers/document_pipeline/
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     python -m pip install --index-url "$PYTORCH_CPU_INDEX_URL" \
         "torch==2.12.0" "torchvision==0.27.0" \
-    && python -c 'import tomllib; data=tomllib.load(open("/app/apps/ingestion/pyproject.toml","rb")); print("\n".join(data["project"]["dependencies"]))' > /tmp/worker-requirements.txt \
-    && python -m pip install -c /app/apps/ingestion/constraints.txt -r /tmp/worker-requirements.txt \
+    && python -c 'import tomllib; data=tomllib.load(open("/app/apps/workers/document_pipeline/pyproject.toml","rb")); print("\n".join(data["project"]["dependencies"]))' > /tmp/worker-requirements.txt \
+    && python -m pip install -c /app/apps/workers/document_pipeline/constraints.txt -r /tmp/worker-requirements.txt \
     && rm /tmp/worker-requirements.txt
 
 ENV DOCLING_ARTIFACTS_PATH=/models/docling
@@ -59,7 +59,8 @@ COPY src/rag/__init__.py /app/src/rag/__init__.py
 COPY src/rag/graphrag /app/src/rag/graphrag
 COPY src/rag/shared /app/src/rag/shared
 COPY apps/__init__.py /app/apps/__init__.py
-COPY apps/ingestion /app/apps/ingestion
+COPY apps/workers/__init__.py /app/apps/workers/__init__.py
+COPY apps/workers/document_pipeline /app/apps/workers/document_pipeline
 ARG PREWARM_FASTEMBED=false
 ARG PREWARM_DOCLING=false
 RUN if [ "$PREWARM_FASTEMBED" = "true" ]; then \
@@ -84,4 +85,4 @@ ENV HF_HUB_DISABLE_TELEMETRY=1
 ENV HF_HUB_DISABLE_XET=1
 ENV DO_NOT_TRACK=1
 
-CMD ["celery", "-A", "apps.ingestion.celery_app", "worker", "--loglevel=info"]
+CMD ["celery", "-A", "apps.workers.document_pipeline.celery_app", "worker", "--loglevel=info"]
