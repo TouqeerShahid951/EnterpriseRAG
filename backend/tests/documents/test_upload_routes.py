@@ -16,8 +16,8 @@ from rag.documents.dependencies import get_file_scanner, get_upload_storage
 from rag.documents.storage import StoredUpload
 from rag.ingestion.contracts import IngestJobPayload
 from rag.ingestion.queue import get_ingest_queue
-from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.documents import get_document_repository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
+from rag.documents.repository import get_document_repository
 from rag.ingestion.job_dependencies import get_ingest_job_repository
 
 PDF_CONTENT = b"%PDF-1.7\nroute contract\n%%EOF"

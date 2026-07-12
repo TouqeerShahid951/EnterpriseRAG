@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from ..repositories.document_models import DocumentRepository
+from ..documents.models import DocumentRepository
 from ..ingestion.folder_schedule_models import FolderScheduleRecord, FolderScheduleRepository
 
 

@@ -8,8 +8,8 @@ from rag.audit.adapters.memory import RepositoryAuditRepository
 from rag.audit.adapters.postgres import PostgresAuditRepository
 from rag.audit.models import AuditFilters, AuditViewerScope
 from rag.audit.repository import audit_repository_for
-from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.document_postgres import PostgresDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
+from rag.documents.adapters.postgres import PostgresDocumentRepository
 from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
 
 

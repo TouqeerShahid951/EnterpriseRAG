@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from rag.api.routes.ingest_job_routes import summarize_ingest_jobs
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.identity_models import UserRecord
 
 

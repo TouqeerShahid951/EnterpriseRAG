@@ -6,9 +6,9 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from ..repositories.document_models import DocumentRepository
-from ..repositories.document_postgres import PostgresDocumentRepository
-from ..repositories.documents import get_document_repository
+from ..documents.models import DocumentRepository
+from ..documents.adapters.postgres import PostgresDocumentRepository
+from ..documents.repository import get_document_repository
 from .adapters.human_review_postgres import PostgresHumanReviewRepository
 from .adapters.image_review_postgres import PostgresImageReviewRepository
 from .review_models import HumanReviewRepository, ImageReviewRepository

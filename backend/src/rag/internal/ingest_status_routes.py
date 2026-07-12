@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..core.config import settings
-from ..repositories.documents import DocumentRepository, get_document_repository
+from ..documents.repository import DocumentRepository, get_document_repository
 from ..ingestion.job_dependencies import get_ingest_job_repository
 from ..ingestion.job_models import IngestJobRecord, IngestJobRepository
 from ..schemas.internal import (

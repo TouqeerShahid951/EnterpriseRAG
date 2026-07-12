@@ -17,7 +17,7 @@ from ...core.config import settings
 from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient as RetrievalQdrantClient
 from ...shared.contracts.clearance import ClearanceLevel, clearance_levels_at_or_below
-from ...repositories.documents import DocumentRepository, get_document_repository
+from ...documents.repository import DocumentRepository, get_document_repository
 from ...ingestion.job_models import (
     IngestJobAccess,
     IngestJobFilters,

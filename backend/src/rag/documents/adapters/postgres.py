@@ -5,17 +5,17 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from ..auth.abac import normalize_group_path
-from ..shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
-from ..audit.adapters.postgres import audit_event_from_row
-from .document_models import (
+from ...audit.adapters.postgres import audit_event_from_row
+from ...auth.abac import normalize_group_path
+from ...repositories.postgres import PostgresConnectionMixin
+from ...shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
+from ..models import (
     AuditEventRecord,
     DocumentCrossReferenceRecord,
     DocumentEntityRecord,
     DocumentImageAssetRecord,
     DocumentRecord,
 )
-from .postgres import PostgresConnectionMixin
 
 
 class PostgresDocumentRepository(PostgresConnectionMixin):

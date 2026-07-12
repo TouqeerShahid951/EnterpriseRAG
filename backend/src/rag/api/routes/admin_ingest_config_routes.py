@@ -3,8 +3,8 @@
 from fastapi import APIRouter, Depends
 
 from ...auth.dependencies import require_platform_admin_user
-from ...repositories.document_models import DocumentRepository
-from ...repositories.documents import get_document_repository
+from ...documents.models import DocumentRepository
+from ...documents.repository import get_document_repository
 from ...auth.identity_models import UserRecord
 from ...ingestion.configuration import IngestConfigRecord, IngestConfigRepository
 from ...ingestion.configuration_dependencies import (

@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from rag.core.config import settings
-from rag.repositories.document_models import DocumentRepository
-from rag.repositories.documents import get_document_repository
+from rag.documents.models import DocumentRepository
+from rag.documents.repository import get_document_repository
 from rag.ingestion.configuration import IngestConfigRepository
 from rag.ingestion.configuration_dependencies import (
     effective_ingest_config,

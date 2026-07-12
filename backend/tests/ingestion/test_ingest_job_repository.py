@@ -11,8 +11,8 @@ from fastapi import HTTPException
 
 from rag.internal.ingest_status_routes import start_ingest_job_attempt, update_ingest_job_status
 from rag.ingestion import maintenance as ingest_maintenance
-from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.document_postgres import PostgresDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
+from rag.documents.adapters.postgres import PostgresDocumentRepository
 from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
 from rag.ingestion.job_models import (
     IngestJobAccess,

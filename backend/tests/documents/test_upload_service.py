@@ -15,7 +15,7 @@ from rag.documents.adapters.file_scanning import NoopFileScanner
 from rag.documents.scanning import MalwareDetectedError, ScannerUnavailableError
 from rag.documents.storage import StoredUpload
 from rag.ingestion.contracts import IngestJobPayload
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
 from rag.auth.identity_models import UserRecord
 

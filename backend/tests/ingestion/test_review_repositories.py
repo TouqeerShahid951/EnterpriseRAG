@@ -7,8 +7,8 @@ import pytest
 from fastapi import HTTPException
 
 from rag.internal.review_batch_routes import get_image_review_approved_keys
-from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.document_postgres import PostgresDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
+from rag.documents.adapters.postgres import PostgresDocumentRepository
 from rag.ingestion.adapters.human_review_postgres import (
     PostgresHumanReviewRepository,
     review_batch_from_row,

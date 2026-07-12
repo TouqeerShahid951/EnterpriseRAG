@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 
-from rag.repositories.document_postgres import PostgresDocumentRepository
+from rag.documents.adapters.postgres import PostgresDocumentRepository
 from rag.ingestion.adapters.human_review_postgres import PostgresHumanReviewRepository
 from rag.ingestion.adapters.image_review_postgres import PostgresImageReviewRepository
 from rag.ingestion.adapters.job_postgres import PostgresIngestJobRepository

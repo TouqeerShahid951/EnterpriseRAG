@@ -11,7 +11,7 @@ from ..auth.context import UserContext
 from ..connectors.models import ConnectorSchemaCatalogRecord
 from ..connectors.repositories import ConnectorProfileRepository, get_connector_profile_repository
 from ..connectors.schema_catalog import column_allowed, schema_catalog_visible_group_path, table_allowed
-from ..repositories.document_models import DocumentRecord, DocumentRepository
+from ..documents.models import DocumentRecord, DocumentRepository
 from ..ingestion.folder_schedule_models import FolderScheduleRepository
 from ..schemas.query import QuerySource
 from ..shared.contracts.clearance import can_access_clearance, clearance_rank

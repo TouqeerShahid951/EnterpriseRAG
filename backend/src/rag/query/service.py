@@ -9,9 +9,9 @@ from ..artifact_jobs.service import ArtifactJobService, default_artifact_job_ser
 from ..auth.context import UserContext
 from ..core.config import Settings, settings
 from ..documents.claim_dependencies import claim_repository_from_settings
-from ..repositories.document_memory import InMemoryDocumentRepository
-from ..repositories.document_models import DocumentRepository
-from ..repositories.document_postgres import PostgresDocumentRepository
+from ..documents.adapters.memory import InMemoryDocumentRepository
+from ..documents.models import DocumentRepository
+from ..documents.adapters.postgres import PostgresDocumentRepository
 from ..schemas.query import QueryRequest, QueryStreamEvent, RAGResponse
 from .artifact_service import GeneratedArtifactService
 from .artifact_intent import parse_artifact_request

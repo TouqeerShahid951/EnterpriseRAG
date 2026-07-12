@@ -13,7 +13,7 @@ from rag.documents.upload_service import (
 from rag.documents.adapters.file_scanning import NoopFileScanner
 from rag.documents.storage import StoredUpload
 from rag.ingestion.contracts import IngestJobPayload
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.ingestion.job_models import IngestJobRepository
 from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
 from rag.auth.identity_models import UserRecord

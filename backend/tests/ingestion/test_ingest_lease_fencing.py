@@ -20,7 +20,7 @@ from rag.internal.ingest_status_routes import (
     update_ingest_job_status,
 )
 from rag.ingestion import maintenance as ingest_maintenance
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
 from rag.schemas.internal import (
     InternalJobAttemptRequest,

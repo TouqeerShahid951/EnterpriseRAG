@@ -17,7 +17,7 @@ from ...ingestion.review_models import (
     ImageReviewRepository,
     ReviewItemRecord,
 )
-from ...repositories.documents import (
+from ...documents.repository import (
     DocumentRepository,
     get_document_repository,
 )

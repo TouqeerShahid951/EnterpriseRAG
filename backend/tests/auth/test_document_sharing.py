@@ -1,7 +1,7 @@
 from uuid import uuid4
 
 from rag.auth.document_access import can_read_document, can_write_document
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.identity_models import UserRecord
 
 

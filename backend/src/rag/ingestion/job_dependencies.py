@@ -6,10 +6,10 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from ..repositories.document_memory import InMemoryDocumentRepository
-from ..repositories.document_models import DocumentRepository
-from ..repositories.document_postgres import PostgresDocumentRepository
-from ..repositories.documents import get_document_repository
+from ..documents.adapters.memory import InMemoryDocumentRepository
+from ..documents.models import DocumentRepository
+from ..documents.adapters.postgres import PostgresDocumentRepository
+from ..documents.repository import get_document_repository
 from .adapters.job_postgres import PostgresIngestJobRepository
 from .job_models import IngestJobStore
 

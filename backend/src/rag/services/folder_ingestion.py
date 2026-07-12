@@ -13,7 +13,7 @@ from ..auth.permissions import can_manage_group_path
 from ..core.config import settings
 from ..ingestion.contracts import IngestJobPayload
 from ..ingestion.queue import IngestQueue
-from ..repositories.document_models import DocumentRepository
+from ..documents.models import DocumentRepository
 from ..ingestion.folder_schedule_models import FolderRunItemRecord, FolderScheduleRecord, FolderScheduleRepository
 from ..auth.identity_models import IdentityRepository, UserRecord
 from ..ingestion.job_models import IngestJobRepository

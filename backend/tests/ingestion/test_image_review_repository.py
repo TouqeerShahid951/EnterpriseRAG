@@ -2,7 +2,7 @@ from uuid import uuid4
 
 import pytest
 
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.ingestion.review_models import ImageReviewBatchClosedError
 
 

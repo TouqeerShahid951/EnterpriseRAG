@@ -10,10 +10,10 @@ from fastapi.testclient import TestClient
 from rag.api.routes import review_routes
 from rag.ingestion.review_dependencies import get_human_review_repository, get_image_review_repository
 from rag.ingestion.review_models import ReviewItemRecord
-from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.document_models import DocumentRecord
-from rag.repositories.document_postgres import PostgresDocumentRepository
-from rag.repositories.documents import get_document_repository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
+from rag.documents.models import DocumentRecord
+from rag.documents.adapters.postgres import PostgresDocumentRepository
+from rag.documents.repository import get_document_repository
 from rag.ingestion.adapters.human_review_postgres import PostgresHumanReviewRepository
 from rag.auth.identity_models import UserRecord
 from rag.ingestion.adapters.image_review_postgres import PostgresImageReviewRepository

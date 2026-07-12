@@ -30,7 +30,7 @@ from rag.connectors.sql_safety import (
     validate_live_sql_for_approved_catalog,
     validate_read_only_sql,
 )
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.ingestion.adapters.folder_schedule_memory import InMemoryFolderScheduleRepository
 from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
 from rag.services.folder_ingestion import create_local_folder_schedule, dispatch_due_schedules

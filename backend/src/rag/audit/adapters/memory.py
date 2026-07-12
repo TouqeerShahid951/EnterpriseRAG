@@ -6,7 +6,7 @@ from typing import Any
 
 from ...auth.abac import normalize_group_path
 from ...auth.identity_models import IdentityRepository
-from ...repositories.document_models import (
+from ...documents.models import (
     AuditEventRecord,
     DocumentRecord,
     DocumentRepository,

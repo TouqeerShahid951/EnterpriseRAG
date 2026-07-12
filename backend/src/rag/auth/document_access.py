@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from ..repositories.document_models import DocumentRecord
+from ..documents.models import DocumentRecord
 from .identity_models import UserRecord
 from ..shared.contracts.clearance import can_access_clearance
 from .abac import normalize_group_path

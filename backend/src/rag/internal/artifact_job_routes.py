@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..artifact_jobs.repository import ArtifactJobRepository, get_artifact_job_repository
 from ..auth.document_access import can_read_document
-from ..repositories.documents import DocumentRepository, get_document_repository
+from ..documents.repository import DocumentRepository, get_document_repository
 from ..auth.identity_models import IdentityRepository
 from ..auth.identity_repository import get_identity_repository
 from ..schemas.internal import ServiceTokenContext

@@ -19,7 +19,7 @@ from ..auth.dependencies import require_csrf, require_current_user
 from ..auth.document_access import can_read_document
 from ..core.config import settings
 from ..ingestion.queue import IngestQueue, get_ingest_queue
-from ..repositories.documents import DocumentRepository, get_document_repository
+from ..documents.repository import DocumentRepository, get_document_repository
 from ..ingestion.job_dependencies import get_ingest_job_repository
 from ..ingestion.job_models import IngestJobRepository
 from ..auth.identity_models import IdentityRepository, UserRecord

@@ -43,7 +43,7 @@ from rag.artifact_jobs.service import ArtifactJobService, _public_stage_timings
 from rag.auth.context import UserContext
 from rag.core.config import Settings
 from rag.query.qdrant import SearchHit
-from rag.repositories.document_models import DocumentRecord
+from rag.documents.models import DocumentRecord
 from rag.auth.identity_models import UserRecord
 from rag.query.rag_config_models import RagConfigRecord
 from rag.services.generated_artifact_storage import LocalGeneratedArtifactStorage

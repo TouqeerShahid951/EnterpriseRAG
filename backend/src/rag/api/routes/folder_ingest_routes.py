@@ -14,7 +14,7 @@ from ...auth.permissions import can_manage_group_path, can_manage_spaces, filter
 from ...core.config import settings
 from ...connectors.repositories import ConnectorProfileRepository, get_connector_profile_repository
 from ...shared.contracts.clearance import can_access_clearance
-from ...repositories.documents import DocumentRepository, get_document_repository
+from ...documents.repository import DocumentRepository, get_document_repository
 from ...ingestion.folder_schedule_dependencies import get_folder_schedule_repository
 from ...ingestion.folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord, FolderScheduleRepository
 from ...auth.identity_models import IdentityRepository, UserRecord

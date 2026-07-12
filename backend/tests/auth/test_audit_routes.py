@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 from rag.api.routes import audit_routes
 from rag.auth.dependencies import require_current_user
 from rag.audit.adapters.memory import RepositoryAuditRepository
-from rag.repositories.document_memory import InMemoryDocumentRepository
-from rag.repositories.documents import get_document_repository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
+from rag.documents.repository import get_document_repository
 from rag.auth.identity_repository import get_identity_repository
 from rag.auth.identity_models import UserRecord
 

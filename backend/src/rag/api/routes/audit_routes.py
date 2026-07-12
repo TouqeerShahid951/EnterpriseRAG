@@ -24,7 +24,7 @@ from ...audit.models import (
     MAX_AUDIT_SCAN_LIMIT,
 )
 from ...audit.repository import audit_repository_for
-from ...repositories.documents import DocumentRepository, get_document_repository
+from ...documents.repository import DocumentRepository, get_document_repository
 from ...auth.identity_models import IdentityRepository, UserRecord
 from ...auth.identity_repository import get_identity_repository
 from ...schemas.audit import AuditEvent, AuditEventListResponse, AuditSummary

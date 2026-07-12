@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import logging
 
-from ..repositories.document_models import DocumentRepository
+from ..documents.models import DocumentRepository
 from ..services.generated_artifact_storage import GeneratedArtifactStorage
 from .generated_models import (
     GeneratedArtifactRecord,

@@ -10,7 +10,7 @@ from rag.api.routes.query_routes import list_query_sources
 from rag.auth.context import UserContext
 from rag.connectors.models import ConnectorSchemaCatalogRecord
 from rag.connectors.repositories import InMemoryConnectorProfileRepository
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.query.source_resolution import (
     QuerySourceAccessError,
     list_visible_query_sources,

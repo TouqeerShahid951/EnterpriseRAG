@@ -26,7 +26,7 @@ from ...documents.claim_models import ClaimRepository
 from ...query.sources import source_from_hit
 from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
-from ...repositories.documents import DocumentRecord, DocumentRepository, get_document_repository
+from ...documents.repository import DocumentRecord, DocumentRepository, get_document_repository
 from ...auth.identity_models import IdentityRepository, UserRecord
 from ...auth.identity_repository import get_identity_repository
 from ...ingestion.configuration import IngestConfigRepository

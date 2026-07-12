@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from ..auth.identity_models import IdentityRepository
-from ..repositories.document_models import DocumentRepository
-from ..repositories.document_postgres import PostgresDocumentRepository
+from ..documents.models import DocumentRepository
+from ..documents.adapters.postgres import PostgresDocumentRepository
 from .adapters.memory import RepositoryAuditRepository
 from .adapters.postgres import PostgresAuditRepository
 from .models import AuditRepository

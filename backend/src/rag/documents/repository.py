@@ -5,15 +5,15 @@ from __future__ import annotations
 from functools import lru_cache
 
 from ..core.config import settings
-from .document_memory import InMemoryDocumentRepository
-from .document_models import (
+from .adapters.memory import InMemoryDocumentRepository
+from .adapters.postgres import PostgresDocumentRepository
+from .models import (
     AuditEventRecord,
     DocumentImageAssetRecord,
     DocumentRecord,
     DocumentRepository,
     IngestJobRecord,
 )
-from .document_postgres import PostgresDocumentRepository
 
 
 @lru_cache

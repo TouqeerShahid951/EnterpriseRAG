@@ -14,7 +14,7 @@ from ...shared.contracts.clearance import MAX_CLEARANCE_LEVEL, normalize_clearan
 from ...auth.passwords import hash_password
 from ...query.chat_history_models import ChatSessionRecord
 from ...query.chat_history_repository import ChatHistoryRepository, get_chat_history_repository
-from ...repositories.documents import DocumentRepository, get_document_repository
+from ...documents.repository import DocumentRepository, get_document_repository
 from ...auth.identity_models import IdentityRepository, UserRecord
 from ...auth.identity_repository import get_identity_repository
 from ...schemas.admin import UserAdmin, UserCreateRequest, UserGroupRequest, UserListResponse, UserPasswordResetRequest, UserUpdateRequest

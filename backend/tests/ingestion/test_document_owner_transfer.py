@@ -10,7 +10,7 @@ from rag.api.routes import document_routes
 from rag.core.config import settings
 from rag.graphrag.cleanup import GraphRAGCleanupResult
 from rag.query.http import ServiceRequestError
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
 from rag.auth.identity_models import UserRecord
 from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository

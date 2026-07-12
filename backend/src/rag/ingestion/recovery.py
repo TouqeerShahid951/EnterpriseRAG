@@ -6,7 +6,7 @@ import mimetypes
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from ..repositories.document_models import DocumentRecord, DocumentRepository
+from ..documents.models import DocumentRecord, DocumentRepository
 from .job_models import IngestJobRecord, IngestJobRepository
 from .contracts import IngestJobPayload
 from .queue import IngestQueue

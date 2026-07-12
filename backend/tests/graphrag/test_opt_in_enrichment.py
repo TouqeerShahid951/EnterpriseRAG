@@ -11,7 +11,7 @@ from rag.api.routes import document_routes, ingest_job_routes
 from rag.core.config import settings
 from rag.graphrag import tasks as graphrag_tasks
 from rag.ingestion import tasks as ingestion_tasks
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.identity_models import UserRecord
 from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
 from rag.ingestion.configuration import IngestConfigRecord

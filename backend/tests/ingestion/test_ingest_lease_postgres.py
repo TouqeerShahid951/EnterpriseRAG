@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from rag.repositories.document_postgres import PostgresDocumentRepository
+from rag.documents.adapters.postgres import PostgresDocumentRepository
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")

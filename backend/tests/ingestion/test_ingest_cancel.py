@@ -10,7 +10,7 @@ from starlette.requests import Request
 from rag.api.routes import ingest_job_routes
 from rag.core.config import settings
 from rag.internal.ingest_status_routes import update_ingest_job_status
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.identity_models import UserRecord
 from rag.schemas.internal import InternalJobStatusRequest, ServiceTokenContext
 

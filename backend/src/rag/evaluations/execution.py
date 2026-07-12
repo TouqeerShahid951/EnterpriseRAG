@@ -15,8 +15,8 @@ from ..query.query_retrieval import add_document_scope, add_expiry_scope
 from ..query.reranker import rerank_hits
 from ..query.service import LocalRagService
 from ..query.sparse import embed_sparse_text
-from ..repositories.documents import get_document_repository
-from ..repositories.document_models import DocumentRepository
+from ..documents.repository import get_document_repository
+from ..documents.models import DocumentRepository
 from ..schemas.evaluations import EvaluationCase
 from ..schemas.query import QueryRequest, RAGResponse
 from ..shared.evaluation.answer_checks import LiteralCheckResult

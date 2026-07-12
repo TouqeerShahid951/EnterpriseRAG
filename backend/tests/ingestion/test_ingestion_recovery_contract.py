@@ -1,6 +1,6 @@
 from rag.ingestion.contracts import IngestJobPayload
 from rag.ingestion.recovery import ingest_queue_message
-from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.documents.adapters.memory import InMemoryDocumentRepository
 
 
 def test_recovery_payload_preserves_document_clearance_and_access_groups() -> None:

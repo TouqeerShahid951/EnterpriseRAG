@@ -15,7 +15,7 @@ from ..auth.document_access import can_read_document
 from ..core.config import Settings
 from ..query.inference import InferenceClient
 from ..query.qdrant import QdrantClient
-from ..repositories.document_models import DocumentRepository
+from ..documents.models import DocumentRepository
 from ..auth.identity_models import IdentityRepository, UserRecord
 from ..query.rag_config_models import RagConfigRecord
 from ..services.generated_artifact_storage import GeneratedArtifactStorage
@@ -851,7 +851,7 @@ def default_artifact_job_executor(
 ) -> ArtifactJobExecutor:
     from ..core.config import settings
     from ..query.inference import build_inference_client
-    from ..repositories.documents import get_document_repository
+    from ..documents.repository import get_document_repository
     from ..auth.identity_repository import get_identity_repository
     from ..query.rag_config_repository import effective_rag_config
     from ..services.generated_artifact_storage import get_generated_artifact_storage

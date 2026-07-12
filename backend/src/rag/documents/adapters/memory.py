@@ -8,25 +8,25 @@ from threading import RLock
 from typing import Any, Literal
 from uuid import uuid4
 
-from ..auth.abac import normalize_group_path
-from ..ingestion.adapters.job_memory import InMemoryIngestJobRepositoryMixin
-from ..ingestion.adapters.review_memory import InMemoryReviewRepositoryMixin
-from ..ingestion.job_models import IngestJobRecord
-from ..ingestion.review_models import (
+from ...auth.abac import normalize_group_path
+from ...ingestion.adapters.job_memory import InMemoryIngestJobRepositoryMixin
+from ...ingestion.adapters.review_memory import InMemoryReviewRepositoryMixin
+from ...ingestion.job_models import IngestJobRecord
+from ...ingestion.review_models import (
     ImageReviewBatchRecord,
     ImageReviewCandidateRecord,
     ReviewBatchRecord,
     ReviewItemRecord,
 )
-from ..shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
-from .document_models import (
+from ...shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
+from ..models import (
     AuditEventRecord,
     DocumentCrossReferenceRecord,
     DocumentEntityRecord,
     DocumentImageAssetRecord,
     DocumentRecord,
 )
-from .document_memory_values import _bbox_list, _int_or_none
+from .memory_values import _bbox_list, _int_or_none
 
 
 class InMemoryDocumentRepository(
