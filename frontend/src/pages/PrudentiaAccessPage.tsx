@@ -319,24 +319,24 @@ export function PrudentiaAccessPage({ currentUser, onAuthChanged, onLogout, onNa
             <tbody>
               {filteredUsers.map((user) => (
                 <tr key={user.id} className="sv-table-row">
-                  <td>
+                  <td data-label="User">
                     <strong className="text-on-surface">{user.name}</strong>
                     <small className="block text-secondary">{user.email}</small>
                     {user.id === currentUser.user_id ? <small className="mt-1 block font-semibold text-primary">Current session</small> : null}
                   </td>
-                  <td>
+                  <td data-label="Role">
                     <strong className="block text-on-surface">{accountTypeLabel(user.account_type)}</strong>
                     <small className="text-secondary">{roleDescription(user.account_type)}</small>
                   </td>
-                  <td>
+                  <td data-label="Clearance">
                     <span className="sv-pill">{clearanceLevelLabel(user.clearance_level)}</span>
                   </td>
-                  <td>{user.is_active ? <span className="sv-pill sv-pill-success">Active</span> : <span className="sv-pill">Inactive</span>}</td>
-                  <td>
+                  <td data-label="Status">{user.is_active ? <span className="sv-pill sv-pill-success">Active</span> : <span className="sv-pill">Inactive</span>}</td>
+                  <td data-label="Knowledge Spaces">
                     <SpacePathList paths={user.group_paths} />
                   </td>
-                  <td className="font-semibold text-on-surface">v{user.permission_version}</td>
-                  <td>
+                  <td data-label="Permission" className="font-semibold text-on-surface">v{user.permission_version}</td>
+                  <td data-label="Actions">
                     <div className="user-row-actions" aria-label={`Actions for ${user.email}`}>
                       <button type="button" onClick={() => openEditUser(user)} className="user-row-action" aria-label={`Edit ${user.email}`} title="Edit user">
                         <Edit3 size={15} aria-hidden="true" />

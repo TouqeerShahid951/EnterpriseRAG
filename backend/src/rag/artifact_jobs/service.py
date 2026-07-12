@@ -9,9 +9,28 @@ from ..auth.context import UserContext
 from ..repositories.artifact_jobs import ArtifactJobRecord, ArtifactJobRepository
 from ..repositories.generated_artifact_models import GeneratedArtifactRepository
 from ..schemas.artifact_jobs import ArtifactJobDetail
-from ..schemas.query import ArtifactFormat, ArtifactJobStageProgress, ArtifactJobSummary, GeneratedArtifact, QueryRequest
+from ..schemas.query import (
+    ArtifactFormat,
+    ArtifactJobStageProgress,
+    ArtifactJobSummary,
+    GeneratedArtifact,
+    QueryRequest,
+)
 from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
 from .queue import ArtifactJobQueue
+
+
+_PUBLIC_ERROR_MESSAGES = {
+    "artifact_attempts_exhausted": "Document generation exhausted its retry limit.",
+    "artifact_authorization_changed": "Authorization changed while the document was being generated.",
+    "artifact_context_rejected": "The generation context was rejected by the backend.",
+    "artifact_enqueue_failed": "Document generation could not be queued.",
+    "artifact_format_failed": "One requested output format could not be generated.",
+    "artifact_generation_failed": "Document generation failed. You can retry the job.",
+    "artifact_no_evidence": "No authorized evidence was found for this document generation request.",
+    "artifact_publish_warning": "The artifact was generated with a non-blocking publication warning.",
+    "artifact_timeout": "Document generation timed out. You can retry the job.",
+}
 
 
 class ArtifactJobActionError(RuntimeError):
@@ -56,6 +75,15 @@ class ArtifactJobService:
             client_request_id=client_request_id,
         )
         if existing is not None:
+            if existing.expires_at is not None and existing.expires_at <= datetime.now(
+                UTC
+            ):
+                raise ArtifactJobActionError(
+                    "artifact_job_expired",
+                    "This generation request has expired. Submit it again with a new request ID.",
+                )
+            if existing.status == "queued":
+                self._enqueue_or_fail(repo, existing.id)
             return self.summary(existing)
         job = repo.create_job(
             client_request_id=client_request_id,
@@ -74,13 +102,20 @@ class ArtifactJobService:
             conversation_context=conversation_context,
             retention_days=self.retention_days,
         )
-        if seeded_plan is not None and seeded_evidence is not None and seeded_bundle is not None:
-            updated = repo.update_job(job.id, {
-                "plan_json": seeded_plan.model_dump(mode="json"),
-                "evidence_manifest_json": seeded_evidence.model_dump(mode="json"),
-                "content_spec_json": seeded_bundle.model_dump(mode="json"),
-                "prompt_versions": {"artifact_seed": "grounded-rag-response-v1"},
-            })
+        if (
+            seeded_plan is not None
+            and seeded_evidence is not None
+            and seeded_bundle is not None
+        ):
+            updated = repo.update_job(
+                job.id,
+                {
+                    "plan_json": seeded_plan.model_dump(mode="json"),
+                    "evidence_manifest_json": seeded_evidence.model_dump(mode="json"),
+                    "content_spec_json": seeded_bundle.model_dump(mode="json"),
+                    "prompt_versions": {"artifact_seed": "grounded-rag-response-v1"},
+                },
+            )
             job = updated or job
         self._enqueue_or_fail(repo, job.id)
         return self.summary(job)
@@ -99,27 +134,52 @@ class ArtifactJobService:
             content_specification=job.content_spec_json,
             validation_results=job.validation_results_json,
             stage_timings=_public_stage_timings(job.stage_timings_json),
-            errors=list(job.errors_json),
+            errors=_public_errors(job.errors_json),
         )
 
-    def add_clarifications(self, job_id: str, user: UserContext, answers: dict[str, str]) -> ArtifactJobSummary:
+    def add_clarifications(
+        self, job_id: str, user: UserContext, answers: dict[str, str]
+    ) -> ArtifactJobSummary:
         job = self._owned_job(job_id, user)
         if job.status != "needs_input":
-            raise ArtifactJobActionError("artifact_job_not_waiting", "This job is not waiting for clarification.")
-        cleaned = {question.strip(): answer.strip() for question, answer in answers.items() if question.strip() and answer.strip()}
+            raise ArtifactJobActionError(
+                "artifact_job_not_waiting", "This job is not waiting for clarification."
+            )
+        cleaned = {
+            question.strip(): answer.strip()
+            for question, answer in answers.items()
+            if question.strip() and answer.strip()
+        }
         if not cleaned:
-            raise ArtifactJobActionError("artifact_clarification_empty", "At least one clarification answer is required.")
-        updated = self.repo_factory().update_job(job.id, {
-            "clarifications": {**job.clarifications, **cleaned},
-            "status": "queued",
-            "stage": "queued",
-            "progress_pct": 0,
-            "stage_progress": None,
-            "error_code": None,
-            "error_message_safe": None,
-        })
+            raise ArtifactJobActionError(
+                "artifact_clarification_empty",
+                "At least one clarification answer is required.",
+            )
+        plan = DocumentPlan.model_validate(job.plan_json) if job.plan_json else None
+        expected_questions = set(plan.clarification_questions if plan else [])
+        unknown_questions = set(cleaned) - expected_questions
+        if not expected_questions or unknown_questions:
+            raise ArtifactJobActionError(
+                "artifact_clarification_invalid",
+                "Clarification answers must match the questions requested for this job.",
+            )
+        updated = self.repo_factory().update_job(
+            job.id,
+            {
+                "clarifications": {**job.clarifications, **cleaned},
+                "status": "queued",
+                "stage": "queued",
+                "progress_pct": 0,
+                "stage_progress": None,
+                "attempt_count": max(0, job.attempt_count - 1),
+                "error_code": None,
+                "error_message_safe": None,
+            },
+        )
         if updated is None:
-            raise ArtifactJobActionError("artifact_job_not_found", "Artifact job was not found.")
+            raise ArtifactJobActionError(
+                "artifact_job_not_found", "Artifact job was not found."
+            )
         self._enqueue_or_fail(self.repo_factory(), job.id)
         return self.summary(updated)
 
@@ -127,40 +187,58 @@ class ArtifactJobService:
         job = self._owned_job(job_id, user)
         if job.status in {"complete", "partial", "failed", "cancelled"}:
             return self.summary(job)
-        updated = self.repo_factory().update_job(job.id, {
-            "cancellation_requested": True,
-            "status": "cancelled",
-            "stage": "cancelled",
-            "progress_pct": 100,
-            "stage_progress": None,
-            "completed_at": datetime.now(UTC),
-        })
+        updated = self.repo_factory().update_job(
+            job.id,
+            {
+                "cancellation_requested": True,
+                "status": "cancelled",
+                "stage": "cancelled",
+                "progress_pct": 100,
+                "stage_progress": None,
+                "completed_at": datetime.now(UTC),
+            },
+        )
         return self.summary(updated or job)
 
     def retry(self, job_id: str, user: UserContext) -> ArtifactJobSummary:
         job = self._owned_job(job_id, user)
         if job.status not in {"failed", "partial", "cancelled"}:
-            raise ArtifactJobActionError("artifact_job_not_retryable", "Only failed, partial, or cancelled jobs can be retried.")
+            raise ArtifactJobActionError(
+                "artifact_job_not_retryable",
+                "Only failed, partial, or cancelled jobs can be retried.",
+            )
         if job.attempt_count >= job.max_attempts:
-            raise ArtifactJobActionError("artifact_retry_exhausted", "This job has reached its retry limit.")
-        updated = self.repo_factory().update_job(job.id, {
-            "status": "queued",
-            "stage": "queued",
-            "progress_pct": 0,
-            "stage_progress": None,
-            "cancellation_requested": False,
-            "error_code": None,
-            "error_message_safe": None,
-            "started_at": None,
-            "completed_at": None,
-            "last_heartbeat_at": None,
-        })
+            raise ArtifactJobActionError(
+                "artifact_retry_exhausted", "This job has reached its retry limit."
+            )
+        updated = self.repo_factory().update_job(
+            job.id,
+            {
+                "status": "queued",
+                "stage": "queued",
+                "progress_pct": 0,
+                "stage_progress": None,
+                "cancellation_requested": False,
+                "error_code": None,
+                "error_message_safe": None,
+                "started_at": None,
+                "completed_at": None,
+                "last_heartbeat_at": None,
+            },
+        )
         if updated is None:
-            raise ArtifactJobActionError("artifact_job_not_found", "Artifact job was not found.")
+            raise ArtifactJobActionError(
+                "artifact_job_not_found", "Artifact job was not found."
+            )
         self._enqueue_or_fail(self.repo_factory(), job.id)
         return self.summary(updated)
 
     def summary(self, job: ArtifactJobRecord) -> ArtifactJobSummary:
+        artifact_records = (
+            self.artifact_repo_factory().list_artifacts_for_job(job.id)
+            if job.status in {"complete", "partial"}
+            else []
+        )
         artifacts = [
             GeneratedArtifact(
                 id=record.id,
@@ -171,7 +249,7 @@ class ArtifactJobService:
                 download_url=f"/api/v1/query/artifacts/{record.id}/content",
                 created_at=record.created_at.isoformat() if record.created_at else None,
             )
-            for record in self.artifact_repo_factory().list_artifacts_for_job(job.id)
+            for record in artifact_records
         ]
         plan = DocumentPlan.model_validate(job.plan_json) if job.plan_json else None
         stage_progress = _artifact_stage_progress(job.stage_progress)
@@ -195,30 +273,44 @@ class ArtifactJobService:
             updated_at=job.updated_at.isoformat() if job.updated_at else None,
             started_at=job.started_at.isoformat() if job.started_at else None,
             completed_at=job.completed_at.isoformat() if job.completed_at else None,
-            last_heartbeat_at=job.last_heartbeat_at.isoformat() if job.last_heartbeat_at else None,
+            last_heartbeat_at=job.last_heartbeat_at.isoformat()
+            if job.last_heartbeat_at
+            else None,
             expires_at=job.expires_at.isoformat() if job.expires_at else None,
         )
 
     def _owned_job(self, job_id: str, user: UserContext) -> ArtifactJobRecord:
         job = self.repo_factory().get_job(job_id)
-        if job is None or job.user_id != user.user_id or job.permission_version != user.permission_version:
-            raise ArtifactJobActionError("artifact_job_not_found", "Artifact job was not found.")
+        if (
+            job is None
+            or job.user_id != user.user_id
+            or job.permission_version != user.permission_version
+            or (job.expires_at is not None and job.expires_at <= datetime.now(UTC))
+        ):
+            raise ArtifactJobActionError(
+                "artifact_job_not_found", "Artifact job was not found."
+            )
         return job
 
     def _enqueue_or_fail(self, repo: ArtifactJobRepository, job_id: str) -> None:
         try:
             self.queue_factory().enqueue(job_id)
         except RuntimeError as exc:
-            repo.update_job(job_id, {
-                "status": "failed",
-                "stage": "failed",
-                "progress_pct": 100,
-                "stage_progress": None,
-                "error_code": "artifact_enqueue_failed",
-                "error_message_safe": str(exc)[:300],
-                "completed_at": datetime.now(UTC),
-            })
-            raise ArtifactJobActionError("artifact_enqueue_failed", "Document generation could not be queued.") from exc
+            repo.update_job(
+                job_id,
+                {
+                    "status": "failed",
+                    "stage": "failed",
+                    "progress_pct": 100,
+                    "stage_progress": None,
+                    "error_code": "artifact_enqueue_failed",
+                    "error_message_safe": "Document generation could not be queued.",
+                    "completed_at": datetime.now(UTC),
+                },
+            )
+            raise ArtifactJobActionError(
+                "artifact_enqueue_failed", "Document generation could not be queued."
+            ) from exc
 
 
 def default_artifact_job_service() -> ArtifactJobService:
@@ -239,7 +331,9 @@ def get_artifact_job_service() -> ArtifactJobService:
     return default_artifact_job_service()
 
 
-def _artifact_stage_progress(payload: dict[str, object] | None) -> ArtifactJobStageProgress | None:
+def _artifact_stage_progress(
+    payload: dict[str, object] | None,
+) -> ArtifactJobStageProgress | None:
     if not payload:
         return None
     try:
@@ -260,7 +354,11 @@ def _artifact_stage_copy(
     if job.status == "complete":
         return "Complete", f"Generated {formats or 'requested files'}"
     if job.status == "partial":
-        return "Partially complete", job.error_message_safe or f"Some {formats or 'files'} could not be generated"
+        return (
+            "Partially complete",
+            job.error_message_safe
+            or f"Some {formats or 'files'} could not be generated",
+        )
     if job.status == "failed":
         return "Failed", job.error_message_safe or "Document generation failed"
     if job.status == "cancelled":
@@ -277,9 +375,16 @@ def _artifact_stage_copy(
     if job.stage == "storing":
         return "Saving file", "Saving generated file"
     if job.stage.startswith("composing_") and progress:
-        return "Composing content", progress.label or f"Composing content batch {progress.current} of {progress.total}"
+        return (
+            "Composing content",
+            progress.label
+            or f"Composing content batch {progress.current} of {progress.total}",
+        )
     if job.stage.startswith("rendering_") and progress:
-        return "Rendering files", progress.label or f"Rendering {formats or 'requested files'}"
+        return (
+            "Rendering files",
+            progress.label or f"Rendering {formats or 'requested files'}",
+        )
     if job.stage == "rendering":
         return "Rendering files", f"Rendering {formats or 'requested files'}"
     if job.stage == "composing":
@@ -295,7 +400,9 @@ def _humanize(value: str) -> str:
     return " ".join(part.capitalize() for part in value.split("_") if part)
 
 
-def _public_stage_timings(payload: dict[str, object] | None) -> dict[str, dict[str, object]]:
+def _public_stage_timings(
+    payload: dict[str, object] | None,
+) -> dict[str, dict[str, object]]:
     timings: dict[str, dict[str, object]] = {}
     if not payload:
         return timings
@@ -314,3 +421,22 @@ def _public_stage_timings(payload: dict[str, object] | None) -> dict[str, dict[s
                 timing[field] = value
         timings[str(stage)] = timing
     return timings
+
+
+def _public_errors(payload: tuple[dict[str, object], ...]) -> list[dict[str, object]]:
+    errors: list[dict[str, object]] = []
+    for raw_error in payload:
+        code = str(raw_error.get("code") or "artifact_generation_failed")
+        public_error: dict[str, object] = {
+            "stage": str(raw_error.get("stage") or "generation"),
+            "code": code,
+            "message": _PUBLIC_ERROR_MESSAGES.get(
+                code,
+                "Document generation encountered an error.",
+            ),
+        }
+        recorded_at = raw_error.get("recorded_at")
+        if isinstance(recorded_at, str):
+            public_error["recorded_at"] = recorded_at
+        errors.append(public_error)
+    return errors

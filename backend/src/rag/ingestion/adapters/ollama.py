@@ -8,6 +8,8 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from rag.shared.ollama_models import is_ollama_cloud_model
+
 from ..errors import EmbeddingUnavailable
 from .http import ServiceRequestError, request_json
 
@@ -70,7 +72,6 @@ class OllamaClient:
             "model": self.chat_model,
             "stream": False,
             "think": self.thinking_enabled,
-            "format": METADATA_FORMAT,
             "keep_alive": "5m",
             "options": _ollama_options(
                 temperature=0.0,
@@ -82,6 +83,8 @@ class OllamaClient:
                 {"role": "user", "content": prompt},
             ],
         }
+        if not is_ollama_cloud_model(self.chat_model):
+            request_payload["format"] = METADATA_FORMAT
         last_error: ServiceRequestError | None = None
         last_attempt = 0
         for attempt in range(1):
@@ -114,11 +117,11 @@ class OllamaClient:
         return self.embed_many([text])[0]
 
     def generate_json(self, *, prompt: str, model: str | None = None, system: str) -> str:
+        selected_model = model or self.chat_model
         request_payload = {
-            "model": model or self.chat_model,
+            "model": selected_model,
             "stream": False,
             "think": self.thinking_enabled,
-            "format": "json",
             "keep_alive": "5m",
             "options": _ollama_options(
                 temperature=0.0,
@@ -130,6 +133,8 @@ class OllamaClient:
                 {"role": "user", "content": prompt},
             ],
         }
+        if not is_ollama_cloud_model(selected_model):
+            request_payload["format"] = "json"
         last_error: ServiceRequestError | None = None
         for attempt in range(3):
             try:

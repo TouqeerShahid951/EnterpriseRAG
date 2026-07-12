@@ -71,7 +71,7 @@
   padding: 0.48rem 0.72rem;
   color: var(--color-secondary);
   font-size: 0.76rem;
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.2;
 }
 
@@ -130,7 +130,7 @@
 .review-clear-copy h2 {
   color: var(--color-on-surface);
   font-size: 1.18rem;
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.2;
 }
 
@@ -172,7 +172,7 @@
   display: block;
   color: var(--color-secondary);
   font-size: 0.66rem;
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.1;
   text-transform: uppercase;
 }
@@ -305,13 +305,13 @@
 .review-image-batch-item strong {
   color: var(--color-on-surface);
   font-size: 0.76rem;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .review-image-batch-item small {
   color: var(--color-secondary);
   font-size: 0.67rem;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .review-image-grid-toolbar {
@@ -397,7 +397,7 @@
   overflow: hidden;
   color: var(--color-on-surface);
   font-size: 0.75rem;
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -438,7 +438,7 @@
   padding: 0.58rem 0.78rem;
   color: var(--color-on-surface);
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .review-doc-group-header span {
@@ -497,7 +497,7 @@
 .review-queue-item-title {
   color: var(--color-on-surface);
   font-size: 0.78rem;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.35;
 }
 
@@ -568,7 +568,7 @@
 .review-empty-state h3 {
   color: var(--color-on-surface);
   font-size: 0.95rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .review-empty-state p {
@@ -639,7 +639,7 @@
 .review-placeholder strong {
   color: var(--color-on-surface);
   font-size: 0.88rem;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .review-placeholder p {
@@ -669,7 +669,7 @@
   padding: 0.55rem 0.7rem;
   color: var(--color-secondary);
   font-size: 0.7rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .review-demo-toolbar span {
@@ -719,7 +719,7 @@
   padding: 0.7rem;
   color: var(--color-on-surface);
   font-size: 0.76rem;
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.45;
 }
 
@@ -760,7 +760,7 @@
   padding: 0.5rem 0.6rem;
   color: var(--color-on-surface);
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -781,7 +781,7 @@
 .review-facts dt {
   color: var(--color-secondary);
   font-size: 0.62rem;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1rem;
   text-transform: uppercase;
 }
@@ -832,13 +832,13 @@
 .review-subsection-header h3 {
   color: var(--color-on-surface);
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .review-subsection-header span {
   color: var(--color-secondary);
   font-size: 0.64rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .review-original-text pre {
@@ -866,7 +866,7 @@
 .review-field-header small {
   color: var(--color-secondary);
   font-size: 0.64rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .review-correction-field .sv-textarea {

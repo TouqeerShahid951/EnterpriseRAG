@@ -1,4 +1,4 @@
-import { Children, type ReactNode } from "react";
+import { Children, useMemo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -7,51 +7,59 @@ import { sourceCitationDisplayLabel, sourceCitationLabel } from "../../utils/sou
 import { sourceDocumentTitle, withSourceDocumentTitle } from "../../utils/sourceDocument";
 import { sourcePageLabel } from "../../utils/sourcePage";
 
+const REMARK_PLUGINS = [remarkGfm];
+
 export function CitedAnswer({ answer, documents, onSelectSource, sources }: Props) {
-  const citationsByLabel = new Map(
-    sources.map((source, index) => [
-      sourceCitationLabel(source),
-      {
-        displayLabel: sourceCitationDisplayLabel(index + 1),
-        source,
-      },
-    ]),
+  const citationsByLabel = useMemo(
+    () => new Map(
+      sources.map((source, index) => [
+        sourceCitationLabel(source),
+        {
+          displayLabel: sourceCitationDisplayLabel(index + 1),
+          source,
+        },
+      ]),
+    ),
+    [sources],
   );
-  const citationPattern = citationPatternFor([...citationsByLabel.keys()]);
-  const citedChildren = (children: ReactNode) =>
-    renderCitedChildren(children, citationPattern, citationsByLabel, documents, onSelectSource);
-  const components: Components = {
-    a: ({ children, href }) => (
-      <a href={href} rel="noreferrer noopener" target="_blank">
-        {citedChildren(children)}
-      </a>
-    ),
-    blockquote: ({ children }) => <blockquote>{citedChildren(children)}</blockquote>,
-    code: ({ children, className }) => <code className={className}>{citedChildren(children)}</code>,
-    del: ({ children }) => <del>{citedChildren(children)}</del>,
-    em: ({ children }) => <em>{citedChildren(children)}</em>,
-    h1: ({ children }) => <h3>{citedChildren(children)}</h3>,
-    h2: ({ children }) => <h4>{citedChildren(children)}</h4>,
-    h3: ({ children }) => <h5>{citedChildren(children)}</h5>,
-    h4: ({ children }) => <h6>{citedChildren(children)}</h6>,
-    h5: ({ children }) => <h6>{citedChildren(children)}</h6>,
-    h6: ({ children }) => <h6>{citedChildren(children)}</h6>,
-    img: ({ alt }) => <span className="rag-markdown-image-alt">{alt || "Image"}</span>,
-    li: ({ children }) => <li>{citedChildren(children)}</li>,
-    p: ({ children }) => <p>{citedChildren(children)}</p>,
-    strong: ({ children }) => <strong>{citedChildren(children)}</strong>,
-    table: ({ children }) => (
-      <div className="rag-markdown-table-wrap">
-        <table>{children}</table>
-      </div>
-    ),
-    td: ({ children }) => <td>{citedChildren(children)}</td>,
-    th: ({ children }) => <th>{citedChildren(children)}</th>,
-  };
+  const citationPattern = useMemo(() => citationPatternFor([...citationsByLabel.keys()]), [citationsByLabel]);
+  const components = useMemo<Components>(() => {
+    const citedChildren = (children: ReactNode) =>
+      renderCitedChildren(children, citationPattern, citationsByLabel, documents, onSelectSource);
+
+    return {
+      a: ({ children, href }) => (
+        <a href={href} rel="noreferrer noopener" target="_blank">
+          {citedChildren(children)}
+        </a>
+      ),
+      blockquote: ({ children }) => <blockquote>{citedChildren(children)}</blockquote>,
+      code: ({ children, className }) => <code className={className}>{citedChildren(children)}</code>,
+      del: ({ children }) => <del>{citedChildren(children)}</del>,
+      em: ({ children }) => <em>{citedChildren(children)}</em>,
+      h1: ({ children }) => <h3>{citedChildren(children)}</h3>,
+      h2: ({ children }) => <h4>{citedChildren(children)}</h4>,
+      h3: ({ children }) => <h5>{citedChildren(children)}</h5>,
+      h4: ({ children }) => <h6>{citedChildren(children)}</h6>,
+      h5: ({ children }) => <h6>{citedChildren(children)}</h6>,
+      h6: ({ children }) => <h6>{citedChildren(children)}</h6>,
+      img: ({ alt }) => <span className="rag-markdown-image-alt">{alt || "Image"}</span>,
+      li: ({ children }) => <li>{citedChildren(children)}</li>,
+      p: ({ children }) => <p>{citedChildren(children)}</p>,
+      strong: ({ children }) => <strong>{citedChildren(children)}</strong>,
+      table: ({ children }) => (
+        <div className="rag-markdown-table-wrap">
+          <table>{children}</table>
+        </div>
+      ),
+      td: ({ children }) => <td>{citedChildren(children)}</td>,
+      th: ({ children }) => <th>{citedChildren(children)}</th>,
+    };
+  }, [citationPattern, citationsByLabel, documents, onSelectSource]);
 
   return (
     <div className="rag-markdown">
-      <ReactMarkdown components={components} remarkPlugins={[remarkGfm]}>
+      <ReactMarkdown components={components} remarkPlugins={REMARK_PLUGINS}>
         {answer}
       </ReactMarkdown>
     </div>

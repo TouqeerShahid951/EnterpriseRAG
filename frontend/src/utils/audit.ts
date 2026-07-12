@@ -86,7 +86,7 @@ export function auditImpactSummary(event: AuditEvent): string {
   return payloadSummary(event.payload);
 }
 
-export function documentDisplayName(event: AuditEvent): string | undefined {
+function documentDisplayName(event: AuditEvent): string | undefined {
   return textValue(event.target_document_title)
     ?? stringPayload(event, "target_document_title")
     ?? stringPayload(event, "document_title")
@@ -108,7 +108,7 @@ export function formatPayloadValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function labelize(value: string): string {
+function labelize(value: string): string {
   return value.replace(/_/g, " ").replace(/\./g, " / ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 

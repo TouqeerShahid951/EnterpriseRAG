@@ -8,9 +8,13 @@ from typing import Any
 
 from .ingest_job_models import (
     IngestAttemptResult,
+    IngestJobAccess,
     IngestJobCancellationResult,
+    IngestJobFilters,
     IngestJobMutationResult,
+    IngestJobPage,
     IngestJobRecord,
+    IngestJobView,
 )
 from .postgres import PostgresConnectionMixin
 
@@ -33,7 +37,10 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                 row = conn.execute(
                     """
                     INSERT INTO ingest_jobs (doc_id, retry_of_job_id, origin, status, progress_pct, completed_at)
-                    VALUES (%s, %s, %s, %s, %s, CASE WHEN %s IN ('complete', 'failed', 'human_review', 'cancelled') THEN NOW() END)
+                    VALUES (
+                        %s, %s, %s, %s, %s,
+                        CASE WHEN %s IN ('complete', 'failed', 'human_review', 'cancelled') THEN NOW() END
+                    )
                     RETURNING *
                     """,
                     (doc_id, retry_of_job_id, origin, status, progress_pct, status),
@@ -42,32 +49,39 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                     "UPDATE documents SET ingest_status = %s, updated_at = NOW() WHERE id = %s",
                     (status, doc_id),
                 )
-        return job_from_row(row)
+        return _job_from_row(_require_row(row, "ingestion job insert"))
 
     def get_ingest_job(self, job_id: str) -> IngestJobRecord | None:
         row = self._execute_optional(
             "SELECT * FROM ingest_jobs WHERE id = %s", (job_id,)
         )
-        return job_from_row(row) if row else None
+        return _job_from_row(row) if row else None
 
     def list_ingest_jobs(self) -> list[IngestJobRecord]:
         rows = self._execute_all(
             "SELECT * FROM ingest_jobs ORDER BY created_at DESC, id DESC"
         )
-        return [job_from_row(row) for row in rows]
+        return [_job_from_row(row) for row in rows]
 
-    def get_active_ingest_job_for_document(self, doc_id: str) -> IngestJobRecord | None:
+    def get_latest_ingest_job_for_document(
+        self,
+        doc_id: str,
+        *,
+        statuses: frozenset[str],
+    ) -> IngestJobRecord | None:
+        if not statuses:
+            return None
         row = self._execute_optional(
             """
-            SELECT * FROM ingest_jobs
-            WHERE doc_id = %s
-              AND status IN ('scheduled', 'queued', 'processing', 'human_review')
+            SELECT *
+            FROM ingest_jobs
+            WHERE doc_id = %s AND status = ANY(%s::text[])
             ORDER BY created_at DESC, id DESC
             LIMIT 1
             """,
-            (doc_id,),
+            (doc_id, sorted(statuses)),
         )
-        return job_from_row(row) if row else None
+        return _job_from_row(row) if row else None
 
     def update_ingest_job(
         self,
@@ -91,7 +105,7 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                 ).fetchone()
                 if current_row is None:
                     return IngestJobMutationResult(job=None, changed=False)
-                current = job_from_row(current_row)
+                current = _job_from_row(current_row)
                 if current.status == "cancelled" and status != "cancelled":
                     return IngestJobMutationResult(job=current, changed=False)
                 if (
@@ -100,9 +114,7 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                 ):
                     return IngestJobMutationResult(job=current, changed=False)
                 last_activity = (
-                    current.last_heartbeat_at
-                    or current.updated_at
-                    or current.created_at
+                    current.last_heartbeat_at or current.updated_at or current.created_at
                 )
                 if (
                     stale_before is not None
@@ -171,7 +183,7 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                     "UPDATE documents SET ingest_status = %s, updated_at = NOW() WHERE id = %s",
                     (status, updated_row["doc_id"]),
                 )
-        return IngestJobMutationResult(job=job_from_row(updated_row), changed=True)
+        return IngestJobMutationResult(job=_job_from_row(updated_row), changed=True)
 
     def requeue_stale_ingest_job(
         self,
@@ -205,7 +217,7 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                         "UPDATE documents SET ingest_status = 'queued', updated_at = NOW() WHERE id = %s",
                         (row["doc_id"],),
                     )
-        return job_from_row(row) if row else None
+        return _job_from_row(row) if row else None
 
     def start_ingest_attempt(
         self,
@@ -215,6 +227,7 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
         stale_after_seconds: int = 120,
         run_token: str | None = None,
     ) -> IngestAttemptResult:
+        selected_token = run_token
         with self._connect() as conn:
             with conn.transaction():
                 row = conn.execute(
@@ -242,10 +255,10 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                     RETURNING *
                     """,
                     (
-                        run_token,
+                        selected_token,
                         job_id,
-                        run_token,
-                        run_token,
+                        selected_token,
+                        selected_token,
                         stale_after_seconds,
                         max_attempts,
                     ),
@@ -255,31 +268,26 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                         "UPDATE documents SET ingest_status = 'processing', updated_at = NOW() WHERE id = %s",
                         (row["doc_id"],),
                     )
-                    return IngestAttemptResult(job=job_from_row(row), claimed=True)
+                    return IngestAttemptResult(job=_job_from_row(row), claimed=True)
                 current = conn.execute(
-                    "SELECT * FROM ingest_jobs WHERE id = %s",
-                    (job_id,),
+                    "SELECT * FROM ingest_jobs WHERE id = %s", (job_id,)
                 ).fetchone()
                 if (
-                    run_token is not None
+                    selected_token is not None
                     and current is not None
                     and current.get("status") == "processing"
-                    and current.get("run_token") == run_token
+                    and current.get("run_token") == selected_token
                 ):
                     return IngestAttemptResult(
-                        job=job_from_row(current),
+                        job=_job_from_row(current),
                         claimed=True,
                     )
         return IngestAttemptResult(
-            job=job_from_row(current) if current else None,
-            claimed=False,
+            job=_job_from_row(current) if current else None, claimed=False
         )
 
     def heartbeat_ingest_job(
-        self,
-        job_id: str,
-        *,
-        run_token: str | None = None,
+        self, job_id: str, *, run_token: str | None = None
     ) -> IngestJobMutationResult:
         with self._connect() as conn:
             with conn.transaction():
@@ -287,22 +295,19 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                     """
                     UPDATE ingest_jobs
                     SET last_heartbeat_at = NOW()
-                    WHERE id = %s
-                      AND status = 'processing'
+                    WHERE id = %s AND status = 'processing'
                       AND run_token IS NOT DISTINCT FROM %s
                     RETURNING *
                     """,
                     (job_id, run_token),
                 ).fetchone()
                 if row:
-                    return IngestJobMutationResult(job=job_from_row(row), changed=True)
+                    return IngestJobMutationResult(job=_job_from_row(row), changed=True)
                 current = conn.execute(
-                    "SELECT * FROM ingest_jobs WHERE id = %s",
-                    (job_id,),
+                    "SELECT * FROM ingest_jobs WHERE id = %s", (job_id,)
                 ).fetchone()
         return IngestJobMutationResult(
-            job=job_from_row(current) if current else None,
-            changed=False,
+            job=_job_from_row(current) if current else None, changed=False
         )
 
     def record_ingest_parser_provenance(
@@ -338,7 +343,7 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                             ),
                         ),
                     )
-        return job_from_row(row) if row else None
+        return _job_from_row(row) if row else None
 
     def cancel_ingest_job(
         self,
@@ -354,16 +359,12 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                 ).fetchone()
                 if current_row is None:
                     return IngestJobCancellationResult(
-                        job=None,
-                        changed=False,
-                        review_items_closed=0,
+                        job=None, changed=False, review_items_closed=0
                     )
-                current = job_from_row(current_row)
+                current = _job_from_row(current_row)
                 if current.status not in allowed_statuses:
                     return IngestJobCancellationResult(
-                        job=current,
-                        changed=False,
-                        review_items_closed=0,
+                        job=current, changed=False, review_items_closed=0
                     )
                 review_items_closed = _close_pending_review_items(conn, job_id)
                 row = conn.execute(
@@ -387,10 +388,128 @@ class PostgresIngestJobRepository(PostgresConnectionMixin):
                     (updated_row["doc_id"],),
                 )
         return IngestJobCancellationResult(
-            job=job_from_row(updated_row),
+            job=_job_from_row(updated_row),
             changed=True,
             review_items_closed=review_items_closed,
         )
+
+    def search_visible_ingest_jobs(
+        self,
+        *,
+        access: IngestJobAccess,
+        filters: IngestJobFilters,
+        limit: int | None,
+        offset: int = 0,
+    ) -> IngestJobPage:
+        _validate_page(limit=limit, offset=offset)
+        where_sql, params = _visible_job_where(access, filters)
+        rows = self._execute_all(
+            f"""
+            WITH filtered AS (
+                SELECT
+                    job.id::text AS id,
+                    job.doc_id::text AS doc_id,
+                    job.retry_of_job_id::text AS retry_of_job_id,
+                    COALESCE(job.origin, 'unknown') AS origin,
+                    job.status,
+                    job.progress_pct,
+                    job.stage_progress,
+                    job.attempt_count,
+                    job.last_heartbeat_at,
+                    job.run_token,
+                    job.warnings,
+                    job.parser_provenance,
+                    job.error_code,
+                    job.error_message_safe,
+                    job.created_at,
+                    job.updated_at,
+                    job.completed_at,
+                    COALESCE(document.title, document.id::text) AS document_title,
+                    document.group_path,
+                    document.clearance_level,
+                    document.uploaded_by::text AS uploaded_by
+                FROM ingest_jobs job
+                JOIN documents document ON document.id = job.doc_id
+                WHERE {where_sql}
+            ),
+            page AS (
+                SELECT *
+                FROM filtered
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s OFFSET %s
+            ),
+            counted AS (
+                SELECT COUNT(*)::bigint AS total FROM filtered
+            )
+            SELECT page.*, counted.total
+            FROM counted
+            LEFT JOIN page ON TRUE
+            ORDER BY page.created_at DESC NULLS LAST, page.id DESC NULLS LAST
+            """,
+            (*params, limit, offset),
+        )
+        total = int(rows[0]["total"]) if rows else 0
+        items = tuple(
+            _job_view_from_row(row) for row in rows if row.get("id") is not None
+        )
+        return IngestJobPage(items=items, total=total)
+
+
+def _visible_job_where(
+    access: IngestJobAccess,
+    filters: IngestJobFilters,
+) -> tuple[str, tuple[Any, ...]]:
+    clauses = ["document.clearance_level = ANY(%s::text[])"]
+    params: list[Any] = [list(access.clearance_levels)]
+    if access.group_paths is not None:
+        visible_groups = list(access.group_paths)
+        clauses.append(
+            """
+            (
+                document.group_path = ANY(%s::text[])
+                OR EXISTS (
+                    SELECT 1
+                    FROM document_shares share
+                    WHERE share.document_id = document.id
+                      AND share.group_path = ANY(%s::text[])
+                )
+            )
+            """
+        )
+        params.extend([visible_groups, visible_groups])
+    if filters.status:
+        clauses.append("job.status = %s")
+        params.append(filters.status)
+    if filters.origin:
+        clauses.append("job.origin = %s")
+        params.append(filters.origin)
+    if filters.group_path:
+        clauses.append("document.group_path = %s")
+        params.append(filters.group_path)
+    query = (filters.search or "").strip().lower()
+    if query:
+        pattern = f"%{query}%"
+        clauses.append(
+            """
+            (
+                lower(job.id::text) LIKE %s
+                OR lower(job.doc_id::text) LIKE %s
+                OR lower(COALESCE(document.title, '')) LIKE %s
+                OR lower(document.group_path) LIKE %s
+            )
+            """
+        )
+        params.extend([pattern, pattern, pattern, pattern])
+    if filters.created_from:
+        clauses.append("job.created_at >= %s")
+        params.append(filters.created_from)
+    if filters.created_to:
+        clauses.append("job.created_at <= %s")
+        params.append(filters.created_to)
+    if filters.uploaded_by_user_id:
+        clauses.append("document.uploaded_by = %s")
+        params.append(filters.uploaded_by_user_id)
+    return " AND ".join(f"({clause})" for clause in clauses), tuple(params)
 
 
 def _close_pending_review_items(conn: Any, job_id: str) -> int:
@@ -414,6 +533,14 @@ def _close_pending_review_items(conn: Any, job_id: str) -> int:
         """,
         (job_id,),
     )
+    conn.execute(
+        """
+        UPDATE image_review_batches
+        SET status = 'rejected', updated_at = NOW()
+        WHERE job_id = %s AND status = 'pending'
+        """,
+        (job_id,),
+    )
     image_rows = conn.execute(
         """
         UPDATE image_review_candidates
@@ -429,21 +556,69 @@ def _close_pending_review_items(conn: Any, job_id: str) -> int:
         """,
         (job_id,),
     ).fetchall()
-    conn.execute(
-        """
-        UPDATE image_review_batches
-        SET status = 'rejected', updated_at = NOW()
-        WHERE job_id = %s AND status = 'pending'
-        """,
-        (job_id,),
-    )
     return len(item_rows) + len(image_rows)
+
+
+def _job_view_from_row(row: dict[str, Any]) -> IngestJobView:
+    job = _job_from_row(row)
+    return IngestJobView(
+        job=job,
+        document_title=str(row.get("document_title") or job.doc_id),
+        group_path=str(row["group_path"]),
+        clearance_level=str(row["clearance_level"]),
+        uploaded_by=str(row["uploaded_by"]) if row.get("uploaded_by") else None,
+    )
+
+
+def _job_from_row(row: dict[str, Any]) -> IngestJobRecord:
+    return IngestJobRecord(
+        id=str(row["id"]),
+        doc_id=str(row["doc_id"]),
+        retry_of_job_id=str(row["retry_of_job_id"])
+        if row.get("retry_of_job_id")
+        else None,
+        origin=str(row.get("origin") or "unknown"),
+        status=str(row["status"]),
+        progress_pct=int(row["progress_pct"]),
+        stage_progress=_json_object(row.get("stage_progress"))
+        if row.get("stage_progress") is not None
+        else None,
+        attempt_count=int(row.get("attempt_count") or 0),
+        last_heartbeat_at=row.get("last_heartbeat_at"),
+        run_token=str(row["run_token"]) if row.get("run_token") else None,
+        warnings=tuple(str(value) for value in _json_list(row.get("warnings"))),
+        parser_provenance=(
+            _json_object(row.get("parser_provenance"))
+            if row.get("parser_provenance") is not None
+            else None
+        ),
+        error_code=row.get("error_code"),
+        error_message_safe=row.get("error_message_safe"),
+        created_at=row.get("created_at"),
+        updated_at=row.get("updated_at"),
+        completed_at=row.get("completed_at"),
+    )
 
 
 def _require_row(row: dict[str, Any] | None, operation: str) -> dict[str, Any]:
     if row is None:
         raise RuntimeError(f"{operation} unexpectedly returned no row")
     return row
+
+
+def _validate_page(*, limit: int | None, offset: int) -> None:
+    if limit is not None and limit < 0:
+        raise ValueError("ingestion job search limit must be nonnegative")
+    if offset < 0:
+        raise ValueError("ingestion job search offset must be nonnegative")
+
+
+def _json_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _run_token_can_update(
@@ -470,39 +645,3 @@ def _next_run_token(
     if current.run_token is None and run_token is not None:
         return run_token
     return current.run_token
-
-
-def job_from_row(row: dict[str, Any]) -> IngestJobRecord:
-    return IngestJobRecord(
-        id=str(row["id"]),
-        doc_id=str(row["doc_id"]),
-        retry_of_job_id=str(row["retry_of_job_id"])
-        if row.get("retry_of_job_id")
-        else None,
-        origin=str(row.get("origin") or "unknown"),
-        status=row["status"],
-        progress_pct=int(row["progress_pct"]),
-        stage_progress=_json_object(row.get("stage_progress"))
-        if row.get("stage_progress") is not None
-        else None,
-        attempt_count=int(row.get("attempt_count") or 0),
-        last_heartbeat_at=row.get("last_heartbeat_at"),
-        run_token=str(row["run_token"]) if row.get("run_token") else None,
-        warnings=tuple(str(value) for value in _json_list(row.get("warnings"))),
-        parser_provenance=_json_object(row.get("parser_provenance"))
-        if row.get("parser_provenance") is not None
-        else None,
-        error_code=row.get("error_code"),
-        error_message_safe=row.get("error_message_safe"),
-        created_at=row.get("created_at"),
-        updated_at=row.get("updated_at"),
-        completed_at=row.get("completed_at"),
-    )
-
-
-def _json_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _json_object(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}

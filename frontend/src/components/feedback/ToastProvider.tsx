@@ -59,7 +59,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const notify = useCallback((input: ToastInput) => {
     const id = ++nextId.current;
-    const duration = input.duration ?? DEFAULT_DURATION;
+    const tone = input.tone ?? "info";
+    const duration = input.duration ?? (tone === "error" ? 0 : DEFAULT_DURATION);
     setToasts((current) => [
       ...current,
       {
@@ -67,7 +68,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         description: input.description,
         id,
         title: input.title,
-        tone: input.tone ?? "info",
+        tone,
       },
     ]);
     if (duration > 0) {

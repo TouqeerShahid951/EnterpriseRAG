@@ -7,24 +7,6 @@ import { formatDateTime } from "../../utils/format";
 
 type NavigateToRoute = (route: RouteId, options?: NavigateOptions) => void;
 
-export function ActionGroup({ actions, description, onNavigate, title }: ActionGroupProps) {
-  if (!actions.length) return null;
-  return (
-    <section className="knowledge-job-block">
-      <div className="knowledge-job-block-header">
-        <div>
-          <h2 className="sv-section-title">{title}</h2>
-          <p>{description}</p>
-        </div>
-        <span className="sv-pill">{actions.length} actions</span>
-      </div>
-      <div className="knowledge-overview-grid">
-        {actions.map((item) => <ActionCard action={item} key={item.route} onNavigate={onNavigate} />)}
-      </div>
-    </section>
-  );
-}
-
 export function AttentionList({ documents, onNavigate }: { documents: Document[]; onNavigate: NavigateToRoute }) {
   return (
     <div className="knowledge-action-list p-4">
@@ -186,23 +168,6 @@ export function StatusShortcutGrid({ loading, onNavigate, shortcuts }: StatusSho
   );
 }
 
-function ActionCard({ action, onNavigate }: { action: OverviewAction; onNavigate: NavigateToRoute }) {
-  const Icon = action.icon;
-  return (
-    <article className="knowledge-management-card">
-      <div className="knowledge-card-header">
-        <div>
-          <p className="sv-metadata">Go to</p>
-          <h3>{action.label}</h3>
-          <p>{action.description}</p>
-        </div>
-        <Icon className="text-primary" size={20} />
-      </div>
-      <button type="button" onClick={() => onNavigate(action.route, { search: action.search })} className="sv-action-secondary">Open {action.label}</button>
-    </article>
-  );
-}
-
 function CountSkeleton({ label }: { label: string }) {
   return (
     <span className="knowledge-count-skeleton">
@@ -215,7 +180,7 @@ function FlowMetric({ icon: Icon, label, tone, value }: { icon: LucideIcon; labe
   return <div data-tone={tone}><span><Icon size={13} /> {label}</span><strong>{value}</strong></div>;
 }
 
-export function IngestStatusBadge({ status, warnings = [] }: { status: DocumentIngestStatus | UploadJobState; warnings?: string[] }) {
+function IngestStatusBadge({ status, warnings = [] }: { status: DocumentIngestStatus | UploadJobState; warnings?: string[] }) {
   const className = status === "complete" && warnings.length > 0
     ? "sv-pill sv-pill-warning"
     : status === "complete"
@@ -254,12 +219,10 @@ function labelize(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-type ActionGroupProps = { actions: OverviewAction[]; description: string; onNavigate: NavigateToRoute; title: string };
 type EmptyProps = { actionLabel?: string; actionRoute?: RouteId; actionSearch?: string; icon?: LucideIcon; onNavigate?: NavigateToRoute; text: string; title: string };
 export type LifecycleItem = { detail: string; icon: LucideIcon; label: string; route?: RouteId; search?: string; tone?: "active" | "success" | "warning"; value: number };
 type LifecycleStripProps = { items: LifecycleItem[]; loading: boolean; onNavigate: NavigateToRoute };
 export type NextStep = { detail: string; primaryLabel: string; primaryRoute: RouteId; primarySearch?: string; secondaryLabel?: string; secondaryRoute?: RouteId; secondarySearch?: string; title: string; tone: "active" | "empty" | "success" | "warning" };
-export type OverviewAction = { description: string; icon: LucideIcon; label: string; route: RouteId; search?: string };
 type OverviewStatusProps = { indexedCurrentCount: number; needsAttention: number; nextStep: NextStep; onNavigate: NavigateToRoute; processingCount: number };
 type PanelHeaderProps = { actionIcon: LucideIcon; actionLabel: string; actionRoute: RouteId; actionSearch?: string; countLabel: string; description: string; onNavigate: NavigateToRoute; title: string };
 type RecentActivityListProps = { isLoading: boolean; jobs: IngestJob[]; onNavigate: NavigateToRoute };

@@ -8,9 +8,9 @@ export type QueryIntent =
   | "aggregation"
   | "conversational";
 
-export type ArtifactFormat = "docx" | "pptx" | "pdf";
-export type ArtifactJobProgressUnit = "sections" | "batches" | "slides" | "formats" | "files";
-export type ArtifactJobStatus =
+type ArtifactFormat = "docx" | "pptx" | "pdf";
+type ArtifactJobProgressUnit = "sections" | "batches" | "slides" | "formats" | "files";
+type ArtifactJobStatus =
   | "queued"
   | "planning"
   | "needs_input"
@@ -24,7 +24,7 @@ export type ArtifactJobStatus =
   | "cancelled";
 export type FaithfulnessStatus = "pending" | "checked" | "skipped" | "failed";
 export type QuerySourceMode = "auto" | "corpus_only" | "db_only" | "hybrid";
-export type QuerySourceKind = "connector_schema_catalog";
+type QuerySourceKind = "connector_schema_catalog";
 
 export interface QueryRequest {
   query: string;
@@ -48,7 +48,7 @@ export interface QuerySource {
   clearance_level: ClearanceLevel;
 }
 
-export interface SourceExpansion {
+interface SourceExpansion {
   available: boolean;
   reason: string;
   suggested_source_mode: QuerySourceMode;
@@ -59,7 +59,7 @@ export interface HighlightRange {
   end: number;
 }
 
-export interface SourceRegion {
+interface SourceRegion {
   page: number | null;
   bbox: [number, number, number, number] | null;
   text: string;
@@ -111,7 +111,7 @@ export interface SourceAnchor {
   attribution_status?: "pending" | "complete" | "unavailable";
 }
 
-export interface ConflictPair {
+interface ConflictPair {
   claim_a_id: string;
   claim_b_id: string;
   doc_a_id: string;
@@ -190,14 +190,14 @@ export interface ArtifactJobSummary {
   expires_at: ISODateString | null;
 }
 
-export interface ArtifactJobStageProgress {
+interface ArtifactJobStageProgress {
   unit: ArtifactJobProgressUnit;
   current: number;
   total: number;
   label?: string | null;
 }
 
-export interface ArtifactStageTiming {
+interface ArtifactStageTiming {
   duration_ms: number;
   started_at?: ISODateString | null;
   completed_at?: ISODateString | null;
@@ -217,9 +217,9 @@ export interface ArtifactJobDetail extends ArtifactJobSummary {
   last_heartbeat_at?: ISODateString | null;
 }
 
-export type SseEventType = "trace" | "intent" | "token" | "source" | "artifact" | "artifact_job" | "warning" | "done" | "verified" | "error";
+type SseEventType = "trace" | "intent" | "token" | "source" | "artifact" | "artifact_job" | "warning" | "done" | "verified" | "error";
 
-export interface SseEventBase<TType extends SseEventType, TData> {
+interface SseEventBase<TType extends SseEventType, TData> {
   event: TType;
   data: TData;
 }

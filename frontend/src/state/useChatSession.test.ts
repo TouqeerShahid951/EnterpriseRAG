@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RAGResponse } from "../types/api";
 import type { ChatTurn, SavedChatSessionSummary } from "../types/chat";
-import { applyStreamEvent, isGeneratingSession, mergeSavedSessionsWithLocal, updateChatSessionTurns, type ActiveGeneration, type ChatSessionTurnCache } from "./useChatSession";
+import { applyStreamEvent, mergeSavedSessionsWithLocal, updateChatSessionTurns, type ChatSessionTurnCache } from "./useChatSession";
 
 describe("chat session cache helpers", () => {
   it("updates a background session without changing the visible session id", () => {
@@ -55,13 +55,6 @@ describe("chat session cache helpers", () => {
     });
   });
 
-  it("identifies only the generating session as delete-locked", () => {
-    const generation: ActiveGeneration = { assistantTurnId: "assistant-1", sessionId: "session-generating" };
-
-    expect(isGeneratingSession("session-generating", generation)).toBe(true);
-    expect(isGeneratingSession("session-other", generation)).toBe(false);
-    expect(isGeneratingSession("session-generating", null)).toBe(false);
-  });
 });
 
 function summary(id: string, title: string, updatedAt: string): SavedChatSessionSummary {

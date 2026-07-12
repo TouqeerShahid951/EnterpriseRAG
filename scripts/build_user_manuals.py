@@ -20,7 +20,6 @@ from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
     LongTable,
-    PageBreak,
     PageTemplate,
     Paragraph,
     Preformatted,
@@ -38,7 +37,6 @@ DARK_BLUE = RGBColor(31, 77, 120)
 INK = RGBColor(28, 37, 48)
 MUTED = RGBColor(91, 103, 112)
 LIGHT_BLUE = "E8EEF5"
-LIGHT_GRAY = "F2F4F7"
 TABLE_WIDTH_DXA = 9360
 TABLE_INDENT_DXA = 120
 

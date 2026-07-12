@@ -75,11 +75,11 @@ def stream_graph(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEv
     if route_output(ctx) == "artifact":
         yield _node_event("artifact_composer")
         ctx = _run("artifact_composer", ctx, nodes.artifact_composer)
-        yield QueryStreamEvent(event="token", data={"text": ctx["response"].answer})
         yield _node_event("artifact_content_validator")
         ctx = _run("artifact_content_validator", ctx, nodes.artifact_content_validator)
         yield _node_event("artifact_generator")
         ctx = _run("artifact_generator", ctx, nodes.artifact_generator)
+        yield QueryStreamEvent(event="token", data={"text": ctx["response"].answer})
         for artifact in ctx["response"].artifacts:
             yield QueryStreamEvent(event="artifact", data=artifact.model_dump())
         yield _node_event("response_serializer")
@@ -219,8 +219,11 @@ def _stream_synthesizer(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryS
         raw_answer = "".join(chunks)
         answer = ensure_answer_has_citation(raw_answer, available_sources)
         streamed_answer = True
-        if answer != raw_answer:
-            yield QueryStreamEvent(event="token", data={"text": answer[len(raw_answer):] if answer.startswith(raw_answer) else answer})
+        # Token events are append-only; non-prefix corrections are delivered by the authoritative done snapshot.
+        if answer.startswith(raw_answer):
+            citation_suffix = answer[len(raw_answer):]
+            if citation_suffix:
+                yield QueryStreamEvent(event="token", data={"text": citation_suffix})
     else:
         available_sources = []
         answer = "No accessible current sources were found for this query."

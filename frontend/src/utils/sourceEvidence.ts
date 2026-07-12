@@ -14,7 +14,7 @@ export function normalizeHighlightRanges(excerpt: string, ranges: HighlightRange
     }, []);
 }
 
-export function sourceMatchedRanges(source: SourceEvidenceFields): HighlightRange[] {
+function sourceMatchedRanges(source: SourceEvidenceFields): HighlightRange[] {
   return normalizeHighlightRanges(source.excerpt, source.highlight_ranges);
 }
 
@@ -26,18 +26,4 @@ export function sourceMatchedSpanLabel(source: SourceEvidenceFields): string {
   const count = sourceMatchedSpanCount(source);
   if (count === 0) return "No matched evidence spans";
   return count === 1 ? "1 matched evidence span" : `${count} matched evidence spans`;
-}
-
-export function sourceMatchedSpanTexts(source: SourceEvidenceFields, limit = 4): string[] {
-  const seen = new Set<string>();
-  const spans: string[] = [];
-  for (const range of sourceMatchedRanges(source)) {
-    const text = source.excerpt.slice(range.start, range.end).replace(/\s+/g, " ").trim();
-    const key = text.toLowerCase();
-    if (!text || seen.has(key)) continue;
-    seen.add(key);
-    spans.push(text);
-    if (spans.length >= limit) break;
-  }
-  return spans;
 }

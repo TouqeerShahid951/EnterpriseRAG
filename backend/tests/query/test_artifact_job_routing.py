@@ -28,6 +28,35 @@ def test_streamed_artifact_request_enqueues_full_job_without_seeded_answer() -> 
     assert artifact_jobs.calls[0]["request"].query == "Create a detailed presentation of all crimes in the FIRs"
 
 
+def test_non_stream_artifact_request_records_query_lifecycle(monkeypatch) -> None:
+    artifact_jobs = _ArtifactJobService()
+    lifecycle_events: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        "rag.query.service.log_query_start",
+        lambda _ctx, *, stream: lifecycle_events.append(("start", stream)),
+    )
+    monkeypatch.setattr(
+        "rag.query.service.log_query_complete",
+        lambda _ctx, *, stream: lifecycle_events.append(("complete", stream)),
+    )
+    service = LocalRagService(
+        config=Settings(document_repository="memory", artifact_pipeline_version="v2"),
+        ollama=object(),
+        qdrant=object(),
+        session_store=_SessionStore(),
+        conflict_checker=object(),
+        artifact_job_service=artifact_jobs,
+    )
+
+    response = service.answer_query(
+        QueryRequest(query="Create a PDF report about quarterly risk"),
+        _user(),
+    )
+
+    assert response.artifact_job is not None
+    assert lifecycle_events == [("start", False), ("complete", False)]
+
+
 class _SessionStore:
     def load(self, **_kwargs):
         return []

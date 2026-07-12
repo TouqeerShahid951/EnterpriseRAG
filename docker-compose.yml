@@ -58,7 +58,6 @@ x-backend-env: &backend-env
   HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
   IDENTITY_REPOSITORY: ${IDENTITY_REPOSITORY:-postgres}
   JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-60}
-  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
   JWT_REFRESH_TOKEN_EXPIRE_DAYS: ${JWT_REFRESH_TOKEN_EXPIRE_DAYS:-7}
   JWT_SECRET_KEY: ${JWT_SECRET_KEY:-replace-with-local-jwt-secret}
   AUTH_IDLE_TIMEOUT_MINUTES: ${AUTH_IDLE_TIMEOUT_MINUTES:-30}
@@ -81,7 +80,7 @@ x-backend-env: &backend-env
   PDF_IMAGE_REVIEW_THRESHOLD: ${PDF_IMAGE_REVIEW_THRESHOLD:-64}
   QDRANT_COLLECTION: ${QDRANT_COLLECTION:-documents}
   QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-  RAG_FAITHFULNESS_MODEL: ${RAG_FAITHFULNESS_MODEL:-Qwen/Qwen3-8B-AWQ}
+  RAG_FAITHFULNESS_MODEL: ${RAG_FAITHFULNESS_MODEL:-llama3.1:8b}
   RAG_FAITHFULNESS_POLICY: ${RAG_FAITHFULNESS_POLICY:-never}
   RAG_FAITHFULNESS_THRESHOLD: ${RAG_FAITHFULNESS_THRESHOLD:-0.8}
   RAG_EMBEDDING_PROVIDER: ${RAG_EMBEDDING_PROVIDER:-fastembed}
@@ -95,15 +94,15 @@ x-backend-env: &backend-env
   RAG_INGESTION_PROVIDER: ${RAG_INGESTION_PROVIDER:-}
   RAG_INGESTION_BASE_URL: ${RAG_INGESTION_BASE_URL:-}
   RAG_JSON_NUM_PREDICT: ${RAG_JSON_NUM_PREDICT:-4096}
-  RAG_MODEL_PROVIDER: ${RAG_MODEL_PROVIDER:-vllm}
+  RAG_MODEL_PROVIDER: ${RAG_MODEL_PROVIDER:-ollama}
   RAG_OLLAMA_CHAT_TIMEOUT_SECONDS: ${RAG_OLLAMA_CHAT_TIMEOUT_SECONDS:-180}
   RAG_OLLAMA_EMBED_TIMEOUT_SECONDS: ${RAG_OLLAMA_EMBED_TIMEOUT_SECONDS:-45}
-  RAG_REASONING_MODEL: ${RAG_REASONING_MODEL:-Qwen/Qwen3-8B-AWQ}
+  RAG_REASONING_MODEL: ${RAG_REASONING_MODEL:-llama3.1:8b}
   RAG_REASONING_PROVIDER: ${RAG_REASONING_PROVIDER:-}
   RAG_REASONING_BASE_URL: ${RAG_REASONING_BASE_URL:-}
   RAG_RETRIEVAL_MAX_RETRIES: ${RAG_RETRIEVAL_MAX_RETRIES:-1}
   RAG_RETRIEVAL_TOKEN_BUDGET: ${RAG_RETRIEVAL_TOKEN_BUDGET:-12000}
-  RAG_ROUTE_LLM_VERIFIER_MODEL: ${RAG_ROUTE_LLM_VERIFIER_MODEL:-Qwen/Qwen3-8B-AWQ}
+  RAG_ROUTE_LLM_VERIFIER_MODEL: ${RAG_ROUTE_LLM_VERIFIER_MODEL:-llama3.1:8b}
   RAG_ROUTING_PROVIDER: ${RAG_ROUTING_PROVIDER:-}
   RAG_ROUTING_BASE_URL: ${RAG_ROUTING_BASE_URL:-}
   RAG_FAITHFULNESS_PROVIDER: ${RAG_FAITHFULNESS_PROVIDER:-}
@@ -123,6 +122,7 @@ x-backend-env: &backend-env
   S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
   UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-52428800}
   UPLOAD_STORAGE_BACKEND: ${UPLOAD_STORAGE_BACKEND:-minio}
+  UPLOAD_STORAGE_DIR: ${UPLOAD_STORAGE_DIR:-/var/lib/agenticrag/uploads}
   TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
   VLLM_BASE_URL: ${VLLM_BASE_URL:-http://vllm-text:8000/v1}
   VLLM_CHAT_MODEL: ${VLLM_CHAT_MODEL:-Qwen/Qwen3-8B-AWQ}
@@ -173,6 +173,7 @@ x-folder-sources-volume: &folder-sources-volume
 x-artifact-env: &artifact-env
   ARTIFACT_COMPOSER_TIMEOUT_SECONDS: ${ARTIFACT_COMPOSER_TIMEOUT_SECONDS:-60}
   ARTIFACT_LIBREOFFICE_REQUIRED: ${ARTIFACT_LIBREOFFICE_REQUIRED:-false}
+  ARTIFACT_MAINTENANCE_INTERVAL_SECONDS: ${ARTIFACT_MAINTENANCE_INTERVAL_SECONDS:-300}
   ARTIFACT_PIPELINE_VERSION: ${ARTIFACT_PIPELINE_VERSION:-v2}
   ARTIFACT_QUEUE_BACKEND: ${ARTIFACT_QUEUE_BACKEND:-celery}
   ARTIFACT_QUEUE_NAME: ${ARTIFACT_QUEUE_NAME:-artifact:jobs}
@@ -482,6 +483,7 @@ services:
     volumes:
       - *fastembed-cache-volume
       - *folder-sources-volume
+      - local-upload-data:${UPLOAD_STORAGE_DIR:-/var/lib/agenticrag/uploads}
     depends_on:
       postgres:
         condition: service_healthy
@@ -529,6 +531,7 @@ services:
     volumes:
       - *fastembed-cache-volume
       - *folder-sources-volume
+      - local-upload-data:${UPLOAD_STORAGE_DIR:-/var/lib/agenticrag/uploads}
     depends_on:
       api:
         condition: service_healthy
@@ -554,7 +557,7 @@ services:
   artifact-worker:
     image: agenticrag-api
     restart: unless-stopped
-    command: ["celery", "-A", "rag.artifact_jobs.celery_app", "worker", "--loglevel=INFO", "--queues=artifact:jobs"]
+    command: ["celery", "-A", "rag.artifact_jobs.celery_app", "worker", "--loglevel=INFO", "--queues=${ARTIFACT_QUEUE_NAME:-artifact:jobs}"]
     healthcheck:
       disable: true
     environment:
@@ -563,6 +566,7 @@ services:
       SERVICE_NAME: artifact-worker
     volumes:
       - *fastembed-cache-volume
+      - local-upload-data:${UPLOAD_STORAGE_DIR:-/var/lib/agenticrag/uploads}
     extra_hosts:
       - host.docker.internal:host-gateway
     depends_on:
@@ -576,6 +580,26 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+
+  artifact-maintenance:
+    image: agenticrag-api
+    restart: unless-stopped
+    command: ["python", "-m", "rag.ops.artifact_maintenance_cli", "--loop"]
+    healthcheck:
+      disable: true
+    environment:
+      <<: [*backend-env, *artifact-env]
+      SERVICE_KIND: artifact-maintenance
+      SERVICE_NAME: artifact-maintenance
+    volumes:
+      - local-upload-data:${UPLOAD_STORAGE_DIR:-/var/lib/agenticrag/uploads}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   ingestion-worker:
     image: agenticrag-ingestion-worker
@@ -812,6 +836,7 @@ services:
       retries: 5
 
 volumes:
+  local-upload-data:
   minio-data:
   postgres-data:
   qdrant-data:

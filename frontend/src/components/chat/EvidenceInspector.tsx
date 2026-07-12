@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ExternalLink, FileText, X } from "lucide-react";
 
 import { Fact } from "../layout/Common";
@@ -12,27 +12,66 @@ import { EvidenceWindows } from "./EvidenceWindows";
 
 export function EvidenceInspector({ onClose, source, sourceCount, sourceNumber }: Props) {
   const sourceCountLabel = formatSourceCount(sourceCount);
+  const panelRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  const titleId = useId();
+  onCloseRef.current = onClose;
 
   useEffect(() => {
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const modalViewport = window.matchMedia("(min-width: 1181px)");
+    const backgroundRegions = Array.from(
+      document.querySelectorAll<HTMLElement>(".Prudentia-sidebar, .rag-chat-header, .rag-corpus-rail, .rag-chat-thread"),
+    );
+
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") onCloseRef.current();
     }
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+    if (modalViewport.matches) {
+      backgroundRegions.forEach((element) => element.setAttribute("inert", ""));
+      window.requestAnimationFrame(() => closeRef.current?.focus());
+    }
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      backgroundRegions.forEach((element) => element.removeAttribute("inert"));
+      returnFocusRef.current?.focus({ preventScroll: true });
+    };
+  }, []);
+
+  function handlePanelKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(
+      panelRef.current?.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), a[href], select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])",
+      ) ?? [],
+    ).filter((element) => element.offsetParent !== null);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
 
   return (
     <div className="rag-evidence-drawer-shell">
       <button type="button" className="rag-evidence-drawer-backdrop" onClick={onClose} aria-label="Close source evidence panel" />
-      <aside className="rag-evidence-panel" aria-label="Source evidence" role="dialog" aria-modal="true">
+      <aside ref={panelRef} className="rag-evidence-panel" aria-labelledby={titleId} role="dialog" aria-modal="true" onKeyDown={handlePanelKeyDown}>
         <div className="rag-evidence-panel-header">
           <div>
             <p className="sv-eyebrow">Citation Inspector</p>
-            <h2 className="text-headline-sm text-on-surface">Evidence</h2>
+            <h2 id={titleId} className="text-headline-sm text-on-surface">Evidence</h2>
             <span className="sv-pill mt-2">{sourceCountLabel}</span>
           </div>
-          <button type="button" onClick={onClose} className="rag-evidence-close" aria-label="Close evidence panel">
+          <button ref={closeRef} type="button" onClick={onClose} className="rag-evidence-close" aria-label="Close evidence panel">
             <X size={16} />
           </button>
         </div>

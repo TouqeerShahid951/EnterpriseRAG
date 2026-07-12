@@ -8,7 +8,6 @@ from .contracts import (
     ArtifactContentBundle,
     ArtifactContentValidation,
     ContentBlock,
-    ContentSection,
     DocumentPlan,
     EvidenceManifest,
 )

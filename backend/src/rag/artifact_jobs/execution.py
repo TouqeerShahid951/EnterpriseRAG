@@ -7,6 +7,9 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 import logging
 from time import perf_counter
+from uuid import uuid4
+
+from billiard.exceptions import SoftTimeLimitExceeded
 
 from ..auth.document_access import can_read_document
 from ..core.config import Settings
@@ -29,6 +32,7 @@ from .composer import (
 from .llm_json import LlmContractError
 from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
 from .planner import PLANNER_PROMPT_VERSION, plan_document
+from .publisher import ArtifactPublisher
 from .renderer import render_document
 from .retrieval import retrieve_document_evidence
 from .validation import validate_document_bundle
@@ -45,8 +49,14 @@ class ArtifactJobCancelled(RuntimeError):
     pass
 
 
+class ArtifactJobLeaseLost(RuntimeError):
+    pass
+
+
 class ArtifactEvidenceUnavailable(RuntimeError):
-    safe_message = "No authorized evidence was found for this document generation request."
+    safe_message = (
+        "No authorized evidence was found for this document generation request."
+    )
 
 
 class ArtifactJobExecutor:
@@ -70,14 +80,23 @@ class ArtifactJobExecutor:
         self.storage_factory = storage_factory
         self.identity_repo_factory = identity_repo_factory
         self.document_repo_factory = document_repo_factory
+        self.publisher = ArtifactPublisher(
+            artifact_repo_factory=artifact_repo_factory,
+            storage_factory=storage_factory,
+            audit_repo_factory=document_repo_factory,
+        )
         self.inference = inference
         self.qdrant = qdrant
         self.model_name = model_name
         self.rag_config = rag_config
+        self._run_token: str | None = None
 
-    def execute(self, job_id: str) -> ArtifactJobRecord:
+    def execute(
+        self, job_id: str, *, run_token: str | None = None
+    ) -> ArtifactJobRecord:
+        self._run_token = run_token or str(uuid4())
         repo = self.repo_factory()
-        job, accepted = repo.start_attempt(job_id)
+        job, accepted = repo.start_attempt(job_id, run_token=self._run_token)
         if job is None:
             raise RuntimeError("artifact job was not found")
         if not accepted:
@@ -88,34 +107,50 @@ class ArtifactJobExecutor:
             self._authorize(job)
             self._check_cancelled(job.id)
             plan = plan_document(job, inference=self.inference, model=self.model_name)
-            job = self._update(job.id, {
-                "plan_json": plan.model_dump(mode="json"),
-                "model_versions": {
-                    "planner": self.model_name,
-                    "composer": self.model_name,
+            job = self._update(
+                job.id,
+                {
+                    "plan_json": plan.model_dump(mode="json"),
+                    "model_versions": {
+                        "planner": self.model_name,
+                        "composer": self.model_name,
+                    },
+                    "prompt_versions": {
+                        "planner": PLANNER_PROMPT_VERSION,
+                        "composer": COMPOSER_PROMPT_VERSION,
+                        "formatter": FORMATTER_PROMPT_VERSION,
+                    },
+                    "stage_progress": _progress(
+                        "sections", 0, len(plan.sections), "Planning document structure"
+                    ),
                 },
-                "prompt_versions": {
-                    "planner": PLANNER_PROMPT_VERSION,
-                    "composer": COMPOSER_PROMPT_VERSION,
-                    "formatter": FORMATTER_PROMPT_VERSION,
-                },
-                "stage_progress": _progress("sections", 0, len(plan.sections), "Planning document structure"),
-            })
+            )
             if plan.clarification_questions:
-                return self._update(job.id, {
-                    "status": "needs_input",
-                    "stage": "needs_input",
-                    "progress_pct": 10,
-                    "stage_progress": None,
-                })
+                return self._update(
+                    job.id,
+                    {
+                        "status": "needs_input",
+                        "stage": "needs_input",
+                        "progress_pct": 10,
+                        "stage_progress": None,
+                    },
+                )
 
         self._check_cancelled(job.id)
-        self._update(job.id, {
-            "status": "retrieving",
-            "stage": "retrieving",
-            "progress_pct": 20,
-            "stage_progress": _progress("sections", 0, len(plan.sections), "Collecting evidence from permitted documents"),
-        })
+        self._update(
+            job.id,
+            {
+                "status": "retrieving",
+                "stage": "retrieving",
+                "progress_pct": 20,
+                "stage_progress": _progress(
+                    "sections",
+                    0,
+                    len(plan.sections),
+                    "Collecting evidence from permitted documents",
+                ),
+            },
+        )
         with self._stage_timer(job.id, "retrieving"):
             started_at = perf_counter()
             evidence = retrieve_document_evidence(
@@ -134,11 +169,19 @@ class ArtifactJobExecutor:
                 len(evidence.records),
                 int((perf_counter() - started_at) * 1000),
             )
-            job = self._update(job.id, {
-                "evidence_manifest_json": evidence.model_dump(mode="json"),
-                "progress_pct": 50,
-                "stage_progress": _progress("sections", len(evidence.sections), len(plan.sections), "Collected evidence"),
-            })
+            job = self._update(
+                job.id,
+                {
+                    "evidence_manifest_json": evidence.model_dump(mode="json"),
+                    "progress_pct": 50,
+                    "stage_progress": _progress(
+                        "sections",
+                        len(evidence.sections),
+                        len(plan.sections),
+                        "Collected evidence",
+                    ),
+                },
+            )
             if not evidence.records:
                 self._record_error(
                     job.id,
@@ -146,15 +189,22 @@ class ArtifactJobExecutor:
                     code="artifact_no_evidence",
                     message=ArtifactEvidenceUnavailable.safe_message,
                 )
-                raise ArtifactEvidenceUnavailable(ArtifactEvidenceUnavailable.safe_message)
+                raise ArtifactEvidenceUnavailable(
+                    ArtifactEvidenceUnavailable.safe_message
+                )
 
         self._check_cancelled(job.id)
-        self._update(job.id, {
-            "status": "composing",
-            "stage": "composing",
-            "progress_pct": 55,
-            "stage_progress": _progress("batches", 0, 1, "Preparing content composition"),
-        })
+        self._update(
+            job.id,
+            {
+                "status": "composing",
+                "stage": "composing",
+                "progress_pct": 55,
+                "stage_progress": _progress(
+                    "batches", 0, 1, "Preparing content composition"
+                ),
+            },
+        )
         with self._stage_timer(job.id, "composing"):
             started_at = perf_counter()
             bundle = compose_document_bundle(
@@ -164,11 +214,13 @@ class ArtifactJobExecutor:
                 inference=self.inference,
                 model=self.model_name,
                 section_timeout_seconds=self.config.artifact_composer_timeout_seconds,
-                progress_callback=lambda current, total, phase: self._record_composition_progress(
-                    job.id,
-                    current=current,
-                    total=total,
-                    phase=phase,
+                progress_callback=lambda current, total, phase: (
+                    self._record_composition_progress(
+                        job.id,
+                        current=current,
+                        total=total,
+                        phase=phase,
+                    )
                 ),
             )
             logger.info(
@@ -178,20 +230,32 @@ class ArtifactJobExecutor:
                 len(bundle.presentation.slides),
                 int((perf_counter() - started_at) * 1000),
             )
-        self._update(job.id, {
-            "content_spec_json": bundle.model_dump(mode="json"),
-            "status": "validating",
-            "stage": "validating",
-            "progress_pct": 72,
-            "stage_progress": None,
-        })
+        self._update(
+            job.id,
+            {
+                "content_spec_json": bundle.model_dump(mode="json"),
+                "status": "validating",
+                "stage": "validating",
+                "progress_pct": 72,
+                "stage_progress": None,
+            },
+        )
         with self._stage_timer(job.id, "validating"):
             validation = validate_document_bundle(bundle, plan=plan, evidence=evidence)
-            self._update(job.id, {"validation_results_json": validation.model_dump(mode="json")})
+            self._update(
+                job.id, {"validation_results_json": validation.model_dump(mode="json")}
+            )
             if not validation.passed:
-                bundle = self._repair_or_fallback_bundle(job.id, bundle, validation.errors, evidence, plan)
-                validation = validate_document_bundle(bundle, plan=plan, evidence=evidence)
-                self._update(job.id, {"validation_results_json": validation.model_dump(mode="json")})
+                bundle = self._repair_or_fallback_bundle(
+                    job.id, bundle, validation.errors, evidence, plan
+                )
+                validation = validate_document_bundle(
+                    bundle, plan=plan, evidence=evidence
+                )
+                self._update(
+                    job.id,
+                    {"validation_results_json": validation.model_dump(mode="json")},
+                )
             if not validation.passed:
                 self._record_error(
                     job.id,
@@ -199,14 +263,25 @@ class ArtifactJobExecutor:
                     code="artifact_content_validation_failed",
                     message="; ".join(validation.errors[:8]),
                 )
-                raise RuntimeError("artifact content validation failed: " + "; ".join(validation.errors[:8]))
-        job = self._update(job.id, {
-            "content_spec_json": bundle.model_dump(mode="json"),
-            "status": "rendering",
-            "stage": "rendering",
-            "progress_pct": 80,
-            "stage_progress": _progress("formats", 0, len(job.requested_formats), "Preparing requested files"),
-        })
+                raise RuntimeError(
+                    "artifact content validation failed: "
+                    + "; ".join(validation.errors[:8])
+                )
+        job = self._update(
+            job.id,
+            {
+                "content_spec_json": bundle.model_dump(mode="json"),
+                "status": "rendering",
+                "stage": "rendering",
+                "progress_pct": 80,
+                "stage_progress": _progress(
+                    "formats",
+                    0,
+                    len(job.requested_formats),
+                    "Preparing requested files",
+                ),
+            },
+        )
         with self._stage_timer(job.id, "rendering"):
             failures = self._render_formats(job, evidence, bundle)
         status = (
@@ -214,15 +289,20 @@ class ArtifactJobExecutor:
             if not failures
             else ("partial" if len(failures) < len(job.requested_formats) else "failed")
         )
-        return self._update(job.id, {
-            "status": status,
-            "stage": status,
-            "progress_pct": 100,
-            "stage_progress": None,
-            "error_code": "artifact_format_failures" if failures else None,
-            "error_message_safe": f"Failed formats: {', '.join(failures)}" if failures else None,
-            "completed_at": datetime.now(UTC),
-        })
+        return self._update(
+            job.id,
+            {
+                "status": status,
+                "stage": status,
+                "progress_pct": 100,
+                "stage_progress": None,
+                "error_code": "artifact_format_failures" if failures else None,
+                "error_message_safe": f"Failed formats: {', '.join(failures)}"
+                if failures
+                else None,
+                "completed_at": datetime.now(UTC),
+            },
+        )
 
     def _execute_seeded_response_job(self, job: ArtifactJobRecord) -> ArtifactJobRecord:
         with self._stage_timer(job.id, "planning"):
@@ -234,26 +314,54 @@ class ArtifactJobExecutor:
                 ArtifactContentBundle.model_validate(job.content_spec_json),
                 evidence,
             )
-            job = self._update(job.id, {
-                "model_versions": {"artifact_seed": "normal_rag_response"},
-                "prompt_versions": {**job.prompt_versions, "artifact_seed": "grounded-rag-response-v1"},
-                "content_spec_json": bundle.model_dump(mode="json"),
-                "progress_pct": 70,
-                "stage_progress": _progress("files", 0, len(job.requested_formats), "Preparing grounded response file"),
-            })
+            job = self._update(
+                job.id,
+                {
+                    "model_versions": {"artifact_seed": "normal_rag_response"},
+                    "prompt_versions": {
+                        **job.prompt_versions,
+                        "artifact_seed": "grounded-rag-response-v1",
+                    },
+                    "content_spec_json": bundle.model_dump(mode="json"),
+                    "progress_pct": 70,
+                    "stage_progress": _progress(
+                        "files",
+                        0,
+                        len(job.requested_formats),
+                        "Preparing grounded response file",
+                    ),
+                },
+            )
 
         self._check_cancelled(job.id)
-        self._update(job.id, {"status": "validating", "stage": "validating", "progress_pct": 72, "stage_progress": None})
+        self._update(
+            job.id,
+            {
+                "status": "validating",
+                "stage": "validating",
+                "progress_pct": 72,
+                "stage_progress": None,
+            },
+        )
         with self._stage_timer(job.id, "validating"):
             validation = validate_document_bundle(bundle, plan=plan, evidence=evidence)
-            self._update(job.id, {"validation_results_json": validation.model_dump(mode="json")})
+            self._update(
+                job.id, {"validation_results_json": validation.model_dump(mode="json")}
+            )
             if not validation.passed:
-                bundle = self._repair_or_fallback_bundle(job.id, bundle, validation.errors, evidence, plan)
-                validation = validate_document_bundle(bundle, plan=plan, evidence=evidence)
-                self._update(job.id, {
-                    "content_spec_json": bundle.model_dump(mode="json"),
-                    "validation_results_json": validation.model_dump(mode="json"),
-                })
+                bundle = self._repair_or_fallback_bundle(
+                    job.id, bundle, validation.errors, evidence, plan
+                )
+                validation = validate_document_bundle(
+                    bundle, plan=plan, evidence=evidence
+                )
+                self._update(
+                    job.id,
+                    {
+                        "content_spec_json": bundle.model_dump(mode="json"),
+                        "validation_results_json": validation.model_dump(mode="json"),
+                    },
+                )
             if not validation.passed:
                 self._record_error(
                     job.id,
@@ -261,14 +369,25 @@ class ArtifactJobExecutor:
                     code="artifact_seed_validation_failed",
                     message="; ".join(validation.errors[:8]),
                 )
-                raise RuntimeError("artifact seeded content validation failed: " + "; ".join(validation.errors[:8]))
+                raise RuntimeError(
+                    "artifact seeded content validation failed: "
+                    + "; ".join(validation.errors[:8])
+                )
 
-        job = self._update(job.id, {
-            "status": "rendering",
-            "stage": "rendering",
-            "progress_pct": 80,
-            "stage_progress": _progress("formats", 0, len(job.requested_formats), "Preparing requested files"),
-        })
+        job = self._update(
+            job.id,
+            {
+                "status": "rendering",
+                "stage": "rendering",
+                "progress_pct": 80,
+                "stage_progress": _progress(
+                    "formats",
+                    0,
+                    len(job.requested_formats),
+                    "Preparing requested files",
+                ),
+            },
+        )
         with self._stage_timer(job.id, "rendering"):
             failures = self._render_formats(job, evidence, bundle)
         status = (
@@ -276,15 +395,20 @@ class ArtifactJobExecutor:
             if not failures
             else ("partial" if len(failures) < len(job.requested_formats) else "failed")
         )
-        return self._update(job.id, {
-            "status": status,
-            "stage": status,
-            "progress_pct": 100,
-            "stage_progress": None,
-            "error_code": "artifact_format_failures" if failures else None,
-            "error_message_safe": f"Failed formats: {', '.join(failures)}" if failures else None,
-            "completed_at": datetime.now(UTC),
-        })
+        return self._update(
+            job.id,
+            {
+                "status": status,
+                "stage": status,
+                "progress_pct": 100,
+                "stage_progress": None,
+                "error_code": "artifact_format_failures" if failures else None,
+                "error_message_safe": f"Failed formats: {', '.join(failures)}"
+                if failures
+                else None,
+                "completed_at": datetime.now(UTC),
+            },
+        )
 
     def _render_formats(
         self,
@@ -292,8 +416,12 @@ class ArtifactJobExecutor:
         evidence: EvidenceManifest,
         bundle: ArtifactContentBundle,
     ) -> list[str]:
-        source_doc_ids = list(dict.fromkeys(record.doc_id for record in evidence.records))
-        return self._render_deterministic_formats(job, bundle, source_doc_ids, list(job.requested_formats))
+        source_doc_ids = list(
+            dict.fromkeys(record.doc_id for record in evidence.records)
+        )
+        return self._render_deterministic_formats(
+            job, bundle, source_doc_ids, list(job.requested_formats)
+        )
 
     def _render_deterministic_formats(
         self,
@@ -308,16 +436,23 @@ class ArtifactJobExecutor:
             try:
                 self._check_cancelled(job.id)
                 self._authorize(job)
-                self._record_render_format_progress(job.id, artifact_format, index, total_formats)
+                self._record_render_format_progress(
+                    job.id, artifact_format, index, total_formats
+                )
                 rendered = render_document(
                     artifact_format=artifact_format,  # type: ignore[arg-type]
                     bundle=bundle,
                     generated_at=datetime.now(UTC),
                     require_libreoffice=self.config.artifact_libreoffice_required,
                     progress_callback=(
-                        lambda current, total, label, fmt=artifact_format, fmt_index=index, fmt_total=total_formats:
-                        self._record_slide_progress(job.id, fmt, fmt_index, fmt_total, current, total, label)
-                    ) if artifact_format == "pptx" else None,
+                        lambda current, total, label, fmt=artifact_format, fmt_index=index, fmt_total=total_formats: (
+                            self._record_slide_progress(
+                                job.id, fmt, fmt_index, fmt_total, current, total, label
+                            )
+                        )
+                    )
+                    if artifact_format == "pptx"
+                    else None,
                 )
                 self._store_rendered_file(
                     job=job,
@@ -329,6 +464,13 @@ class ArtifactJobExecutor:
                     warnings=list(rendered.smoke_warnings),
                     progress_pct=_format_complete_progress(index, total_formats),
                 )
+            except (
+                ArtifactJobCancelled,
+                ArtifactJobLeaseLost,
+                ArtifactPermissionChanged,
+                SoftTimeLimitExceeded,
+            ):
+                raise
             except Exception as exc:
                 failures.append(artifact_format)
                 self._record_format_error(job.id, artifact_format, exc)
@@ -347,46 +489,45 @@ class ArtifactJobExecutor:
         progress_pct: int,
     ) -> None:
         with self._stage_timer(job.id, "storing", accumulate=True):
-            self._update(job.id, {
-                "status": "rendering",
-                "stage": "storing",
-                "progress_pct": progress_pct,
-                "stage_progress": _progress("files", 0, 1, f"Saving {artifact_format.upper()} file"),
-            })
-            stored = self.storage_factory().put(
-                filename=filename,
-                content=content,
-                content_type=content_type,
-            )
-            record = self.artifact_repo_factory().create_artifact(
-                job_id=job.id,
-                user_id=job.user_id,
-                permission_version=job.permission_version,
-                session_id=job.session_id,
-                trace_id=job.trace_id,
-                requested_formats=list(job.requested_formats),
-                filename=filename,
-                format=artifact_format,
-                content_type=content_type,
-                object_path=stored.object_path,
-                size_bytes=stored.size_bytes,
-                source_doc_ids=source_doc_ids,
-                prompt=job.original_request,
-            )
-            self.document_repo_factory().append_audit_event(
-                event_type="query.artifact_created",
-                actor_id=job.user_id,
-                target_type="generated_artifact",
-                target_id=record.id,
-                payload={
-                    "artifact_job_id": job.id,
-                    "format": artifact_format,
-                    "source_doc_ids": source_doc_ids,
-                    "smoke_warnings": warnings,
+            self._update(
+                job.id,
+                {
+                    "status": "rendering",
+                    "stage": "storing",
+                    "progress_pct": progress_pct,
+                    "stage_progress": _progress(
+                        "files", 0, 1, f"Saving {artifact_format.upper()} file"
+                    ),
                 },
             )
+            self._check_cancelled(job.id)
+            published = self.publisher.publish(
+                job=job,
+                filename=filename,
+                artifact_format=artifact_format,
+                content=content,
+                content_type=content_type,
+                source_doc_ids=source_doc_ids,
+                smoke_warnings=warnings,
+                expected_run_token=self._run_token,
+                lease_guard=lambda: self._guard_publication(job, source_doc_ids),
+            )
+            publication_warnings = [
+                item for item in published.warnings if item not in warnings
+            ]
+            if publication_warnings:
+                self._record_error(
+                    job.id,
+                    stage="storing",
+                    code="artifact_publish_warning",
+                    message="; ".join(publication_warnings),
+                    context={"format": artifact_format},
+                )
+            self._check_cancelled(job.id)
 
-    def _record_format_error(self, job_id: str, artifact_format: str, exc: Exception) -> None:
+    def _record_format_error(
+        self, job_id: str, artifact_format: str, exc: Exception
+    ) -> None:
         detail = str(exc)[:2000]
         self._record_error(
             job_id,
@@ -403,16 +544,37 @@ class ArtifactJobExecutor:
             detail,
         )
 
-    def _authorize(self, job: ArtifactJobRecord) -> UserRecord:
+    def _authorize(
+        self,
+        job: ArtifactJobRecord,
+        additional_document_ids: list[str] | tuple[str, ...] = (),
+    ) -> UserRecord:
         user = self.identity_repo_factory().get_user_by_id(job.user_id)
-        if user is None or not user.is_active or user.permission_version != job.permission_version:
-            raise ArtifactPermissionChanged("artifact job authorization is no longer valid")
+        if (
+            user is None
+            or not user.is_active
+            or user.permission_version != job.permission_version
+        ):
+            raise ArtifactPermissionChanged(
+                "artifact job authorization is no longer valid"
+            )
         document_repo = self.document_repo_factory()
-        for document_id in job.document_ids:
+        document_ids = dict.fromkeys((*job.document_ids, *additional_document_ids))
+        for document_id in document_ids:
             document = document_repo.get_document(document_id)
             if document is None or not can_read_document(user, document):
-                raise ArtifactPermissionChanged("artifact job document access is no longer valid")
+                raise ArtifactPermissionChanged(
+                    "artifact job document access is no longer valid"
+                )
         return user
+
+    def _guard_publication(
+        self,
+        job: ArtifactJobRecord,
+        source_doc_ids: list[str],
+    ) -> None:
+        self._check_cancelled(job.id)
+        self._authorize(job, source_doc_ids)
 
     def _check_cancelled(self, job_id: str) -> None:
         current = self.repo_factory().get_job(job_id)
@@ -420,14 +582,32 @@ class ArtifactJobExecutor:
             raise RuntimeError("artifact job was not found")
         if current.cancellation_requested or current.status == "cancelled":
             raise ArtifactJobCancelled("artifact job was cancelled")
+        if current.expires_at is not None and current.expires_at <= datetime.now(UTC):
+            raise ArtifactJobCancelled("artifact job expired")
+        run_token = getattr(self, "_run_token", None)
+        if run_token is not None and current.run_token != run_token:
+            raise ArtifactJobLeaseLost("artifact job execution lease was reclaimed")
 
     def _update(self, job_id: str, changes: dict[str, object]) -> ArtifactJobRecord:
-        updated = self.repo_factory().update_job(job_id, changes)
+        repo = self.repo_factory()
+        run_token = getattr(self, "_run_token", None)
+        updated = (
+            repo.transition_job(job_id, run_token=run_token, changes=changes)
+            if run_token is not None
+            else repo.update_job(job_id, changes)
+        )
         if updated is None:
-            raise RuntimeError("artifact job was not found")
+            current = repo.get_job(job_id)
+            if current is None:
+                raise RuntimeError("artifact job was not found")
+            if current.cancellation_requested or current.status == "cancelled":
+                raise ArtifactJobCancelled("artifact job was cancelled")
+            raise ArtifactJobLeaseLost("artifact job execution lease was reclaimed")
         return updated
 
-    def _record_composition_progress(self, job_id: str, *, current: int, total: int, phase: str) -> None:
+    def _record_composition_progress(
+        self, job_id: str, *, current: int, total: int, phase: str
+    ) -> None:
         bounded_total = max(total, 1)
         bounded_current = min(max(current, 0), bounded_total)
         if phase == "formatting":
@@ -435,13 +615,17 @@ class ArtifactJobExecutor:
                 "status": "composing",
                 "stage": "formatting_outputs",
                 "progress_pct": 70,
-                "stage_progress": _progress("slides", 0, 1, "Choosing title, sections, and slide layout"),
+                "stage_progress": _progress(
+                    "slides", 0, 1, "Choosing title, sections, and slide layout"
+                ),
             }
         else:
             if phase == "batch_complete":
                 progress = 56 + int((bounded_current / bounded_total) * 14)
             else:
-                progress = 56 + int(((max(bounded_current, 1) - 1) / bounded_total) * 14)
+                progress = 56 + int(
+                    ((max(bounded_current, 1) - 1) / bounded_total) * 14
+                )
             changes = {
                 "status": "composing",
                 "stage": f"composing_{max(bounded_current, 1)}_of_{bounded_total}_batch",
@@ -455,6 +639,13 @@ class ArtifactJobExecutor:
             }
         try:
             self._update(job_id, changes)
+        except (
+            ArtifactJobCancelled,
+            ArtifactJobLeaseLost,
+            ArtifactPermissionChanged,
+            SoftTimeLimitExceeded,
+        ):
+            raise
         except Exception:
             logger.warning(
                 "failed to record artifact composition progress job_id=%s phase=%s current=%s total=%s",
@@ -465,19 +656,24 @@ class ArtifactJobExecutor:
                 exc_info=True,
             )
 
-    def _record_render_format_progress(self, job_id: str, artifact_format: str, current: int, total: int) -> None:
+    def _record_render_format_progress(
+        self, job_id: str, artifact_format: str, current: int, total: int
+    ) -> None:
         pct = 80 + int((max(current - 1, 0) / max(total, 1)) * 15)
-        self._update(job_id, {
-            "status": "rendering",
-            "stage": f"rendering_{artifact_format}",
-            "progress_pct": min(95, max(80, pct)),
-            "stage_progress": _progress(
-                "formats",
-                current,
-                max(total, 1),
-                f"Rendering {artifact_format.upper()} ({current} of {max(total, 1)})",
-            ),
-        })
+        self._update(
+            job_id,
+            {
+                "status": "rendering",
+                "stage": f"rendering_{artifact_format}",
+                "progress_pct": min(95, max(80, pct)),
+                "stage_progress": _progress(
+                    "formats",
+                    current,
+                    max(total, 1),
+                    f"Rendering {artifact_format.upper()} ({current} of {max(total, 1)})",
+                ),
+            },
+        )
 
     def _record_slide_progress(
         self,
@@ -491,18 +687,25 @@ class ArtifactJobExecutor:
     ) -> None:
         format_span = 15 / max(format_total, 1)
         format_start = 80 + ((max(format_current, 1) - 1) * format_span)
-        pct = int(format_start + (min(max(slide_current, 0), max(slide_total, 1)) / max(slide_total, 1)) * format_span)
-        self._update(job_id, {
-            "status": "rendering",
-            "stage": f"rendering_{artifact_format}_slide",
-            "progress_pct": min(95, max(82, pct)),
-            "stage_progress": _progress(
-                "slides",
-                slide_current,
-                max(slide_total, 1),
-                f"Building slide {slide_current} of {max(slide_total, 1)}: {label}",
-            ),
-        })
+        pct = int(
+            format_start
+            + (min(max(slide_current, 0), max(slide_total, 1)) / max(slide_total, 1))
+            * format_span
+        )
+        self._update(
+            job_id,
+            {
+                "status": "rendering",
+                "stage": f"rendering_{artifact_format}_slide",
+                "progress_pct": min(95, max(82, pct)),
+                "stage_progress": _progress(
+                    "slides",
+                    slide_current,
+                    max(slide_total, 1),
+                    f"Building slide {slide_current} of {max(slide_total, 1)}: {label}",
+                ),
+            },
+        )
 
     def _repair_or_fallback_bundle(
         self,
@@ -516,7 +719,9 @@ class ArtifactJobExecutor:
             fallback_repair_document_bundle(bundle, errors=errors, evidence=evidence),
             evidence,
         )
-        fallback_validation = validate_document_bundle(fallback, plan=plan, evidence=evidence)
+        fallback_validation = validate_document_bundle(
+            fallback, plan=plan, evidence=evidence
+        )
         if fallback_validation.passed:
             return fallback
         try:
@@ -543,7 +748,9 @@ class ArtifactJobExecutor:
         return normalize_bundle_evidence_ids(repaired, evidence)
 
     @contextmanager
-    def _stage_timer(self, job_id: str, stage: str, *, accumulate: bool = False) -> Iterator[None]:
+    def _stage_timer(
+        self, job_id: str, stage: str, *, accumulate: bool = False
+    ) -> Iterator[None]:
         started_at = datetime.now(UTC)
         started_perf = perf_counter()
         try:
@@ -588,13 +795,17 @@ class ArtifactJobExecutor:
         }
         existing = timings.get(stage)
         if accumulate and isinstance(existing, dict):
-            timing["started_at"] = str(existing.get("started_at") or timing["started_at"])
+            timing["started_at"] = str(
+                existing.get("started_at") or timing["started_at"]
+            )
             try:
-                timing["duration_ms"] = int(existing.get("duration_ms") or 0) + int(timing["duration_ms"])
+                timing["duration_ms"] = int(existing.get("duration_ms") or 0) + int(
+                    timing["duration_ms"]
+                )
             except (TypeError, ValueError):
                 pass
         timings[stage] = timing
-        repo.update_job(job_id, {"stage_timings_json": timings})
+        self._update(job_id, {"stage_timings_json": timings})
 
     def _record_error(
         self,
@@ -610,14 +821,16 @@ class ArtifactJobExecutor:
         if current is None:
             return
         errors = list(current.errors_json)
-        errors.append({
-            "stage": stage,
-            "code": code,
-            "message": message[:2000],
-            "context": context or {},
-            "recorded_at": datetime.now(UTC).isoformat(),
-        })
-        repo.update_job(job_id, {"errors_json": errors[-50:]})
+        errors.append(
+            {
+                "stage": stage,
+                "code": code,
+                "message": message[:2000],
+                "context": context or {},
+                "recorded_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        self._update(job_id, {"errors_json": errors[-50:]})
 
 
 def _progress(unit: str, current: int, total: int, label: str) -> dict[str, object]:
@@ -633,7 +846,9 @@ def _format_complete_progress(current: int, total: int) -> int:
     return min(96, max(84, 80 + int((max(current, 1) / max(total, 1)) * 15)))
 
 
-def default_artifact_job_executor(config: Settings | None = None) -> ArtifactJobExecutor:
+def default_artifact_job_executor(
+    config: Settings | None = None,
+) -> ArtifactJobExecutor:
     from ..core.config import settings
     from ..query.inference import build_inference_client
     from ..repositories.artifact_jobs import get_artifact_job_repository

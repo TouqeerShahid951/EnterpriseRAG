@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
+import logging
 import re
 from typing import Any
 
@@ -15,8 +17,13 @@ from ..repositories.document_models import DocumentRepository
 from ..repositories.document_postgres import PostgresDocumentRepository
 from ..repositories.documents import get_document_repository
 from ..repositories.generated_artifact_memory import InMemoryGeneratedArtifactRepository
-from ..repositories.generated_artifact_models import GeneratedArtifactRecord, GeneratedArtifactRepository
-from ..repositories.generated_artifact_postgres import PostgresGeneratedArtifactRepository
+from ..repositories.generated_artifact_models import (
+    GeneratedArtifactRecord,
+    GeneratedArtifactRepository,
+)
+from ..repositories.generated_artifact_postgres import (
+    PostgresGeneratedArtifactRepository,
+)
 from ..repositories.generated_artifacts import get_generated_artifact_repository
 from ..schemas.query import GeneratedArtifact, RAGResponse
 from ..services.generated_artifact_storage import (
@@ -28,6 +35,9 @@ from ..services.generated_artifact_storage import (
 from .artifact_intent import ArtifactRequest
 from .artifact_models import ArtifactContent
 from .artifact_renderer import render_artifact
+
+
+logger = logging.getLogger("rag.query.artifact_service")
 
 
 @dataclass(frozen=True)
@@ -63,7 +73,13 @@ class GeneratedArtifactService:
             return ArtifactGenerationResult(artifacts=[], failures=[])
         repo = self._repo_factory()
         storage = self._storage_factory()
-        audit_repo = self._audit_repo_factory()
+        try:
+            audit_repo = self._audit_repo_factory()
+        except Exception:
+            audit_repo = None
+            logger.error(
+                "generated artifact audit repository unavailable", exc_info=True
+            )
         generated_at = datetime.now(UTC)
         title = _title_from_query(artifact_request.content_query)
         source_doc_ids = (
@@ -75,6 +91,8 @@ class GeneratedArtifactService:
         failures: list[str] = []
         failure_details: list[dict[str, str]] = []
         for artifact_format in artifact_request.formats:
+            stored = None
+            record = None
             try:
                 rendered = render_artifact(
                     artifact_format=artifact_format,
@@ -88,6 +106,10 @@ class GeneratedArtifactService:
                     filename=rendered.filename,
                     content=rendered.content,
                     content_type=rendered.content_type,
+                    object_key=(
+                        f"query/{trace_id}/{sha256(rendered.content).hexdigest()[:24]}/"
+                        f"artifact.{artifact_format}"
+                    ),
                 )
                 record = repo.create_artifact(
                     user_id=user.user_id,
@@ -104,30 +126,27 @@ class GeneratedArtifactService:
                     prompt=artifact_request.original_query,
                     job_id=None,
                 )
-                audit_repo.append_audit_event(
-                    event_type="query.artifact_created",
-                    actor_id=user.user_id,
-                    target_type="generated_artifact",
-                    target_id=record.id,
-                    payload={
-                        "session_id": session_id,
-                        "trace_id": trace_id,
-                        "format": rendered.format,
-                        "filename": rendered.filename,
-                        "size_bytes": stored.size_bytes,
-                        "source_doc_ids": source_doc_ids,
-                    },
-                )
-                artifacts.append(generated_artifact_from_record(record))
             except Exception as exc:
+                if stored is not None and record is None:
+                    _delete_failed_object(repo, storage, stored.object_path)
                 failures.append(artifact_format)
+                logger.warning(
+                    "legacy artifact generation failed trace_id=%s format=%s error_type=%s",
+                    trace_id,
+                    artifact_format,
+                    type(exc).__name__,
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
                 safe_error = _safe_error(exc)
-                failure_details.append({
-                    "format": artifact_format,
-                    "type": safe_error["type"],
-                    "message": safe_error["message"],
-                })
-                audit_repo.append_audit_event(
+                failure_details.append(
+                    {
+                        "format": artifact_format,
+                        "type": safe_error["type"],
+                        "message": safe_error["message"],
+                    }
+                )
+                _append_audit_safely(
+                    audit_repo,
                     event_type="query.artifact_failed",
                     actor_id=user.user_id,
                     target_type="query",
@@ -139,6 +158,24 @@ class GeneratedArtifactService:
                         "error": safe_error,
                     },
                 )
+                continue
+
+            _append_audit_safely(
+                audit_repo,
+                event_type="query.artifact_created",
+                actor_id=user.user_id,
+                target_type="generated_artifact",
+                target_id=record.id,
+                payload={
+                    "session_id": session_id,
+                    "trace_id": trace_id,
+                    "format": rendered.format,
+                    "filename": rendered.filename,
+                    "size_bytes": stored.size_bytes,
+                    "source_doc_ids": source_doc_ids,
+                },
+            )
+            artifacts.append(generated_artifact_from_record(record))
         return ArtifactGenerationResult(
             artifacts=artifacts,
             failures=failures,
@@ -146,7 +183,9 @@ class GeneratedArtifactService:
         )
 
 
-def generated_artifact_service_from_settings(config: Settings) -> GeneratedArtifactService:
+def generated_artifact_service_from_settings(
+    config: Settings,
+) -> GeneratedArtifactService:
     return GeneratedArtifactService(
         repo_factory=lambda: _repo_from_settings(config),
         storage_factory=lambda: _storage_from_settings(config),
@@ -154,7 +193,9 @@ def generated_artifact_service_from_settings(config: Settings) -> GeneratedArtif
     )
 
 
-def generated_artifact_from_record(record: GeneratedArtifactRecord) -> GeneratedArtifact:
+def generated_artifact_from_record(
+    record: GeneratedArtifactRecord,
+) -> GeneratedArtifact:
     return GeneratedArtifact(
         id=record.id,
         filename=record.filename,
@@ -194,7 +235,9 @@ def _storage_from_settings(config: Settings) -> GeneratedArtifactStorage:
             secure=config.minio_secure,
         )
     if config.upload_storage_backend != "local":
-        raise RuntimeError(f"unsupported generated artifact storage backend: {config.upload_storage_backend}")
+        raise RuntimeError(
+            f"unsupported generated artifact storage backend: {config.upload_storage_backend}"
+        )
     return LocalGeneratedArtifactStorage(config.upload_storage_dir)
 
 
@@ -223,5 +266,38 @@ def _source_doc_ids_from_content(content: ArtifactContent) -> list[str]:
 def _safe_error(exc: Exception) -> dict[str, Any]:
     return {
         "type": type(exc).__name__,
-        "message": str(exc)[:240],
+        "message": "The requested artifact format could not be generated.",
     }
+
+
+def _delete_failed_object(
+    repository: GeneratedArtifactRepository,
+    storage: GeneratedArtifactStorage,
+    object_path: str,
+) -> None:
+    try:
+        if repository.is_object_path_referenced(object_path):
+            return
+    except Exception:
+        logger.error(
+            "generated artifact compensation deferred because reference checking failed",
+            exc_info=True,
+        )
+        return
+    try:
+        storage.delete(object_path)
+    except Exception:
+        logger.error(
+            "failed to compensate generated artifact object write", exc_info=True
+        )
+
+
+def _append_audit_safely(
+    audit_repo: DocumentRepository | None, **event: object
+) -> None:
+    if audit_repo is None:
+        return
+    try:
+        audit_repo.append_audit_event(**event)  # type: ignore[arg-type]
+    except Exception:
+        logger.error("generated artifact audit event failed", exc_info=True)

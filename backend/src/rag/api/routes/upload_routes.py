@@ -12,6 +12,9 @@ from ...auth.abac import normalize_group_path
 from ...auth.dependencies import require_csrf, require_current_user
 from ...auth.document_access import can_read_document, can_write_document
 from ...auth.permissions import can_manage_group_path, can_upload_to_group, is_global_admin
+from ...ingestion.contracts import IngestJobPayload
+from ...ingestion.quality import normalize_ingestion_quality_preset
+from ...ingestion.queue import IngestQueue, get_ingest_queue
 from ...repositories.documents import DocumentRepository, get_document_repository
 from ...repositories.ingest_job_models import IngestJobRepository
 from ...repositories.ingest_jobs import get_ingest_job_repository
@@ -19,7 +22,6 @@ from ...repositories.identity import IdentityRepository, UserRecord, get_identit
 from ...schemas.common import StubResponse
 from ...schemas.upload import JobStatusResponse, UploadResponse
 from ...shared.contracts.clearance import DEFAULT_CLEARANCE_LEVEL, clearance_rank, normalize_clearance_level
-from ...ingestion.quality import normalize_ingestion_quality_preset
 from ...services.document_uploads import (
     default_filename,
     default_title,
@@ -30,8 +32,6 @@ from ...services.document_uploads import (
     validate_upload_size,
 )
 from ...services.file_scanning import FileScanner, get_file_scanner
-from ...ingestion.contracts import IngestJobPayload
-from ...ingestion.queue import IngestQueue, get_ingest_queue
 from ...services.upload_status import build_job_status_response
 from ...services.upload_storage import UploadStorage, get_upload_storage
 
@@ -297,5 +297,11 @@ def _enqueue_upload(
             )
         )
     except RuntimeError as exc:
-        job_repo.update_ingest_job(job_id, status="failed", progress_pct=0, error_code="queue_unavailable", error_message_safe=str(exc))
+        job_repo.update_ingest_job(
+            job_id,
+            status="failed",
+            progress_pct=0,
+            error_code="queue_unavailable",
+            error_message_safe=str(exc),
+        )
         raise HTTPException(status_code=503, detail={"code": "queue_unavailable", "message": "Upload queue is unavailable."}) from exc

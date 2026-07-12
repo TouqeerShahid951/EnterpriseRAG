@@ -166,7 +166,7 @@ def test_status_route_rechecks_token_when_takeover_wins_update_race() -> None:
                     status="processing",
                     progress_pct=50,
                 ),
-                document_repo=repo,
+                document_repo=racing_repo,  # type: ignore[arg-type]
                 job_repo=racing_repo,  # type: ignore[arg-type]
                 service=ServiceTokenContext(service_name="ingestion-worker"),
             )

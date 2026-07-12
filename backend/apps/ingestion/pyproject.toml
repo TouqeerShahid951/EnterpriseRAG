@@ -20,5 +20,4 @@ dependencies = [
 [project.optional-dependencies]
 metadata-ner = [
     "gliner>=0.2,<1",
-    "spacy>=3.7,<4",
 ]

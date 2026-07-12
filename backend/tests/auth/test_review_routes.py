@@ -4,12 +4,19 @@ import asyncio
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from rag.api.routes import review_routes
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.document_models import DocumentRecord, ReviewItemRecord
+from rag.repositories.document_postgres import PostgresDocumentRepository
+from rag.repositories.documents import get_document_repository, get_human_review_repository, get_image_review_repository
+from rag.repositories.human_review_postgres import PostgresHumanReviewRepository
 from rag.repositories.identity_models import UserRecord
+from rag.repositories.image_review_postgres import PostgresImageReviewRepository
+from rag.repositories.ingest_job_postgres import PostgresIngestJobRepository
+from rag.repositories.ingest_jobs import get_ingest_job_repository
 from rag.schemas.review import ImageReviewDecisionRequest, ReviewApproveRequest
 
 
@@ -21,6 +28,44 @@ class FakeQueue:
         self.enqueued.append(message)
 
 
+class FailOnceQueue(FakeQueue):
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts = 0
+
+    def enqueue(self, message: object) -> None:
+        self.attempts += 1
+        if self.attempts == 1:
+            raise RuntimeError("queue unavailable")
+        super().enqueue(message)
+
+
+def test_review_ports_are_independently_substitutable() -> None:
+    assert get_human_review_repository is not get_document_repository
+    assert get_image_review_repository is not get_document_repository
+    assert get_ingest_job_repository is not get_document_repository
+    assert not issubclass(PostgresDocumentRepository, PostgresHumanReviewRepository)
+    assert not issubclass(PostgresDocumentRepository, PostgresImageReviewRepository)
+    assert not issubclass(PostgresDocumentRepository, PostgresIngestJobRepository)
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [get_human_review_repository, get_image_review_repository, get_ingest_job_repository],
+)
+def test_document_override_flows_to_capability_provider(provider) -> None:
+    repo = InMemoryDocumentRepository()
+    app = FastAPI()
+
+    @app.get("/probe")
+    def probe(capability_repo: object = Depends(provider)) -> dict[str, bool]:
+        return {"same_repository": capability_repo is repo}
+
+    app.dependency_overrides[get_document_repository] = lambda: repo
+
+    assert TestClient(app).get("/probe").json() == {"same_repository": True}
+
+
 def test_review_queue_filters_to_reviewer_document_scope() -> None:
     repo = InMemoryDocumentRepository()
     reviewer = _user("contributor", group_paths=("/ops",))
@@ -29,13 +74,7 @@ def test_review_queue_filters_to_reviewer_document_scope() -> None:
     other_doc = _document(repo, user=_user("contributor", group_paths=("/finance",)), group_path="/finance")
     _review_item(repo, other_doc)
 
-    response = asyncio.run(
-        review_routes.list_review_queue(
-            user=reviewer,
-            document_repo=repo,
-            review_repo=repo,
-        )
-    )
+    response = asyncio.run(review_routes.list_review_queue(user=reviewer, document_repo=repo, review_repo=repo))
 
     assert response.total == 1
     assert [item.doc_id for item in response.items] == [own_doc.id]
@@ -49,17 +88,7 @@ def test_contributor_can_approve_peer_document_in_same_space() -> None:
     item = _review_item(repo, document)
     queue = FakeQueue()
 
-    response = asyncio.run(
-        review_routes.approve_review_item(
-            item.id,
-            ReviewApproveRequest(corrected_text="Corrected text"),
-            user=reviewer,
-            document_repo=repo,
-            review_repo=repo,
-            job_repo=repo,
-            queue=queue,  # type: ignore[arg-type]
-        )
-    )
+    response = _approve(repo, item.id, reviewer=reviewer, queue=queue)
 
     assert response.status == "approved"
     assert response.batch_complete is True
@@ -75,21 +104,34 @@ def test_review_approval_rejects_out_of_scope_document_before_mutation() -> None
     queue = FakeQueue()
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            review_routes.approve_review_item(
-                item.id,
-                ReviewApproveRequest(corrected_text="Corrected text"),
-                user=reviewer,
-                document_repo=repo,
-                review_repo=repo,
-                job_repo=repo,
-                queue=queue,  # type: ignore[arg-type]
-            )
-        )
+        _approve(repo, item.id, reviewer=reviewer, queue=queue)
 
     assert exc_info.value.status_code == 403
     assert repo.list_review_items(status="pending")[0].id == item.id
     assert queue.enqueued == []
+
+
+def test_completed_text_review_can_resume_after_queue_failure() -> None:
+    repo = InMemoryDocumentRepository()
+    reviewer = _user("contributor", group_paths=("/ops",))
+    document = _document(repo, user=reviewer, group_path="/ops")
+    item = _review_item(repo, document)
+    queue = FailOnceQueue()
+
+    with pytest.raises(HTTPException) as exc_info:
+        _approve(repo, item.id, reviewer=reviewer, queue=queue)
+
+    assert exc_info.value.status_code == 503
+    batch = repo.get_review_batch(item.batch_id)
+    assert batch is not None
+    assert repo.get_ingest_job(batch.job_id).status == "human_review"  # type: ignore[union-attr]
+
+    response = _approve(repo, item.id, reviewer=reviewer, queue=queue)
+
+    assert response.batch_complete is True
+    assert queue.attempts == 2
+    assert len(queue.enqueued) == 1
+    assert repo.get_ingest_job(batch.job_id).status == "queued"  # type: ignore[union-attr]
 
 
 def test_image_review_queue_and_decisions_are_scoped() -> None:
@@ -100,13 +142,7 @@ def test_image_review_queue_and_decisions_are_scoped() -> None:
     other_doc = _document(repo, user=_user("contributor", group_paths=("/finance",)), group_path="/finance")
     other_batch = _image_review_batch(repo, other_doc)
 
-    response = asyncio.run(
-        review_routes.list_image_review_batches(
-            user=reviewer,
-            document_repo=repo,
-            image_review_repo=repo,
-        )
-    )
+    response = asyncio.run(review_routes.list_image_review_batches(user=reviewer, document_repo=repo, image_review_repo=repo))
 
     assert response.total == 1
     assert [batch.id for batch in response.batches] == [own_batch.id]
@@ -124,6 +160,159 @@ def test_image_review_queue_and_decisions_are_scoped() -> None:
         )
     assert exc_info.value.status_code == 403
     assert repo.get_image_review_batch(other_batch.id).status == "pending"  # type: ignore[union-attr]
+
+
+def test_image_review_decision_rejects_cancelled_batch() -> None:
+    repo = InMemoryDocumentRepository()
+    reviewer = _user("contributor", group_paths=("/ops",))
+    document = _document(repo, user=reviewer, group_path="/ops")
+    batch = _image_review_batch(repo, document)
+    repo.cancel_ingest_job(batch.job_id, allowed_statuses=frozenset({"human_review"}))
+    queue = FakeQueue()
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            review_routes.decide_image_review_batch(
+                batch.id,
+                ImageReviewDecisionRequest(approve_recommended=True),
+                user=reviewer,
+                document_repo=repo,
+                image_review_repo=repo,
+                job_repo=repo,
+                queue=queue,  # type: ignore[arg-type]
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert queue.enqueued == []
+    assert repo.get_image_review_batch(batch.id).status == "rejected"  # type: ignore[union-attr]
+
+
+def test_completed_image_review_reports_missing_ingest_job() -> None:
+    repo = InMemoryDocumentRepository()
+    reviewer = _user("contributor", group_paths=("/ops",))
+    document = _document(repo, user=reviewer, group_path="/ops")
+    batch = _image_review_batch(repo, document)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            review_routes.decide_image_review_batch(
+                batch.id,
+                ImageReviewDecisionRequest(approve_recommended=True),
+                user=reviewer,
+                document_repo=repo,
+                image_review_repo=repo,
+                job_repo=_MissingJobRepository(),  # type: ignore[arg-type]
+                queue=FakeQueue(),  # type: ignore[arg-type]
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ingest_job_not_found"
+
+
+def test_completed_image_review_decision_is_idempotent() -> None:
+    repo = InMemoryDocumentRepository()
+    reviewer = _user("contributor", group_paths=("/ops",))
+    document = _document(repo, user=reviewer, group_path="/ops")
+    batch = _image_review_batch(repo, document)
+    queue = FakeQueue()
+
+    first = asyncio.run(
+        review_routes.decide_image_review_batch(
+            batch.id,
+            ImageReviewDecisionRequest(approve_recommended=True),
+            user=reviewer,
+            document_repo=repo,
+            image_review_repo=repo,
+            job_repo=repo,
+            queue=queue,  # type: ignore[arg-type]
+        )
+    )
+    audit_count = len(repo.list_audit_events(limit=100))
+    repeated = asyncio.run(
+        review_routes.decide_image_review_batch(
+            batch.id,
+            ImageReviewDecisionRequest(approve_recommended=True),
+            user=reviewer,
+            document_repo=repo,
+            image_review_repo=repo,
+            job_repo=repo,
+            queue=queue,  # type: ignore[arg-type]
+        )
+    )
+
+    assert first.batch_complete is True
+    assert repeated.batch_complete is True
+    assert len(queue.enqueued) == 1
+    assert len(repo.list_audit_events(limit=100)) == audit_count
+
+
+def test_completed_image_review_can_resume_after_queue_failure() -> None:
+    repo = InMemoryDocumentRepository()
+    reviewer = _user("contributor", group_paths=("/ops",))
+    document = _document(repo, user=reviewer, group_path="/ops")
+    batch = _image_review_batch(repo, document)
+    queue = FailOnceQueue()
+    payload = ImageReviewDecisionRequest(approve_recommended=True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            review_routes.decide_image_review_batch(
+                batch.id,
+                payload,
+                user=reviewer,
+                document_repo=repo,
+                image_review_repo=repo,
+                job_repo=repo,
+                queue=queue,  # type: ignore[arg-type]
+            )
+        )
+
+    assert exc_info.value.status_code == 503
+    assert repo.get_ingest_job(batch.job_id).status == "human_review"  # type: ignore[union-attr]
+
+    response = asyncio.run(
+        review_routes.decide_image_review_batch(
+            batch.id,
+            payload,
+            user=reviewer,
+            document_repo=repo,
+            image_review_repo=repo,
+            job_repo=repo,
+            queue=queue,  # type: ignore[arg-type]
+        )
+    )
+
+    assert response.batch_complete is True
+    assert queue.attempts == 2
+    assert len(queue.enqueued) == 1
+    assert repo.get_ingest_job(batch.job_id).status == "queued"  # type: ignore[union-attr]
+
+
+def _approve(
+    repo: InMemoryDocumentRepository,
+    item_id: str,
+    *,
+    reviewer: UserRecord,
+    queue: FakeQueue,
+):
+    return asyncio.run(
+        review_routes.approve_review_item(
+            item_id,
+            ReviewApproveRequest(corrected_text="Corrected text"),
+            user=reviewer,
+            document_repo=repo,
+            review_repo=repo,
+            job_repo=repo,
+            queue=queue,  # type: ignore[arg-type]
+        )
+    )
+
+
+class _MissingJobRepository:
+    def get_ingest_job(self, _job_id: str):
+        return None
 
 
 def _review_item(repo: InMemoryDocumentRepository, document: DocumentRecord) -> ReviewItemRecord:

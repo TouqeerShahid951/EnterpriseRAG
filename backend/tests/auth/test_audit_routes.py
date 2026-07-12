@@ -5,10 +5,15 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from rag.api.routes import audit_routes
+from rag.auth.dependencies import require_current_user
+from rag.repositories.audit_memory import RepositoryAuditRepository
 from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.repositories.documents import get_document_repository
+from rag.repositories.identity import get_identity_repository
 from rag.repositories.identity_models import UserRecord
 
 
@@ -45,6 +50,44 @@ def test_audit_list_defaults_and_enriches_user_email() -> None:
     assert response.items[0].target_user_name == "Target Member"
 
 
+def test_dependency_overrides_flow_through_audit_repository_provider() -> None:
+    repo = InMemoryDocumentRepository()
+    admin = _user("platform_admin", email="admin@example.test")
+    identity = FakeIdentityRepository([admin])
+    repo.append_audit_event(
+        event_type="auth.login",
+        actor_id=admin.id,
+        target_type="user",
+        target_id=admin.id,
+        payload={"email": admin.email},
+    )
+    app = FastAPI()
+    app.include_router(audit_routes.router)
+
+    with TestClient(app) as anonymous:
+        assert anonymous.get("/audit-log?category=unsupported").status_code == 401
+        assert anonymous.get("/audit-log/export?category=unsupported").status_code == 401
+
+    app.dependency_overrides[require_current_user] = lambda: admin
+    app.dependency_overrides[get_document_repository] = lambda: repo
+    app.dependency_overrides[get_identity_repository] = lambda: identity
+
+    with TestClient(app) as client:
+        response = client.get("/audit-log?category=authentication")
+        export = client.get("/audit-log/export?category=authentication")
+        invalid = client.get("/audit-log?category=unsupported")
+        invalid_group = client.get("/audit-log?group_path=/finance//")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["actor_email"] == admin.email
+    assert export.status_code == 200
+    assert "auth.login" in export.text
+    assert repo.audit_events[-1]["event_type"] == "audit.exported"
+    assert invalid.status_code == 400
+    assert invalid_group.status_code == 400
+
+
 def test_audit_list_requires_audit_permission() -> None:
     repo = InMemoryDocumentRepository()
     member = _user("member")
@@ -69,6 +112,36 @@ def test_auditor_visibility_stays_scoped_to_readable_documents() -> None:
     assert response.total == 1
     assert response.items[0].target_id == finance_doc.id
     assert response.items[0].target_document_title == finance_doc.title
+
+
+def test_document_event_cannot_bypass_document_scope_with_payload_group() -> None:
+    repo = InMemoryDocumentRepository()
+    auditor = _user("auditor", group_paths=("/finance",))
+    uploader = _user("contributor", group_paths=("/ops",))
+    ops_doc = _document(repo, uploader, "/ops")
+    repo.append_audit_event(
+        event_type="upload.queued",
+        actor_id=uploader.id,
+        target_type="document",
+        target_id=ops_doc.id,
+        payload={"group_path": "/finance", "doc_id": ops_doc.id},
+    )
+    repo.append_audit_event(
+        event_type="review.queue.opened",
+        actor_id=uploader.id,
+        target_type="review_queue",
+        target_id=None,
+        payload={"group_path": "/finance"},
+    )
+
+    response = _list(
+        user=auditor,
+        repo=repo,
+        identity=FakeIdentityRepository([auditor, uploader]),
+    )
+
+    assert response.total == 1
+    assert response.items[0].event_type == "review.queue.opened"
 
 
 def test_auditor_cannot_see_upper_level_events_outside_visible_scope() -> None:
@@ -282,22 +355,24 @@ def _list(
     limit: int = 100,
     offset: int = 0,
 ):
+    audit_repo = RepositoryAuditRepository(documents=repo, identities=identity)
     return asyncio.run(
         audit_routes.list_audit_events(
-            search=search,
-            category=category,
-            event_type=event_type,
-            actor_id=actor_id,
-            target_type=target_type,
-            target_id=target_id,
-            group_path=group_path,
-            created_from=created_from,
-            created_to=created_to,
             limit=limit,
             offset=offset,
+            filters=audit_routes._audit_filters(
+                search=search,
+                category=category,
+                event_type=event_type,
+                actor_id=actor_id,
+                target_type=target_type,
+                target_id=target_id,
+                group_path=group_path,
+                created_from=created_from,
+                created_to=created_to,
+            ),
             user=user,
-            repo=repo,
-            identity_repo=identity,  # type: ignore[arg-type]
+            repo=audit_repo,
         )
     )
 
@@ -318,21 +393,24 @@ def _export(
     created_to: datetime | None = None,
     max_rows: int = audit_routes.AUDIT_SCAN_LIMIT,
 ):
+    audit_repo = RepositoryAuditRepository(documents=repo, identities=identity)
     return asyncio.run(
         audit_routes.export_audit_events(
-            search=search,
-            category=category,
-            event_type=event_type,
-            actor_id=actor_id,
-            target_type=target_type,
-            target_id=target_id,
-            group_path=group_path,
-            created_from=created_from,
-            created_to=created_to,
             max_rows=max_rows,
+            filters=audit_routes._audit_filters(
+                search=search,
+                category=category,
+                event_type=event_type,
+                actor_id=actor_id,
+                target_type=target_type,
+                target_id=target_id,
+                group_path=group_path,
+                created_from=created_from,
+                created_to=created_to,
+            ),
             user=user,
-            repo=repo,
-            identity_repo=identity,  # type: ignore[arg-type]
+            repo=audit_repo,
+            writer=repo,
         )
     )
 

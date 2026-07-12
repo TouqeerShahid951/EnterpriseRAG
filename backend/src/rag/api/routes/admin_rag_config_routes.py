@@ -32,7 +32,6 @@ from ...query.rag_config_service import (
     RagConfigValidationError,
     checked_record,
     discover_runtime_models,
-    list_runtime_models,
     validate_rag_config,
 )
 from ...schemas.common import ErrorResponse

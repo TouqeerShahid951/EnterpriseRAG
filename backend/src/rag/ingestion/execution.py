@@ -8,7 +8,6 @@ from typing import Any, Iterator
 from uuid import uuid4
 
 from billiard.exceptions import SoftTimeLimitExceeded
-from rag.ingestion.quality import parser_tuning_for_quality_preset
 
 from .adapters.backend import BackendInternalClient, IngestAttempt
 from .adapters.http import ServiceRequestError
@@ -22,6 +21,7 @@ from .indexing.qdrant import QdrantClient
 from .indexing.sparse import SparseEmbedder
 from .contracts import IngestJobPayload
 from .pipeline import IngestDependencies, run_ingest_graph
+from .quality import parser_tuning_for_quality_preset
 
 
 def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
@@ -31,12 +31,7 @@ def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
     run_token = str(uuid4())
     attempt = _start_attempt(task, backend, job.job_id, run_token)
     if not attempt.accepted:
-        resume_attempt = _resume_exhausted_review_attempt(
-            backend,
-            job,
-            attempt,
-            run_token,
-        )
+        resume_attempt = _resume_exhausted_review_attempt(backend, job, attempt, run_token)
         if resume_attempt is None:
             return _handle_rejected_attempt(backend, job, attempt)
         attempt = resume_attempt

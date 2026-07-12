@@ -6,7 +6,6 @@ import {
   normalizeHighlightRanges,
   sourceMatchedSpanCount,
   sourceMatchedSpanLabel,
-  sourceMatchedSpanTexts,
 } from "./sourceEvidence";
 import { sourcePageLabel } from "./sourcePage";
 
@@ -48,7 +47,6 @@ describe("source citation presentation", () => {
     ]);
     expect(sourceMatchedSpanCount(source)).toBe(2);
     expect(sourceMatchedSpanLabel(source)).toBe("2 matched evidence spans");
-    expect(sourceMatchedSpanTexts(source)).toEqual(["Retention", "period is seven"]);
   });
 
   it("uses an explicit empty-state label when no matched spans are available", () => {
@@ -56,7 +54,6 @@ describe("source citation presentation", () => {
 
     expect(sourceMatchedSpanCount(source)).toBe(0);
     expect(sourceMatchedSpanLabel(source)).toBe("No matched evidence spans");
-    expect(sourceMatchedSpanTexts(source)).toEqual([]);
   });
 });
 

@@ -53,43 +53,6 @@ class QdrantGraphRAGClient:
         )
         return [_chunk_from_payload(point.get("payload")) for point in _points(response) if isinstance(point.get("payload"), dict)]
 
-    def retrieve_chunks_by_refs(
-        self,
-        refs: list[SourceRef],
-        *,
-        qdrant_filter: dict[str, Any] | None = None,
-        limit: int | None = None,
-    ) -> list[dict[str, Any]]:
-        if not refs:
-            return []
-        scoped = dict(qdrant_filter or {})
-        must = list(scoped.get("must", []))
-        must.append(
-            {
-                "should": [
-                    {
-                        "must": [
-                            {"key": "doc_id", "match": {"value": ref.doc_id}},
-                            {"key": "chunk_id", "match": {"value": ref.chunk_id}},
-                        ]
-                    }
-                    for ref in refs
-                ]
-            }
-        )
-        scoped["must"] = must
-        response = self._request(
-            "POST",
-            f"/collections/{quote(self.documents_collection, safe='')}/points/scroll",
-            {
-                "filter": scoped,
-                "limit": limit or len(refs),
-                "with_payload": True,
-                "with_vector": False,
-            },
-        )
-        return [dict(point.get("payload")) for point in _points(response) if isinstance(point.get("payload"), dict)]
-
     def ensure_community_collection(self, vector_size: int) -> None:
         path = f"/collections/{quote(self.community_collection, safe='')}"
         try:

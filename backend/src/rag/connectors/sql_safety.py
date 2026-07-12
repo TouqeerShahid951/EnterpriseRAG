@@ -87,35 +87,6 @@ def validate_read_only_sql(query: str, *, connector_type: str = "sql_server") ->
     return statement
 
 
-def validate_live_sql_for_approved_selection(query: str, *, connector_type: str = "sql_server") -> str:
-    """Validate generated live SQL against the approved schedule selection CTE.
-
-    Live SQL is intentionally stricter than connector sync SQL. The generated
-    statement may only read from the caller-provided approved_selection CTE, so a
-    schedule selection stays the access boundary even when the agent writes SQL.
-    """
-
-    statement = validate_read_only_sql(query, connector_type=connector_type)
-    lowered = statement.lower()
-    if re.match(r"^\s*with\b", lowered):
-        raise SqlValidationError("Live connector SQL cannot define additional CTEs.")
-    if re.search(r"\bjoin\b", lowered):
-        raise SqlValidationError("Live connector SQL cannot join additional relations.")
-    relations = _referenced_relations(statement)
-    if not relations:
-        raise SqlValidationError("Live connector SQL must read from approved_selection.")
-    invalid = sorted(relation for relation in relations if relation != "approved_selection")
-    if invalid:
-        raise SqlValidationError("Live connector SQL can only read from approved_selection.")
-    return statement
-
-
-def wrap_approved_selection_query(approved_query: str, live_query: str, *, connector_type: str = "sql_server") -> str:
-    approved = validate_read_only_sql(approved_query, connector_type=connector_type)
-    generated = validate_live_sql_for_approved_selection(live_query, connector_type=connector_type)
-    return f"WITH approved_selection AS (\n{approved}\n)\n{generated}"
-
-
 def validate_live_sql_for_approved_catalog(
     query: str,
     *,
@@ -148,26 +119,6 @@ def _contains_chained_statements(value: str) -> bool:
     if stripped.endswith(";") and stripped.count(";") == 1:
         return False
     return True
-
-
-def _referenced_relations(statement: str) -> set[str]:
-    relations: set[str] = set()
-    for match in re.finditer(r"\bfrom\s+([^\s,;)]+)", statement, flags=re.IGNORECASE):
-        relation = _normalize_relation(match.group(1))
-        if relation:
-            relations.add(relation)
-    return relations
-
-
-def _normalize_relation(value: str) -> str:
-    text = value.strip().rstrip(";")
-    if text.startswith("("):
-        return ""
-    if "." in text:
-        return text.lower()
-    if (text.startswith('"') and text.endswith('"')) or (text.startswith("[") and text.endswith("]")):
-        text = text[1:-1]
-    return text.strip().lower()
 
 
 @dataclass(frozen=True)

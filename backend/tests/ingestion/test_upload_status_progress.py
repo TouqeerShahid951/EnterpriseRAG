@@ -4,7 +4,7 @@ import base64
 import json
 
 from rag.api.routes.ingest_job_routes import _graphrag_queued_task_from_redis_item
-from rag.repositories.document_models import IngestJobRecord
+from rag.repositories.ingest_job_models import IngestJobRecord
 from rag.services.upload_status import build_job_status_response
 
 

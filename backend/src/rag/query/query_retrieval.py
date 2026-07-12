@@ -833,10 +833,6 @@ def not_stale_condition() -> dict[str, object]:
     }
 
 
-def topics_for_query(query: str) -> list[str]:
-    return []
-
-
 def prioritize_language(hits: list[SearchHit], language: str) -> list[SearchHit]:
     if language == "unknown":
         return hits

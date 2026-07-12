@@ -172,15 +172,6 @@ class CommunitySummary:
     entity_ids: list[str] = field(default_factory=list)
 
 
-@dataclass(frozen=True)
-class PartialAnswer:
-    text: str
-    community_id: str
-    supporting_entities: list[str]
-    source_refs: list[SourceRef]
-    relevance_score: float = 0.0
-
-
 def _bounded_confidence(value: float) -> float:
     try:
         return max(0.0, min(1.0, float(value)))

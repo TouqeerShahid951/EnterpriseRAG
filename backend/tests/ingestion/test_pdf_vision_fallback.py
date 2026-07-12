@@ -453,59 +453,6 @@ def test_pdf_image_review_threshold_pauses_before_vision_analysis(monkeypatch: p
     assert set(raised.value.image_selection.source_scores) == {image_source_candidate_key(source) for source in sources}
 
 
-def test_pdf_image_review_resume_analyzes_only_approved_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
-    sources = [_embedded_source(page=index + 1) for index in range(3)]
-    approved_key = image_source_candidate_key(sources[1])
-
-    def fake_image_sources_to_items(selected_sources, *, doc_id, store, analyzer, start_index=0, progress_callback=None):
-        del doc_id, store, analyzer, start_index, progress_callback
-        assert selected_sources == [sources[1]]
-        return (
-            [
-                ParsedPdfItem(
-                    index=0,
-                    text="Visible image text:\nApproved figure label",
-                    item_type="image_text",
-                    page_start=2,
-                    page_end=2,
-                    parser="pdf_image",
-                    quality_flags=["source:vision"],
-                )
-            ],
-            [
-                ParsedImageAsset(
-                    id="asset-1",
-                    source_kind="pdf_image",
-                    object_path="memory://asset-1.png",
-                    content_type="image/png",
-                    content_hash="hash",
-                    page=2,
-                    quality_flags=["source:vision"],
-                )
-            ],
-        )
-
-    monkeypatch.setattr(document_module, "_parse_pdf_with_ocr_fallback", lambda *args, **kwargs: _complex_layout_result())
-    monkeypatch.setattr(document_module, "pdf_image_sources", lambda _file_bytes: sources)
-    monkeypatch.setattr(document_module, "image_sources_to_items", fake_image_sources_to_items)
-
-    parsed = parse_document(
-        b"%PDF-1.7",
-        content_type="application/pdf",
-        file_path="figures.pdf",
-        min_chars_per_page=10,
-        doc_id="doc-1",
-        image_asset_store=DummyStore(),
-        image_analyzer=DummyAnalyzer(),
-        pdf_image_review_threshold=2,
-        pdf_image_review_approved_keys={approved_key},
-    )
-
-    assert parsed.provenance["image_analysis_selected_count"] == 1
-    assert parsed.provenance["image_analysis_skipped_review_count"] == 2
-    assert parsed.provenance["image_asset_count"] == 1
-
-
 def test_pdf_image_review_resume_uses_stored_sources_without_pdf_parse() -> None:
     class Analyzer:
         def __init__(self) -> None:

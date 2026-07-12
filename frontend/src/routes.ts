@@ -54,6 +54,33 @@ export const routePaths: Record<RouteId, string> = {
   "workspace-settings": "/workspace-settings",
 };
 
+export const routeTitles: Record<RouteId, string> = {
+  access: "User Management",
+  account: "Account",
+  "activity-log": "System Audit",
+  "advanced-search": "Query Intelligence",
+  analytics: "RAG Evaluation",
+  "answer-review": "Review Queue",
+  chat: "Query Intelligence",
+  "database-connectors": "Database Connectors",
+  "document-extraction": "Folder Sources",
+  "document-overview": "Document Overview",
+  "document-trash": "Document Trash",
+  documents: "Documents",
+  evaluations: "RAG Evaluation",
+  "ingestion-health": "Ingestion Health",
+  "ingestion-jobs": "Ingestion Activity",
+  "knowledge-spaces": "Knowledge Spaces",
+  login: "Sign in",
+  overview: "Workspace Summary",
+  review: "Review Queue",
+  "security-audit": "System Audit",
+  settings: "Runtime Settings",
+  "source-viewer": "Source Viewer",
+  upload: "Add Files",
+  "workspace-settings": "Runtime Settings",
+};
+
 const routeAliases: Partial<Record<RouteId, RouteId>> = {
   "advanced-search": "chat",
   "answer-review": "review",
@@ -100,6 +127,14 @@ export function defaultRouteForUser(user: AuthUser): RouteId {
   return "account";
 }
 
+export function authenticatedRouteForUser(user: AuthUser, requestedRoute: RouteId | null): RouteId {
+  if (user.must_change_password) return "account";
+  if (!requestedRoute || requestedRoute === "login") return defaultRouteForUser(user);
+
+  const targetRoute = canonicalRoute(requestedRoute);
+  return canAccessRoute(user, targetRoute) ? targetRoute : defaultRouteForUser(user);
+}
+
 export function canonicalRoute(route: RouteId): RouteId {
   return routeAliases[route] ?? route;
 }
@@ -111,7 +146,7 @@ export function routeFromLocation(pathname = location.pathname, search = locatio
   return (entry?.[0] as RouteId | undefined) ?? null;
 }
 
-export const workspaceNavigation: WorkspaceNavigationItem[] = [
+const workspaceNavigation: WorkspaceNavigationItem[] = [
   {
     children: [
       { label: "Workspace Summary", route: "overview" },
@@ -180,7 +215,7 @@ function legacyKnowledgeSpaceRoute(pathname: string, search: string): RouteId | 
 export type NavigationBadge = "jobs" | "review" | "trash";
 export type NavigationIcon = "audit" | "documents" | "evaluations" | "overview" | "query" | "review" | "settings" | "spaces" | "users";
 export type NavigateOptions = { replace?: boolean; search?: string | URLSearchParams };
-export type WorkspaceNavigationChild = { badge?: NavigationBadge; label: string; route: RouteId };
+type WorkspaceNavigationChild = { badge?: NavigationBadge; label: string; route: RouteId };
 export type WorkspaceNavigationItem = {
   badge?: NavigationBadge;
   children?: WorkspaceNavigationChild[];

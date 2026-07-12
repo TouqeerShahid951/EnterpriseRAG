@@ -15,6 +15,7 @@ interface LoadedSource {
 
 export function SourceViewerPage() {
   const params = useMemo(() => sourceViewerParams(location.search), []);
+  const isIncompleteLink = !params;
   const [loadedSource, setLoadedSource] = useState<LoadedSource | null>(null);
   const [error, setError] = useState<string | null>(params ? null : "The source viewer link is missing a document or chunk identifier.");
 
@@ -77,7 +78,18 @@ export function SourceViewerPage() {
 
       <section className="source-viewer-stage" aria-live="polite">
         {!loadedSource && !error ? <SourceViewerLoading /> : null}
-        {error ? <SourceViewerError message={error} /> : null}
+        {error ? (
+          <SourceViewerError
+            title={isIncompleteLink ? "Citation link is incomplete" : "Source could not be opened"}
+            message={error}
+            guidance={
+              isIncompleteLink
+                ? "Return to chat and open the citation from its answer so the document and source location are included."
+                : "The source may have moved, been removed, or no longer be available to this account. You can safely return to the answer."
+            }
+            action={<a className="sv-action-primary" href="/chat">Return to chat</a>}
+          />
+        ) : null}
         {loadedSource ? (
           <DocumentRegionViewer
             documentId={loadedSource.anchor.doc_id}

@@ -695,7 +695,7 @@ function Notice({ icon, text, tone }: { icon: ReactNode; text: string; tone: "er
 }
 
 function ErrorAssistant({ message }: { message?: string }) {
-  return <div className="rag-assistant-error rounded-lg border border-error-red/20 bg-error-container p-4 text-body-md text-error-red">{message ?? "Query failed."}</div>;
+  return <div className="rag-assistant-error rounded-lg border border-error-red/20 bg-error-container p-4 text-body-md text-error-red" role="alert">{message ?? "Query failed."}</div>;
 }
 
 type Props = {

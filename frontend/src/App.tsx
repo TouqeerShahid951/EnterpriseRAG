@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Clock3 } from "lucide-react";
 
 import { isGlobalAdmin } from "./authz";
@@ -6,24 +6,8 @@ import { ChatKnowledgeSpaceControl, type ChatSpaceOption } from "./components/ch
 import { InlineMessage, SessionLoading } from "./components/layout/Common";
 import { Modal } from "./components/layout/Modal";
 import { PrudentiaSidebarHeaderProvider } from "./components/layout/PrudentiaWorkspace";
-import { PrudentiaAccountPage } from "./pages/PrudentiaAccountPage";
-import { PrudentiaAccessPage } from "./pages/PrudentiaAccessPage";
-import { PrudentiaAuditPage } from "./pages/PrudentiaAuditPage";
-import { PrudentiaChatPage } from "./pages/PrudentiaChatPage";
-import { PrudentiaDatabaseConnectorsPage } from "./pages/PrudentiaDatabaseConnectorsPage";
-import { PrudentiaDocumentOverviewPage } from "./pages/PrudentiaDocumentOverviewPage";
-import { PrudentiaDocumentsPage } from "./pages/PrudentiaDocumentsPage";
-import { PrudentiaFolderSourcesPage } from "./pages/PrudentiaFolderSourcesPage";
-import { PrudentiaIngestionHealthPage } from "./pages/PrudentiaIngestionHealthPage";
-import { PrudentiaIngestionJobsPage } from "./pages/PrudentiaIngestionJobsPage";
 import { PrudentiaLogin } from "./pages/PrudentiaLogin";
-import { PrudentiaOverviewPage } from "./pages/PrudentiaPlannedPage";
-import { PrudentiaRagEvaluationsPage } from "./pages/PrudentiaRagEvaluationsPage";
-import { PrudentiaReviewQueuePage } from "./pages/PrudentiaReviewQueuePage";
-import { PrudentiaSettingsPage } from "./pages/PrudentiaSettingsPage";
-import { SourceViewerPage } from "./pages/SourceViewerPage";
-import { PrudentiaUploadPage } from "./pages/PrudentiaUploadPage";
-import { canAccessRoute, canonicalRoute, defaultRouteForUser, routeFromLocation, routePaths, type NavigateOptions, type RouteId } from "./routes";
+import { authenticatedRouteForUser, canAccessRoute, canonicalRoute, defaultRouteForUser, routeFromLocation, routePaths, routeTitles, type NavigateOptions, type RouteId } from "./routes";
 import { formatIdleCountdown } from "./state/authSessionTiming";
 import { useAuthSession } from "./state/useAuthSession";
 import { useChatSession } from "./state/useChatSession";
@@ -36,10 +20,28 @@ import "./styles.css";
 
 const THEME_STORAGE_KEY = "Prudentia-theme-light";
 
+const PrudentiaAccountPage = lazy(() => import("./pages/PrudentiaAccountPage").then((module) => ({ default: module.PrudentiaAccountPage })));
+const PrudentiaAccessPage = lazy(() => import("./pages/PrudentiaAccessPage").then((module) => ({ default: module.PrudentiaAccessPage })));
+const PrudentiaAuditPage = lazy(() => import("./pages/PrudentiaAuditPage").then((module) => ({ default: module.PrudentiaAuditPage })));
+const PrudentiaChatPage = lazy(() => import("./pages/PrudentiaChatPage").then((module) => ({ default: module.PrudentiaChatPage })));
+const PrudentiaDatabaseConnectorsPage = lazy(() => import("./pages/PrudentiaDatabaseConnectorsPage").then((module) => ({ default: module.PrudentiaDatabaseConnectorsPage })));
+const PrudentiaDocumentOverviewPage = lazy(() => import("./pages/PrudentiaDocumentOverviewPage").then((module) => ({ default: module.PrudentiaDocumentOverviewPage })));
+const PrudentiaDocumentsPage = lazy(() => import("./pages/PrudentiaDocumentsPage").then((module) => ({ default: module.PrudentiaDocumentsPage })));
+const PrudentiaFolderSourcesPage = lazy(() => import("./pages/PrudentiaFolderSourcesPage").then((module) => ({ default: module.PrudentiaFolderSourcesPage })));
+const PrudentiaIngestionHealthPage = lazy(() => import("./pages/PrudentiaIngestionHealthPage").then((module) => ({ default: module.PrudentiaIngestionHealthPage })));
+const PrudentiaIngestionJobsPage = lazy(() => import("./pages/PrudentiaIngestionJobsPage").then((module) => ({ default: module.PrudentiaIngestionJobsPage })));
+const PrudentiaOverviewPage = lazy(() => import("./pages/PrudentiaPlannedPage").then((module) => ({ default: module.PrudentiaOverviewPage })));
+const PrudentiaRagEvaluationsPage = lazy(() => import("./pages/PrudentiaRagEvaluationsPage").then((module) => ({ default: module.PrudentiaRagEvaluationsPage })));
+const PrudentiaReviewQueuePage = lazy(() => import("./pages/PrudentiaReviewQueuePage").then((module) => ({ default: module.PrudentiaReviewQueuePage })));
+const PrudentiaSettingsPage = lazy(() => import("./pages/PrudentiaSettingsPage").then((module) => ({ default: module.PrudentiaSettingsPage })));
+const SourceViewerPage = lazy(() => import("./pages/SourceViewerPage").then((module) => ({ default: module.SourceViewerPage })));
+const PrudentiaUploadPage = lazy(() => import("./pages/PrudentiaUploadPage").then((module) => ({ default: module.PrudentiaUploadPage })));
+
 function App() {
   const [activeRoute, setActiveRoute] = useState<RouteId>(() => routeFromLocation() ?? "chat");
   const [isLightMode, setIsLightMode] = useState(() => readStoredBoolean(THEME_STORAGE_KEY, false));
   const auth = useAuthSession();
+  const resolvedRoute = auth.currentUser ? authenticatedRouteForUser(auth.currentUser, routeFromLocation()) : activeRoute;
   const chat = useChatSession(auth.currentUser);
   const inventory = useDocumentInventory(auth.currentUser);
   const pdfUpload = usePdfUpload(auth.currentUser);
@@ -49,10 +51,25 @@ function App() {
     [chat.activeSpacePath, inventory.documents],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.classList.toggle("light", isLightMode);
+    document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content", isLightMode ? "#f1f1f4" : "#101016");
     writeStoredBoolean(THEME_STORAGE_KEY, isLightMode);
   }, [isLightMode]);
+
+  useEffect(() => {
+    const routeTitle = auth.currentUser ? routeTitles[resolvedRoute] : "Sign in";
+    document.title = `${routeTitle} | Prudentia AI`;
+    if (!auth.currentUser) return;
+
+    const focusMainContent = window.requestAnimationFrame(() => {
+      const main = document.getElementById("main-content");
+      if (!main) return;
+      main.setAttribute("tabindex", "-1");
+      main.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(focusMainContent);
+  }, [auth.currentUser, resolvedRoute]);
 
   useEffect(() => {
     const handlePopState = () => setActiveRoute(routeFromLocation() ?? "chat");
@@ -63,13 +80,10 @@ function App() {
   useEffect(() => {
     if (auth.currentUserQuery.isLoading) return;
     if (!auth.currentUser) return navigate("login", { replace: true });
-    const defaultRoute = defaultRouteForUser(auth.currentUser);
-    if (auth.currentUser.must_change_password && activeRoute !== "account") return navigate("account", { replace: true });
-    if (activeRoute === "login" || location.pathname === "/") return navigate(defaultRoute, { replace: true });
-    if (canonicalRoute(activeRoute) !== activeRoute) return navigate(canonicalRoute(activeRoute), { replace: true });
-    if (location.pathname !== routePaths[activeRoute]) return navigate(activeRoute, { replace: true });
-    if (!canAccessRoute(auth.currentUser, activeRoute)) navigate(defaultRoute, { replace: true });
-  }, [activeRoute, auth.currentUser, auth.currentUserQuery.isLoading]);
+    if (activeRoute !== resolvedRoute || location.pathname !== routePaths[resolvedRoute]) {
+      navigate(resolvedRoute, { replace: true });
+    }
+  }, [activeRoute, auth.currentUser, auth.currentUserQuery.isLoading, resolvedRoute]);
 
   function navigate(route: RouteId, options: NavigateOptions = {}) {
     const targetRoute = canonicalRoute(route);
@@ -116,10 +130,14 @@ function App() {
     />
   );
 
-  if (activeRoute === "source-viewer") {
+  if (resolvedRoute === "source-viewer") {
     return (
       <>
-        <div className="app-route-stage"><SourceViewerPage /></div>
+        <div className="app-route-stage">
+          <Suspense fallback={<RouteLoading label="Loading source viewer" />}>
+            <SourceViewerPage />
+          </Suspense>
+        </div>
         {sessionTimeoutDialog}
       </>
     );
@@ -132,7 +150,7 @@ function App() {
       documentCount={sidebarDocumentCount}
       documentsLoading={inventory.documentsQuery.isLoading}
       onActiveSpaceChange={chat.changeActiveSpacePath}
-      spaceSwitchDisabled={activeRoute === "chat" && chat.hasPendingGeneration}
+      spaceSwitchDisabled={resolvedRoute === "chat" && chat.hasPendingGeneration}
       spaces={sidebarSpaceOptions}
     />
   );
@@ -144,9 +162,11 @@ function App() {
       value={sidebarHeaderContent}
     >
       <a className="skip-link" href="#main-content">Skip to content</a>
+      <div className="sr-only" aria-live="polite" aria-atomic="true">{routeTitles[resolvedRoute]}</div>
 
-      <div className="app-route-stage" key={activeRoute}>
-        {activeRoute === "chat" ? (
+      <div className="app-route-stage" key={resolvedRoute}>
+        <Suspense fallback={<RouteLoading label={`Loading ${routeTitles[resolvedRoute]}`} />}>
+        {resolvedRoute === "chat" ? (
           <PrudentiaChatPage
             activeSessionId={chat.activeSessionId}
             activeSpacePath={chat.activeSpacePath}
@@ -193,23 +213,23 @@ function App() {
             user={user}
           />
         ) : null}
-        {activeRoute === "knowledge-spaces" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} view="spaces" /> : null}
-        {activeRoute === "document-overview" ? <PrudentiaDocumentOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} /> : null}
-        {activeRoute === "documents" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="documents" /> : null}
-        {activeRoute === "document-trash" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="trash" /> : null}
-        {activeRoute === "upload" ? <PrudentiaUploadPage batchItems={pdfUpload.batchItems} cancelingJobId={pdfUpload.cancelingJobId} currentDocuments={inventory.documents} currentUser={user} onCancelIngestJob={pdfUpload.cancelJob} onClearUploadJobs={pdfUpload.clearUploadJobs} onLogout={handleLogout} onNavigate={navigate} onPdfDraftChange={pdfUpload.updatePdfDraft} onPdfSubmit={pdfUpload.onPdfSubmit} pdfDraft={pdfUpload.pdfDraft} selectionError={pdfUpload.selectionError} uploadPending={pdfUpload.uploadMutation.isPending} /> : null}
-        {activeRoute === "document-extraction" ? <PrudentiaFolderSourcesPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "database-connectors" ? <PrudentiaDatabaseConnectorsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "ingestion-jobs" ? <PrudentiaIngestionJobsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "ingestion-health" ? <PrudentiaIngestionHealthPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "review" ? <PrudentiaReviewQueuePage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "access" ? <PrudentiaAccessPage currentUser={user} onAuthChanged={auth.authChanged} onLogout={handleLogout} onNavigate={navigate} /> : null}
-        {activeRoute === "account" ? <PrudentiaAccountPage currentUser={user} isLoggingOut={auth.logoutMutation.isPending} onAuthChanged={auth.authChanged} onLogout={handleLogout} onNavigate={navigate} /> : null}
-        {activeRoute === "settings" ? <PrudentiaSettingsPage currentUser={user} onLogout={handleLogout} onNavigate={navigate} /> : null}
+        {resolvedRoute === "knowledge-spaces" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} view="spaces" /> : null}
+        {resolvedRoute === "document-overview" ? <PrudentiaDocumentOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} /> : null}
+        {resolvedRoute === "documents" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="documents" /> : null}
+        {resolvedRoute === "document-trash" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="trash" /> : null}
+        {resolvedRoute === "upload" ? <PrudentiaUploadPage batchItems={pdfUpload.batchItems} cancelingJobId={pdfUpload.cancelingJobId} currentDocuments={inventory.documents} currentUser={user} onCancelIngestJob={pdfUpload.cancelJob} onClearUploadJobs={pdfUpload.clearUploadJobs} onLogout={handleLogout} onNavigate={navigate} onPdfDraftChange={pdfUpload.updatePdfDraft} onPdfSubmit={pdfUpload.onPdfSubmit} pdfDraft={pdfUpload.pdfDraft} selectionError={pdfUpload.selectionError} uploadPending={pdfUpload.uploadMutation.isPending} /> : null}
+        {resolvedRoute === "document-extraction" ? <PrudentiaFolderSourcesPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {resolvedRoute === "database-connectors" ? <PrudentiaDatabaseConnectorsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {resolvedRoute === "ingestion-jobs" ? <PrudentiaIngestionJobsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {resolvedRoute === "ingestion-health" ? <PrudentiaIngestionHealthPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {resolvedRoute === "review" ? <PrudentiaReviewQueuePage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {resolvedRoute === "access" ? <PrudentiaAccessPage currentUser={user} onAuthChanged={auth.authChanged} onLogout={handleLogout} onNavigate={navigate} /> : null}
+        {resolvedRoute === "account" ? <PrudentiaAccountPage currentUser={user} isLoggingOut={auth.logoutMutation.isPending} onAuthChanged={auth.authChanged} onLogout={handleLogout} onNavigate={navigate} /> : null}
+        {resolvedRoute === "settings" ? <PrudentiaSettingsPage currentUser={user} onLogout={handleLogout} onNavigate={navigate} /> : null}
 
-        {activeRoute === "overview" ? <PrudentiaOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "activity-log" ? <PrudentiaAuditPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {activeRoute === "evaluations" ? (
+        {resolvedRoute === "overview" ? <PrudentiaOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {resolvedRoute === "activity-log" ? <PrudentiaAuditPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {resolvedRoute === "evaluations" ? (
           <PrudentiaRagEvaluationsPage
             activeSpacePath={chat.activeSpacePath}
             currentDocuments={inventory.currentDocuments}
@@ -221,9 +241,23 @@ function App() {
             user={user}
           />
         ) : null}
+        </Suspense>
       </div>
       {sessionTimeoutDialog}
     </PrudentiaSidebarHeaderProvider>
+  );
+}
+
+function RouteLoading({ label }: { label: string }) {
+  return (
+    <main className="route-loading" id="main-content" tabIndex={-1} aria-busy="true" aria-label={label}>
+      <div className="route-loading-inner" role="status">
+        <span className="sv-skeleton h-5 w-40" />
+        <span className="sv-skeleton h-3 w-64" />
+        <span className="sv-skeleton h-32 w-full" />
+        <span className="sr-only">{label}</span>
+      </div>
+    </main>
   );
 }
 

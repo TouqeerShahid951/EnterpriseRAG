@@ -283,23 +283,37 @@ function jsonTokenClass(token: string): string {
 
 export function SourceViewerLoading() {
   return (
-    <div className="source-viewer-state">
-      <span className="source-viewer-spinner" aria-hidden="true" />
+    <div className="source-viewer-state source-viewer-state-loading" role="status">
+      <div className="source-viewer-document-skeleton" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
       <h2>Opening original source</h2>
       <p>Loading the document and source location.</p>
     </div>
   );
 }
 
-export function SourceViewerError({ message }: { message: string }) {
+export function SourceViewerError({ action, guidance, message, title = "Source unavailable" }: SourceViewerErrorProps) {
   return (
     <div className="source-viewer-state source-viewer-state-error" role="alert">
       <AlertTriangle aria-hidden="true" size={24} />
-      <h2>Source unavailable</h2>
+      <h2>{title}</h2>
       <p>{message}</p>
+      {guidance ? <p>{guidance}</p> : null}
+      {action}
     </div>
   );
 }
+
+type SourceViewerErrorProps = {
+  action?: ReactNode;
+  guidance?: string;
+  message: string;
+  title?: string;
+};
 
 function PdfRegionDocument({
   buffer,

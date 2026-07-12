@@ -140,24 +140,6 @@ class ArtifactContent:
 
 
 @dataclass(frozen=True)
-class ProjectionUnit:
-    kind: str
-    title: str
-    body: tuple[str, ...] = ()
-    table: ArtifactTable | None = None
-    citation_ids: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class FormatProjection:
-    format: ArtifactFormat
-    title: str
-    units: tuple[ProjectionUnit, ...]
-    template_id: str = "default"
-    rendering_options: dict[str, str | int | bool] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
 class ArtifactValidation:
     passed: bool
     support_score: float

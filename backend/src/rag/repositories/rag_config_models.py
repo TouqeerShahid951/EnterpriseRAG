@@ -14,7 +14,6 @@ DEFAULT_OLLAMA_PORT = 11434
 DEFAULT_VLLM_PORT = 8000
 SUPPORTED_INFERENCE_PROVIDERS = {"ollama", "vllm"}
 SUPPORTED_EMBEDDING_PROVIDERS = {"ollama", "openai_compatible", "fastembed"}
-LANGUAGE_ROLE_NAMES = ("reasoning", "routing", "faithfulness", "ingestion", "vision")
 
 
 @dataclass(frozen=True)

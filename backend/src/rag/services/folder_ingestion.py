@@ -4,20 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 import hashlib
-import json
 from pathlib import PurePosixPath
-from typing import Any
 
 from fastapi import HTTPException, UploadFile, status
 
 from ..auth.abac import normalize_group_path
 from ..auth.permissions import can_manage_group_path
-from ..connectors.crypto import decrypt_secret, keyring_from_settings
-from ..connectors.models import CONNECTOR_RECORD_CONTENT_TYPE, DIRECT_CHUNKS_MODE, JSON_SNAPSHOT_MODE
-from ..connectors.repositories import ConnectorProfileRepository
-from ..connectors.registry import ConnectorRegistry
-from ..connectors.sql_safety import SqlValidationError, validate_read_only_sql
 from ..core.config import settings
+from ..ingestion.contracts import IngestJobPayload
+from ..ingestion.queue import IngestQueue
 from ..repositories.document_models import DocumentRepository
 from ..repositories.folder_schedule_models import FolderRunItemRecord, FolderScheduleRecord, FolderScheduleRepository
 from ..repositories.identity import IdentityRepository, UserRecord
@@ -35,8 +30,6 @@ from .document_uploads import (
 from .file_scanning import FileScanner
 from .folder_schedule_time import next_recurring_window_after_current, next_run_for_schedule, normalize_timezone
 from .folder_sources import LocalFolderSource, MinioPrefixSource, resolve_local_folder_path
-from ..ingestion.contracts import IngestJobPayload
-from ..ingestion.queue import IngestQueue
 from .upload_storage import UploadStorage
 
 FOLDER_SNAPSHOT_MAX_FILES = settings.folder_snapshot_max_files
@@ -398,66 +391,6 @@ def create_local_folder_schedule(
     return schedule
 
 
-def create_connector_schedule(
-    *,
-    name: str,
-    connector_profile_id: str,
-    selection: dict[str, object],
-    identity_fields: list[str],
-    ingestion_mode: str,
-    deletion_policy: str,
-    batch_size: int,
-    row_limit: int,
-    group_path: str,
-    clearance_level: str,
-    effective_date: date | None,
-    expiry_date: date | None,
-    doc_type: str | None,
-    description: str | None,
-    schedule_type: str,
-    timezone_name: str,
-    scheduled_at: datetime | None,
-    recurrence: dict[str, object],
-    user: UserRecord,
-    identity_repo: IdentityRepository,
-    document_repo: DocumentRepository,
-    schedule_repo: FolderScheduleRepository,
-    connector_profile_repo: ConnectorProfileRepository,
-) -> FolderScheduleRecord:
-    _ = (
-        name,
-        connector_profile_id,
-        selection,
-        identity_fields,
-        ingestion_mode,
-        deletion_policy,
-        batch_size,
-        row_limit,
-        group_path,
-        clearance_level,
-        effective_date,
-        expiry_date,
-        doc_type,
-        description,
-        schedule_type,
-        timezone_name,
-        scheduled_at,
-        recurrence,
-        user,
-        identity_repo,
-        document_repo,
-        schedule_repo,
-        connector_profile_repo,
-    )
-    raise HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail={
-            "code": "connector_schedules_retired",
-            "message": "Database connector sync schedules are retired. Use approved schema catalogs for live read-only SQL.",
-        },
-    )
-
-
 def dispatch_due_schedules(
     *,
     schedule_repo: FolderScheduleRepository,
@@ -466,10 +399,7 @@ def dispatch_due_schedules(
     queue: IngestQueue,
     minio_source: MinioPrefixSource,
     local_folder_source: LocalFolderSource | None = None,
-    connector_profile_repo: ConnectorProfileRepository | None = None,
-    connector_registry: ConnectorRegistry | None = None,
     storage: UploadStorage | None = None,
-    qdrant: Any | None = None,
     now: datetime | None = None,
     limit: int = 20,
 ) -> list[str]:
@@ -815,132 +745,6 @@ def _dispatch_minio_prefix(
         )
 
 
-def _dispatch_connector(
-    schedule: FolderScheduleRecord,
-    run_id: str,
-    *,
-    schedule_repo: FolderScheduleRepository,
-    document_repo: DocumentRepository,
-    job_repo: IngestJobRepository,
-    queue: IngestQueue,
-    connector_profile_repo: ConnectorProfileRepository | None,
-    connector_registry: ConnectorRegistry,
-    storage: UploadStorage | None,
-    qdrant: Any | None,
-) -> None:
-    if connector_profile_repo is None or storage is None:
-        raise RuntimeError("connector dispatch requires connector profile repository and upload storage")
-    profile_id = str(schedule.source_config.get("connector_profile_id") or "")
-    profile = connector_profile_repo.get_profile(profile_id)
-    if profile is None:
-        raise RuntimeError("connector profile was not found")
-    selection = _object_config(schedule.source_config.get("selection"))
-    identity_fields = _validated_identity_fields(_list_config(schedule.source_config.get("identity_fields")))
-    ingestion_mode = _validated_ingestion_mode(str(schedule.source_config.get("ingestion_mode") or JSON_SNAPSHOT_MODE))
-    deletion_policy = _validated_deletion_policy(str(schedule.source_config.get("deletion_policy") or "keep_deleted_documents"))
-    batch_size = _bounded_int(schedule.source_config.get("batch_size"), default=settings.connector_default_batch_size, lower=1, upper=5000)
-    row_limit = _bounded_int(schedule.source_config.get("row_limit"), default=settings.connector_default_row_limit, lower=1, upper=1000000)
-    selection = {**selection, "row_limit": row_limit}
-    connector = connector_registry.get(profile.connector_type)
-    secrets = decrypt_secret(profile.encrypted_secrets, keyring_from_settings(settings.connector_secrets_key, settings.connector_secrets_key_ring))
-    records = connector.iter_records(
-        config=profile.public_config,
-        secrets=secrets,
-        selection=selection,
-        identity_fields=identity_fields,
-        batch_size=batch_size,
-    )
-    seen_paths: set[str] = set()
-    for record in records[:row_limit]:
-        seen_paths.add(record.source_path)
-        content = _connector_record_bytes(schedule=schedule, profile=profile, record=record, ingestion_mode=ingestion_mode)
-        content_hash = hashlib.sha256(content).hexdigest()
-        content_type = CONNECTOR_RECORD_CONTENT_TYPE if ingestion_mode == DIRECT_CHUNKS_MODE else "application/json"
-        if schedule_repo.has_source_content(schedule.id, record.source_path, content_hash):
-            schedule_repo.create_run_item(
-                run_id=run_id,
-                schedule_id=schedule.id,
-                source_path=record.source_path,
-                filename=_connector_filename(record.source_path, ingestion_mode),
-                content_hash=content_hash,
-                size_bytes=len(content),
-                content_type=content_type,
-                status="skipped",
-                skip_code="unchanged_source",
-                skip_message="Source record has not changed since the last sync.",
-            )
-            continue
-        previous = schedule_repo.latest_document_for_source(schedule.id, record.source_path)
-        supersedes = [previous[0]] if previous else []
-        duplicate = document_repo.find_current_by_content_hash(content_hash)
-        if duplicate and not supersedes:
-            schedule_repo.create_run_item(
-                run_id=run_id,
-                schedule_id=schedule.id,
-                source_path=record.source_path,
-                filename=_connector_filename(record.source_path, ingestion_mode),
-                content_hash=content_hash,
-                size_bytes=len(content),
-                content_type=content_type,
-                status="skipped",
-                skip_code="duplicate_document",
-                skip_message="A current document with the same connector record content already exists.",
-            )
-            continue
-        stored = storage.put(filename=_connector_filename(record.source_path, ingestion_mode), content=content, content_type=content_type)
-        document = document_repo.create_document(
-            title=record.title,
-            source_id=_connector_source_id(schedule.id, record.source_path, content_hash),
-            group_path=schedule.group_path,
-            clearance_level=schedule.clearance_level,
-            doc_type=schedule.doc_type,
-            effective_date=schedule.effective_date,
-            expiry_date=schedule.expiry_date,
-            description=schedule.description,
-            uploaded_by=schedule.created_by,
-            file_path=stored.object_path,
-            content_hash=content_hash,
-            pending_supersedes=supersedes,
-            ingest_status="scheduled",
-        )
-        job = job_repo.create_ingest_job(doc_id=document.id, status="scheduled", progress_pct=0, origin="connector")
-        item = schedule_repo.create_run_item(
-            run_id=run_id,
-            schedule_id=schedule.id,
-            source_path=record.source_path,
-            filename=_connector_filename(record.source_path, ingestion_mode),
-            object_path=stored.object_path,
-            content_hash=content_hash,
-            size_bytes=stored.size_bytes,
-            content_type=content_type,
-            status="scheduled",
-            document_id=document.id,
-            job_id=job.id,
-        )
-        _queue_item(schedule, item, document_repo=document_repo, job_repo=job_repo, schedule_repo=schedule_repo, queue=queue, supersedes=supersedes)
-
-    for source_path in sorted(schedule_repo.known_source_paths(schedule.id) - seen_paths):
-        previous = schedule_repo.latest_document_for_source(schedule.id, source_path)
-        if previous:
-            _mark_connector_source_stale(
-                document_repo=document_repo,
-                qdrant=qdrant,
-                document_id=previous[0],
-                deletion_policy=deletion_policy,
-            )
-        schedule_repo.create_run_item(
-            run_id=run_id,
-            schedule_id=schedule.id,
-            source_path=source_path,
-            filename=_connector_filename(source_path, ingestion_mode),
-            content_hash=previous[1] if previous else None,
-            status="skipped",
-            skip_code="source_deleted",
-            skip_message="Source record is no longer present in the configured connector selection.",
-            document_id=previous[0] if previous else None,
-        )
-
-
 def _queue_item(
     schedule: FolderScheduleRecord,
     item: FolderRunItemRecord,
@@ -989,92 +793,6 @@ def _safe_relative_path(value: str | None) -> str:
 def _source_id(schedule_id: str, source_path: str, content_hash: str) -> str:
     path_hash = hashlib.sha256(source_path.encode("utf-8")).hexdigest()[:16]
     return f"folder:{schedule_id}:{path_hash}:{content_hash}"
-
-
-def _connector_source_id(schedule_id: str, source_path: str, content_hash: str) -> str:
-    path_hash = hashlib.sha256(source_path.encode("utf-8")).hexdigest()[:16]
-    return f"connector:{schedule_id}:{path_hash}:{content_hash}"
-
-
-def _connector_record_bytes(*, schedule: FolderScheduleRecord, profile: Any, record: Any, ingestion_mode: str) -> bytes:
-    envelope = {
-        "source_type": "connector",
-        "connector_type": profile.connector_type,
-        "connector_profile_id": profile.id,
-        "schedule_id": schedule.id,
-        "source_path": record.source_path,
-        "title": record.title,
-        "identity": record.identity,
-        "data": record.data,
-        "ingestion_mode": ingestion_mode,
-    }
-    return json.dumps(envelope, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
-
-
-def _connector_filename(source_path: str, ingestion_mode: str) -> str:
-    suffix = ".connector.json" if ingestion_mode == DIRECT_CHUNKS_MODE else ".json"
-    name = PurePosixPath(source_path).name or "connector-record"
-    stem = name.rsplit(".", 1)[0] if "." in name else name
-    safe = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in stem).strip("-")
-    return f"{safe or 'connector-record'}{suffix}"
-
-
-def _mark_connector_source_stale(*, document_repo: DocumentRepository, qdrant: Any | None, document_id: str, deletion_policy: str) -> None:
-    reason = "source_deleted" if deletion_policy == "keep_deleted_documents" else deletion_policy
-    updated = document_repo.mark_document_stale(document_id, source_deleted=True, retrieval_status="stale", reason=reason)
-    if updated is not None and qdrant is not None and hasattr(qdrant, "set_document_retrieval_status"):
-        qdrant.set_document_retrieval_status(document_id, retrieval_status="stale", source_deleted=True)
-
-
-def _validated_identity_fields(identity_fields: list[Any]) -> list[str]:
-    normalized = []
-    for value in identity_fields:
-        text = str(value).strip()
-        if not text:
-            continue
-        normalized.append(text)
-    if not normalized:
-        raise HTTPException(status_code=400, detail={"code": "connector_identity_required", "message": "Connector schedules require at least one stable identity field."})
-    return list(dict.fromkeys(normalized))
-
-
-def _validated_connector_selection(connector_type: str, selection: dict[str, object], *, row_limit: int) -> dict[str, object]:
-    normalized = dict(selection or {})
-    normalized["row_limit"] = max(1, min(row_limit, 1000000))
-    if connector_type in {"sql_server", "postgres", "mysql", "mariadb", "oracle"}:
-        try:
-            normalized["query"] = validate_read_only_sql(str(normalized.get("query") or ""), connector_type=connector_type)
-        except SqlValidationError as exc:
-            raise HTTPException(status_code=400, detail={"code": "unsafe_connector_query", "message": str(exc)}) from exc
-    return normalized
-
-
-def _validated_ingestion_mode(value: str) -> str:
-    if value in {JSON_SNAPSHOT_MODE, DIRECT_CHUNKS_MODE}:
-        return value
-    raise HTTPException(status_code=400, detail={"code": "invalid_connector_ingestion_mode", "message": "Connector ingestion mode is invalid."})
-
-
-def _validated_deletion_policy(value: str) -> str:
-    if value in {"keep_deleted_documents", "mark_as_stale", "archive_from_retrieval", "delete_from_index_after_review"}:
-        return value
-    raise HTTPException(status_code=400, detail={"code": "invalid_connector_deletion_policy", "message": "Connector deletion policy is invalid."})
-
-
-def _object_config(value: object) -> dict[str, object]:
-    return dict(value) if isinstance(value, dict) else {}
-
-
-def _list_config(value: object) -> list[Any]:
-    return list(value) if isinstance(value, list) else []
-
-
-def _bounded_int(value: object, *, default: int, lower: int, upper: int) -> int:
-    try:
-        candidate = int(value)
-    except (TypeError, ValueError):
-        candidate = default
-    return max(lower, min(candidate, upper))
 
 
 def _format_byte_limit(value: int) -> str:

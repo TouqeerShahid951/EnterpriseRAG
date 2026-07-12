@@ -79,8 +79,8 @@
 
 .Prudentia-toast button {
   display: inline-flex;
-  min-height: 2rem;
-  min-width: 2rem;
+  min-height: var(--control-height-md);
+  min-width: var(--control-height-md);
   align-items: center;
   justify-content: center;
   border: 0;

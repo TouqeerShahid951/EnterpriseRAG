@@ -46,7 +46,7 @@ export interface UploadBatchItemView {
   jobError: Error | null;
 }
 
-export interface UserTurn {
+interface UserTurn {
   id: string;
   role: "user";
   content: string;

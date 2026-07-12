@@ -26,6 +26,7 @@ export function PrudentiaRagEvaluationsPage({ activeSpacePath, currentDocuments,
   const { notify } = useToast();
   const [activeScreen, setActiveScreen] = useState<RagEvalScreen>("overview");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [newRunDatasetId, setNewRunDatasetId] = useState<string | null>(null);
   const datasetsQuery = useQuery({ queryKey: ["rag-evaluations", "datasets"], queryFn: ragEvaluationsApi.listDatasets, retry: false });
   const runsQuery = useQuery({ queryKey: ["rag-evaluations", "runs"], queryFn: ragEvaluationsApi.listRuns, refetchInterval: 5000, retry: false });
   const datasets = datasetsQuery.data?.items ?? [];
@@ -55,7 +56,10 @@ export function PrudentiaRagEvaluationsPage({ activeSpacePath, currentDocuments,
     setSelectedRunId(runId);
     setActiveScreen("runs");
   };
-  const openNewRun = () => setActiveScreen(datasets.length > 0 ? "new-run" : "datasets");
+  const openNewRun = (datasetId: string | null = null) => {
+    setNewRunDatasetId(datasetId);
+    setActiveScreen(datasets.length > 0 ? "new-run" : "datasets");
+  };
   const handleRunCreated = (runId: string) => {
     setSelectedRunId(runId);
     setActiveScreen("runs");
@@ -91,7 +95,7 @@ export function PrudentiaRagEvaluationsPage({ activeSpacePath, currentDocuments,
               <p className="sv-page-subtitle">Manage evaluation datasets, launch scoped runs, and inspect failures from retrieval through faithfulness without crowding one screen.</p>
             </div>
             <div className="rag-eval-header-actions">
-              <button type="button" className="sv-action-primary" onClick={openNewRun}>
+              <button type="button" className="sv-action-primary" onClick={() => openNewRun()}>
                 <Play size={16} />
                 New evaluation
               </button>
@@ -130,8 +134,8 @@ export function PrudentiaRagEvaluationsPage({ activeSpacePath, currentDocuments,
               summarySource={summarySource}
             />
           ) : null}
-          {activeScreen === "datasets" ? <DatasetsScreen datasets={datasets} loading={datasetsQuery.isLoading} onNewRun={() => setActiveScreen("new-run")} /> : null}
-          {activeScreen === "new-run" ? <NewRunScreen datasets={datasets} datasetsLoading={datasetsQuery.isLoading} onRunCreated={handleRunCreated} /> : null}
+          {activeScreen === "datasets" ? <DatasetsScreen datasets={datasets} loading={datasetsQuery.isLoading} onUseDataset={(datasetId) => openNewRun(datasetId)} /> : null}
+          {activeScreen === "new-run" ? <NewRunScreen datasets={datasets} datasetsLoading={datasetsQuery.isLoading} initialDatasetId={newRunDatasetId} onRunCreated={handleRunCreated} /> : null}
           {activeScreen === "query-tracker" ? (
             <QueryTrackerPanel
               activeSpacePath={activeSpacePath}
@@ -264,16 +268,16 @@ function RunSummaryPanel({ failureBreakdown, onInspect, selectedRun }: { failure
   );
 }
 
-function DatasetsScreen({ datasets, loading, onNewRun }: { datasets: EvaluationDatasetSummary[]; loading: boolean; onNewRun: () => void }) {
+function DatasetsScreen({ datasets, loading, onUseDataset }: { datasets: EvaluationDatasetSummary[]; loading: boolean; onUseDataset: (datasetId: string) => void }) {
   return (
     <div className="rag-eval-screen rag-eval-datasets-grid">
       <DatasetImportPanel />
-      <DatasetLibraryPanel datasets={datasets} loading={loading} onNewRun={onNewRun} />
+      <DatasetLibraryPanel datasets={datasets} loading={loading} onUseDataset={onUseDataset} />
     </div>
   );
 }
 
-function DatasetLibraryPanel({ datasets, loading, onNewRun }: { datasets: EvaluationDatasetSummary[]; loading: boolean; onNewRun: () => void }) {
+function DatasetLibraryPanel({ datasets, loading, onUseDataset }: { datasets: EvaluationDatasetSummary[]; loading: boolean; onUseDataset: (datasetId: string) => void }) {
   return (
     <section className="sv-panel rag-eval-dataset-library">
       <div className="rag-eval-section-header">
@@ -293,7 +297,7 @@ function DatasetLibraryPanel({ datasets, loading, onNewRun }: { datasets: Evalua
               <small>{dataset.case_count} cases / {dataset.source_format} / {formatDateTime(dataset.created_at)}</small>
               {dataset.description ? <p>{dataset.description}</p> : null}
             </div>
-            <button type="button" className="sv-action-secondary" onClick={onNewRun}>Use dataset</button>
+            <button type="button" className="sv-action-secondary" onClick={() => onUseDataset(dataset.id)}>Use dataset</button>
           </article>
         ))}
       </div>
@@ -301,10 +305,10 @@ function DatasetLibraryPanel({ datasets, loading, onNewRun }: { datasets: Evalua
   );
 }
 
-function NewRunScreen({ datasets, datasetsLoading, onRunCreated }: { datasets: EvaluationDatasetSummary[]; datasetsLoading: boolean; onRunCreated: (runId: string) => void }) {
+function NewRunScreen({ datasets, datasetsLoading, initialDatasetId, onRunCreated }: { datasets: EvaluationDatasetSummary[]; datasetsLoading: boolean; initialDatasetId: string | null; onRunCreated: (runId: string) => void }) {
   return (
     <div className="rag-eval-screen rag-eval-new-run-grid">
-      <RunLauncherPanel datasets={datasets} datasetsLoading={datasetsLoading} onRunCreated={onRunCreated} />
+      <RunLauncherPanel datasets={datasets} datasetsLoading={datasetsLoading} initialDatasetId={initialDatasetId} onRunCreated={onRunCreated} />
       <section className="sv-panel p-5">
         <div className="rag-eval-panel-header">
           <span><Info size={18} /> Before queueing</span>
@@ -463,10 +467,10 @@ function DatasetImportPanel() {
   );
 }
 
-function RunLauncherPanel({ datasets, datasetsLoading, onRunCreated }: { datasets: EvaluationDatasetSummary[]; datasetsLoading: boolean; onRunCreated: (runId: string) => void }) {
+function RunLauncherPanel({ datasets, datasetsLoading, initialDatasetId, onRunCreated }: { datasets: EvaluationDatasetSummary[]; datasetsLoading: boolean; initialDatasetId: string | null; onRunCreated: (runId: string) => void }) {
   const queryClient = useQueryClient();
   const { notify } = useToast();
-  const [datasetId, setDatasetId] = useState("");
+  const [datasetId, setDatasetId] = useState(() => resolveEvaluationDatasetId(datasets, initialDatasetId, ""));
   const [groupPath, setGroupPath] = useState("");
   const [documentIds, setDocumentIds] = useState("");
   const [caseIds, setCaseIds] = useState("");
@@ -474,8 +478,9 @@ function RunLauncherPanel({ datasets, datasetsLoading, onRunCreated }: { dataset
   const selectedDataset = datasets.find((dataset) => dataset.id === datasetId) ?? datasets[0] ?? null;
 
   useEffect(() => {
-    if (!datasetId && datasets.length > 0) setDatasetId(datasets[0].id);
-  }, [datasetId, datasets]);
+    const resolvedDatasetId = resolveEvaluationDatasetId(datasets, initialDatasetId, datasetId);
+    if (resolvedDatasetId !== datasetId) setDatasetId(resolvedDatasetId);
+  }, [datasetId, datasets, initialDatasetId]);
 
   const createRunMutation = useMutation({
     mutationFn: ragEvaluationsApi.createRun,
@@ -790,6 +795,12 @@ function optionalPercent(summary: Record<string, unknown>, keys: string[]) {
 
 function splitCsv(value: string) {
   return value.split(",").map((part) => part.trim()).filter(Boolean);
+}
+
+export function resolveEvaluationDatasetId(datasets: EvaluationDatasetSummary[], requestedDatasetId: string | null, currentDatasetId: string) {
+  if (currentDatasetId && datasets.some((dataset) => dataset.id === currentDatasetId)) return currentDatasetId;
+  if (requestedDatasetId && datasets.some((dataset) => dataset.id === requestedDatasetId)) return requestedDatasetId;
+  return datasets[0]?.id ?? "";
 }
 
 type RagEvalScreen = "overview" | "datasets" | "new-run" | "query-tracker" | "runs";

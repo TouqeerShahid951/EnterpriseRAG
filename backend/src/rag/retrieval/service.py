@@ -94,7 +94,6 @@ class RetrievalService:
             )
             ctx["execution_modes"]["live_sql_retriever"] = live_sql.mode
             ctx["execution_details"]["live_sql_retriever"] = live_sql.detail
-            live_hits = live_sql.hits
         except QueryCancelled:
             raise
         except Exception as exc:

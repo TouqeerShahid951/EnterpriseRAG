@@ -63,14 +63,6 @@ def account_type_from_legacy_groups(group_paths: Sequence[str]) -> AccountType:
     return "member"
 
 
-def is_platform_admin(user: PermissionUser) -> bool:
-    return user.account_type == "platform_admin"
-
-
-def is_system_admin(user: PermissionUser) -> bool:
-    return user.account_type == "system_admin"
-
-
 def is_global_admin(user: PermissionUser) -> bool:
     return user.account_type in GLOBAL_ADMIN_ACCOUNT_TYPES
 

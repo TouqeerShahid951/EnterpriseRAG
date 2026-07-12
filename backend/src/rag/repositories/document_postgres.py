@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from typing import Any, Literal
 
 from ..auth.abac import normalize_group_path
 from ..shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
+from .audit_models import audit_event_from_row
 from .document_models import (
     AuditEventRecord,
     DocumentCrossReferenceRecord,
@@ -15,29 +15,10 @@ from .document_models import (
     DocumentImageAssetRecord,
     DocumentRecord,
 )
-from .human_review_postgres import (
-    PostgresHumanReviewRepository,
-    review_batch_from_row as review_batch_from_row,
-    review_item_from_row as review_item_from_row,
-)
-from .image_review_postgres import (
-    PostgresImageReviewRepository,
-    image_review_batch_from_row as image_review_batch_from_row,
-    image_review_candidate_from_row as image_review_candidate_from_row,
-)
-from .ingest_job_postgres import (
-    PostgresIngestJobRepository,
-    job_from_row as job_from_row,
-)
+from .postgres import PostgresConnectionMixin
 
 
-class PostgresDocumentRepository(
-    PostgresIngestJobRepository,
-    PostgresHumanReviewRepository,
-    PostgresImageReviewRepository,
-):
-    """Document adapter with inherited ingestion-job methods for compatibility."""
-
+class PostgresDocumentRepository(PostgresConnectionMixin):
     def __init__(self, database_url: str) -> None:
         self.database_url = database_url
 
@@ -106,18 +87,6 @@ class PostgresDocumentRepository(
         )
         return document_from_row(row) if row else None
 
-    def list_document_shares(self, document_id: str) -> list[str]:
-        rows = self._execute_all(
-            """
-            SELECT group_path
-            FROM document_shares
-            WHERE document_id = %s
-            ORDER BY group_path
-            """,
-            (document_id,),
-        )
-        return [str(row["group_path"]) for row in rows]
-
     def replace_document_shares(
         self,
         document_id: str,
@@ -183,20 +152,6 @@ class PostgresDocumentRepository(
                     )
         return self.get_document(document_id, include_deleted=True)
 
-    def remove_document_share(self, document_id: str, group_path: str) -> DocumentRecord | None:
-        normalized = normalize_group_path(group_path)
-        with self._connect() as conn:
-            with conn.transaction():
-                document = conn.execute("SELECT id::text FROM documents WHERE id = %s", (document_id,)).fetchone()
-                if document is None:
-                    return None
-                conn.execute(
-                    "DELETE FROM document_shares WHERE document_id = %s AND group_path = %s",
-                    (document_id, normalized),
-                )
-                conn.execute("UPDATE documents SET updated_at = NOW() WHERE id = %s", (document_id,))
-        return self.get_document(document_id, include_deleted=True)
-
     def update_document_clearance(self, document_id: str, clearance_level: ClearanceLevel) -> DocumentRecord | None:
         row = self._execute_optional(
             """
@@ -229,36 +184,6 @@ class PostgresDocumentRepository(
             (
                 json.dumps(_unique_text(topics)),
                 json.dumps(_unique_text(llm_topics)),
-                document_id,
-            ),
-        )
-        return document_from_row(row) if row else None
-
-    def mark_document_stale(
-        self,
-        document_id: str,
-        *,
-        source_deleted: bool = True,
-        retrieval_status: str = "stale",
-        reason: str = "source_deleted",
-    ) -> DocumentRecord | None:
-        row = self._execute_optional(
-            """
-            UPDATE documents
-            SET metadata_flags = metadata_flags || %s::jsonb,
-                updated_at = NOW()
-            WHERE id = %s AND deleted_at IS NULL
-            RETURNING *
-            """,
-            (
-                json.dumps(
-                    {
-                        "source_deleted": source_deleted,
-                        "retrieval_status": retrieval_status,
-                        "stale_reason": reason,
-                        "stale_at": datetime.now(UTC).isoformat(),
-                    }
-                ),
                 document_id,
             ),
         )
@@ -416,11 +341,6 @@ class PostgresDocumentRepository(
         )
         return document_from_row(row) if row else None
 
-    def cancel_review_batch_for_job(self, job_id: str) -> int:
-        with self._connect() as conn:
-            with conn.transaction():
-                return _close_pending_review_items(conn, job_id)
-
     def mark_superseded(self, *, new_doc_id: str, old_doc_ids: list[str]) -> list[DocumentRecord]:
         with self._connect() as conn:
             with conn.transaction():
@@ -574,53 +494,6 @@ def validate_edges(conn: Any, new_doc_id: str, old_doc_ids: list[str]) -> None:
         _validate_edge(conn, new_doc_id, old_doc_id)
 
 
-def _close_pending_review_items(conn: Any, job_id: str) -> int:
-    item_rows = conn.execute(
-        """
-        UPDATE human_review_queue
-        SET status = 'rejected', updated_at = NOW()
-        WHERE status = 'pending'
-          AND batch_id IN (
-              SELECT id FROM human_review_batches WHERE job_id = %s
-          )
-        RETURNING id
-        """,
-        (job_id,),
-    ).fetchall()
-    conn.execute(
-        """
-        UPDATE human_review_batches
-        SET status = 'rejected', updated_at = NOW()
-        WHERE job_id = %s AND status = 'pending'
-        """,
-        (job_id,),
-    )
-    image_rows = conn.execute(
-        """
-        UPDATE image_review_candidates
-        SET status = 'skipped',
-            assigned_to = NULL,
-            skip_reason = 'ingest_cancelled',
-            updated_at = NOW()
-        WHERE status = 'pending'
-          AND batch_id IN (
-              SELECT id FROM image_review_batches WHERE job_id = %s
-          )
-        RETURNING id
-        """,
-        (job_id,),
-    ).fetchall()
-    conn.execute(
-        """
-        UPDATE image_review_batches
-        SET status = 'rejected', updated_at = NOW()
-        WHERE job_id = %s AND status = 'pending'
-        """,
-        (job_id,),
-    )
-    return len(item_rows) + len(image_rows)
-
-
 def document_from_row(row: dict[str, Any]) -> DocumentRecord:
     pending = row.get("pending_supersedes") or []
     shared = tuple(str(value) for value in _json_list(row.get("shared_group_paths")))
@@ -653,23 +526,6 @@ def document_from_row(row: dict[str, Any]) -> DocumentRecord:
         updated_at=row.get("updated_at"),
         shared_group_paths=shared,
     )
-
-
-def audit_event_from_row(row: dict[str, Any]) -> AuditEventRecord:
-    payload = row.get("payload") or {}
-    if isinstance(payload, str):
-        payload = json.loads(payload)
-    return AuditEventRecord(
-        id=str(row["id"]),
-        event_type=str(row["event_type"]),
-        actor_id=str(row["actor_id"]) if row.get("actor_id") is not None else None,
-        target_type=str(row["target_type"]) if row.get("target_type") is not None else None,
-        target_id=str(row["target_id"]) if row.get("target_id") is not None else None,
-        payload=dict(payload),
-        created_at=row.get("created_at"),
-    )
-
-
 
 
 def image_asset_from_row(row: dict[str, Any]) -> DocumentImageAssetRecord:

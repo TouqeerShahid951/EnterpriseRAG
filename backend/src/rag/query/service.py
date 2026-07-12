@@ -86,15 +86,6 @@ class LocalRagService:
         trace_id = str(uuid4())
         session_id = request.session_id or str(uuid4())
         async_request = self._async_artifact_request(request)
-        if async_request is not None:
-            return self._enqueue_artifact_job(
-                request=request,
-                user=user,
-                trace_id=trace_id,
-                session_id=session_id,
-                formats=async_request.formats,
-                started=started,
-            )
         ctx = initial_state(
             trace_id=trace_id,
             session_id=session_id,
@@ -106,12 +97,25 @@ class LocalRagService:
         )
         log_query_start(ctx, stream=False)
         try:
-            result = self.graph.invoke(ctx)
+            if async_request is not None:
+                response = self._enqueue_artifact_job(
+                    request=request,
+                    user=user,
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    formats=async_request.formats,
+                    started=started,
+                )
+                ctx["response"] = response
+            else:
+                result = self.graph.invoke(ctx)
+                response = result["response"]
+                ctx = result
         except Exception as exc:
             log_query_error(ctx, stream=False, exc=exc)
             raise
-        log_query_complete(result, stream=False)
-        return result["response"]
+        log_query_complete(ctx, stream=False)
+        return response
 
     def stream_query(
         self,
@@ -164,38 +168,10 @@ class LocalRagService:
         log_query_complete(ctx, stream=True)
 
     def _async_artifact_request(self, request: QueryRequest):
-        if self.config.artifact_pipeline_version.strip().lower() != "v2":
+        if self.config.artifact_pipeline_version != "v2":
             return None
         return parse_artifact_request(request.query)
 
-    def _run_graph(
-        self,
-        *,
-        request: QueryRequest,
-        user: UserContext,
-        trace_id: str,
-        session_id: str,
-        started: float,
-        cancellation_token: QueryCancellationToken | None,
-        stream: bool,
-    ) -> RAGResponse:
-        ctx = initial_state(
-            trace_id=trace_id,
-            session_id=session_id,
-            request=request,
-            user=user,
-            started=started,
-            token_budget=self.rag_config.retrieval_token_budget,
-            cancellation_token=cancellation_token,
-        )
-        log_query_start(ctx, stream=stream)
-        try:
-            result = self.graph.invoke(ctx)
-        except Exception as exc:
-            log_query_error(ctx, stream=stream, exc=exc)
-            raise
-        log_query_complete(result, stream=stream)
-        return result["response"]
 
     def _enqueue_artifact_job(
         self,

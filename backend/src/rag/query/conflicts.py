@@ -39,17 +39,6 @@ class ConflictChecker(Protocol):
     ) -> list[ConflictPair]: ...
 
 
-class NoopConflictChecker:
-    def check_conflicts(
-        self,
-        claims: list[ClaimRecord],
-        *,
-        visible_group_paths: Sequence[str] | None = None,
-    ) -> list[ConflictPair]:
-        _ = claims, visible_group_paths
-        return []
-
-
 def apply_conflict_detection(ctx: QueryContext, checker: ConflictChecker, qdrant: QdrantClient) -> QueryContext:
     cancellation_token = cancellation_token_from_context(ctx)
     if cancellation_token is not None:

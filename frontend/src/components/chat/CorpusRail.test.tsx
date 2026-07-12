@@ -64,6 +64,34 @@ describe("CorpusRail", () => {
     expect(html).toContain('aria-label="Open chat history, 126 saved conversations"');
     expect(html).toContain(">99+<");
   });
+
+  it("uses an explicit close control in the mobile history drawer", () => {
+    const html = renderToStaticMarkup(
+      <CorpusRail
+        activeSessionId={null}
+        collapsed={false}
+        errorMessage={null}
+        generatingSessionId={null}
+        loadErrorMessage={null}
+        loading={false}
+        loadingSessionId={null}
+        mobile
+        onCollapsedChange={vi.fn()}
+        onDeleteSession={vi.fn()}
+        onLoadMoreSessions={vi.fn()}
+        onLoadSession={vi.fn()}
+        onReset={vi.fn()}
+        savedSessions={[session("session-one", "First chat")]}
+        savedSessionsFetchingMore={false}
+        savedSessionsHasMore={false}
+        savedSessionsTotal={1}
+      />,
+    );
+
+    expect(html).toContain('class="rag-corpus-rail rag-corpus-rail-mobile"');
+    expect(html).toContain('aria-label="Close chat history"');
+    expect(html).not.toContain('aria-label="Collapse chat history"');
+  });
 });
 
 function session(id: string, title: string): SavedChatSessionSummary {

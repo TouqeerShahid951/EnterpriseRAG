@@ -216,8 +216,8 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
               ) : null}
             </form>
 
-            <aside className="space-y-4">
-              <section className="sv-panel p-5">
+            <aside className="upload-guidance space-y-4">
+              <section className="sv-panel p-5 upload-guardrails-panel">
                 <h2 className="sv-section-title">Ingestion guardrails</h2>
                 <div className="mt-4 space-y-3">
                   <Guardrail icon={<CheckCircle2 size={16} />} title="Access scope" detail="Documents inherit the owner space and optional shared spaces for retrieval filtering." />
@@ -565,7 +565,7 @@ function isClearableUploadItem(item: UploadBatchItemView) {
 
 function Guardrail({ detail, icon, title }: { detail: string; icon: JSX.Element; title: string }) {
   return (
-    <div className="rounded-lg border border-surface-border bg-surface-container-low p-3">
+    <div className="upload-guardrail">
       <div className="flex items-center gap-2 text-body-md font-bold text-on-surface"><span className="text-primary">{icon}</span>{title}</div>
       <p className="mt-1 text-body-md text-on-surface-variant">{detail}</p>
     </div>

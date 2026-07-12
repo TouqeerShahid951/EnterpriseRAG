@@ -4,15 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol
 
 from ..shared.contracts.clearance import ClearanceLevel
-from .ingest_job_models import (
-    IngestAttemptResult as IngestAttemptResult,
-    IngestJobCancellationResult as IngestJobCancellationResult,
-    IngestJobMutationResult as IngestJobMutationResult,
-    IngestJobRecord as IngestJobRecord,
-)
+from .ingest_job_models import IngestJobRecord as IngestJobRecord
 
 
 @dataclass(frozen=True)
@@ -181,6 +176,13 @@ class ImageReviewDecisionRecord:
     batch_complete: bool = False
 
 
+class ImageReviewBatchClosedError(RuntimeError):
+    def __init__(self, batch_id: str, status: str) -> None:
+        self.batch_id = batch_id
+        self.status = status
+        super().__init__(f"image review batch {batch_id} is {status}")
+
+
 @dataclass(frozen=True)
 class DocumentImageAssetRecord:
     id: str
@@ -201,7 +203,6 @@ class DocumentImageAssetRecord:
     created_at: datetime | None
 
 
-@runtime_checkable
 class HumanReviewRepository(Protocol):
     def create_review_batch(
         self,
@@ -222,15 +223,9 @@ class HumanReviewRepository(Protocol):
         corrected_text: str,
         reviewer_id: str,
     ) -> ReviewDecisionRecord | None: ...
-    def reject_review_item(
-        self,
-        item_id: str,
-        *,
-        reviewer_id: str,
-    ) -> ReviewDecisionRecord | None: ...
+    def reject_review_item(self, item_id: str, *, reviewer_id: str) -> ReviewDecisionRecord | None: ...
 
 
-@runtime_checkable
 class ImageReviewRepository(Protocol):
     def create_image_review_batch(
         self,
@@ -242,21 +237,14 @@ class ImageReviewRepository(Protocol):
         candidates: list[dict[str, Any]],
     ) -> ImageReviewBatchRecord: ...
     def get_image_review_batch(self, batch_id: str) -> ImageReviewBatchRecord | None: ...
-    def list_image_review_batches(
-        self,
-        *,
-        status: str = "pending",
-    ) -> list[ImageReviewBatchRecord]: ...
+    def list_image_review_batches(self, *, status: str = "pending") -> list[ImageReviewBatchRecord]: ...
     def list_image_review_candidates_for_batch(
         self,
         batch_id: str,
         *,
         status: str | None = None,
     ) -> list[ImageReviewCandidateRecord]: ...
-    def get_image_review_candidate(
-        self,
-        candidate_id: str,
-    ) -> ImageReviewCandidateRecord | None: ...
+    def get_image_review_candidate(self, candidate_id: str) -> ImageReviewCandidateRecord | None: ...
     def apply_image_review_decisions(
         self,
         batch_id: str,
@@ -267,14 +255,12 @@ class ImageReviewRepository(Protocol):
         approve_recommended: bool = False,
         skip_remaining: bool = False,
     ) -> ImageReviewDecisionRecord | None: ...
-    def get_image_review_approved_keys(self, batch_id: str) -> list[str]: ...
 
 
 class DocumentRepository(Protocol):
     def create_document(self, **kwargs: Any) -> DocumentRecord: ...
     def list_documents(self, *, state: Literal["active", "deleted"] = "active") -> list[DocumentRecord]: ...
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None: ...
-    def list_document_shares(self, document_id: str) -> list[str]: ...
     def replace_document_shares(
         self,
         document_id: str,
@@ -290,7 +276,6 @@ class DocumentRepository(Protocol):
         shared_group_paths: list[str],
         actor_id: str | None,
     ) -> DocumentRecord | None: ...
-    def remove_document_share(self, document_id: str, group_path: str) -> DocumentRecord | None: ...
     def update_document_clearance(self, document_id: str, clearance_level: ClearanceLevel) -> DocumentRecord | None: ...
     def update_document_topics(
         self,
@@ -298,14 +283,6 @@ class DocumentRepository(Protocol):
         *,
         topics: list[str],
         llm_topics: list[str],
-    ) -> DocumentRecord | None: ...
-    def mark_document_stale(
-        self,
-        document_id: str,
-        *,
-        source_deleted: bool = True,
-        retrieval_status: str = "stale",
-        reason: str = "source_deleted",
     ) -> DocumentRecord | None: ...
     def save_document_metadata(
         self,
@@ -328,7 +305,6 @@ class DocumentRepository(Protocol):
     def soft_delete_document(self, document_id: str) -> DocumentRecord | None: ...
     def restore_document(self, document_id: str) -> DocumentRecord | None: ...
     def permanently_delete_document(self, document_id: str) -> DocumentRecord | None: ...
-    def cancel_review_batch_for_job(self, job_id: str) -> int: ...
     def mark_superseded(self, *, new_doc_id: str, old_doc_ids: list[str]) -> list[DocumentRecord]: ...
     def list_version_chain(self, document_id: str) -> list[DocumentRecord]: ...
     def list_superseded_document_ids(self, document_id: str) -> list[str]: ...

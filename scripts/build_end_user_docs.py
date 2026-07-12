@@ -5,14 +5,13 @@ from pathlib import Path
 from typing import Iterable
 
 from docx import Document
-from docx.enum.section import WD_SECTION
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
@@ -20,7 +19,6 @@ from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
     KeepTogether,
-    NextPageTemplate,
     PageBreak,
     PageTemplate,
     Paragraph,
@@ -44,7 +42,6 @@ DARK_BLUE = RGBColor(31, 77, 120)
 INK = RGBColor(28, 37, 48)
 MUTED = RGBColor(91, 103, 112)
 LIGHT_BLUE = "E8EEF5"
-LIGHT_GRAY = "F2F4F7"
 NOTE_FILL = "F4F6F9"
 CAUTION_FILL = "FFF6D8"
 
@@ -69,6 +66,7 @@ FEATURE_ROWS = [
     FeatureRow("Database Connectors", "Approve SQL Server or PostgreSQL scopes for live read-only answers.", "Corpus > Document Intake > Database Connectors"),
     FeatureRow("Review Queue", "Resolve OCR blocks and PDF image-analysis holds before indexing continues.", "Evaluate > Review Queue"),
     FeatureRow("System Audit", "Review visible authentication, document, and ingestion activity.", "Govern > System Audit"),
+    FeatureRow("User Management", "Create users, reset passwords, assign account types, spaces, and clearance when permitted.", "Govern > User Management"),
     FeatureRow("Runtime Settings", "Assign inference roles, tune services, and manage ingestion controls.", "Govern > Runtime Settings"),
 ]
 

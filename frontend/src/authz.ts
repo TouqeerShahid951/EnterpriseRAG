@@ -9,7 +9,7 @@ export const accountTypeOptions: AccountType[] = [
   "member",
 ];
 
-export const clearanceLevelOptions: ClearanceLevel[] = [
+const clearanceLevelOptions: ClearanceLevel[] = [
   "NATO_UNCLASSIFIED",
   "NATO_RESTRICTED",
   "NATO_CONFIDENTIAL",
@@ -54,7 +54,7 @@ export function clearanceLevelDescription(clearanceLevel: ClearanceLevel): strin
   }[clearanceLevel];
 }
 
-export function clearanceRank(clearanceLevel: ClearanceLevel): number {
+function clearanceRank(clearanceLevel: ClearanceLevel): number {
   return clearanceRanks.get(clearanceLevel) ?? 0;
 }
 

@@ -238,10 +238,6 @@ def should_call_llm_verifier(result: RuleRouteResult) -> bool:
     return result.confidence < RULE_ACCEPT_CONFIDENCE or result.margin < INTENT_MARGIN_THRESHOLD
 
 
-def is_rule_route_accepted(result: RuleRouteResult) -> bool:
-    return result.confidence >= RULE_ACCEPT_CONFIDENCE and result.margin >= INTENT_MARGIN_THRESHOLD
-
-
 def _has_unambiguous_explicit_date_route(result: RuleRouteResult) -> bool:
     return (
         result.intent in {"temporal", "temporal_factual"}

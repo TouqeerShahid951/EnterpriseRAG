@@ -12,6 +12,7 @@ export function CorpusRail({
   loadErrorMessage,
   loading,
   loadingSessionId,
+  mobile = false,
   onCollapsedChange,
   onDeleteSession,
   onLoadSession,
@@ -154,8 +155,8 @@ export function CorpusRail({
   }
 
   return (
-    <aside className="rag-corpus-rail" aria-label="Conversations">
-      <CorpusRailHeader count={savedSessionsTotal} onCollapse={() => onCollapsedChange(true)} />
+    <aside className={mobile ? "rag-corpus-rail rag-corpus-rail-mobile" : "rag-corpus-rail"} aria-label="Conversations">
+      <CorpusRailHeader count={savedSessionsTotal} mobile={mobile} onCollapse={() => onCollapsedChange(true)} />
       <CorpusRailContent
         activeSessionId={activeSessionId}
         errorMessage={errorMessage}
@@ -175,7 +176,7 @@ export function CorpusRail({
   );
 }
 
-function CorpusRailHeader({ closeRef, count, onClose, onCollapse }: CorpusRailHeaderProps) {
+function CorpusRailHeader({ closeRef, count, mobile = false, onClose, onCollapse }: CorpusRailHeaderProps) {
   const drawer = Boolean(onClose);
   return (
     <div className="rag-corpus-header">
@@ -191,10 +192,10 @@ function CorpusRailHeader({ closeRef, count, onClose, onCollapse }: CorpusRailHe
           type="button"
           onClick={onCollapse}
           className="rag-history-header-action"
-          aria-label={drawer ? "Expand chat history rail" : "Collapse chat history"}
-          title={drawer ? "Expand rail" : "Collapse history"}
+          aria-label={mobile ? "Close chat history" : drawer ? "Expand chat history rail" : "Collapse chat history"}
+          title={mobile ? "Close history" : drawer ? "Expand rail" : "Collapse history"}
         >
-          {drawer ? <PanelLeftOpen size={16} aria-hidden="true" /> : <PanelLeftClose size={16} aria-hidden="true" />}
+          {mobile ? <X size={16} aria-hidden="true" /> : drawer ? <PanelLeftOpen size={16} aria-hidden="true" /> : <PanelLeftClose size={16} aria-hidden="true" />}
         </button>
         {onClose ? (
           <button ref={closeRef} type="button" onClick={onClose} className="rag-history-header-action" aria-label="Close chat history" title="Close">
@@ -347,6 +348,7 @@ type Props = {
   loadErrorMessage: string | null;
   loading: boolean;
   loadingSessionId: string | null;
+  mobile?: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
   onDeleteSession: (sessionId: string) => void;
   onLoadSession: (sessionId: string) => void;
@@ -363,6 +365,7 @@ type ContentProps = Omit<Props, "collapsed" | "onCollapsedChange" | "savedSessio
 type CorpusRailHeaderProps = {
   closeRef?: RefObject<HTMLButtonElement>;
   count: number;
+  mobile?: boolean;
   onClose?: () => void;
   onCollapse: () => void;
 };

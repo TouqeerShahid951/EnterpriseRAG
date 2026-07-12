@@ -1,8 +1,10 @@
 from itertools import islice
+from types import SimpleNamespace
 from time import perf_counter
 
 from rag.auth.context import UserContext
-from rag.query.query_stream import stream_graph
+from rag.query.qdrant import SearchHit
+from rag.query.query_stream import _stream_response_tail, _stream_synthesizer, stream_graph
 from rag.query.routing_models import RoutePlan
 from rag.query.state import QueryContext, initial_state
 from rag.schemas.query import QueryRequest
@@ -35,6 +37,56 @@ class FakeStreamNodes:
         return ctx
 
 
+class FakeStreamingLlm:
+    def __init__(self, chunks: list[str]) -> None:
+        self.chunks = chunks
+
+    def stream_answer(self, **_: object):
+        yield from self.chunks
+
+
+class FakeSynthesizerNodes:
+    def __init__(self, chunks: list[str]) -> None:
+        self.ollama = FakeStreamingLlm(chunks)
+        self.config = SimpleNamespace(
+            rag_defer_faithfulness=False,
+            rag_faithfulness_threshold=0.7,
+        )
+
+    def faithfulness_checker(self, ctx: QueryContext) -> QueryContext:
+        return ctx
+
+    def artifact_generator(self, ctx: QueryContext) -> QueryContext:
+        return ctx
+
+    def response_serializer(self, ctx: QueryContext) -> QueryContext:
+        return ctx
+
+
+def context_with_evidence() -> QueryContext:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="What is finding A?"),
+        user=UserContext(user_id="user", email="user@example.com", group_paths=("/admin",)),
+        started=perf_counter(),
+    )
+    ctx["retrieved_hits"] = [
+        SearchHit(
+            point_id="report-a:1",
+            score=0.9,
+            payload={
+                "doc_id": "report-a",
+                "chunk_id": "report-a:1",
+                "doc_title": "Report A.pdf",
+                "text": "Finding A.",
+                "page": 1,
+            },
+        )
+    ]
+    return ctx
+
+
 def test_stream_graph_runs_source_resolver_before_intent_router() -> None:
     ctx = initial_state(
         trace_id="trace",
@@ -54,3 +106,28 @@ def test_stream_graph_runs_source_resolver_before_intent_router() -> None:
         {"node": "intent_router"},
     ]
     assert nodes.calls == ["session_memory", "source_resolver", "intent_router"]
+
+
+def test_stream_synthesizer_defers_non_prefix_citation_rewrite_to_done() -> None:
+    ctx = context_with_evidence()
+    nodes = FakeSynthesizerNodes(["Finding A ", "[wrong:source]."])
+
+    events = list(_stream_synthesizer(ctx, nodes))
+    events.extend(_stream_response_tail(ctx, nodes))
+
+    token_text = "".join(str(event.data["text"]) for event in events if event.event == "token")
+    done = next(event for event in events if event.event == "done")
+    assert token_text == "Finding A [wrong:source]."
+    assert done.data["answer"] == "Finding A. [report-a:1]"
+    assert ctx["response"].answer == done.data["answer"]
+
+
+def test_stream_synthesizer_emits_append_only_citation_suffix() -> None:
+    ctx = context_with_evidence()
+    nodes = FakeSynthesizerNodes(["Finding A."])
+
+    events = list(_stream_synthesizer(ctx, nodes))
+
+    token_texts = [event.data["text"] for event in events if event.event == "token"]
+    assert token_texts == ["Finding A.", " [report-a:1]"]
+    assert "".join(str(text) for text in token_texts) == ctx["response"].answer

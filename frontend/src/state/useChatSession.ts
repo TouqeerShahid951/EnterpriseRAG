@@ -474,14 +474,10 @@ export function updateChatSessionTurns(cache: ChatSessionTurnCache, sessionId: s
   return { ...cache, [sessionId]: updater(cache[sessionId] ?? []) };
 }
 
-export function removeCachedSession(cache: ChatSessionTurnCache, sessionId: string): ChatSessionTurnCache {
+function removeCachedSession(cache: ChatSessionTurnCache, sessionId: string): ChatSessionTurnCache {
   if (!(sessionId in cache)) return cache;
   const { [sessionId]: _removed, ...remaining } = cache;
   return remaining;
-}
-
-export function isGeneratingSession(sessionId: string, generation: ActiveGeneration | null): boolean {
-  return generation?.sessionId === sessionId;
 }
 
 function upsertLocalSessionSummary(summaries: SavedChatSessionSummary[], summary: SavedChatSessionSummary): SavedChatSessionSummary[] {

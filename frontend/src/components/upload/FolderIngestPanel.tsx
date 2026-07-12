@@ -25,15 +25,6 @@ import { formatFileSize } from "../../state/pdfUploadBatch";
 import type { ClearanceLevel, ConnectorProfile, ConnectorSchemaCatalog, ConnectorSchemaCatalogStatus, ConnectorSchemaSnapshot, ConnectorTestResponse, ConnectorType, FolderRun, FolderSchedule, FolderScheduleStatus, User as AuthUser } from "../../types/api";
 import { errorMessage } from "../../utils/format";
 
-const dayOptions = [
-  { value: 0, label: "Mon" },
-  { value: 1, label: "Tue" },
-  { value: 2, label: "Wed" },
-  { value: 3, label: "Thu" },
-  { value: 4, label: "Fri" },
-  { value: 5, label: "Sat" },
-  { value: 6, label: "Sun" },
-];
 
 const folderInputAttributes = { webkitdirectory: "", directory: "" };
 
@@ -59,7 +50,6 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
   const [draft, setDraft] = useState<FolderScheduleDraft>(() => defaultFolderScheduleDraftForVariant("", variant));
   const [profileDraft, setProfileDraft] = useState<ConnectorProfileDraft>(() => defaultProfileDraft());
   const [connectorSetupOpen, setConnectorSetupOpen] = useState(false);
-  const [connectorStep, setConnectorStep] = useState<ConnectorSetupStep>("connection");
   const [connectorWorkspaceTab, setConnectorWorkspaceTab] = useState<ConnectorWorkspaceTab>("connections");
   const [profileEditor, setProfileEditor] = useState<ConnectorProfileEditorState | null>(null);
   const [catalogEditor, setCatalogEditor] = useState<ConnectorCatalogEditorState | null>(null);
@@ -104,7 +94,6 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
       setDraft((current) => ({ ...current, name: "", folderPath: "", connectorQuery: "", connectorIdentityFields: "" }));
       if (isConnectorPanel) {
         setConnectorSetupOpen(false);
-        setConnectorStep("connection");
       }
       void queryClient.invalidateQueries({ queryKey: ["folder-ingest", "schedules"] });
     },
@@ -285,13 +274,6 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
     setSelectedFiles((current) => current.filter((item) => item !== file));
   }
 
-  function toggleDay(day: number) {
-    const next = draft.recurrenceDays.includes(day)
-      ? draft.recurrenceDays.filter((value) => value !== day)
-      : [...draft.recurrenceDays, day].sort();
-    patchDraft({ recurrenceDays: next });
-  }
-
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const validation = validateDraft(draft, selection, writableSpacePaths);
@@ -341,17 +323,6 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
     setDeleteProfileConfirm(null);
   }
 
-  function handleConnectorSelectionContinue(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const validation = validateConnectorSelectionDraft(draft);
-    if (validation) {
-      setFormError(validation);
-      return;
-    }
-    setFormError(null);
-    setConnectorStep("schedule");
-  }
-
   const isSubmitting = createMutation.isPending;
   const visibleSchedules = (schedulesQuery.data?.items ?? []).filter((schedule) => isScheduleVisibleForPanelVariant(schedule.source_type, variant));
   const connectorProfiles = profilesQuery.data?.items ?? [];
@@ -379,10 +350,9 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
   const scheduleLoadError = "Unable to load folder schedules.";
   const createError = "Unable to create folder ingestion schedule.";
 
-  function openConnectorSetup(step: ConnectorSetupStep) {
+  function openConnectorSetup() {
     setFormError(null);
     setProfileError(null);
-    setConnectorStep(step);
     setConnectorSetupOpen(true);
   }
 
@@ -714,7 +684,7 @@ function ConnectorOverview({
           <p className="connector-workflow-path">Connect / Review schema / Enable Live DB</p>
         </div>
         <div className="connector-workflow-actions">
-          <button type="button" onClick={() => onStartSetup("connection")} className="sv-action-primary">
+          <button type="button" onClick={onStartSetup} className="sv-action-primary">
             <Plus size={16} />
             Add Connection
           </button>
@@ -1066,196 +1036,6 @@ function ConnectorDiagnosticsPanel({ catalogsByProfile, connectorProfiles, isErr
   );
 }
 
-function ConnectorSetupFlow({
-  activeStep,
-  clearanceOptions,
-  connectorProfiles,
-  createError,
-  createMutation,
-  draft,
-  formError,
-  groupsLoading,
-  onConnectorSelectionContinue,
-  onDraftChange,
-  onClose,
-  onProfileAction,
-  onProfileChange,
-  onProfileSubmit,
-  onStepChange,
-  onSubmit,
-  onToggleDay,
-  pendingProfileActionId,
-  pendingProfileActionType,
-  profileDraft,
-  profileError,
-  profileMutationError,
-  profilesCreating,
-  profilesLoading,
-  submittingLabel,
-  submitLabel,
-  writableSpacePaths,
-}: ConnectorSetupFlowProps) {
-  const isSubmitting = createMutation.isPending;
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-surface-border bg-surface-container-low p-4">
-        <div>
-          <p className="sv-label">Setup flow</p>
-          <p className="mt-1 text-body-md text-on-surface-variant">Add a connection profile, inspect the schema, and approve database access for Live DB answers.</p>
-        </div>
-        <button type="button" onClick={onClose} className="sv-action-secondary">
-          <ChevronRight className="rotate-180" size={16} />
-          Back to overview
-        </button>
-      </div>
-      <ConnectorStepNav
-        activeStep={activeStep}
-        profileCount={connectorProfiles.length}
-        onChange={onStepChange}
-      />
-
-      {activeStep === "connection" ? (
-        <div className="space-y-4">
-          <ConnectorProfilePanel
-            draft={profileDraft}
-            error={profileError}
-            isCreating={profilesCreating}
-            isLoading={profilesLoading}
-            mutationError={profileMutationError}
-            onChange={onProfileChange}
-            onSubmit={onProfileSubmit}
-            onProfileAction={onProfileAction}
-            pendingActionId={pendingProfileActionId}
-            pendingActionType={pendingProfileActionType}
-            profiles={connectorProfiles}
-          />
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-surface-border bg-surface-container-low p-4">
-            <p className="max-w-3xl text-body-md text-on-surface-variant">
-              Save a profile once, then reuse it for multiple read-only database sync schedules.
-            </p>
-            <button
-              type="button"
-              disabled={connectorProfiles.length === 0}
-              onClick={() => onStepChange("selection")}
-              className="sv-action-secondary disabled:opacity-50"
-            >
-              Continue to data selection
-              <ChevronRight size={16} />
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {activeStep === "selection" ? (
-        <form onSubmit={onConnectorSelectionContinue} className="space-y-5">
-          <ConnectorDataSelectionFields
-            draft={draft}
-            profiles={connectorProfiles}
-            profilesLoading={profilesLoading}
-            onChange={onDraftChange}
-          />
-          {formError ? <InlineMessage tone="warning">{formError}</InlineMessage> : null}
-          <ConnectorStepFooter
-            backLabel="Back to connection"
-            nextLabel="Continue to schedule"
-            onBack={() => onStepChange("connection")}
-          />
-        </form>
-      ) : null}
-
-      {activeStep === "schedule" ? (
-        <form onSubmit={onSubmit} className="space-y-5">
-          <ConnectorReviewSummary draft={draft} profiles={connectorProfiles} />
-          <ConnectorAdvancedSyncSettings draft={draft} onChange={onDraftChange} />
-          <ScheduleGovernanceFields
-            clearanceOptions={clearanceOptions}
-            draft={draft}
-            groupsLoading={groupsLoading}
-            onChange={onDraftChange}
-            writableSpacePaths={writableSpacePaths}
-          />
-          {draft.scheduleType === "one_time" ? (
-            <label className="sv-field">
-              <span className="sv-label">Start Time ({WORKSPACE_TIMEZONE})</span>
-              <input type="datetime-local" value={draft.scheduledAt} onChange={(event) => onDraftChange({ scheduledAt: event.target.value })} className="sv-input" />
-              <small className="text-secondary">Queue this one-time run at the selected local time.</small>
-            </label>
-          ) : (
-            <RecurringWindowFields draft={draft} onChange={onDraftChange} onToggleDay={onToggleDay} />
-          )}
-          <label className="sv-field">
-            <span className="sv-label">Description</span>
-            <textarea value={draft.description} onChange={(event) => onDraftChange({ description: event.target.value })} placeholder="Optional context for synced database records" className="sv-input min-h-20" />
-            <small className="text-secondary">Shared context attached to every synced connector record.</small>
-          </label>
-          {formError ? <InlineMessage tone="warning">{formError}</InlineMessage> : null}
-          {createMutation.isError ? <InlineMessage tone="error">{errorMessage(createMutation.error, createError)}</InlineMessage> : null}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <button type="button" onClick={() => onStepChange("selection")} className="sv-action-secondary">
-              <ChevronRight className="rotate-180" size={16} />
-              Back to data selection
-            </button>
-            <button type="submit" disabled={isSubmitting || writableSpacePaths.length === 0} className="sv-action-primary">
-              {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <CalendarClock size={18} />}
-              {isSubmitting ? submittingLabel : submitLabel}
-            </button>
-          </div>
-        </form>
-      ) : null}
-
-    </div>
-  );
-}
-
-function ConnectorStepNav({ activeStep, onChange, profileCount }: ConnectorStepNavProps) {
-  const steps: Array<{ id: ConnectorSetupStep; label: string; detail: string; meta?: string }> = [
-    { id: "connection", label: "Connection", detail: "Profiles and health", meta: `${profileCount} saved` },
-    { id: "selection", label: "Data Selection", detail: "Profile, query, identity" },
-    { id: "schedule", label: "Schedule", detail: "Security and timing" },
-  ];
-  return (
-    <div className="grid gap-2 md:grid-cols-3" aria-label="Database connector setup steps">
-      {steps.map((step, index) => {
-        const isActive = activeStep === step.id;
-        return (
-          <button
-            key={step.id}
-            type="button"
-            aria-current={isActive ? "step" : undefined}
-            onClick={() => onChange(step.id)}
-            className={`rounded-lg border p-3 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
-              isActive
-                ? "border-surface-border bg-surface-container-high shadow-sm"
-                : "border-surface-border bg-surface-container-low hover:bg-surface-container-high"
-            }`}
-          >
-            <span className="flex items-center justify-between gap-2">
-              <span className={`text-label-md font-extrabold uppercase tracking-wide ${isActive ? "text-on-surface" : "text-secondary"}`}>Step {index + 1}</span>
-              {step.meta ? <span className="sv-pill">{step.meta}</span> : null}
-            </span>
-            <strong className="mt-2 block text-body-md text-on-surface">{step.label}</strong>
-            <span className="mt-0.5 block text-label-md text-on-surface-variant">{step.detail}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function ConnectorStepFooter({ backLabel, nextLabel, onBack }: ConnectorStepFooterProps) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <button type="button" onClick={onBack} className="sv-action-secondary">
-        <ChevronRight className="rotate-180" size={16} />
-        {backLabel}
-      </button>
-      <button type="submit" className="sv-action-primary">
-        {nextLabel}
-        <ChevronRight size={16} />
-      </button>
-    </div>
-  );
-}
 
 function ConnectorProfilePanel({
   draft,
@@ -2370,178 +2150,6 @@ function SchemaReviewStat({ label, value }: SchemaReviewMetricProps) {
   );
 }
 
-function ConnectorDataSelectionFields({ draft, onChange, profiles, profilesLoading }: ConnectorDataSelectionFieldsProps) {
-  return (
-    <section className="rounded-lg border border-surface-border bg-surface-container-low p-4">
-      <div className="mb-4">
-        <p className="sv-label">Data selection</p>
-        <p className="mt-1 max-w-3xl text-body-md text-on-surface-variant">
-          Choose the saved connection, then define exactly which read-only records the scheduler should fetch.
-        </p>
-      </div>
-      <div className="grid items-start gap-4 md:grid-cols-2">
-      <label className="sv-field">
-        <span className="sv-label">Connector Profile</span>
-        <select value={draft.connectorProfileId} onChange={(event) => onChange({ connectorProfileId: event.target.value })} className="sv-select">
-          <option value="">{profilesLoading ? "Loading profiles" : "Select profile"}</option>
-          {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} ({connectorTypeLabel(profile.connector_type)})</option>)}
-        </select>
-        <small className="text-secondary">Choose a saved SQL Server or PostgreSQL profile.</small>
-      </label>
-      <label className="sv-field">
-        <span className="sv-label">Identity Fields</span>
-        <input value={draft.connectorIdentityFields} onChange={(event) => onChange({ connectorIdentityFields: event.target.value })} placeholder="id, updated_at" className="sv-input" />
-        <small className="text-secondary">Comma-separated stable fields used for source identity.</small>
-      </label>
-      <label className="sv-field md:col-span-2">
-        <span className="sv-label">Read-only SQL Selection</span>
-        <textarea value={draft.connectorQuery} onChange={(event) => onChange({ connectorQuery: event.target.value })} placeholder="SELECT id, fir_number, status, updated_at FROM dbo.FIRReports" className="sv-input min-h-28 font-mono text-sm" />
-        <small className="text-secondary">Only one SELECT or WITH statement is accepted by the backend.</small>
-      </label>
-      </div>
-    </section>
-  );
-}
-
-function ConnectorAdvancedSyncSettings({ draft, onChange }: ConnectorAdvancedSyncSettingsProps) {
-  return (
-    <details className="rounded-lg border border-surface-border bg-surface-container-low p-4">
-      <summary className="cursor-pointer text-label-md font-bold text-on-surface">Advanced sync settings</summary>
-      <p className="mt-2 max-w-3xl text-body-md text-on-surface-variant">
-        The scheduler fetches records and sends them through indexing either way. These settings only control how each row is prepared, how missing rows are handled, and how much work a run can take.
-      </p>
-      <div className="mt-3 grid gap-4 md:grid-cols-2">
-        <SelectField
-          label="Record Preparation"
-          value={draft.connectorIngestionMode}
-          onChange={(value) => onChange({ connectorIngestionMode: value as FolderScheduleDraft["connectorIngestionMode"] })}
-          options={["json_snapshot", "direct_chunks"]}
-          optionLabels={{
-            json_snapshot: "Structured JSON snapshot (recommended)",
-            direct_chunks: "Direct searchable chunks (advanced)",
-          }}
-          helper="Structured snapshots preserve the row data before the normal ingestion pipeline chunks and indexes it."
-        />
-        <SelectField
-          label="Missing Record Handling"
-          value={draft.connectorDeletionPolicy}
-          onChange={(value) => onChange({ connectorDeletionPolicy: value as FolderScheduleDraft["connectorDeletionPolicy"] })}
-          options={["keep_deleted_documents", "mark_as_stale", "archive_from_retrieval", "delete_from_index_after_review"]}
-          optionLabels={{
-            keep_deleted_documents: "Keep deleted documents",
-            mark_as_stale: "Mark as stale",
-            archive_from_retrieval: "Archive from retrieval",
-            delete_from_index_after_review: "Delete after admin review",
-          }}
-          helper="Missing records are kept but marked stale unless an explicit removal workflow is configured."
-        />
-        <label className="sv-field">
-          <span className="sv-label">Batch Size</span>
-          <input type="number" min={1} max={5000} value={draft.connectorBatchSize} onChange={(event) => onChange({ connectorBatchSize: Number(event.target.value) })} className="sv-input" />
-        </label>
-        <label className="sv-field">
-          <span className="sv-label">Row Limit</span>
-          <input type="number" min={1} max={1000000} value={draft.connectorRowLimit} onChange={(event) => onChange({ connectorRowLimit: Number(event.target.value) })} className="sv-input" />
-        </label>
-      </div>
-    </details>
-  );
-}
-
-function ConnectorReviewSummary({ draft, profiles }: ConnectorReviewSummaryProps) {
-  const selectedProfile = profiles.find((profile) => profile.id === draft.connectorProfileId);
-  return (
-    <section className="rounded-lg border border-surface-border bg-surface-container-low p-4">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="sv-label">Review selection</p>
-          <p className="mt-1 text-body-md text-on-surface-variant">Confirm the profile and record identity before scheduling the sync.</p>
-        </div>
-        <span className="sv-pill">{draft.connectorIngestionMode === "json_snapshot" ? "Structured snapshot" : "Direct chunks"}</span>
-      </div>
-      <dl className="grid gap-3 text-body-md sm:grid-cols-3">
-        <div>
-          <dt className="text-label-md font-bold uppercase tracking-wide text-secondary">Profile</dt>
-          <dd className="mt-0.5 text-on-surface">{selectedProfile ? `${selectedProfile.name} (${connectorTypeLabel(selectedProfile.connector_type)})` : "Not selected"}</dd>
-        </div>
-        <div>
-          <dt className="text-label-md font-bold uppercase tracking-wide text-secondary">Identity</dt>
-          <dd className="mt-0.5 text-on-surface">{identityFieldsFromDraft(draft.connectorIdentityFields).join(", ") || "Missing"}</dd>
-        </div>
-        <div>
-          <dt className="text-label-md font-bold uppercase tracking-wide text-secondary">Row Limit</dt>
-          <dd className="mt-0.5 text-on-surface">{draft.connectorRowLimit.toLocaleString()}</dd>
-        </div>
-      </dl>
-    </section>
-  );
-}
-
-function ScheduleGovernanceFields({ clearanceOptions, draft, groupsLoading, onChange, writableSpacePaths }: ScheduleGovernanceFieldsProps) {
-  return (
-    <section className="rounded-lg border border-surface-border bg-surface-container-low p-4">
-      <div className="mb-4">
-        <p className="sv-label">Schedule and access</p>
-        <p className="mt-1 text-body-md text-on-surface-variant">Apply one Knowledge Space and clearance level to every record in this schedule.</p>
-      </div>
-      <div className="grid items-start gap-4 md:grid-cols-2">
-        <label className="sv-field">
-          <span className="sv-label">Schedule Name</span>
-          <input value={draft.name} onChange={(event) => onChange({ name: event.target.value })} placeholder="Case records nightly sync" className="sv-input" />
-          <small className="text-secondary">Used to identify this sync in activity history.</small>
-        </label>
-        <SelectField label="Knowledge Space" value={draft.groupPath} onChange={(value) => onChange({ groupPath: value })} options={["", ...writableSpacePaths]} emptyLabel={groupsLoading ? "Loading spaces" : "Select ingestion space"} helper="Records inherit this space for retrieval filtering." />
-        <ClearanceSelect value={draft.clearanceLevel} onChange={(clearanceLevel) => onChange({ clearanceLevel })} options={clearanceOptions} />
-        <label className="sv-field">
-          <span className="sv-label">Effective Date <span className="font-normal text-secondary">(optional)</span></span>
-          <input type="date" value={draft.effectiveDate} onChange={(event) => onChange({ effectiveDate: event.target.value })} className="sv-input" />
-          <small className="text-secondary">Optional start date applied to synced records.</small>
-        </label>
-        <label className="sv-field">
-          <span className="sv-label">Expiry Date</span>
-          <input type="date" value={draft.expiryDate} onChange={(event) => onChange({ expiryDate: event.target.value })} className="sv-input" />
-          <small className="text-secondary">Leave blank unless these records should expire from current use.</small>
-        </label>
-        <SelectField
-          label="Schedule Type"
-          value={draft.scheduleType}
-          onChange={(value) => onChange({ scheduleType: value as FolderScheduleDraft["scheduleType"] })}
-          options={["one_time", "recurring"]}
-          helper="One-time runs once; recurring follows the selected window."
-        />
-      </div>
-    </section>
-  );
-}
-
-function RecurringWindowFields({ draft, onChange, onToggleDay }: RecurringWindowFieldsProps) {
-  return (
-    <div className="grid items-start gap-4 rounded-lg border border-surface-border bg-surface-container-low p-4 md:grid-cols-[1fr_auto_auto]">
-      <fieldset>
-        <legend className="sv-label mb-2">Recurring Days</legend>
-        <div className="flex flex-wrap gap-2">
-          {dayOptions.map((day) => (
-            <label key={day.value} className="inline-flex items-center gap-2 rounded-md border border-surface-border bg-surface px-2.5 py-1.5 text-label-md font-bold text-on-surface">
-              <input type="checkbox" checked={draft.recurrenceDays.includes(day.value)} onChange={() => onToggleDay(day.value)} />
-              {day.label}
-            </label>
-          ))}
-        </div>
-        <small className="mt-2 block text-secondary">Choose the weekdays when this schedule may run.</small>
-      </fieldset>
-      <label className="sv-field">
-        <span className="sv-label">Window Start</span>
-        <input type="time" value={draft.recurrenceStartTime} onChange={(event) => onChange({ recurrenceStartTime: event.target.value })} className="sv-input" />
-        <small className="text-secondary">Earliest local time this recurring schedule may start.</small>
-      </label>
-      <label className="sv-field">
-        <span className="sv-label">Window End</span>
-        <input type="time" value={draft.recurrenceEndTime} onChange={(event) => onChange({ recurrenceEndTime: event.target.value })} className="sv-input" />
-        <small className="text-secondary">Latest local time this recurring schedule may run.</small>
-      </label>
-    </div>
-  );
-}
 
 function ScheduleListPanel({ emptyMessage, isError, isLoading, loadError, onAction, pendingActionId, pendingActionPending, schedules, title }: ScheduleListPanelProps) {
   return (
@@ -2826,13 +2434,6 @@ function validateDraft(draft: FolderScheduleDraft, selection: ReturnType<typeof 
     if (!draft.connectorQuery.trim()) return "Enter a read-only SQL selection.";
     if (identityFieldsFromDraft(draft.connectorIdentityFields).length === 0) return "Enter at least one stable identity field.";
   }
-  return null;
-}
-
-function validateConnectorSelectionDraft(draft: FolderScheduleDraft): string | null {
-  if (!draft.connectorProfileId) return "Select a database connection.";
-  if (!draft.connectorQuery.trim()) return "Enter a read-only SQL selection.";
-  if (identityFieldsFromDraft(draft.connectorIdentityFields).length === 0) return "Enter at least one stable identity field.";
   return null;
 }
 
@@ -3122,10 +2723,6 @@ function catalogSharedGroupPaths(catalog: ConnectorSchemaCatalog): string[] {
   return Array.isArray(raw) ? uniqueGroupPaths(raw.filter(isString)) : [];
 }
 
-function catalogAccessGroupPaths(catalog: ConnectorSchemaCatalog): string[] {
-  if (Array.isArray(catalog.access_group_paths) && catalog.access_group_paths.length) return uniqueGroupPaths(catalog.access_group_paths);
-  return uniqueGroupPaths([catalogOwnerGroupPath(catalog), ...catalogSharedGroupPaths(catalog)]);
-}
 
 function catalogScopeSummary(catalog: ConnectorSchemaCatalog): string {
   const owner = catalogOwnerGroupPath(catalog);
@@ -3142,16 +2739,6 @@ function catalogTimestamp(catalog: ConnectorSchemaCatalog): string {
   return catalog.updated_at ?? catalog.created_at ?? "";
 }
 
-function catalogStatus(value: string): ConnectorSchemaCatalogStatus {
-  return value === "reviewed" || value === "approved" || value === "disabled" ? value : "draft";
-}
-
-function catalogStatusLabel(value: string): string {
-  if (value === "approved") return "Enabled";
-  if (value === "reviewed") return "Reviewed";
-  if (value === "disabled") return "Disabled";
-  return "Draft";
-}
 
 function catalogAccessStateLabel(value: string): string {
   if (value === "approved") return "Enabled";
@@ -3389,7 +2976,6 @@ type Props = {
   writableSpacePaths: string[];
 };
 
-type ConnectorSetupStep = "connection" | "selection" | "schedule";
 type ConnectorWorkspaceTab = "connections" | "schema_reviews" | "live_access" | "diagnostics";
 type ConnectorMetricTone = "neutral" | "success" | "warning" | "danger";
 type ConnectorReviewTab = "summary" | "tables" | "joins" | "access" | "raw_schema";
@@ -3411,39 +2997,6 @@ type ProfileValidationOptions = {
   credentialsRequired: boolean;
 };
 
-type ConnectorSetupFlowProps = {
-  activeStep: ConnectorSetupStep;
-  clearanceOptions: ClearanceLevel[];
-  connectorProfiles: ConnectorProfile[];
-  createError: string;
-  createMutation: {
-    error: unknown;
-    isError: boolean;
-    isPending: boolean;
-  };
-  draft: FolderScheduleDraft;
-  formError: string | null;
-  groupsLoading: boolean;
-  onConnectorSelectionContinue: (event: FormEvent<HTMLFormElement>) => void;
-  onDraftChange: (patch: Partial<FolderScheduleDraft>) => void;
-  onClose: () => void;
-  onProfileAction: (action: "test" | "introspect", id: string) => void;
-  onProfileChange: (patch: Partial<ConnectorProfileDraft>) => void;
-  onProfileSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onStepChange: (step: ConnectorSetupStep) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onToggleDay: (day: number) => void;
-  pendingProfileActionId: string | null;
-  pendingProfileActionType: "test" | "introspect" | null;
-  profileDraft: ConnectorProfileDraft;
-  profileError: string | null;
-  profileMutationError: unknown;
-  profilesCreating: boolean;
-  profilesLoading: boolean;
-  submitLabel: string;
-  submittingLabel: string;
-  writableSpacePaths: string[];
-};
 
 type ConnectorProfileSetupProps = {
   connectorProfiles: ConnectorProfile[];
@@ -3485,7 +3038,7 @@ type ConnectorOverviewProps = {
   onProfileEditChange: (patch: Partial<ConnectorProfileDraft>) => void;
   onProfileEditSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onProfileAction: (action: "test" | "introspect", id: string) => void;
-  onStartSetup: (step: ConnectorSetupStep) => void;
+  onStartSetup: () => void;
   onTabChange: (tab: ConnectorWorkspaceTab) => void;
   pendingAiDraftProfileId: string | null;
   pendingDeleteProfileId: string | null;
@@ -3539,17 +3092,6 @@ type ConnectorDiagnosticsPanelProps = {
   pendingActionType: "test" | "introspect" | null;
 };
 
-type ConnectorStepNavProps = {
-  activeStep: ConnectorSetupStep;
-  onChange: (step: ConnectorSetupStep) => void;
-  profileCount: number;
-};
-
-type ConnectorStepFooterProps = {
-  backLabel: string;
-  nextLabel: string;
-  onBack: () => void;
-};
 
 type ConnectorProfilePanelProps = {
   draft: ConnectorProfileDraft;
@@ -3752,36 +3294,6 @@ type SchemaCatalogReviewStats = {
   totalTables: number;
 };
 
-type ConnectorDataSelectionFieldsProps = {
-  draft: FolderScheduleDraft;
-  onChange: (patch: Partial<FolderScheduleDraft>) => void;
-  profiles: ConnectorProfile[];
-  profilesLoading: boolean;
-};
-
-type ConnectorAdvancedSyncSettingsProps = {
-  draft: FolderScheduleDraft;
-  onChange: (patch: Partial<FolderScheduleDraft>) => void;
-};
-
-type ConnectorReviewSummaryProps = {
-  draft: FolderScheduleDraft;
-  profiles: ConnectorProfile[];
-};
-
-type ScheduleGovernanceFieldsProps = {
-  clearanceOptions: ClearanceLevel[];
-  draft: FolderScheduleDraft;
-  groupsLoading: boolean;
-  onChange: (patch: Partial<FolderScheduleDraft>) => void;
-  writableSpacePaths: string[];
-};
-
-type RecurringWindowFieldsProps = {
-  draft: FolderScheduleDraft;
-  onChange: (patch: Partial<FolderScheduleDraft>) => void;
-  onToggleDay: (day: number) => void;
-};
 
 type ScheduleListPanelProps = {
   emptyMessage: string;

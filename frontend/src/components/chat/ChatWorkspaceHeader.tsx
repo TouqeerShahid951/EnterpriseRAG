@@ -1,6 +1,6 @@
-import { Database } from "lucide-react";
+import { Database, MessageSquare } from "lucide-react";
 
-export function ChatWorkspaceHeader() {
+export function ChatWorkspaceHeader({ onOpenHistory, savedSessionsTotal }: HeaderProps) {
   return (
     <header className="rag-chat-header">
       <div>
@@ -10,9 +10,26 @@ export function ChatWorkspaceHeader() {
           Ask evidence-grounded questions across your Knowledge Space. Use @ to scope a query to specific documents.
         </p>
       </div>
+      <button
+        type="button"
+        className="rag-mobile-history-trigger"
+        data-chat-history-trigger
+        onClick={onOpenHistory}
+        aria-haspopup="dialog"
+        aria-label={`Open chat history, ${savedSessionsTotal} saved conversations`}
+      >
+        <MessageSquare size={16} aria-hidden="true" />
+        <span>History</span>
+        {savedSessionsTotal > 0 ? <small>{savedSessionsTotal > 99 ? "99+" : savedSessionsTotal}</small> : null}
+      </button>
     </header>
   );
 }
+
+type HeaderProps = {
+  onOpenHistory: () => void;
+  savedSessionsTotal: number;
+};
 
 export function ChatKnowledgeSpaceControl({ activeSpacePath, allowAllSpaces = false, documentCount, documentsLoading, onActiveSpaceChange, spaceSwitchDisabled, spaces }: Props) {
   const corpusText = documentsLoading ? "Loading docs" : `${documentCount} document${documentCount === 1 ? "" : "s"}`;

@@ -2,8 +2,8 @@ import type { QueryIntent, RagSseEvent, RAGResponse, SourceAnchor } from "../../
 import type { QueryNodeTiming } from "../../types/query";
 import { formatIntent } from "../../utils/format";
 
-export type QueryTrackerTimelineStatus = "running" | "complete" | "warning" | "error";
-export type QueryTrackerTimelineKind = "trace" | "intent" | "source" | "artifact" | "warning" | "error" | "done" | "verified";
+type QueryTrackerTimelineStatus = "running" | "complete" | "warning" | "error";
+type QueryTrackerTimelineKind = "trace" | "intent" | "source" | "artifact" | "warning" | "error" | "done" | "verified";
 
 export interface QueryTrackerTimelineItem {
   id: string;
@@ -185,7 +185,7 @@ export function markQueryTrackerCancelled(state: QueryTrackerState, receivedAt =
   };
 }
 
-export function labelForNode(node: string): string {
+function labelForNode(node: string): string {
   const labels: Record<string, string> = {
     abac_retriever: "Searching permitted documents",
     artifact_generator: "Preparing requested files",

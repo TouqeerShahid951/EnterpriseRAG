@@ -8,28 +8,85 @@ import re
 from ..schemas.query import ArtifactFormat
 
 
-GENERATION_VERB_RE = re.compile(r"\b(?:generate|create|make|export|download|draft|produce|prepare|build)\b", re.IGNORECASE)
+_GENERATION_VERBS = (
+    r"(?:generate|create|make|export|download|draft|produce|prepare|build)"
+)
+GENERATION_VERB_RE = re.compile(rf"\b{_GENERATION_VERBS}\b", re.IGNORECASE)
+DIRECT_GENERATION_REQUEST_RE = re.compile(
+    rf"""
+    ^\s*(?:
+        (?:please[\s,]+)?{_GENERATION_VERBS}\b
+        |(?:can|could|would|will)\s+you\s+(?:please\s+)?{_GENERATION_VERBS}\b
+        |(?:i\s+)?(?:want|need)\s+(?:you\s+)?to\s+{_GENERATION_VERBS}\b
+        |i(?:'d|\s+would)\s+like\s+(?:you\s+)?to\s+{_GENERATION_VERBS}\b
+        |(?:using|from|with|based\s+on)\b[^,;:]{{0,240}}[,;:]\s*
+            (?:please[\s,]+)?{_GENERATION_VERBS}\b
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+_OUTPUT_REQUEST_VERBS = r"(?:convert|give|provide|return|save|send)"
+DIRECT_OUTPUT_REQUEST_RE = re.compile(
+    rf"""
+    ^\s*(?:
+        (?:please[\s,]+)?{_OUTPUT_REQUEST_VERBS}\b
+        |(?:can|could|would|will)\s+you\s+(?:please\s+)?{_OUTPUT_REQUEST_VERBS}\b
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 OUTPUT_FORMAT_CONTEXT_RE = re.compile(
-    r"\b(?:as|in|to)\s+(?:a|an)?\s*(?:docx|word(?:\s+document)?|pptx|powerpoint|slides?|slide\s+deck|pdf)\b",
+    r"\b(?:as|in|into|to)\s+(?:a|an)?\s*(?:docx|word(?:\s+document)?|pptx|powerpoint|slides?|slide\s+deck|pdf)\b",
+    re.IGNORECASE,
+)
+PRESENTATION_SOFTWARE_CONTEXT_RE = re.compile(
+    r"\bpresentation\s+(?:api|component|framework|layer|logic|model|pattern|tier|view)\b",
+    re.IGNORECASE,
+)
+CONCRETE_FILE_FORMAT_RE = re.compile(
+    r"(?<!\.)\b(?:docx|word\s+document|pptx|powerpoint|slides?|slide\s+deck|pdf)\b",
+    re.IGNORECASE,
+)
+LEADING_OUTPUT_REQUEST_RE = re.compile(
+    rf"^\s*(?:please[\s,]+)?{_OUTPUT_REQUEST_VERBS}\s+(?:me\s+)?",
+    re.IGNORECASE,
+)
+TRAILING_OUTPUT_WRAPPER_RE = re.compile(
+    r"\b(?:as|in|into|to)\s+(?:a|an)?\s*$",
     re.IGNORECASE,
 )
 FORMAT_PATTERNS: tuple[tuple[ArtifactFormat, re.Pattern[str]], ...] = (
     ("docx", re.compile(r"(?<!\.)\b(?:docx|word(?:\s+document)?)\b", re.IGNORECASE)),
-    ("pptx", re.compile(r"(?<!\.)\b(?:pptx|powerpoint|slides?|slide\s+deck|presentation)\b", re.IGNORECASE)),
+    (
+        "pptx",
+        re.compile(
+            r"(?<!\.)\b(?:pptx|powerpoint|slides?|slide\s+deck|presentation)\b",
+            re.IGNORECASE,
+        ),
+    ),
     ("pdf", re.compile(r"(?<!\.)\bpdf\b", re.IGNORECASE)),
 )
 REMOVE_PATTERNS = (
-    re.compile(r"(?<!\.)\b(?:docx|word(?:\s+document)?|pptx|powerpoint|slides?|slide\s+deck|presentation|pdf)\b", re.IGNORECASE),
+    re.compile(
+        r"(?<!\.)\b(?:docx|word(?:\s+document)?|pptx|powerpoint|slides?|slide\s+deck|presentation|pdf)\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"\b(?:file|deck)\b", re.IGNORECASE),
     GENERATION_VERB_RE,
     re.compile(r"\b(?:as|in|to)\s+(?:a|an)?\s*(?:format|file)\b", re.IGNORECASE),
-    re.compile(r"\b(?:using|from)\s+(?:the\s+)?(?:indexed|retrieved|available)\s+(?:documents|sources|evidence)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:using|from)\s+(?:the\s+)?(?:indexed|retrieved|available)\s+(?:documents|sources|evidence)\b",
+        re.IGNORECASE,
+    ),
 )
 LEADING_WRAPPER_RE = re.compile(
     r"^(?:(?:that\s+)?(?:contains?|containing)\s+(?:of\s+)?|with\s+|about\s+|on\s+|for\s+)+",
     re.IGNORECASE,
 )
-LEADING_FILLER_RE = re.compile(r"^(?:please|a|an|the|and|or|about|on|for|of|with|based\s+on)\b[\s:,-]*", re.IGNORECASE)
+LEADING_FILLER_RE = re.compile(
+    r"^(?:please|a|an|the|and|or|about|on|for|of|with|based\s+on)\b[\s:,-]*",
+    re.IGNORECASE,
+)
 LEADING_DETAIL_MODIFIER_RE = re.compile(
     r"^(?:detailed|comprehensive|full|complete)\s+(?:of\s+)?",
     re.IGNORECASE,
@@ -42,7 +99,9 @@ EMPTY_TOPICS = {
     "answer",
     "the answer",
     "current answer",
+    "the current answer",
     "previous answer",
+    "the previous answer",
     "the sources",
     "sources",
     "documents",
@@ -77,7 +136,7 @@ def parse_artifact_request(query: str) -> ArtifactRequest | None:
     formats = _requested_formats(normalized)
     if not formats:
         return None
-    if GENERATION_VERB_RE.search(normalized) is None and OUTPUT_FORMAT_CONTEXT_RE.search(normalized) is None:
+    if not _is_explicit_artifact_request(normalized):
         return None
     content_query = cleaned_content_query(normalized)
     return ArtifactRequest(
@@ -88,11 +147,28 @@ def parse_artifact_request(query: str) -> ArtifactRequest | None:
     )
 
 
+def _is_explicit_artifact_request(query: str) -> bool:
+    if (
+        PRESENTATION_SOFTWARE_CONTEXT_RE.search(query) is not None
+        and CONCRETE_FILE_FORMAT_RE.search(query) is None
+    ):
+        return False
+    if DIRECT_GENERATION_REQUEST_RE.search(query) is not None:
+        return True
+    return (
+        DIRECT_OUTPUT_REQUEST_RE.search(query) is not None
+        and OUTPUT_FORMAT_CONTEXT_RE.search(query) is not None
+    )
+
+
 def cleaned_content_query(query: str) -> str:
-    cleaned = query.strip()
+    cleaned = LEADING_OUTPUT_REQUEST_RE.sub("", query.strip())
     for pattern in REMOVE_PATTERNS:
         cleaned = pattern.sub(" ", cleaned)
-    cleaned = re.sub(r"\b(?:and|or)\s+(?:a|an|the)?\s*$", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = TRAILING_OUTPUT_WRAPPER_RE.sub(" ", cleaned)
+    cleaned = re.sub(
+        r"\b(?:and|or)\s+(?:a|an|the)?\s*$", " ", cleaned, flags=re.IGNORECASE
+    )
     cleaned = re.sub(r"\b(?:and|or)\b\s*(?=$)", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^[\s:,-]+|[\s:,-]+$", "", cleaned)
     previous = None

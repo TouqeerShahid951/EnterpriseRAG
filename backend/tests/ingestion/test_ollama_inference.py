@@ -46,6 +46,87 @@ def test_ollama_metadata_request_includes_context_limit(monkeypatch) -> None:
     assert "claims" not in payload["messages"][1]["content"]
 
 
+def test_ollama_metadata_cloud_model_omits_structured_format(monkeypatch) -> None:
+    calls = []
+
+    def fake_request_json(base_url, path, **kwargs):
+        calls.append((base_url, path, kwargs))
+        return {
+            "message": {
+                "content": json.dumps(
+                    {
+                        "summary": "A concise factual summary.",
+                        "llm_topics": ["contracts"],
+                        "doc_type": "policy",
+                    }
+                )
+            }
+        }
+
+    monkeypatch.setattr(ollama_module, "request_json", fake_request_json)
+    client = OllamaClient(
+        base_url="http://ollama:11434",
+        chat_model="qwen3.5:cloud",
+        embed_model="nomic-embed-text:latest",
+        timeout_seconds=45,
+    )
+
+    metadata = client.generate_metadata("document text")
+
+    payload = calls[0][2]["payload"]
+    assert "format" not in payload
+    assert payload["messages"][0]["content"] == "Return valid JSON only."
+    assert metadata["summary"] == "A concise factual summary."
+
+
+def test_ollama_generate_json_uses_selected_models_structured_output_support(monkeypatch) -> None:
+    calls = []
+
+    def fake_request_json(base_url, path, **kwargs):
+        calls.append((base_url, path, kwargs))
+        return {"message": {"content": '{"status":"ok"}'}}
+
+    monkeypatch.setattr(ollama_module, "request_json", fake_request_json)
+    client = OllamaClient(
+        base_url="http://ollama:11434",
+        chat_model="qwen3.5:9b",
+        embed_model="nomic-embed-text:latest",
+        timeout_seconds=45,
+    )
+
+    result = client.generate_json(
+        prompt='Return {"status":"ok"}.',
+        model="qwen3.5:cloud",
+        system="Return valid JSON only.",
+    )
+
+    payload = calls[0][2]["payload"]
+    assert payload["model"] == "qwen3.5:cloud"
+    assert "format" not in payload
+    assert payload["messages"][0]["content"] == "Return valid JSON only."
+    assert result == '{"status":"ok"}'
+
+
+def test_ollama_generate_json_local_model_keeps_json_format(monkeypatch) -> None:
+    calls = []
+
+    def fake_request_json(base_url, path, **kwargs):
+        calls.append((base_url, path, kwargs))
+        return {"message": {"content": "{}"}}
+
+    monkeypatch.setattr(ollama_module, "request_json", fake_request_json)
+    client = OllamaClient(
+        base_url="http://ollama:11434",
+        chat_model="qwen3.5:9b",
+        embed_model="nomic-embed-text:latest",
+        timeout_seconds=45,
+    )
+
+    client.generate_json(prompt="Return {}.", system="Return valid JSON only.")
+
+    assert calls[0][2]["payload"]["format"] == "json"
+
+
 def test_ollama_metadata_timeout_returns_specific_warning(monkeypatch) -> None:
     calls = []
 

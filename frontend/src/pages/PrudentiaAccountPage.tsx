@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { KeyRound, LogOut, ShieldCheck } from "lucide-react";
 
 import { authApi } from "../api/contracts";
+import { accountTypeLabel, clearanceLevelLabel } from "../authz";
 import { useToast } from "../components/feedback/ToastProvider";
 import { Fact } from "../components/layout/Common";
 import { PrudentiaBasicPage } from "../components/layout/PrudentiaWorkspace";
@@ -17,11 +18,16 @@ export function PrudentiaAccountPage({ currentUser, isLoggingOut, onAuthChanged,
   const permissionVersion = currentUser.permission_version ?? "unknown";
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmedPassword, setConfirmedPassword] = useState("");
+  const passwordRequirementsId = useId();
+  const passwordMismatchId = useId();
+  const validation = passwordChangeValidation(currentPassword, newPassword, confirmedPassword);
   const passwordMutation = useMutation({
     mutationFn: () => authApi.changePassword({ current_password: currentPassword, new_password: newPassword }),
     onSuccess: () => {
       setCurrentPassword("");
       setNewPassword("");
+      setConfirmedPassword("");
       onAuthChanged();
       notify({ title: "Password updated", description: "Use the new password on your next sign-in.", tone: "success" });
     },
@@ -49,8 +55,10 @@ export function PrudentiaAccountPage({ currentUser, isLoggingOut, onAuthChanged,
           </div>
           <dl className="mt-4 space-y-3">
             <Fact label="Email" value={userEmail} />
+            <Fact label="Role" value={accountTypeLabel(currentUser.account_type)} />
+            <Fact label="Clearance" value={clearanceLevelLabel(currentUser.clearance_level)} />
             <Fact label="Knowledge Spaces" value={userGroupPaths.join(", ") || "No spaces"} />
-            <Fact label="Permission" value={`v${permissionVersion}`} />
+            <Fact label="Permission version" value={`v${permissionVersion}`} />
           </dl>
           <button type="button" onClick={onLogout} disabled={isLoggingOut} className="sv-action-secondary mt-5">
             <LogOut size={16} />
@@ -73,13 +81,51 @@ export function PrudentiaAccountPage({ currentUser, isLoggingOut, onAuthChanged,
           <div className="mt-4 space-y-3">
             <label className="sv-field">
               <span className="sv-label">Current password</span>
-              <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder="Current password" className="sv-input" />
+              <input
+                type="password"
+                autoComplete="current-password"
+                required
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                className="sv-input"
+              />
             </label>
             <label className="sv-field">
               <span className="sv-label">New password</span>
-              <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="New password" className="sv-input" />
+              <input
+                type="password"
+                autoComplete="new-password"
+                aria-describedby={passwordRequirementsId}
+                minLength={8}
+                required
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                className="sv-input"
+              />
             </label>
-            <button disabled={!currentPassword || newPassword.length < 8 || passwordMutation.isPending} className="sv-action-primary">
+            <div id={passwordRequirementsId} className="account-password-requirements">
+              <p className="font-semibold text-on-surface">Password requirements</p>
+              <p className="mt-1">Use at least 8 characters, then enter the same password again below.</p>
+            </div>
+            <label className="sv-field">
+              <span className="sv-label">Confirm new password</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                aria-describedby={validation.showMismatch ? passwordMismatchId : passwordRequirementsId}
+                aria-invalid={validation.showMismatch}
+                required
+                value={confirmedPassword}
+                onChange={(event) => setConfirmedPassword(event.target.value)}
+                className="sv-input"
+              />
+              {validation.showMismatch ? (
+                <small id={passwordMismatchId} className="text-error-red" role="alert">
+                  The new passwords do not match.
+                </small>
+              ) : null}
+            </label>
+            <button type="submit" disabled={!validation.canSubmit || passwordMutation.isPending} className="sv-action-primary">
               {passwordMutation.isPending ? "Updating" : "Change password"}
             </button>
           </div>
@@ -87,6 +133,14 @@ export function PrudentiaAccountPage({ currentUser, isLoggingOut, onAuthChanged,
       </div>
     </PrudentiaBasicPage>
   );
+}
+
+export function passwordChangeValidation(currentPassword: string, newPassword: string, confirmedPassword: string) {
+  const showMismatch = confirmedPassword.length > 0 && newPassword !== confirmedPassword;
+  return {
+    canSubmit: currentPassword.length > 0 && newPassword.length >= 8 && newPassword === confirmedPassword,
+    showMismatch,
+  };
 }
 
 type Props = {

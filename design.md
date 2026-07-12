@@ -46,7 +46,6 @@ flowchart LR
     Workers --> Qdrant
     Workers --> Models
 
-    Workers --> Sandbox["Artifact sandbox<br/>offline render service"]
     Scheduler["Folder scheduler"] --> Workers
     Maintenance["Ingest maintenance"] --> Workers
 ```
@@ -60,7 +59,6 @@ flowchart LR
 | Internal API | `backend/src/rag/internal/*` | Service-token protected endpoints under `/internal` used by workers for job state, config snapshots, review batches, ABAC context, claims, and supersession. |
 | Ingestion worker | `backend/apps/ingestion/tasks.py`, `backend/src/rag/ingestion/*` | Celery worker that parses documents, enriches metadata, chunks content, embeds text, indexes Qdrant, saves claims, and updates ingestion status. |
 | Artifact worker | `backend/src/rag/artifact_jobs/*` | Durable document generation workflow. Plans, retrieves evidence, composes content, validates grounding, renders files, stores outputs, and reports progress. |
-| Artifact sandbox | `backend/src/rag/artifact_sandbox/*` | Isolated render service for DOCX, PPTX, PDF, and related generated artifacts. Applies policy and timeout limits. |
 | Evaluation worker | `backend/src/rag/evaluations/*` | Runs imported evaluation datasets against the current RAG configuration and stores per-case diagnostics. |
 | Folder scheduler | `backend/src/rag/ops/folder_ingest_scheduler_cli.py` | Polls scheduled folder or MinIO-prefix ingestion plans and dispatches due work. |
 | Ingest maintenance | `backend/src/rag/ops/ingest_maintenance_cli.py` | Recovers stale ingestion jobs and coordinates worker capacity. |
@@ -256,7 +254,7 @@ queued job summary. The artifact worker then:
 3. Plans the document and asks for clarification when needed.
 4. Retrieves permitted evidence.
 5. Composes content and validates grounding.
-6. Renders outputs through the artifact sandbox.
+6. Renders outputs directly in the artifact worker with the deterministic renderer.
 7. Stores files in MinIO and metadata in Postgres.
 8. Marks the job `complete`, `partial`, `failed`, or `cancelled`.
 
@@ -310,8 +308,7 @@ enabled. Deployments can stay on Ollama while vLLM services are absent.
 
 ## Reliability and Operations
 
-- Health endpoints exist for API, frontend, storage services, model services,
-  and artifact sandbox readiness.
+- Health endpoints exist for API, frontend, storage services, and model services.
 - Ingestion, artifact, and evaluation jobs keep explicit statuses, progress
   percentages, stage details, attempt counts, retry limits, errors, completion
   timestamps, and heartbeats.

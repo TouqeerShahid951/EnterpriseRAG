@@ -53,7 +53,6 @@ def _summary(repo: InMemoryDocumentRepository):
             created_from=None,
             created_to=None,
             user=_user(),
-            repo=repo,
             job_repo=repo,
         )
     )

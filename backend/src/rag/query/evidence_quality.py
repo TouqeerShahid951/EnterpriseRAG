@@ -110,7 +110,6 @@ class EvidenceQuality:
     distinct_doc_count: int
     evidence_score: float = 0.0
     outcome: str = "degrade"
-    hit_count: int = 0
     structured_hit_count: int = 0
     metadata_hit_count: int = 0
     document_class_match_count: int = 0
@@ -207,7 +206,6 @@ def assess_evidence_quality(query: str, hits: list[SearchHit], *, route_plan: ob
         distinct_doc_count=len(distinct_docs),
         evidence_score=score,
         outcome=outcome,
-        hit_count=len(hits),
         structured_hit_count=structured_hit_count,
         metadata_hit_count=metadata_hit_count,
         document_class_match_count=document_class_match_count,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..repositories.document_models import IngestJobRecord
+from ..repositories.ingest_job_models import IngestJobRecord
 from ..schemas.upload import JobStatusResponse, UploadJobStage, UploadJobStep, UploadJobStepState
 
 

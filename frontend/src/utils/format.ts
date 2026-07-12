@@ -1,10 +1,6 @@
 import { ApiClientError } from "../api/client";
 import type { RAGResponse } from "../types/api";
 
-export function todayInputValue(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export function formatDate(value: string | null | undefined): string {
   if (!value) {
     return "Not set";
@@ -42,11 +38,4 @@ export function errorMessage(error: unknown, fallback = "Request failed."): stri
     return error.message;
   }
   return fallback;
-}
-
-export function splitPathList(value: string): string[] {
-  return value
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
 }

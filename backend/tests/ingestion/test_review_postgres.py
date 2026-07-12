@@ -116,7 +116,6 @@ def test_postgres_human_and_image_review_lifecycles() -> None:
                     "object_path": "memory://recommended.png",
                     "content_hash": "recommended-hash",
                     "page": 1,
-                    "bbox": [],
                     "score": 10,
                     "recommended": True,
                 },
@@ -132,6 +131,14 @@ def test_postgres_human_and_image_review_lifecycles() -> None:
                 },
             ],
         )
+        image_candidates = image_repo.list_image_review_candidates_for_batch(image_batch.id)
+        recommended_candidate = next(
+            candidate
+            for candidate in image_candidates
+            if candidate.candidate_key == "recommended-key"
+        )
+        assert recommended_candidate.bbox is None
+
         image_decision = image_repo.apply_image_review_decisions(
             image_batch.id,
             approve_candidate_ids=[],

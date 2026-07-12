@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any, Protocol
 
-from .models import ConnectorQueryResult, ConnectorRecord, ConnectorTestResult
+from .models import ConnectorQueryResult, ConnectorTestResult
 from .sql_safety import validate_read_only_sql
 
 
@@ -15,15 +13,6 @@ class Connector(Protocol):
 
     def test_connection(self, *, config: dict[str, Any], secrets: dict[str, Any]) -> ConnectorTestResult: ...
     def introspect(self, *, config: dict[str, Any], secrets: dict[str, Any]) -> dict[str, Any]: ...
-    def iter_records(
-        self,
-        *,
-        config: dict[str, Any],
-        secrets: dict[str, Any],
-        selection: dict[str, Any],
-        identity_fields: list[str],
-        batch_size: int,
-    ) -> list[ConnectorRecord]: ...
     def execute_query(
         self,
         *,
@@ -58,19 +47,6 @@ class FakeConnector:
                 }
             ],
         }
-
-    def iter_records(
-        self,
-        *,
-        config: dict[str, Any],
-        secrets: dict[str, Any],
-        selection: dict[str, Any],
-        identity_fields: list[str],
-        batch_size: int,
-    ) -> list[ConnectorRecord]:
-        _ = secrets, selection, batch_size
-        records = [item for item in config.get("records", []) if isinstance(item, dict)]
-        return [_record_from_mapping("fake", record, identity_fields) for record in records]
 
     def execute_query(
         self,
@@ -109,46 +85,6 @@ class SqlServerConnector:
             _add_sample_estimate_rows(tables, _fetch_pyodbc_dicts(cursor, _SQL_SERVER_ROW_ESTIMATES_SQL))
             _attach_sql_server_sample_counts(cursor, tables, sample_limit)
         return {"connector_type": self.connector_type, "tables": _finalize_tables(tables)}
-
-    def iter_records(
-        self,
-        *,
-        config: dict[str, Any],
-        secrets: dict[str, Any],
-        selection: dict[str, Any],
-        identity_fields: list[str],
-        batch_size: int,
-    ) -> list[ConnectorRecord]:
-        query = validate_read_only_sql(str(selection.get("query") or ""), connector_type=self.connector_type)
-        timeout_seconds = int(selection.get("timeout_seconds") or config.get("timeout_seconds") or 30)
-        row_limit = int(selection.get("row_limit") or config.get("row_limit") or 5000)
-        with self._connect(config, secrets) as conn:
-            try:
-                conn.autocommit = False
-            except Exception:
-                pass
-            try:
-                conn.timeout = max(1, min(timeout_seconds, 300))
-            except Exception:
-                pass
-            cursor = conn.cursor()
-            try:
-                cursor.timeout = max(1, min(timeout_seconds, 300))
-            except Exception:
-                pass
-            cursor.execute(query)
-            records: list[ConnectorRecord] = []
-            while len(records) < row_limit:
-                rows = cursor.fetchmany(max(1, min(batch_size, row_limit - len(records))))
-                if not rows:
-                    break
-                for row in rows:
-                    records.append(_record_from_mapping(self.connector_type, _row_dict(cursor, row), identity_fields))
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-        return records
 
     def execute_query(
         self,
@@ -221,31 +157,6 @@ class PostgresConnector:
             conn.rollback()
         return {"connector_type": self.connector_type, "tables": _finalize_tables(tables)}
 
-    def iter_records(
-        self,
-        *,
-        config: dict[str, Any],
-        secrets: dict[str, Any],
-        selection: dict[str, Any],
-        identity_fields: list[str],
-        batch_size: int,
-    ) -> list[ConnectorRecord]:
-        query = validate_read_only_sql(str(selection.get("query") or ""), connector_type=self.connector_type)
-        row_limit = int(selection.get("row_limit") or config.get("row_limit") or 5000)
-        with self._connect(config, secrets) as conn:
-            _prepare_postgres_session(conn, {**config, "timeout_seconds": selection.get("timeout_seconds") or config.get("timeout_seconds")})
-            records: list[ConnectorRecord] = []
-            with conn.cursor() as cursor:
-                cursor.execute(query)
-                while len(records) < row_limit:
-                    rows = cursor.fetchmany(max(1, min(batch_size, row_limit - len(records))))
-                    if not rows:
-                        break
-                    for row in rows:
-                        records.append(_record_from_mapping(self.connector_type, dict(row), identity_fields))
-            conn.rollback()
-        return records
-
     def execute_query(
         self,
         *,
@@ -290,10 +201,6 @@ class UnsupportedConnector:
         _ = config, secrets
         raise RuntimeError(f"{self.connector_type} connector introspection is not implemented yet.")
 
-    def iter_records(self, **kwargs: Any) -> list[ConnectorRecord]:
-        _ = kwargs
-        raise RuntimeError(f"{self.connector_type} connector sync is not implemented yet.")
-
     def execute_query(self, **kwargs: Any) -> ConnectorQueryResult:
         _ = kwargs
         raise RuntimeError(f"{self.connector_type} connector live query is not implemented yet.")
@@ -313,23 +220,6 @@ class ConnectorRegistry:
 
 def default_connector_registry() -> ConnectorRegistry:
     return ConnectorRegistry()
-
-
-def _record_from_mapping(connector_type: str, row: dict[str, Any], identity_fields: list[str]) -> ConnectorRecord:
-    identity = {field: row.get(field) for field in identity_fields}
-    if any(value is None or str(value) == "" for value in identity.values()):
-        missing = [field for field, value in identity.items() if value is None or str(value) == ""]
-        raise ValueError(f"Connector record is missing identity field: {missing[0]}")
-    identity_text = json.dumps(identity, sort_keys=True, separators=(",", ":"), default=str)
-    digest = hashlib.sha256(identity_text.encode("utf-8")).hexdigest()[:24]
-    title = f"{connector_type} record {', '.join(str(value) for value in identity.values())}"
-    return ConnectorRecord(
-        source_path=f"{connector_type}/{digest}.json",
-        title=title,
-        data=_json_safe(row),
-        identity=_json_safe(identity),
-        updated_at=str(row.get("updated_at") or row.get("modified_at") or "") or None,
-    )
 
 
 def _fetch_pyodbc_dicts(cursor, query: str) -> list[dict[str, Any]]:

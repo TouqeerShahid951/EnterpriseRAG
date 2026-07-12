@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from json import JSONDecodeError
 from typing import Any
 
+from rag.shared.ollama_models import is_ollama_cloud_model
 from rag.shared.thinking import no_thinking_payload_fields, no_thinking_system, strip_thinking_content
 
 from .http import ServiceRequestError, request_json
@@ -232,7 +233,6 @@ class VisionClient:
             "model": self.model,
             "stream": False,
             "think": False,
-            "format": OLLAMA_VISION_FORMAT,
             "keep_alive": "5m",
             "options": _ollama_options(temperature=0.0, num_ctx=self.num_ctx),
             "messages": [
@@ -247,6 +247,8 @@ class VisionClient:
                 },
             ],
         }
+        if not is_ollama_cloud_model(self.model):
+            payload["format"] = OLLAMA_VISION_FORMAT
         try:
             response = request_json(
                 self.base_url,
@@ -268,7 +270,6 @@ class VisionClient:
             "model": self.model,
             "stream": False,
             "think": False,
-            "format": OLLAMA_LAYOUT_FORMAT,
             "keep_alive": "5m",
             "options": _ollama_options(temperature=0.0, num_ctx=self.num_ctx),
             "messages": [
@@ -283,6 +284,8 @@ class VisionClient:
                 },
             ],
         }
+        if not is_ollama_cloud_model(self.model):
+            payload["format"] = OLLAMA_LAYOUT_FORMAT
         try:
             response = request_json(
                 self.base_url,

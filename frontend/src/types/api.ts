@@ -1,5 +1,5 @@
 export type ISODateString = string;
-export type DocType = string;
+type DocType = string;
 export type AccountType =
   | "platform_admin"
   | "system_admin"
@@ -37,11 +37,11 @@ export type UploadJobStage =
   | "failed"
   | "human_review"
   | "cancelled";
-export type UploadJobStepState = "pending" | "active" | "complete" | "failed" | "needs_review" | "cancelled";
-export type UploadJobProgressUnit = "pages" | "chunks" | "vectors" | "files" | "metadata" | "images";
-export type ReviewStatus = "pending" | "approved" | "rejected";
-export type ImageReviewCandidateStatus = "pending" | "approved" | "skipped";
-export type FolderSourceType =
+type UploadJobStepState = "pending" | "active" | "complete" | "failed" | "needs_review" | "cancelled";
+type UploadJobProgressUnit = "pages" | "chunks" | "vectors" | "files" | "metadata" | "images";
+type ReviewStatus = "pending" | "approved" | "rejected";
+type ImageReviewCandidateStatus = "pending" | "approved" | "skipped";
+type FolderSourceType =
   | "snapshot"
   | "local_folder"
   | "minio_prefix"
@@ -59,8 +59,8 @@ export type FolderSourceType =
   | "fake";
 export type FolderScheduleType = "one_time" | "recurring";
 export type FolderScheduleStatus = "scheduled" | "active" | "paused" | "cancelled" | "complete" | "failed";
-export type FolderRunStatus = "scheduled" | "running" | "complete" | "failed" | "cancelled";
-export type FolderRunItemStatus = "scheduled" | "queued" | "skipped" | "failed";
+type FolderRunStatus = "scheduled" | "running" | "complete" | "failed" | "cancelled";
+type FolderRunItemStatus = "scheduled" | "queued" | "skipped" | "failed";
 export type ConnectorType = "sql_server" | "postgres" | "mysql" | "mariadb" | "mongodb" | "oracle" | "opensearch" | "elasticsearch" | "redis" | "cassandra" | "fake";
 export type ConnectorIngestionMode = "json_snapshot" | "direct_chunks";
 export type ConnectorDeletionPolicy = "keep_deleted_documents" | "mark_as_stale" | "archive_from_retrieval" | "delete_from_index_after_review";
@@ -77,28 +77,19 @@ export type EvaluationFailureStage =
   | "runtime"
   | "latency";
 export type {
-  ArtifactFormat,
   ArtifactJobDetail,
-  ArtifactJobStatus,
   ArtifactJobSummary,
-  ConflictPair,
   EvidenceField,
   EvidenceWindow,
-  FaithfulnessStatus,
   GeneratedArtifact,
   HighlightRange,
   QueryIntent,
   QueryRequest,
   QuerySource,
-  QuerySourceKind,
   QuerySourceMode,
   RAGResponse,
   RagSseEvent,
   SourceAnchor,
-  SourceExpansion,
-  SourceRegion,
-  SseEventBase,
-  SseEventType,
 } from "./query";
 
 export interface User {
@@ -123,7 +114,7 @@ export interface UserAdmin {
   permission_version: number;
 }
 
-export interface RagConfigHealth {
+interface RagConfigHealth {
   status: string;
   message: string;
   embedding_dimension: number | null;
@@ -132,19 +123,19 @@ export interface RagConfigHealth {
   embed_latency_ms: number | null;
 }
 
-export interface IngestWorkerState {
+interface IngestWorkerState {
   name: string;
   pool_size: number;
   active_jobs: number;
 }
 
-export interface GraphRAGWorkerState {
+interface GraphRAGWorkerState {
   name: string;
   pool_size: number;
   active_jobs: number;
 }
 
-export interface GraphRAGActiveTask {
+interface GraphRAGActiveTask {
   task_id: string;
   task_name: string;
   worker: string;
@@ -154,7 +145,7 @@ export interface GraphRAGActiveTask {
   elapsed_seconds: number | null;
 }
 
-export interface GraphRAGQueuedTask {
+interface GraphRAGQueuedTask {
   task_id: string;
   task_name: string;
   job_id: string | null;
@@ -332,7 +323,7 @@ export interface RagConfigTestResult {
   health: RagConfigHealth;
 }
 
-export interface RerankerModelOption {
+interface RerankerModelOption {
   model: string;
   default: boolean;
 }
@@ -421,7 +412,7 @@ export interface ParserProvenance {
   errors: Record<string, string>[];
 }
 
-export interface ParserDoclingSelection {
+interface ParserDoclingSelection {
   mode: string;
   budget_pages: number;
   batch_pages: number;
@@ -430,13 +421,13 @@ export interface ParserDoclingSelection {
   skipped_pages: ParserPageList;
 }
 
-export interface ParserPageList {
+interface ParserPageList {
   total: number;
   truncated: boolean;
   items: ParserPageEntry[];
 }
 
-export interface ParserPageEntry {
+interface ParserPageEntry {
   page_no: number;
   score: number;
   reasons: string[];
@@ -471,7 +462,7 @@ export interface IngestJobSummary {
   origin_counts: Record<string, number>;
 }
 
-export interface StaleIngestJob {
+interface StaleIngestJob {
   job_id: string;
   document_id: string;
   document_title: string;
@@ -665,20 +656,20 @@ export interface Document {
   created_at: ISODateString | null;
 }
 
-export interface DocumentEntity {
+interface DocumentEntity {
   text: string;
   type: string;
   start: number | null;
   end: number | null;
 }
 
-export interface DocumentCrossReference {
+interface DocumentCrossReference {
   ref_text: string;
   ref_type: string;
   position: number | null;
 }
 
-export interface DocumentClaim {
+interface DocumentClaim {
   id: string | null;
   chunk_id: string;
   entity: string;
@@ -686,7 +677,7 @@ export interface DocumentClaim {
   value: string;
 }
 
-export interface VersionNode {
+interface VersionNode {
   id: string;
   effective_date: ISODateString | null;
   is_current: boolean;
@@ -818,7 +809,7 @@ export interface ImageReviewDecisionResponse {
   pending_count: number;
 }
 
-export interface EvaluationCase {
+interface EvaluationCase {
   id: string;
   question: string;
   question_type: string | null;

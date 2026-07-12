@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -584,18 +583,6 @@ def _chunk_params(chunk: ChunkRecord) -> dict[str, Any]:
         "page_start": chunk.page_start,
         "page_end": chunk.page_end,
     }
-
-
-def _unique_by_id(items: Iterable[Any]) -> list[Any]:
-    seen: set[str] = set()
-    unique: list[Any] = []
-    for item in items:
-        item_id = str(getattr(item, "id"))
-        if item_id in seen:
-            continue
-        seen.add(item_id)
-        unique.append(item)
-    return unique
 
 
 def _dedupe_refs(refs: list[SourceRef]) -> list[SourceRef]:

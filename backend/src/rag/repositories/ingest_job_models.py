@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -47,10 +47,39 @@ class IngestJobCancellationResult:
     review_items_closed: int
 
 
-@runtime_checkable
-class IngestJobRepository(Protocol):
-    """Persistence boundary for ingestion-job lifecycle state."""
+@dataclass(frozen=True)
+class IngestJobAccess:
+    clearance_levels: tuple[str, ...]
+    group_paths: tuple[str, ...] | None
 
+
+@dataclass(frozen=True)
+class IngestJobFilters:
+    status: str | None = None
+    origin: str | None = None
+    group_path: str | None = None
+    search: str | None = None
+    created_from: datetime | None = None
+    created_to: datetime | None = None
+    uploaded_by_user_id: str | None = None
+
+
+@dataclass(frozen=True)
+class IngestJobView:
+    job: IngestJobRecord
+    document_title: str
+    group_path: str
+    clearance_level: str
+    uploaded_by: str | None
+
+
+@dataclass(frozen=True)
+class IngestJobPage:
+    items: tuple[IngestJobView, ...]
+    total: int
+
+
+class IngestJobRepository(Protocol):
     def create_ingest_job(
         self,
         *,
@@ -65,9 +94,11 @@ class IngestJobRepository(Protocol):
 
     def list_ingest_jobs(self) -> list[IngestJobRecord]: ...
 
-    def get_active_ingest_job_for_document(
+    def get_latest_ingest_job_for_document(
         self,
         doc_id: str,
+        *,
+        statuses: frozenset[str],
     ) -> IngestJobRecord | None: ...
 
     def update_ingest_job(
@@ -103,10 +134,7 @@ class IngestJobRepository(Protocol):
     ) -> IngestAttemptResult: ...
 
     def heartbeat_ingest_job(
-        self,
-        job_id: str,
-        *,
-        run_token: str | None = None,
+        self, job_id: str, *, run_token: str | None = None
     ) -> IngestJobMutationResult: ...
 
     def record_ingest_parser_provenance(
@@ -125,10 +153,16 @@ class IngestJobRepository(Protocol):
     ) -> IngestJobCancellationResult: ...
 
 
-__all__ = [
-    "IngestAttemptResult",
-    "IngestJobCancellationResult",
-    "IngestJobMutationResult",
-    "IngestJobRecord",
-    "IngestJobRepository",
-]
+class IngestJobSearchRepository(Protocol):
+    def search_visible_ingest_jobs(
+        self,
+        *,
+        access: IngestJobAccess,
+        filters: IngestJobFilters,
+        limit: int | None,
+        offset: int = 0,
+    ) -> IngestJobPage: ...
+
+
+class IngestJobStore(IngestJobRepository, IngestJobSearchRepository, Protocol):
+    pass

@@ -8,8 +8,6 @@ import unicodedata
 from collections.abc import Sequence
 
 
-LITERAL_CHECK_VERSION = "v3"
-
 _CITATION_RE = re.compile(r"\[[^\[\]\r\n]{1,200}:\d+\]")
 _DIMENSION_QUOTE_RE = re.compile(r'(?<=\d)["\u201d\u2033]')
 _TOKEN_RE = re.compile(r"\d+(?:\.\d+)?|[a-z]+|[+/]")

@@ -12,6 +12,7 @@ from ..core.config import Settings, settings
 from ..repositories.rag_config import RagConfigRecord
 from ..shared.contracts.reranker_models import is_supported_reranker_model
 from ..shared.fastembed_dense import FastEmbedDenseError, embed_dense_texts, list_supported_dense_models
+from ..shared.ollama_models import is_ollama_cloud_model
 from .http import ServiceRequestError, request_json
 from .qdrant import QdrantClient
 
@@ -165,14 +166,6 @@ def checked_record(
         embed_latency_ms=result.embed_latency_ms,
         last_checked_at=result.checked_at,
         updated_by=updated_by,
-    )
-
-
-def list_ollama_models(config_record: RagConfigRecord) -> list[str]:
-    return _list_ollama_models_at(
-        config_record.base_url,
-        timeout_seconds=config_record.chat_timeout_seconds,
-        service="ollama",
     )
 
 
@@ -475,24 +468,26 @@ def _ollama_chat_probe(
 ) -> None:
     selected_base_url = base_url or config_record.base_url
     selected_model = model or config_record.chat_model
+    request_payload: dict[str, Any] = {
+        "model": selected_model,
+        "stream": False,
+        "think": config_record.thinking_enabled,
+        "keep_alive": "5m",
+        "options": {"temperature": 0, "num_predict": 16},
+        "messages": [
+            {"role": "system", "content": "You are a health check endpoint. Return JSON only."},
+            {"role": "user", "content": 'Return {"status":"ok"}.'},
+        ],
+    }
+    if not is_ollama_cloud_model(selected_model):
+        request_payload["format"] = "json"
     try:
         payload = request_json(
             selected_base_url,
             "/api/chat",
             service=service,
             method="POST",
-            payload={
-                "model": selected_model,
-                "stream": False,
-                "think": config_record.thinking_enabled,
-                "keep_alive": "5m",
-                "format": "json",
-                "options": {"temperature": 0, "num_predict": 16},
-                "messages": [
-                    {"role": "system", "content": "You are a health check endpoint. Return JSON only."},
-                    {"role": "user", "content": 'Return {"status":"ok"}.'},
-                ],
-            },
+            payload=request_payload,
             timeout_seconds=config_record.chat_timeout_seconds,
         )
         message = payload.get("message")

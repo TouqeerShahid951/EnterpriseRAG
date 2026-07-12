@@ -15,6 +15,33 @@ from .llm_json import LlmContractError, generate_contract
 PLANNER_PROMPT_VERSION = "document-planner-v2.2"
 _MAX_LLM_SECTIONS = 8
 _MAX_SECTION_QUERIES = 4
+_TOPIC_QUESTION_MARKERS = (
+    "topic",
+    "subject",
+    "cover",
+    "business question",
+    "document set",
+)
+_EMPTY_CLARIFICATION_ANSWERS = {
+    "n/a",
+    "na",
+    "no",
+    "none",
+    "not applicable",
+    "not sure",
+    "unknown",
+    "yes",
+}
+_CLARIFICATION_TOPIC_PREFIXES = (
+    re.compile(
+        r"(?i)^(?:the\s+)?(?:artifact\s+)?(?:topic|subject|business\s+question|document\s+set)"
+        r"\s*(?:is|should\s+be|will\s+be|:|-)\s*"
+    ),
+    re.compile(
+        r"(?i)^(?:it|the\s+(?:artifact|report|presentation|document))\s+"
+        r"(?:should|will)\s+(?:cover|focus\s+on|be\s+about)\s+"
+    ),
+)
 
 
 def plan_document(
@@ -23,7 +50,7 @@ def plan_document(
     inference: object,
     model: str | None,
 ) -> DocumentPlan:
-    topic = _extract_topic(job.original_request)
+    topic = _resolve_topic(job)
     if not topic:
         return _clarification_plan()
 
@@ -32,8 +59,17 @@ def plan_document(
         return fallback
 
     try:
-        planned = _llm_plan(job, topic=topic, fallback=fallback, inference=inference, model=model)
-    except (LlmContractError, RuntimeError, ServiceRequestError, TimeoutError, TypeError, ValueError):
+        planned = _llm_plan(
+            job, topic=topic, fallback=fallback, inference=inference, model=model
+        )
+    except (
+        LlmContractError,
+        RuntimeError,
+        ServiceRequestError,
+        TimeoutError,
+        TypeError,
+        ValueError,
+    ):
         return fallback
     return _normalize_llm_plan(planned, fallback=fallback, job=job)
 
@@ -55,7 +91,9 @@ def _llm_plan(
     )
 
 
-def _planner_prompt(job: ArtifactJobRecord, *, topic: str, fallback: DocumentPlan) -> str:
+def _planner_prompt(
+    job: ArtifactJobRecord, *, topic: str, fallback: DocumentPlan
+) -> str:
     scope = {
         "group_path": job.group_path,
         "document_ids": list(job.document_ids),
@@ -66,7 +104,7 @@ def _planner_prompt(job: ArtifactJobRecord, *, topic: str, fallback: DocumentPla
     }
     return (
         "Create a retrieval-first artifact plan. Return only one JSON object. Do not answer the request.\n"
-        "Required JSON keys: version=\"v2\", title, purpose, audience, language, tone, detail_level, "
+        'Required JSON keys: version="v2", title, purpose, audience, language, tone, detail_level, '
         "document_type, assumptions, clarification_questions, sections, and format_requirements. "
         "Each section needs title, objective, preferred_blocks, retrieval_queries, retrieval_mode, "
         "and coverage_requirement.\n"
@@ -86,17 +124,27 @@ def _planner_prompt(job: ArtifactJobRecord, *, topic: str, fallback: DocumentPla
 
 
 def _deterministic_plan(job: ArtifactJobRecord, *, topic: str) -> DocumentPlan:
-
-    lowered = job.original_request.lower()
+    lowered = f"{job.original_request} {topic}".lower()
     exhaustive = _requests_exhaustive_rows(lowered)
     summary_mode = "document_scan" if job.document_ids else "focused_search"
-    summary_coverage = "complete_selected_documents" if job.document_ids else "relevant_evidence"
-    detail_mode = "document_scan" if job.document_ids else ("structured_rows" if exhaustive else "focused_search")
-    detail_coverage = "complete_selected_documents" if job.document_ids else ("complete_authorized_scope" if exhaustive else "relevant_evidence")
+    summary_coverage = (
+        "complete_selected_documents" if job.document_ids else "relevant_evidence"
+    )
+    detail_mode = (
+        "document_scan"
+        if job.document_ids
+        else ("structured_rows" if exhaustive else "focused_search")
+    )
+    detail_coverage = (
+        "complete_selected_documents"
+        if job.document_ids
+        else ("complete_authorized_scope" if exhaustive else "relevant_evidence")
+    )
     blocks = ["paragraph", "bullet_list"]
     if exhaustive:
         blocks = ["table", "bullet_list", "paragraph"]
 
+    request_query = cleaned_content_query(job.original_request).strip() or topic
     sections = [
         DocumentPlanSection(
             title="Summary",
@@ -113,10 +161,7 @@ def _deterministic_plan(job: ArtifactJobRecord, *, topic: str) -> DocumentPlan:
             title="Details",
             objective=f"Extract supporting details and source-backed facts about {topic}.",
             preferred_blocks=blocks,  # type: ignore[arg-type]
-            retrieval_queries=[
-                f"{topic} details",
-                job.original_request.strip(),
-            ],
+            retrieval_queries=_dedupe_non_empty([f"{topic} details", request_query]),
             retrieval_mode=detail_mode,  # type: ignore[arg-type]
             coverage_requirement=detail_coverage,
         ),
@@ -132,7 +177,10 @@ def _deterministic_plan(job: ArtifactJobRecord, *, topic: str) -> DocumentPlan:
                 coverage_requirement="relevant_evidence",
             )
         )
-    if any(marker in lowered for marker in ("timeline", "chronology", "chronological", "date")):
+    if any(
+        marker in lowered
+        for marker in ("timeline", "chronology", "chronological", "date")
+    ):
         sections.append(
             DocumentPlanSection(
                 title="Timeline",
@@ -179,40 +227,49 @@ def _should_use_llm_plan(job: ArtifactJobRecord, *, topic: str) -> bool:
         return True
     if len(topic.split()) >= 14:
         return True
-    if any(marker in padded for marker in (
-        " all ",
-        " every ",
-        " each ",
-        "complete",
-        "comprehensive",
-        "detailed",
-        " full ",
-        "extract",
-        "fields",
-        "list",
-        "matrix",
-        "recommendation",
-        "risk",
-        "rows",
-        "table",
-    )):
+    if any(
+        marker in padded
+        for marker in (
+            " all ",
+            " every ",
+            " each ",
+            "complete",
+            "comprehensive",
+            "detailed",
+            " full ",
+            "extract",
+            "fields",
+            "list",
+            "matrix",
+            "recommendation",
+            "risk",
+            "rows",
+            "table",
+        )
+    ):
         return True
-    if any(marker in lowered for marker in (
-        "compare",
-        "comparison",
-        "versus",
-        " vs ",
-        "timeline",
-        "chronology",
-        "chronological",
-    )):
+    if any(
+        marker in lowered
+        for marker in (
+            "compare",
+            "comparison",
+            "versus",
+            " vs ",
+            "timeline",
+            "chronology",
+            "chronological",
+        )
+    ):
         return True
-    if "pptx" in job.requested_formats and any(marker in lowered for marker in (
-        "board",
-        "briefing",
-        "executive",
-        "slide",
-    )):
+    if "pptx" in job.requested_formats and any(
+        marker in lowered
+        for marker in (
+            "board",
+            "briefing",
+            "executive",
+            "slide",
+        )
+    ):
         return True
     return False
 
@@ -231,32 +288,46 @@ def _normalize_llm_plan(
         queries = _dedupe_non_empty(section.retrieval_queries)[:_MAX_SECTION_QUERIES]
         if not queries:
             queries = list(fallback_section.retrieval_queries)
-        sections.append(section.model_copy(update={
-            "title": section.title.strip() or fallback_section.title,
-            "objective": section.objective.strip() or fallback_section.objective,
-            "preferred_blocks": section.preferred_blocks or fallback_section.preferred_blocks,
-            "retrieval_queries": queries,
-        }))
+        sections.append(
+            section.model_copy(
+                update={
+                    "title": section.title.strip() or fallback_section.title,
+                    "objective": section.objective.strip()
+                    or fallback_section.objective,
+                    "preferred_blocks": section.preferred_blocks
+                    or fallback_section.preferred_blocks,
+                    "retrieval_queries": queries,
+                }
+            )
+        )
     if not sections:
         return fallback
-    return plan.model_copy(update={
-        "title": _clean_plan_title(plan.title) or fallback.title,
-        "purpose": plan.purpose.strip() or fallback.purpose,
-        "document_type": plan.document_type.strip() or fallback.document_type,
-        "assumptions": _dedupe_non_empty([*plan.assumptions, *fallback.assumptions])[:12],
-        "sections": sections,
-        "format_requirements": _format_requirements_for_plan(job, plan),
-    })
+    return plan.model_copy(
+        update={
+            "title": _clean_plan_title(plan.title) or fallback.title,
+            "purpose": plan.purpose.strip() or fallback.purpose,
+            "document_type": plan.document_type.strip() or fallback.document_type,
+            "assumptions": _dedupe_non_empty(
+                [*plan.assumptions, *fallback.assumptions]
+            )[:12],
+            "sections": sections,
+            "format_requirements": _format_requirements_for_plan(job, plan),
+        }
+    )
 
 
-def _format_requirements_for_plan(job: ArtifactJobRecord, plan: DocumentPlan) -> dict[str, list[str]]:
+def _format_requirements_for_plan(
+    job: ArtifactJobRecord, plan: DocumentPlan
+) -> dict[str, list[str]]:
     result = {
         artifact_format: _format_requirements(artifact_format)
         for artifact_format in job.requested_formats
     }
     for artifact_format in job.requested_formats:
         llm_requirements = plan.format_requirements.get(artifact_format, [])
-        result[artifact_format] = _dedupe_non_empty([*llm_requirements, *result[artifact_format]])[:8]
+        result[artifact_format] = _dedupe_non_empty(
+            [*llm_requirements, *result[artifact_format]]
+        )[:8]
     return result
 
 
@@ -289,6 +360,39 @@ def _requests_exhaustive_rows(lowered_request: str) -> bool:
     )
 
 
+def _resolve_topic(job: ArtifactJobRecord) -> str:
+    request_topic = _extract_topic(job.original_request)
+    if request_topic:
+        return request_topic
+
+    prioritized_answers = sorted(
+        job.clarifications.items(),
+        key=lambda item: 0 if _is_topic_question(item[0]) else 1,
+    )
+    for _question, answer in prioritized_answers:
+        normalized_answer = _normalize_clarification_answer(answer)
+        if not normalized_answer:
+            continue
+        answer_topic = _extract_topic(normalized_answer)
+        if answer_topic:
+            return answer_topic
+    return ""
+
+
+def _is_topic_question(question: str) -> bool:
+    lowered = question.lower()
+    return any(marker in lowered for marker in _TOPIC_QUESTION_MARKERS)
+
+
+def _normalize_clarification_answer(answer: str) -> str:
+    normalized = re.sub(r"\s+", " ", answer).strip(" \t\r\n\"'.,:;-")
+    for prefix in _CLARIFICATION_TOPIC_PREFIXES:
+        normalized = prefix.sub("", normalized).strip(" \t\r\n\"'.,:;-")
+    if normalized.lower() in _EMPTY_CLARIFICATION_ANSWERS:
+        return ""
+    return normalized
+
+
 def _extract_topic(request: str) -> str:
     text = re.sub(r"\s+", " ", cleaned_content_query(request) or request).strip(" .")
     text = re.sub(
@@ -306,13 +410,27 @@ def _extract_topic(request: str) -> str:
         "",
         text,
     ).strip(" .")
-    text = re.sub(r"(?i)^(?:file\s+)?(?:summari[sz](?:e|ing)|summary\s+of|overview\s+of|explain(?:ing)?|describe|describing|analy[sz](?:e|ing)|identify(?:ing)?|list(?:ing)?)\s+", "", text).strip(" .")
+    text = re.sub(
+        r"(?i)^(?:file\s+)?(?:summari[sz](?:e|ing)|summary\s+of|overview\s+of|explain(?:ing)?|describe|describing|analy[sz](?:e|ing)|identify(?:ing)?|list(?:ing)?)\s+",
+        "",
+        text,
+    ).strip(" .")
     text = re.sub(r"(?i)^(on|about|for|of|covering|with)\s+", "", text).strip(" .")
     text = re.sub(r"(?i)^(the|this|selected)\s+", "", text).strip(" .")
-    text = re.sub(r"(?i)\b(as|in)\s+(pdf|docx|pptx|powerpoint|presentation|slides?)\b", "", text).strip(" .")
+    text = re.sub(
+        r"(?i)\b(as|in)\s+(pdf|docx|pptx|powerpoint|presentation|slides?)\b", "", text
+    ).strip(" .")
     if len(text) < 4:
         return ""
-    if text.lower() in {"pdf", "docx", "pptx", "presentation", "report", "document", "artifact"}:
+    if text.lower() in {
+        "pdf",
+        "docx",
+        "pptx",
+        "presentation",
+        "report",
+        "document",
+        "artifact",
+    }:
         return ""
     return text[:240]
 

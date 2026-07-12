@@ -30,7 +30,12 @@ class PostgresHumanReviewRepository(PostgresConnectionMixin):
                     VALUES (%s, %s, %s::jsonb, %s::jsonb, 'pending')
                     RETURNING *
                     """,
-                    (job_id, doc_id, json.dumps(parsed_items), json.dumps(resume_payload)),
+                    (
+                        job_id,
+                        doc_id,
+                        json.dumps(parsed_items),
+                        json.dumps(resume_payload),
+                    ),
                 ).fetchone()
                 for item in review_items:
                     conn.execute(
@@ -57,7 +62,9 @@ class PostgresHumanReviewRepository(PostgresConnectionMixin):
         return review_batch_from_row(batch_row)
 
     def get_review_batch(self, batch_id: str) -> ReviewBatchRecord | None:
-        row = self._execute_optional("SELECT * FROM human_review_batches WHERE id = %s", (batch_id,))
+        row = self._execute_optional(
+            "SELECT * FROM human_review_batches WHERE id = %s", (batch_id,)
+        )
         return review_batch_from_row(row) if row else None
 
     def list_review_items(self, *, status: str = "pending") -> list[ReviewItemRecord]:
@@ -86,7 +93,13 @@ class PostgresHumanReviewRepository(PostgresConnectionMixin):
         )
         return [review_item_from_row(row) for row in rows]
 
-    def approve_review_item(self, item_id: str, *, corrected_text: str, reviewer_id: str) -> ReviewDecisionRecord | None:
+    def approve_review_item(
+        self,
+        item_id: str,
+        *,
+        corrected_text: str,
+        reviewer_id: str,
+    ) -> ReviewDecisionRecord | None:
         with self._connect() as conn:
             with conn.transaction():
                 item_row = conn.execute(
@@ -102,7 +115,9 @@ class PostgresHumanReviewRepository(PostgresConnectionMixin):
                     (corrected_text, reviewer_id, item_id),
                 ).fetchone()
                 if item_row is None:
-                    item_row = conn.execute("SELECT * FROM human_review_queue WHERE id = %s", (item_id,)).fetchone()
+                    item_row = conn.execute(
+                        "SELECT * FROM human_review_queue WHERE id = %s", (item_id,)
+                    ).fetchone()
                     if item_row is None:
                         return None
                 complete = conn.execute(
@@ -125,7 +140,10 @@ class PostgresHumanReviewRepository(PostgresConnectionMixin):
                         (item_row["batch_id"],),
                     ).fetchone()
                 else:
-                    batch_row = conn.execute("SELECT * FROM human_review_batches WHERE id = %s", (item_row["batch_id"],)).fetchone()
+                    batch_row = conn.execute(
+                        "SELECT * FROM human_review_batches WHERE id = %s",
+                        (item_row["batch_id"],),
+                    ).fetchone()
                 item_detail = conn.execute(
                     """
                     SELECT q.*, COALESCE(d.title, d.id::text) AS doc_title
@@ -135,9 +153,15 @@ class PostgresHumanReviewRepository(PostgresConnectionMixin):
                     """,
                     (item_row["id"],),
                 ).fetchone()
-        return ReviewDecisionRecord(item=review_item_from_row(item_detail), batch=review_batch_from_row(batch_row), batch_complete=bool(complete))
+        return ReviewDecisionRecord(
+            item=review_item_from_row(item_detail),
+            batch=review_batch_from_row(batch_row),
+            batch_complete=bool(complete),
+        )
 
-    def reject_review_item(self, item_id: str, *, reviewer_id: str) -> ReviewDecisionRecord | None:
+    def reject_review_item(
+        self, item_id: str, *, reviewer_id: str
+    ) -> ReviewDecisionRecord | None:
         with self._connect() as conn:
             with conn.transaction():
                 item_row = conn.execute(
@@ -152,7 +176,9 @@ class PostgresHumanReviewRepository(PostgresConnectionMixin):
                     (reviewer_id, item_id),
                 ).fetchone()
                 if item_row is None:
-                    item_row = conn.execute("SELECT * FROM human_review_queue WHERE id = %s", (item_id,)).fetchone()
+                    item_row = conn.execute(
+                        "SELECT * FROM human_review_queue WHERE id = %s", (item_id,)
+                    ).fetchone()
                     if item_row is None:
                         return None
                 batch_row = conn.execute(
@@ -173,7 +199,11 @@ class PostgresHumanReviewRepository(PostgresConnectionMixin):
                     """,
                     (item_row["id"],),
                 ).fetchone()
-        return ReviewDecisionRecord(item=review_item_from_row(item_detail), batch=review_batch_from_row(batch_row), batch_complete=False)
+        return ReviewDecisionRecord(
+            item=review_item_from_row(item_detail),
+            batch=review_batch_from_row(batch_row),
+            batch_complete=False,
+        )
 
 
 def review_batch_from_row(row: dict[str, Any]) -> ReviewBatchRecord:
@@ -182,7 +212,11 @@ def review_batch_from_row(row: dict[str, Any]) -> ReviewBatchRecord:
         job_id=str(row["job_id"]),
         doc_id=str(row["doc_id"]),
         status=str(row["status"]),
-        parsed_items=[dict(item) for item in _json_list(row.get("parsed_items")) if isinstance(item, dict)],
+        parsed_items=[
+            dict(item)
+            for item in _json_list(row.get("parsed_items"))
+            if isinstance(item, dict)
+        ],
         resume_payload=_json_object(row.get("resume_payload")),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
@@ -202,10 +236,16 @@ def review_item_from_row(row: dict[str, Any]) -> ReviewItemRecord:
         page_start=row.get("page_start"),
         page_end=row.get("page_end"),
         bbox=[float(item) for item in bbox] if isinstance(bbox, list) else None,
-        quality_flags=tuple(str(item) for item in flags) if isinstance(flags, list) else tuple(),
+        quality_flags=tuple(str(item) for item in flags)
+        if isinstance(flags, list)
+        else tuple(),
         partial_text=str(row.get("partial_text") or ""),
-        corrected_text=str(row["corrected_text"]) if row.get("corrected_text") is not None else None,
-        confidence=float(row["confidence"]) if row.get("confidence") is not None else None,
+        corrected_text=str(row["corrected_text"])
+        if row.get("corrected_text") is not None
+        else None,
+        confidence=float(row["confidence"])
+        if row.get("confidence") is not None
+        else None,
         status=str(row["status"]),
         assigned_to=str(row["assigned_to"]) if row.get("assigned_to") else None,
         created_at=row.get("created_at"),

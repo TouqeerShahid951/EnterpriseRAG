@@ -143,6 +143,32 @@ def test_ollama_vision_client_uses_api_chat_images_payload(monkeypatch) -> None:
     assert "concise caption" not in payload["messages"][1]["content"]
 
 
+def test_ollama_cloud_vision_omits_structured_format(monkeypatch) -> None:
+    calls = []
+
+    def fake_request_json(base_url, path, **kwargs):
+        calls.append((base_url, path, kwargs))
+        return {
+            "message": {
+                "content": '{"extracted_text":"Case 123","caption":"A scanned form.","confidence":0.9}'
+            }
+        }
+
+    monkeypatch.setattr(vision_module, "request_json", fake_request_json)
+    result = VisionClient(
+        provider="ollama",
+        base_url="http://ollama:11434",
+        model="gemma4:31b-cloud",
+        timeout_seconds=10,
+    ).analyze_image(content=b"image-bytes", content_type="image/png")
+
+    payload = calls[0][2]["payload"]
+    assert "format" not in payload
+    assert payload["model"] == "gemma4:31b-cloud"
+    assert "Return only valid JSON" in payload["messages"][1]["content"]
+    assert result.extracted_text == "Case 123"
+
+
 def test_openai_compatible_vision_client_uses_rag_description_prompt(monkeypatch) -> None:
     calls = []
 
@@ -245,6 +271,32 @@ def test_ollama_vision_client_supports_structured_layout_repair(monkeypatch) -> 
     assert payload["format"]["required"] == ["blocks", "confidence"]
     assert payload["messages"][1]["images"] == ["aW1hZ2UtYnl0ZXM="]
     assert "reading order" in payload["messages"][1]["content"]
+
+
+def test_ollama_cloud_layout_omits_structured_format(monkeypatch) -> None:
+    calls = []
+
+    def fake_request_json(base_url, path, **kwargs):
+        calls.append((base_url, path, kwargs))
+        return {
+            "message": {
+                "content": '{"blocks":[{"type":"text","text":"Case 123"}],"confidence":0.8}'
+            }
+        }
+
+    monkeypatch.setattr(vision_module, "request_json", fake_request_json)
+    result = VisionClient(
+        provider="ollama",
+        base_url="http://ollama:11434",
+        model="gemma4:31b-cloud",
+        timeout_seconds=10,
+    ).analyze_layout(content=b"image-bytes", content_type="image/png")
+
+    payload = calls[0][2]["payload"]
+    assert "format" not in payload
+    assert payload["model"] == "gemma4:31b-cloud"
+    assert "Return only valid JSON" in payload["messages"][1]["content"]
+    assert [block.text for block in result.blocks] == ["Case 123"]
 
 
 def test_image_item_text_indexes_visual_description_not_caption() -> None:

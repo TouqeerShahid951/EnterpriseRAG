@@ -81,9 +81,7 @@ def reconcile_ingestion_jobs(
     config = effective_ingest_config(repo=config_repo or get_ingest_config_repository())
     snapshot = control.apply(config.worker_concurrency)
     observed_at = now or datetime.now(UTC)
-    stale_before = observed_at - timedelta(
-        seconds=settings.ingest_stale_after_seconds
-    )
+    stale_before = observed_at - timedelta(seconds=settings.ingest_stale_after_seconds)
     recovered: list[str] = []
 
     stale_jobs = list_stale_ingest_jobs(
@@ -110,12 +108,7 @@ def reconcile_ingestion_jobs(
                 run_token=job.run_token,
             )
             if mutation.changed:
-                _audit(
-                    document_repo,
-                    job,
-                    "exhausted",
-                    {"attempt_count": job.attempt_count},
-                )
+                _audit(document_repo, job, "exhausted", {"attempt_count": job.attempt_count})
             continue
 
         if not candidate.recoverable:
@@ -132,12 +125,7 @@ def reconcile_ingestion_jobs(
                 run_token=job.run_token,
             )
             if mutation.changed:
-                _audit(
-                    document_repo,
-                    job,
-                    "unrecoverable",
-                    {"reason": candidate.recovery_code},
-                )
+                _audit(document_repo, job, "unrecoverable", {"reason": candidate.recovery_code})
             continue
 
         try:

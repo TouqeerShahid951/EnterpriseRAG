@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildConnectorScheduleRequest,
   buildLocalFolderScheduleRequest,
   buildRecurrence,
   buildSnapshotScheduleRequest,
@@ -10,7 +9,6 @@ import {
   folderSnapshotLabel,
   isScheduleVisibleForPanelVariant,
   relativePathForFile,
-  sourceModesForPanelVariant,
   summarizeFolderFiles,
 } from "./folderIngest";
 
@@ -102,36 +100,7 @@ describe("folder ingestion scheduling", () => {
     expect(buildLocalFolderScheduleRequest(draft).effective_date).toBeNull();
   });
 
-  it("builds connector schedule payloads with stable identity fields", () => {
-    const draft = {
-      ...defaultFolderScheduleDraft("2026-06-09"),
-      sourceMode: "connector" as const,
-      name: "Case DB sync",
-      groupPath: "/finance",
-      connectorProfileId: "profile-1",
-      connectorQuery: "SELECT id, status FROM dbo.Cases",
-      connectorIdentityFields: "id, updated_at",
-      connectorIngestionMode: "json_snapshot" as const,
-      connectorDeletionPolicy: "keep_deleted_documents" as const,
-      connectorBatchSize: 250,
-      connectorRowLimit: 1000,
-      scheduledAt: "2026-06-09T22:00",
-    };
-
-    expect(buildConnectorScheduleRequest(draft)).toMatchObject({
-      connector_profile_id: "profile-1",
-      selection: { query: "SELECT id, status FROM dbo.Cases", row_limit: 1000 },
-      identity_fields: ["id", "updated_at"],
-      ingestion_mode: "json_snapshot",
-      deletion_policy: "keep_deleted_documents",
-      batch_size: 250,
-      row_limit: 1000,
-    });
-  });
-
   it("separates folder source and database connector panel modes", () => {
-    expect(sourceModesForPanelVariant("folder_sources")).toEqual(["snapshot"]);
-    expect(sourceModesForPanelVariant("database_connectors")).toEqual([]);
     expect(defaultFolderScheduleDraftForVariant("", "database_connectors").sourceMode).toBe("connector");
     expect(defaultFolderScheduleDraftForVariant("", "folder_sources")).toMatchObject({ sourceMode: "snapshot", scheduleType: "one_time" });
   });

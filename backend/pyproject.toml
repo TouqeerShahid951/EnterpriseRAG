@@ -2,6 +2,7 @@
 name = "agenticrag-backend"
 version = "0.0.0"
 description = "FastAPI backend for the AgenticRAG local enterprise RAG pilot."
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "celery[redis]>=5.4,<6",
@@ -28,6 +29,8 @@ dependencies = [
 dev = [
     "httpx>=0.27,<1",
     "pytest>=8,<9",
+    "ruff>=0.15,<1",
+    "vulture>=2.16,<3",
 ]
 
 [tool.uvicorn]

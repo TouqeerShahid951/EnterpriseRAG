@@ -1,12 +1,12 @@
-import type { CreateConnectorScheduleRequest, CreateLocalFolderScheduleRequest, CreateSnapshotScheduleRequest } from "../api/contracts";
+import type { CreateLocalFolderScheduleRequest, CreateSnapshotScheduleRequest } from "../api/contracts";
 import { defaultClearanceLevel } from "../authz";
 import type { ClearanceLevel, ConnectorDeletionPolicy, ConnectorIngestionMode, ConnectorType, FolderScheduleType, RecurrenceWindow } from "../types/api";
 
 export const WORKSPACE_TIMEZONE = "Asia/Karachi";
-export const FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES = 100;
-export const FOLDER_SNAPSHOT_MAX_BYTES = 5 * 1024 * 1024 * 1024;
+const FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES = 100;
+const FOLDER_SNAPSHOT_MAX_BYTES = 5 * 1024 * 1024 * 1024;
 
-export type FolderSourceMode = "snapshot" | "local_folder" | "connector";
+type FolderSourceMode = "snapshot" | "local_folder" | "connector";
 export type FolderIngestPanelVariant = "folder_sources" | "database_connectors";
 
 export interface FolderFileEntry {
@@ -83,11 +83,6 @@ export function defaultFolderScheduleDraftForVariant(effectiveDate: string, vari
   return { ...draft, sourceMode: "snapshot", scheduleType: "one_time" };
 }
 
-export function sourceModesForPanelVariant(variant: FolderIngestPanelVariant): FolderSourceMode[] {
-  if (variant === "database_connectors") return [];
-  return ["snapshot"];
-}
-
 export function isScheduleVisibleForPanelVariant(sourceType: string, variant: FolderIngestPanelVariant): boolean {
   if (variant === "database_connectors") return false;
   return sourceType === "local_folder" || sourceType === "snapshot";
@@ -153,28 +148,6 @@ export function buildLocalFolderScheduleRequest(draft: FolderScheduleDraft): Cre
   return {
     name: draft.name.trim(),
     path: draft.folderPath.trim(),
-    group_path: draft.groupPath.trim(),
-    clearance_level: draft.clearanceLevel,
-    effective_date: draft.effectiveDate || null,
-    expiry_date: draft.expiryDate || null,
-    description: draft.description.trim() || null,
-    schedule_type: draft.scheduleType,
-    timezone: draft.timezone,
-    scheduled_at: draft.scheduleType === "one_time" ? draft.scheduledAt || null : null,
-    recurrence: buildRecurrence(draft),
-  };
-}
-
-export function buildConnectorScheduleRequest(draft: FolderScheduleDraft): CreateConnectorScheduleRequest {
-  return {
-    name: draft.name.trim(),
-    connector_profile_id: draft.connectorProfileId,
-    selection: { query: draft.connectorQuery.trim(), row_limit: draft.connectorRowLimit },
-    identity_fields: identityFieldsFromDraft(draft.connectorIdentityFields),
-    ingestion_mode: draft.connectorIngestionMode,
-    deletion_policy: draft.connectorDeletionPolicy,
-    batch_size: draft.connectorBatchSize,
-    row_limit: draft.connectorRowLimit,
     group_path: draft.groupPath.trim(),
     clearance_level: draft.clearanceLevel,
     effective_date: draft.effectiveDate || null,

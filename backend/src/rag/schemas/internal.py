@@ -227,10 +227,6 @@ class ImageReviewBatchCreateResponse(ContractModel):
     image_review_batch_id: str
 
 
-class ImageReviewApprovedKeysResponse(ContractModel):
-    candidate_keys: list[str] = Field(default_factory=list)
-
-
 class ImageReviewResumeResponse(ContractModel):
     parsed_items: list[dict[str, Any]] = Field(default_factory=list)
     candidates: list[ImageReviewCandidatePayload] = Field(default_factory=list)

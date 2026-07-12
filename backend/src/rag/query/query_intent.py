@@ -10,20 +10,11 @@ from .routing_rules import score_route_rules
 from .routing_signals import extract_query_signals
 
 _DATE_RE = re.compile(r"\b(19|20)\d{2}(-\d{2}){0,2}\b")
-_TEMPORAL_TERMS = ("latest", "current", "currently", "as of", "historical", "previous", "old")
-_CONFLICT_TERMS = ("conflict", "contradict", "disagree", "inconsistent")
-_AGGREGATION_TERMS = ("how many", "count", "list all", "total")
-_FOLLOW_UP_TERMS = ("it", "that", "those", "they", "previous answer")
 
 
 def classify_intent(query: str) -> QueryIntent:
     route = score_route_rules(extract_query_signals(query, [])).intent
     return public_intent_for(route)
-
-
-def has_temporal_signal(query: str) -> bool:
-    text = query.lower()
-    return _DATE_RE.search(query) is not None or any(term in text for term in _TEMPORAL_TERMS)
 
 
 def should_include_superseded(query: str) -> bool:

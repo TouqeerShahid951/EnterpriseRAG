@@ -33,7 +33,6 @@ _LOGGER = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class LiveSqlRetrievalResult:
     hits: list[SearchHit]
-    attempted: bool
     mode: str
     detail: str
 
@@ -74,12 +73,12 @@ def retrieve_live_sql_hits(
     connector_registry: ConnectorRegistry | None = None,
 ) -> LiveSqlRetrievalResult:
     if not getattr(config, "connector_live_sql_enabled", False):
-        return LiveSqlRetrievalResult([], False, "skipped", "disabled")
+        return LiveSqlRetrievalResult([], "skipped", "disabled")
     if ctx["request"].document_ids:
-        return LiveSqlRetrievalResult([], False, "skipped", "document_scope")
+        return LiveSqlRetrievalResult([], "skipped", "document_scope")
     plan = ctx.get("route_plan")
     if not _should_run_live_sql(plan, ctx.get("source_decision")):
-        return LiveSqlRetrievalResult([], False, "skipped", "non_structured_route")
+        return LiveSqlRetrievalResult([], "skipped", "non_structured_route")
 
     _ = schedule_repo
     connector_profile_repo = connector_profile_repo or get_connector_profile_repository()
@@ -205,15 +204,14 @@ def retrieve_live_sql_hits(
     if all_hits:
         return LiveSqlRetrievalResult(
             all_hits,
-            True,
             "ai_assisted",
             f"scope=database_scope,live_sql_hits={len(all_hits)},catalogs={len(catalogs)},repairs={repair_count}",
         )
     if failures:
-        return LiveSqlRetrievalResult([], True, "fallback", ",".join(failures[:5]))
+        return LiveSqlRetrievalResult([], "fallback", ",".join(failures[:5]))
     if attempted_scopes:
-        return LiveSqlRetrievalResult([], True, "fallback", "no_live_rows")
-    return LiveSqlRetrievalResult([], False, "skipped", "no_approved_connector_scope")
+        return LiveSqlRetrievalResult([], "fallback", "no_live_rows")
+    return LiveSqlRetrievalResult([], "skipped", "no_approved_connector_scope")
 
 
 def live_catalog_query_hits(

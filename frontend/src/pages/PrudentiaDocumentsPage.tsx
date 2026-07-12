@@ -3,8 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ArchiveRestore,
-  Activity,
-  AlertTriangle,
   ChevronDown,
   ChevronRight,
   Download,
@@ -12,7 +10,6 @@ import {
   Eye,
   FileText,
   Folder,
-  FolderOpen,
   FolderPlus,
   Loader2,
   Network,
@@ -49,7 +46,7 @@ import { PrudentiaWorkspace } from "../components/layout/PrudentiaWorkspace";
 import { Modal } from "../components/layout/Modal";
 import { compactDocumentTopics, hasActiveDocumentFilters, resultCountLabel, shortDocumentId } from "./document/documentListFormat";
 import type { RouteId } from "../routes";
-import { formatSecondaryStageProgress, graphEnrichmentForJob, graphEnrichmentTaskForJob, isUploadTerminalStatus, type GraphEnrichmentChip as GraphEnrichmentChipShape, type GraphEnrichmentTask } from "../state/uploadJobProgress";
+import { graphEnrichmentForJob, graphEnrichmentTaskForJob, isUploadTerminalStatus, type GraphEnrichmentChip as GraphEnrichmentChipShape, type GraphEnrichmentTask } from "../state/uploadJobProgress";
 import type { ClearanceLevel, Document, DocumentIngestStatus, GraphRAGStatus, User as AuthUser, VersionChainResponse } from "../types/api";
 import type { UploadBatchItemView } from "../types/chat";
 import { errorMessage, formatDate, formatDateTime } from "../utils/format";
@@ -62,7 +59,6 @@ import {
   type GroupOption,
 } from "../utils/groups";
 
-const SPACE_TABS_STORAGE_KEY = "agenticrag.knowledge-space-tabs.v1";
 const INSPECTOR_TABS: Array<{ id: InspectorTab; label: string }> = [
   { id: "overview", label: "Overview" },
   { id: "governance", label: "Governance" },
@@ -70,31 +66,12 @@ const INSPECTOR_TABS: Array<{ id: InspectorTab; label: string }> = [
   { id: "versions", label: "Versions" },
 ];
 
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(() => (typeof window === "undefined" ? false : window.matchMedia(query).matches));
-
-  useEffect(() => {
-    const media = window.matchMedia(query);
-    const update = () => setMatches(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, [query]);
-
-  return matches;
-}
-
 export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user, view = "spaces" }: Props) {
   const queryClient = useQueryClient();
   const { notify } = useToast();
   const isSpaceManager = canManageSpaces(user);
-  const isPhoneKnowledgeLayout = useMediaQuery("(max-width: 680px)");
   const canLoadSpaceDirectory = isSpaceManager || canViewSpaceMetadata(user);
   const [activeTab, setActiveTab] = useState<ExplorerTab>(() => initialExplorerTabFromUrl());
-  const [previousTabKey, setPreviousTabKey] = useState("overview");
-  const [openSpaceTabs, setOpenSpaceTabs] = useState<string[]>(() => initialOpenSpaceTabsFromSession());
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
-  const [spaceSearch, setSpaceSearch] = useState("");
   const [documentSearch, setDocumentSearch] = useState(() => initialStringParamFromUrl("doc_q"));
   const [statusFilter, setStatusFilter] = useState<DocumentStateFilter>(() => initialDocumentStateFilterFromUrl());
   const [ingestFilter, setIngestFilter] = useState<DocumentIngestFilter>(() => initialDocumentIngestFilterFromUrl());
@@ -132,44 +109,14 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
   const canUploadDocuments = view === "spaces"
     ? spaceOptions.some((space) => canUploadToSpace(user, space.path))
     : canUploadToSpace(user, user.group_paths[0] ?? "/") || isGlobalAdmin(user);
-  const visibleActiveTab: ExplorerTab = view === "spaces" && isPhoneKnowledgeLayout ? { kind: "overview" } : activeTab;
+  const visibleActiveTab = activeTab;
   const selectedSpacePath = visibleActiveTab.kind === "space" ? visibleActiveTab.path : "";
   const selectedSpace = selectedSpacePath ? spaceOptions.find((space) => space.path === selectedSpacePath) ?? null : null;
   const canUploadToSelectedSpace = Boolean(selectedSpacePath && canUploadToSpace(user, selectedSpacePath));
   const selectedDocument = selectedDocumentId ? allKnownDocuments.find((doc) => doc.id === selectedDocumentId) ?? null : null;
   const hasSelectedDocument = Boolean(selectedDocument);
   const activeTabKey = explorerTabKey(activeTab);
-  const activeFolderTabs = openSpaceTabs
-    .map((path) => spaceOptions.find((space) => space.path === path) ?? spaceFromPath(path))
-    .filter(Boolean);
   const isLoadingDirectory = canLoadSpaceDirectory && groupsQuery.isLoading;
-
-  useEffect(() => {
-    const urlSpace = initialStringParamFromUrl("space");
-    if (urlSpace && activeTab.kind === "space") {
-      setOpenSpaceTabs((current) => (current.includes(urlSpace) ? current : [...current, urlSpace]));
-    }
-  }, []);
-
-  useEffect(() => {
-    sessionStorage.setItem(SPACE_TABS_STORAGE_KEY, JSON.stringify(openSpaceTabs));
-  }, [openSpaceTabs]);
-
-  useEffect(() => {
-    if (view === "spaces" && isPhoneKnowledgeLayout && activeTab.kind !== "overview") {
-      activateTab({ kind: "overview" });
-    }
-  }, [activeTab, isPhoneKnowledgeLayout, view]);
-
-  useEffect(() => {
-    const roots = rootSpaces(spaceOptions).map((space) => space.path);
-    const scoped = user.group_paths.filter(Boolean);
-    setExpandedPaths((current) => {
-      const next = new Set([...current, ...roots, ...scoped]);
-      if (next.size === current.size && [...next].every((path) => current.has(path))) return current;
-      return next;
-    });
-  }, [spaceOptions, user.group_paths]);
 
   useEffect(() => {
     syncExplorerUrl({ activeTab, documentSearch, ingestFilter, selectedDocumentId, spaceFilter, statusFilter, view });
@@ -217,7 +164,6 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
     mutationFn: (path: string) => adminApi.deleteGroup({ path }),
     onMutate: (path) => setDeletingSpacePath(path),
     onSuccess: (_, path) => {
-      setOpenSpaceTabs((current) => current.filter((item) => item !== path));
       if (activeTab.kind === "space" && activeTab.path === path) activateTab({ kind: "overview" });
       setSpacePanel(null);
       void queryClient.invalidateQueries({ queryKey: ["admin", "groups"] });
@@ -400,7 +346,7 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
   });
 
   const graphCancelMutation = useMutation({
-    mutationFn: ({ document, task }: { document: Document; task: GraphEnrichmentTask }) => {
+    mutationFn: ({ task }: { document: Document; task: GraphEnrichmentTask }) => {
       if (!task.jobId) throw new Error("Graph task is missing its ingestion job ID.");
       return ingestJobsApi.cancelGraphEnrichment(task.jobId, task.taskId);
     },
@@ -421,28 +367,13 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
   function activateTab(tab: ExplorerTab) {
     const nextKey = explorerTabKey(tab);
     if (nextKey !== activeTabKey) {
-      setPreviousTabKey(activeTabKey);
       setSelectedDocumentId(null);
     }
     setActiveTab(tab);
   }
 
   function openSpace(path: string) {
-    if (isPhoneKnowledgeLayout) {
-      activateTab({ kind: "overview" });
-      return;
-    }
-    setOpenSpaceTabs((current) => (current.includes(path) ? current : [...current, path]));
-    setExpandedPaths((current) => new Set([...current, path]));
     activateTab({ kind: "space", path });
-  }
-
-  function closeSpaceTab(path: string) {
-    setOpenSpaceTabs((current) => current.filter((item) => item !== path));
-    if (activeTab.kind === "space" && activeTab.path === path) {
-      const previous = tabFromKey(previousTabKey, openSpaceTabs.filter((item) => item !== path)) ?? { kind: "overview" as const };
-      activateTab(previous);
-    }
   }
 
   function resetSpaceMutations() {
@@ -619,7 +550,6 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
                       onCancelGraph={(document, task) => graphCancelMutation.mutate({ document, task })}
                       onEnrichGraph={(document) => graphEnrichmentMutation.mutate(document)}
                       onNavigate={onNavigate}
-                      onOpenSpace={openSpace}
                       onSearchChange={setDocumentSearch}
                       onSelectDocument={setSelectedDocumentId}
                       onSelectionChange={setSelectedIds}
@@ -637,7 +567,7 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
                       activeDocuments={activeDocuments}
                       canCreateSpace={isSpaceManager}
                       canManageSpaces={isSpaceManager}
-                      canOpenSpaces={!isPhoneKnowledgeLayout}
+                      canOpenSpaces
                       deletingSpacePath={deletingSpacePath}
                       deletedCount={deletedDocuments.length}
                       isLoading={activeDocsQuery.isLoading || isLoadingDirectory}
@@ -781,129 +711,6 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
   );
 }
 
-function ExplorerTabs({ activeTab, onActivate, onCloseSpace, openSpaces }: ExplorerTabsProps) {
-  return (
-    <div className="knowledge-internal-tabs" role="tablist" aria-label="Open Knowledge Space tabs">
-      <button
-        type="button"
-        role="tab"
-        aria-selected={activeTab.kind === "overview"}
-        className={activeTab.kind === "overview" ? "knowledge-internal-tab-active" : "knowledge-internal-tab"}
-        onClick={() => onActivate({ kind: "overview" })}
-      >
-        <FolderOpen size={15} />
-        <span>Overview</span>
-        <small>All spaces</small>
-      </button>
-      {openSpaces.map((space) => (
-        <button
-          key={space.path}
-          type="button"
-          role="tab"
-          aria-selected={activeTab.kind === "space" && activeTab.path === space.path}
-          className={activeTab.kind === "space" && activeTab.path === space.path ? "knowledge-internal-tab-active" : "knowledge-internal-tab"}
-          onClick={() => onActivate({ kind: "space", path: space.path })}
-        >
-          <Folder size={15} />
-          <span>{space.name}</span>
-          <small>{space.path}</small>
-          <span
-            role="button"
-            tabIndex={0}
-            className="knowledge-tab-close"
-            aria-label={`Close ${space.name}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              onCloseSpace(space.path);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                event.stopPropagation();
-                onCloseSpace(space.path);
-              }
-            }}
-          >
-            <X size={14} />
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function KnowledgeFolderTree({
-  activePath,
-  deletingPath,
-  documents,
-  expandedPaths,
-  isLoading,
-  isSpaceManager,
-  onDeleteSpace,
-  onEditSpace,
-  onOpenSpace,
-  onToggle,
-  search,
-  spaces,
-}: KnowledgeFolderTreeProps) {
-  const spaceByPath = new Map(spaces.map((space) => [space.path, space]));
-  const childrenByParent = new Map<string, GroupOption[]>();
-  for (const space of spaces) {
-    const key = space.parentPath && spaceByPath.has(space.parentPath) ? space.parentPath : "";
-    childrenByParent.set(key, [...(childrenByParent.get(key) ?? []), space]);
-  }
-  const query = search.trim().toLowerCase();
-
-  function matches(space: GroupOption): boolean {
-    if (!query) return true;
-    if (space.name.toLowerCase().includes(query) || space.path.toLowerCase().includes(query)) return true;
-    return (childrenByParent.get(space.path) ?? []).some(matches);
-  }
-
-  function renderRows(parentPath = ""): JSX.Element[] {
-    return (childrenByParent.get(parentPath) ?? []).filter(matches).flatMap((space) => {
-      const children = childrenByParent.get(space.path) ?? [];
-      const expanded = expandedPaths.has(space.path) || Boolean(query);
-      const directCount = documents.filter((doc) => documentAccessPaths(doc).includes(space.path)).length;
-      const descendantCount = documents.filter((doc) => isDocumentVisibleInSpace(doc, space.path)).length;
-      return [
-        <div key={space.path} className={activePath === space.path ? "knowledge-tree-row-active" : "knowledge-tree-row"} style={{ "--space-depth": space.depth } as TreeRowStyle}>
-          <button type="button" className="knowledge-tree-toggle" onClick={() => onToggle(space.path)} disabled={children.length === 0} aria-label={expanded ? `Collapse ${space.name}` : `Expand ${space.name}`}>
-            {children.length > 0 ? expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} /> : <span />}
-          </button>
-          <button type="button" className="knowledge-tree-folder" onClick={() => onOpenSpace(space.path)}>
-            {activePath === space.path ? <FolderOpen size={16} /> : <Folder size={16} />}
-            <span>
-              <strong>{space.name}</strong>
-              <small>{space.path}</small>
-            </span>
-          </button>
-          <span className="knowledge-tree-count" title={`${descendantCount} documents in this folder and descendants`}>
-            {directCount}
-          </span>
-          {isSpaceManager ? (
-            <div className="knowledge-tree-actions">
-              <button type="button" onClick={() => onEditSpace(space)} aria-label={`Edit ${space.name}`}>
-                <Edit3 size={13} />
-              </button>
-              <button type="button" onClick={() => onDeleteSpace(space)} disabled={deletingPath === space.path} aria-label={`Delete ${space.name}`}>
-                <Trash2 size={13} />
-              </button>
-            </div>
-          ) : null}
-        </div>,
-        ...(expanded ? renderRows(space.path) : []),
-      ];
-    });
-  }
-
-  if (isLoading) return <SpaceSkeleton />;
-  const rows = renderRows();
-  if (rows.length === 0) {
-    return <EmptyState title="No folders">No Knowledge Spaces match this view.</EmptyState>;
-  }
-  return <div className="knowledge-tree">{rows}</div>;
-}
 
 function OverviewTab({
   activeDocuments,
@@ -1123,90 +930,6 @@ function SpaceAttentionList({ canOpenSpaces, onOpenSpace, rows }: { canOpenSpace
   );
 }
 
-function LegacyOverviewTab({ activeDocuments, canCreateSpace, deletedCount, isLoading, onCreateSpace, onOpenSpace, onShowJobs, onShowTrash, rows }: OverviewTabProps) {
-  const currentCount = activeDocuments.filter((doc) => doc.is_current).length;
-  const processingCount = activeDocuments.filter((doc) => isProcessingIngestStatus(doc.ingest_status)).length;
-  const reviewCount = activeDocuments.filter((doc) => doc.ingest_status === "human_review").length;
-  const failedCount = activeDocuments.filter((doc) => doc.ingest_status === "failed").length;
-  const unknownCount = activeDocuments.filter((doc) => doc.ingest_status === "unknown").length;
-
-  return (
-    <div className="knowledge-section knowledge-overview">
-      <div className="knowledge-section-header">
-        <div>
-          <h2 className="sv-section-title">Workspace overview</h2>
-          <p className="text-body-md text-on-surface-variant">Open a Knowledge Space to manage documents assigned to it.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {canCreateSpace ? (
-            <button type="button" onClick={onCreateSpace} className="sv-action-secondary">
-              <FolderPlus size={16} /> New Space
-            </button>
-          ) : null}
-        </div>
-      </div>
-      <div className="knowledge-card-metrics" aria-label="Document lifecycle summary">
-        <ContextMetric label="Active documents" value={String(activeDocuments.length)} loading={isLoading} />
-        <ContextMetric label="Current" value={String(currentCount)} loading={isLoading} tone="success" />
-        <ContextMetric label="Needs attention" value={String(processingCount + reviewCount + failedCount + unknownCount)} loading={isLoading} />
-        <ContextMetric label="Trash" value={String(deletedCount)} loading={isLoading} />
-      </div>
-      <div className="knowledge-action-strip">
-        <button type="button" onClick={onShowJobs}>Review Activity</button>
-        <button type="button" onClick={onShowTrash}>Open Trash</button>
-      </div>
-      <section className="knowledge-job-block" aria-label="Knowledge Space breakdown">
-        <div className="knowledge-job-block-header">
-          <div>
-            <h3>Space breakdown</h3>
-            <p>Counts include documents assigned to each visible Knowledge Space.</p>
-          </div>
-          <span className="sv-pill">{rows.length} spaces</span>
-        </div>
-        {isLoading ? <DocumentSkeleton /> : null}
-        {!isLoading && rows.length > 0 ? (
-          <div className="knowledge-doc-surface">
-            <table className="sv-table knowledge-doc-table knowledge-space-breakdown-table">
-              <thead>
-                <tr>
-                  <th>Knowledge Space</th>
-                  <th>Documents</th>
-                  <th>Ingestion</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody className="text-body-md">
-                {rows.map((row) => (
-                  <tr key={row.space.path} className="sv-table-row">
-                    <td data-label="Knowledge Space">
-                      <button type="button" className="knowledge-link-button" onClick={() => onOpenSpace(row.space.path)}>
-                        <strong>{row.space.name}</strong>
-                        <span>{row.space.path}</span>
-                      </button>
-                    </td>
-                    <td data-label="Documents" className="text-secondary">
-                      {row.documentsCount} total · {row.currentCount} current
-                    </td>
-                    <td data-label="Ingestion">
-                      <div className="knowledge-breakdown-pills">
-                        {row.processingCount > 0 ? <span className="sv-pill knowledge-status-processing">{row.processingCount} processing</span> : null}
-                        {row.reviewCount > 0 ? <span className="sv-pill knowledge-status-human_review">{row.reviewCount} review</span> : null}
-                        {row.failedCount > 0 ? <span className="sv-pill knowledge-status-failed">{row.failedCount} failed</span> : null}
-                        {row.unknownCount > 0 ? <span className="sv-pill knowledge-status-unknown">{row.unknownCount} unknown</span> : null}
-                        {row.processingCount + row.reviewCount + row.failedCount + row.unknownCount === 0 ? <span className="sv-pill sv-pill-success">Healthy</span> : null}
-                      </div>
-                    </td>
-                    <td data-label="Status" className="text-secondary">{row.currentCount} current</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </section>
-    </div>
-  );
-}
 
 function FolderTab({
   bulkSelection,
@@ -1224,7 +947,6 @@ function FolderTab({
   onCancelGraph,
   onEnrichGraph,
   onNavigate,
-  onOpenSpace,
   onSearchChange,
   onSelectDocument,
   onSelectionChange,
@@ -1469,137 +1191,6 @@ function TrashTab({
   );
 }
 
-function JobsTab({ batchItems, canUploadDocuments, documents, isLoading, onNavigate }: JobsTabProps) {
-  const processingBatchItems = batchItems.filter((item) => item.requestState !== "failed" && !isUploadTerminalStatus(item.job?.status));
-  const attentionBatchItems = batchItems.filter((item) => item.requestState === "failed" || item.job?.status === "failed" || item.job?.status === "human_review" || item.job?.status === "cancelled");
-  const shouldPollGraphStatus = batchItems.some((item) => item.job?.status === "complete");
-  const graphStatusQuery = useQuery({
-    queryKey: ["ingest-jobs", "graphrag-status", "documents-batch"],
-    queryFn: ingestJobsApi.graphragStatus,
-    enabled: shouldPollGraphStatus,
-    refetchInterval: shouldPollGraphStatus ? 5000 : false,
-    staleTime: 3000,
-    retry: false,
-  });
-  const graphStatusError = graphStatusQuery.isError ? errorMessage(graphStatusQuery.error, "Unable to load graph enrichment status.") : null;
-  const activeDocuments = documents.filter((doc) => doc.ingest_status !== "complete");
-  const processingCount = activeDocuments.filter((doc) => isProcessingIngestStatus(doc.ingest_status)).length + processingBatchItems.length;
-  const failedCount = activeDocuments.filter((doc) => doc.ingest_status === "failed").length + attentionBatchItems.filter((item) => item.requestState === "failed" || item.job?.status === "failed").length;
-  const reviewCount = activeDocuments.filter((doc) => doc.ingest_status === "human_review").length + attentionBatchItems.filter((item) => item.job?.status === "human_review").length;
-  const unknownCount = activeDocuments.filter((doc) => doc.ingest_status === "unknown").length;
-  const completeCount = documents.filter((doc) => doc.ingest_status === "complete").length + batchItems.filter((item) => item.job?.status === "complete").length;
-
-  return (
-    <div className="knowledge-section">
-      <div className="knowledge-section-header">
-        <div>
-          <h2 className="sv-section-title">Uploads and Activity</h2>
-          <p className="text-body-md text-on-surface-variant">Persistent document status plus live progress from uploads in this browser session.</p>
-        </div>
-        {canUploadDocuments ? (
-          <button type="button" onClick={() => onNavigate("upload")} className="sv-action-primary">
-            <Upload size={16} /> Open Intake
-          </button>
-        ) : null}
-      </div>
-      <div className="knowledge-job-metrics" aria-label="Activity summary">
-        <ContextMetric label="Processing" value={String(processingCount)} loading={isLoading} />
-        <ContextMetric label="Needs review" value={String(reviewCount)} loading={isLoading} />
-        <ContextMetric label="Failed" value={String(failedCount)} loading={isLoading} />
-        <ContextMetric label="Unknown" value={String(unknownCount)} loading={isLoading} />
-        <ContextMetric label="Indexed" value={String(completeCount)} loading={isLoading} tone="success" />
-      </div>
-      {batchItems.length > 0 ? (
-        <section className="knowledge-job-block" aria-label="Current browser upload activity">
-          <div className="knowledge-job-block-header">
-            <div>
-              <h3>Current upload batch</h3>
-              <p>Live progress from this browser session, including page/chunk/vector detail when available.</p>
-            </div>
-            <span className="sv-pill">{batchItems.length} recent</span>
-          </div>
-          <div className="knowledge-job-list">
-            {batchItems.map((item) => (
-              <UploadJobCard
-                graphStatus={graphStatusQuery.data}
-                graphStatusError={graphStatusError}
-                item={item}
-                key={item.id}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
-      <section className="knowledge-job-block" aria-label="Persistent ingestion status">
-        <div className="knowledge-job-block-header">
-          <div>
-            <h3>Persistent ingestion status</h3>
-            <p>Documents that are queued, processing, failed, unknown, or waiting for review.</p>
-          </div>
-          <span className="sv-pill">{activeDocuments.length} active</span>
-        </div>
-        <DocumentCompactList
-          documents={activeDocuments}
-          emptyAction={canUploadDocuments ? "Upload document" : undefined}
-          emptyTitle="No active processing"
-          isLoading={isLoading}
-          mode="readonly"
-          onEmptyAction={canUploadDocuments ? () => onNavigate("upload") : undefined}
-          onSelectDocument={() => undefined}
-          onSelectionChange={() => undefined}
-          pendingIds={new Set()}
-          selectedDocumentId={null}
-          selectedIds={new Set()}
-          user={null}
-        />
-      </section>
-    </div>
-  );
-}
-
-function UploadJobCard({ graphStatus, graphStatusError, item }: { graphStatus: GraphRAGStatus | undefined; graphStatusError: string | null; item: UploadBatchItemView }) {
-  const job = item.job;
-  const status: DocumentIngestStatus = item.requestState === "failed" ? "failed" : job?.status ?? "queued";
-  const progressPct = job ? Math.max(0, Math.min(100, job.progressPct)) : item.requestState === "uploading" ? 8 : 0;
-  const stageProgress = formatSecondaryStageProgress(job?.stageProgress, job?.stageDetail);
-  const graphChip = job ? graphEnrichmentForJob(job, graphStatus, graphStatusError) : null;
-  const detail = item.requestState === "uploading"
-    ? "Validating, scanning, storing, and queueing this document."
-    : item.requestState === "failed"
-      ? "The document did not reach the indexing queue."
-      : job?.stageDetail ?? "Waiting for ingestion status.";
-
-  return (
-    <article className="knowledge-job-card">
-      <div className="knowledge-job-card-main">
-        <div>
-          <h4>{item.fileName}</h4>
-          <p>{[item.groupPath, clearanceLevelLabel(item.clearanceLevel), item.fileSize === null ? null : formatFileSizeForJob(item.fileSize)].filter(Boolean).join(" · ")}</p>
-        </div>
-        <IngestStatusPill status={status} />
-      </div>
-      <p className="knowledge-job-card-detail">{detail}</p>
-      {stageProgress ? <p className="knowledge-job-card-progress">{stageProgress}</p> : null}
-      {graphChip ? <GraphEnrichmentChip chip={graphChip} /> : null}
-      <div className="knowledge-job-progress" aria-label={`${item.fileName} ingestion progress`} aria-valuemax={100} aria-valuemin={0} aria-valuenow={progressPct} role="progressbar">
-        <span style={{ width: `${progressPct}%` }} />
-      </div>
-    </article>
-  );
-}
-
-function GraphEnrichmentChip({ chip }: { chip: GraphEnrichmentChipShape }) {
-  const className = chip.state === "unavailable"
-    ? "border-warning-amber/30 bg-warning-amber/10 text-warning-amber"
-    : "border-primary/30 bg-primary/10 text-primary";
-  return (
-    <p className={`knowledge-job-card-progress inline-flex w-fit items-center gap-1 rounded-full border px-2 py-1 ${className}`}>
-      {chip.state === "unavailable" ? <AlertTriangle size={12} /> : <Activity className={chip.state === "running" ? "animate-pulse" : ""} size={12} />}
-      <span>{chip.label}</span>
-      {chip.detail ? <span>{chip.detail}</span> : null}
-    </p>
-  );
-}
 
 function DocumentCompactList({
   cancellingGraphTaskId,
@@ -1621,7 +1212,7 @@ function DocumentCompactList({
   selectedDocumentId,
   selectedIds,
   user,
-}: DocumentTableProps) {
+}: DocumentListProps) {
   const selectable = mode !== "readonly";
   const allSelected = selectable && documents.length > 0 && documents.every((doc) => selectedIds.has(doc.id));
   const someSelected = selectable && !allSelected && documents.some((doc) => selectedIds.has(doc.id));
@@ -1738,118 +1329,6 @@ function DocumentCompactList({
   );
 }
 
-function DocumentTable({
-  documents,
-  emptyAction,
-  emptyTitle,
-  isLoading,
-  mode,
-  onAction,
-  onEmptyAction,
-  onSelectDocument,
-  onSelectionChange,
-  pendingIds,
-  selectedDocumentId,
-  selectedIds,
-  user,
-}: DocumentTableProps) {
-  const selectable = mode !== "readonly";
-  const allSelected = selectable && documents.length > 0 && documents.every((doc) => selectedIds.has(doc.id));
-  const someSelected = selectable && !allSelected && documents.some((doc) => selectedIds.has(doc.id));
-  return (
-    <div className="knowledge-doc-surface">
-      {isLoading ? <DocumentSkeleton /> : null}
-      {!isLoading && documents.length > 0 ? (
-        <table className="sv-table knowledge-doc-table">
-          <thead>
-            <tr>
-              {selectable ? (
-                <th>
-                  <button
-                    type="button"
-                    className="knowledge-checkbox-button"
-                    onClick={() => onSelectionChange(allSelected ? new Set() : new Set(documents.map((doc) => doc.id)))}
-                    aria-label={allSelected ? "Clear document selection" : "Select all documents in this table"}
-                  >
-                    {allSelected ? "☑" : "☐"}
-                  </button>
-                </th>
-              ) : null}
-              <th>Document</th>
-              <th>Knowledge Space</th>
-              <th>Clearance</th>
-              <th>Lifecycle</th>
-              <th>Ingestion</th>
-              <th>Effective</th>
-              {mode !== "readonly" ? <th>Actions</th> : null}
-            </tr>
-          </thead>
-          <tbody className="text-body-md">
-            {documents.map((doc) => {
-              const selected = selectedIds.has(doc.id);
-              const pending = pendingIds.has(doc.id);
-              const visibleTopics = uniqueTopicValues([...doc.topics, ...doc.llm_topics]);
-              return (
-                <tr key={doc.id} aria-selected={selectedDocumentId === doc.id} className="sv-table-row">
-                  {selectable ? (
-                    <td data-label="Select">
-                      <button
-                        type="button"
-                        className="knowledge-checkbox-button"
-                        onClick={() => {
-                          const next = new Set(selectedIds);
-                          if (next.has(doc.id)) next.delete(doc.id);
-                          else next.add(doc.id);
-                          onSelectionChange(next);
-                        }}
-                        aria-label={selected ? `Deselect ${doc.title}` : `Select ${doc.title}`}
-                      >
-                        {selected ? "☑" : "☐"}
-                      </button>
-                    </td>
-                  ) : null}
-                  <td data-label="Document">
-                    <button type="button" className="knowledge-document-open" onClick={() => onSelectDocument(doc.id)}>
-                      <FileText size={18} />
-                      <span>
-                        <strong>{doc.title}</strong>
-                        <small>{doc.id}</small>
-                      </span>
-                    </button>
-                    {doc.summary ? <p className="mt-1 max-w-xl text-body-md text-on-surface-variant">{doc.summary}</p> : null}
-                    {visibleTopics.length ? (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {visibleTopics.slice(0, 4).map((topic) => <span key={topic} className="sv-pill">{topic}</span>)}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td data-label="Knowledge Space" className="text-secondary">
-                    <span className="block">{doc.owner_group_path ?? doc.group_path}</span>
-                    {doc.shared_group_paths.length ? <small>{scopeLine(doc)}</small> : null}
-                  </td>
-                  <td data-label="Clearance"><span className="sv-pill">{clearanceLevelLabel(doc.clearance_level)}</span></td>
-                  <td data-label="Lifecycle"><DocumentStatePill document={doc} /></td>
-                  <td data-label="Ingestion"><IngestStatusPill status={doc.ingest_status} /></td>
-                  <td data-label="Effective" className="text-secondary">{formatDate(doc.effective_date)}</td>
-                  {mode !== "readonly" && onAction && user ? (
-                    <td data-label="Actions">
-                      <DocumentRowActions document={doc} mode={mode} onAction={onAction} pending={pending} user={user} />
-                    </td>
-                  ) : null}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      ) : null}
-      {!isLoading && documents.length === 0 ? (
-        <EmptyState action={emptyAction} onAction={onEmptyAction} title={emptyTitle}>
-          {mode === "trash" ? "Soft-deleted documents will appear here with restore and permanent delete actions." : "Open another folder or adjust the filters to find documents."}
-        </EmptyState>
-      ) : null}
-    </div>
-  );
-}
 
 function RowActionTooltip({ children, label }: RowActionTooltipProps) {
   const tooltipId = useId();
@@ -2690,15 +2169,6 @@ function EmptyState({ action, children, onAction, title }: EmptyStateProps) {
   );
 }
 
-function SpaceSkeleton() {
-  return (
-    <div className="space-y-2">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <div key={index} className="knowledge-skeleton-row" />
-      ))}
-    </div>
-  );
-}
 
 function SpaceOverviewSkeleton() {
   return (
@@ -2898,10 +2368,6 @@ function spaceHealth(row: SpaceOverviewRow): { label: string; tone: "active" | "
   return { label: "Healthy", tone: "success" };
 }
 
-function rootSpaces(spaces: GroupOption[]) {
-  const paths = new Set(spaces.map((space) => space.path));
-  return spaces.filter((space) => !space.parentPath || !paths.has(space.parentPath));
-}
 
 function canModifyDocument(user: AuthUser, document: Document) {
   if (document.governance_owner === "system" && !isGlobalAdmin(user)) return false;
@@ -2983,11 +2449,6 @@ function labelize(value: string | null | undefined) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function formatFileSizeForJob(bytes: number) {
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${bytes} B`;
-}
 
 function spaceFromPath(path: string): GroupOption {
   const name = path.split("/").filter(Boolean).at(-1)?.replace(/-/g, " ") || path;
@@ -3005,15 +2466,6 @@ function initialExplorerTabFromUrl(): ExplorerTab {
   return { kind: "overview" };
 }
 
-function initialOpenSpaceTabsFromSession() {
-  if (typeof window === "undefined") return [];
-  try {
-    const parsed = JSON.parse(sessionStorage.getItem(SPACE_TABS_STORAGE_KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && item.startsWith("/")) : [];
-  } catch {
-    return [];
-  }
-}
 
 function initialDocumentStateFilterFromUrl(): DocumentStateFilter {
   const value = initialStringParamFromUrl("lifecycle");
@@ -3053,14 +2505,6 @@ function explorerTabKey(tab: ExplorerTab) {
   return tab.kind === "space" ? `space:${tab.path}` : tab.kind;
 }
 
-function tabFromKey(key: string, openSpaceTabs: string[]): ExplorerTab | null {
-  if (key === "overview" || key === "jobs" || key === "trash") return { kind: key };
-  if (key.startsWith("space:")) {
-    const path = key.slice("space:".length);
-    return openSpaceTabs.includes(path) ? { kind: "space", path } : null;
-  }
-  return null;
-}
 
 function isDocumentStateFilter(value: string): value is DocumentStateFilter {
   return value === "all" || value === "current" || value === "superseded";
@@ -3080,7 +2524,7 @@ function createSpaceDraft(): SpaceDraft {
 
 type Props = { onLogout: () => void; onNavigate: (route: RouteId) => void; uploadJobs?: UploadBatchItemView[]; user: AuthUser; view?: DocumentsView };
 type DocumentsView = "spaces" | "documents" | "trash";
-type ExplorerTab = { kind: "overview" } | { kind: "jobs" } | { kind: "trash" } | { kind: "space"; path: string };
+type ExplorerTab = { kind: "overview" } | { kind: "space"; path: string };
 type DocumentAction = "reingest" | "trash" | "restore" | "permanent";
 type DocumentMode = "active" | "trash" | "readonly";
 type DocumentStateFilter = "all" | "current" | "superseded";
@@ -3101,27 +2545,6 @@ type ExplorerUrlState = {
   view: DocumentsView;
 };
 
-type ExplorerTabsProps = {
-  activeTab: ExplorerTab;
-  onActivate: (tab: ExplorerTab) => void;
-  onCloseSpace: (path: string) => void;
-  openSpaces: GroupOption[];
-};
-
-type KnowledgeFolderTreeProps = {
-  activePath: string | null;
-  deletingPath: string | null;
-  documents: Document[];
-  expandedPaths: Set<string>;
-  isLoading: boolean;
-  isSpaceManager: boolean;
-  onDeleteSpace: (space: GroupOption) => void;
-  onEditSpace: (space: GroupOption) => void;
-  onOpenSpace: (path: string) => void;
-  onToggle: (path: string) => void;
-  search: string;
-  spaces: GroupOption[];
-};
 
 type SpaceOverviewRow = {
   currentCount: number;
@@ -3166,7 +2589,6 @@ type FolderTabProps = {
   onCancelGraph?: (document: Document, task: GraphEnrichmentTask) => void;
   onEnrichGraph?: (document: Document) => void;
   onNavigate: (route: RouteId) => void;
-  onOpenSpace: (path: string) => void;
   onSearchChange: (value: string) => void;
   onSelectDocument: (id: string) => void;
   onSelectionChange: Dispatch<SetStateAction<Set<string>>> | ((ids: Set<string>) => void);
@@ -3186,19 +2608,12 @@ type DocumentSpaceFilterProps = {
   spaceOptions: GroupOption[];
 };
 
-type ActiveDocumentsTabProps = Omit<FolderTabProps, "onOpenSpace" | "space"> & DocumentSpaceFilterProps;
+type ActiveDocumentsTabProps = Omit<FolderTabProps, "space"> & DocumentSpaceFilterProps;
 
-type TrashTabProps = Omit<FolderTabProps, "canUploadDocuments" | "onNavigate" | "onOpenSpace" | "space"> & DocumentSpaceFilterProps;
+type TrashTabProps = Omit<FolderTabProps, "canUploadDocuments" | "onNavigate" | "space"> & DocumentSpaceFilterProps;
 
-type JobsTabProps = {
-  batchItems: UploadBatchItemView[];
-  canUploadDocuments: boolean;
-  documents: Document[];
-  isLoading: boolean;
-  onNavigate: (route: RouteId) => void;
-};
 
-type DocumentTableProps = {
+type DocumentListProps = {
   cancellingGraphTaskId?: string | null;
   documents: Document[];
   emptyAction?: string;

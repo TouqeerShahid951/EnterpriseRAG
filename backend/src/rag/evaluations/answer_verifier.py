@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from ..schemas.evaluations import EvaluationCase
 from ..schemas.query import RAGResponse

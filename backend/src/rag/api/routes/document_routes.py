@@ -17,6 +17,8 @@ from ...graphrag.cleanup import (
     deletion_service_from_settings,
     partition_key_for_document,
 )
+from ...ingestion.contracts import IngestJobPayload
+from ...ingestion.queue import IngestQueue, get_ingest_queue
 from ...repositories.claims import ClaimRepository, get_claim_repository
 from ...query.sources import source_from_hit
 from ...query.http import ServiceRequestError
@@ -48,8 +50,6 @@ from ...schemas.docs import (
     VersionChainResponse,
 )
 from ...schemas.query import SourceAnchor
-from ...ingestion.contracts import IngestJobPayload
-from ...ingestion.queue import IngestQueue, get_ingest_queue
 from ...services.graphrag_queue import (
     GraphRAGDocumentIndexMessage,
     GraphRAGMaintenanceQueue,
@@ -688,9 +688,9 @@ async def queue_document_graph_enrichment(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "graphrag_disabled", "message": "Graph enrichment is disabled for this workspace."},
         )
-    job = next(
-        (candidate for candidate in job_repo.list_ingest_jobs() if candidate.doc_id == document.id and candidate.status == "complete"),
-        None,
+    job = job_repo.get_latest_ingest_job_for_document(
+        document.id,
+        statuses=frozenset({"complete"}),
     )
     if document.ingest_status != "complete" or job is None:
         raise HTTPException(
@@ -752,7 +752,10 @@ async def restore_document(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "document_not_deleted", "message": "Document is not in Trash."},
         )
-    if job_repo.get_active_ingest_job_for_document(document.id):
+    if job_repo.get_latest_ingest_job_for_document(
+        document.id,
+        statuses=frozenset({"scheduled", "queued", "processing", "human_review"}),
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "document_ingest_active", "message": "Document already has an active ingestion job."},
@@ -1145,7 +1148,10 @@ def _refresh_graphrag_after_owner_transfer(
 ) -> None:
     if not enabled or updated_document.ingest_status != "complete":
         return
-    job = next((candidate for candidate in job_repo.list_ingest_jobs() if candidate.doc_id == updated_document.id and candidate.status == "complete"), None)
+    job = job_repo.get_latest_ingest_job_for_document(
+        updated_document.id,
+        statuses=frozenset({"complete"}),
+    )
     if job is None:
         return
     cleanup_status = "skipped"
@@ -1339,18 +1345,33 @@ def _queue_document_reingest(
     source: object | None = None,
     retry_of_job_id: str | None = None,
 ) -> IngestJobRecord:
-    if not skip_active_job_check and job_repo.get_active_ingest_job_for_document(document.id):
+    if not skip_active_job_check and job_repo.get_latest_ingest_job_for_document(
+        document.id,
+        statuses=frozenset({"scheduled", "queued", "processing", "human_review"}),
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "document_ingest_active", "message": "Document already has an active ingestion job."},
         )
     stored = source or _read_reingest_source(document, storage)
-    job = job_repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin=action, retry_of_job_id=retry_of_job_id)
+    job = job_repo.create_ingest_job(
+        doc_id=document.id,
+        status="queued",
+        progress_pct=0,
+        origin=action,
+        retry_of_job_id=retry_of_job_id,
+    )
     message = _ingest_message_for_document(document, job.id, stored, repo)
     try:
         queue.enqueue(message)
     except RuntimeError as exc:
-        job_repo.update_ingest_job(job.id, status="failed", progress_pct=0, error_code="queue_unavailable", error_message_safe=str(exc))
+        job_repo.update_ingest_job(
+            job.id,
+            status="failed",
+            progress_pct=0,
+            error_code="queue_unavailable",
+            error_message_safe=str(exc),
+        )
         repo.append_audit_event(
             event_type=f"documents.{action}",
             actor_id=actor_id,
@@ -1372,7 +1393,11 @@ def _queue_document_reingest(
     return job
 
 
-def _validated_retry_of_job_id(job_repo: IngestJobRepository, document: DocumentRecord, retry_of_job_id: str | None) -> str | None:
+def _validated_retry_of_job_id(
+    job_repo: IngestJobRepository,
+    document: DocumentRecord,
+    retry_of_job_id: str | None,
+) -> str | None:
     if not retry_of_job_id:
         return None
     retry_job = job_repo.get_ingest_job(retry_of_job_id)

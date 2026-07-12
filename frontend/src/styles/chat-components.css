@@ -1,22 +1,9 @@
-.rag-status-pill,
-.rag-primary-action,
-.rag-secondary-action,
-.rag-upload-prompt,
-.rag-trust-note {
+.rag-secondary-action {
   display: inline-flex;
   min-height: 2.2rem;
   align-items: center;
   gap: 0.5rem;
   border-radius: 0.5rem;
-}
-
-.rag-status-pill {
-  border: 1px solid var(--color-surface-border);
-  background: color-mix(in srgb, var(--color-surface-container-low) 86%, transparent);
-  padding: 0 0.75rem;
-  color: var(--color-on-surface-variant);
-  font-size: 0.75rem;
-  font-weight: 600;
 }
 
 .rag-space-switcher {
@@ -35,7 +22,7 @@
 .rag-space-switcher span {
   color: var(--color-secondary);
   font-size: 0.6875rem;
-  font-weight: 800;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -48,7 +35,7 @@
   padding: 0 0.75rem;
   color: var(--color-on-surface);
   font-size: 0.8125rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-space-switcher select:disabled {
@@ -84,29 +71,7 @@
   white-space: nowrap;
 }
 
-.rag-primary-action {
-  border: 1px solid color-mix(in srgb, var(--color-primary) 70%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--color-primary) 84%, var(--color-on-primary) 8%), var(--color-primary));
-  padding: 0 0.7rem;
-  color: var(--color-on-primary);
-  font-size: 0.75rem;
-  font-weight: 700;
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--color-on-primary) 28%, transparent),
-    0 0.65rem 1.5rem color-mix(in srgb, var(--color-primary) 18%, transparent);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.rag-primary-action:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--color-on-primary) 34%, transparent),
-    0 0.85rem 1.9rem color-mix(in srgb, var(--color-primary) 24%, transparent);
-}
-
-.rag-secondary-action,
-.rag-upload-prompt {
+.rag-secondary-action {
   justify-content: center;
   border: 1px solid var(--color-surface-border);
   background: color-mix(in srgb, var(--color-surface-container-low) 86%, transparent);
@@ -114,31 +79,15 @@
   padding: 0 0.6rem;
   color: var(--color-on-surface);
   font-size: 0.75rem;
-  font-weight: 750;
+  font-weight: 700;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.rag-secondary-action:hover:not(:disabled),
-.rag-upload-prompt:hover {
+.rag-secondary-action:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--color-primary) 26%, var(--color-surface-border));
   background: var(--color-surface-container-high);
   transform: translateY(-1px);
   box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.1);
-}
-
-.rag-upload-prompt {
-  width: 100%;
-  justify-content: space-between;
-}
-
-.rag-trust-note {
-  align-items: flex-start;
-  border: 1px solid var(--color-surface-border);
-  background: var(--color-surface-container-low);
-  padding: 0.75rem;
-  color: var(--color-on-surface-variant);
-  font-size: 0.75rem;
-  line-height: 1.35;
 }
 
 .rag-empty-state {
@@ -147,7 +96,9 @@
   border: 1px solid var(--color-surface-border);
   border-radius: 0.5rem;
   background: color-mix(in srgb, var(--color-surface-card) 76%, transparent);
-  padding: 0.75rem;
+  width: min(100%, 56rem);
+  align-self: center;
+  padding: clamp(1rem, 2vw, 1.5rem);
   color: var(--color-on-surface);
 }
 
@@ -155,14 +106,14 @@
   display: grid;
   max-width: 52rem;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.55rem;
+  gap: 0.75rem;
   align-items: start;
 }
 
 .rag-empty-icon {
   display: inline-flex;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 2.25rem;
+  height: 2.25rem;
   align-items: center;
   justify-content: center;
   border: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-surface-border));
@@ -175,7 +126,7 @@
   margin: 0;
   color: var(--color-primary);
   font-size: 0.64rem;
-  font-weight: 850;
+  font-weight: 700;
   letter-spacing: 0;
   line-height: 1.15;
   text-transform: uppercase;
@@ -184,16 +135,17 @@
 .rag-empty-copy h2 {
   margin: 0.12rem 0 0;
   color: var(--color-on-surface);
-  font-size: 1rem;
-  font-weight: 850;
+  font-size: 1.125rem;
+  font-weight: 700;
   line-height: 1.2;
 }
 
 .rag-empty-copy p:not(.rag-empty-eyebrow) {
   margin: 0.18rem 0 0;
   color: var(--color-secondary);
-  font-size: 0.78rem;
-  line-height: 1.35;
+  max-width: 62ch;
+  font-size: 0.8125rem;
+  line-height: 1.5;
 }
 
 .rag-empty-capabilities {
@@ -255,7 +207,7 @@
 
 .rag-corpus-header .text-headline-sm {
   font-size: 0.92rem;
-  font-weight: 760;
+  font-weight: 700;
   line-height: 1.25rem;
 }
 
@@ -333,34 +285,9 @@
   background: var(--color-surface-container-high);
   color: var(--color-secondary);
   font-size: 0.58rem;
-  font-weight: 850;
+  font-weight: 700;
   line-height: 0.95rem;
   text-align: center;
-}
-
-.rag-corpus-facts {
-  display: grid;
-  gap: 0.55rem;
-}
-
-.rag-corpus-facts div {
-  border: 1px solid var(--color-surface-border);
-  border-radius: 0.5rem;
-  background: var(--color-surface-container-low);
-  padding: 0.6rem;
-}
-
-.rag-corpus-facts dt {
-  color: var(--color-secondary);
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.rag-corpus-facts dd {
-  margin-top: 0.25rem;
-  color: var(--color-on-surface);
-  font-size: 0.875rem;
-  overflow-wrap: anywhere;
 }
 
 .rag-chat-history-list {
@@ -379,7 +306,7 @@
   border-radius: 999px;
   color: var(--color-on-surface-variant);
   font-size: 0.6875rem;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .rag-chat-history-item,
@@ -476,7 +403,7 @@
 .rag-chat-history-open strong,
 .rag-chat-history-empty strong {
   font-size: 0.76rem;
-  font-weight: 760;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -495,7 +422,7 @@
   color: var(--color-primary);
   padding: 0.05rem 0.35rem;
   font-size: 0.62rem;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -605,7 +532,7 @@
 .rag-markdown h5,
 .rag-markdown h6 {
   color: var(--color-on-surface);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -624,7 +551,7 @@
 
 .rag-markdown strong {
   color: var(--color-on-surface);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-markdown ul,
@@ -707,7 +634,7 @@
 .rag-markdown th {
   background: var(--color-surface-container-high);
   color: var(--color-on-surface);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-markdown tr:last-child td {
@@ -734,7 +661,7 @@
   padding: 0.05rem 0.32rem;
   color: var(--color-primary);
   font-size: 0.75rem;
-  font-weight: 760;
+  font-weight: 700;
   line-height: 1.25;
   vertical-align: baseline;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
@@ -802,7 +729,7 @@
 .rag-source-chip-title {
   color: inherit;
   font-size: 0.8125rem;
-  font-weight: 760;
+  font-weight: 700;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
@@ -815,7 +742,7 @@
   gap: 0.25rem 0.5rem;
   color: var(--color-on-surface-variant);
   font-size: 0.6875rem;
-  font-weight: 720;
+  font-weight: 700;
   line-height: 1.25;
 }
 
@@ -890,13 +817,13 @@
 
 .rag-artifact-copy strong {
   font-size: 0.8125rem;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .rag-artifact-copy small {
   color: var(--color-secondary);
   font-size: 0.6875rem;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .rag-artifact-job-panel {
@@ -931,7 +858,7 @@
   margin: 0.125rem 0;
   color: var(--color-on-surface);
   font-size: 0.95rem;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .rag-artifact-job-header p {
@@ -978,7 +905,7 @@
   margin: -0.35rem 0 0;
   color: var(--color-secondary);
   font-size: 0.75rem;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .rag-artifact-job-message.is-error {
@@ -995,7 +922,7 @@
   gap: 0.35rem;
   color: var(--color-on-surface);
   font-size: 0.78rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-artifact-clarifications textarea {
@@ -1122,7 +1049,7 @@
   padding: 0 0.65rem;
   color: var(--color-on-surface-variant);
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-composer-source-segments button:hover,
@@ -1142,13 +1069,13 @@
   padding: 0 0.65rem;
   color: var(--color-on-surface);
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-composer-scope-label {
   color: var(--color-secondary);
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -1162,7 +1089,7 @@
 .rag-composer-box:focus-within {
   border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-surface-border));
   background: color-mix(in srgb, var(--color-surface-container-high) 72%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 12%, transparent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .rag-scope-chip {
@@ -1177,7 +1104,7 @@
   padding: 0 0.3rem 0 0.5rem;
   color: var(--color-primary);
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-scope-chip > svg {
@@ -1361,7 +1288,7 @@
 
 .rag-composer-upload-copy small.rag-composer-upload-stage-progress {
   color: var(--color-primary);
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .rag-composer-upload-copy small.rag-composer-upload-graph {
@@ -1583,7 +1510,7 @@
 .rag-live-section-label {
   color: var(--color-secondary);
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -1613,7 +1540,7 @@
   padding: 0.375rem 0.625rem;
   color: var(--color-secondary);
   font-size: 0.6875rem;
-  font-weight: 800;
+  font-weight: 700;
   text-align: center;
   text-transform: uppercase;
 }
@@ -1724,23 +1651,8 @@
   line-height: 1.5;
 }
 
-.rag-stream-text p {
-  animation: rag-fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
 .rag-stream-text p + p {
   margin-top: 0.75rem;
-}
-
-@keyframes rag-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .rag-answer-skeleton {
@@ -1828,6 +1740,22 @@
 
   .rag-user-message {
     max-width: 92%;
+  }
+
+  .rag-composer-input {
+    min-height: 3.75rem;
+    padding-block: 1rem;
+    font-size: 1rem;
+  }
+
+  .rag-composer-icon-action,
+  .rag-composer-send-action {
+    width: var(--control-height-md);
+    height: var(--control-height-md);
+  }
+
+  .rag-composer-icon-action {
+    right: 4rem;
   }
 
   .rag-live-summary {

@@ -616,6 +616,7 @@ function ModelsAndRolesPanel({
 
       <div className="mt-4 grid gap-3">
         <GuidedStep
+          defaultOpen
           number={1}
           title="Choose stack"
           controls="Select a starting stack. Fine tune provider, host, port, and model per role below."
@@ -1760,6 +1761,7 @@ type ModelSelectProps = {
 };
 
 function CurrentRagStatus({ config }: { config: RagConfig }) {
+  const vision = activeVisionStatus(config);
   return (
     <section className="mt-4 border-t border-surface-border pt-4" aria-labelledby="active-rag-config-title">
       <div>
@@ -1777,8 +1779,8 @@ function CurrentRagStatus({ config }: { config: RagConfig }) {
         <Fact label="Faithfulness endpoint" value={config.faithfulness_base_url ?? config.base_url} />
         <Fact label="Ingestion metadata" value={`${providerName(config.ingestion_provider ?? config.provider)}: ${config.ingestion_model ?? config.chat_model}`} />
         <Fact label="Ingestion endpoint" value={config.ingestion_base_url ?? config.base_url} />
-        <Fact label="Vision" value={`${providerName(config.vision_provider ?? config.ingestion_provider ?? config.provider)}: ${config.vision_model ?? config.ingestion_model ?? config.chat_model}`} />
-        <Fact label="Vision endpoint" value={config.vision_base_url ?? config.ingestion_base_url ?? config.base_url} />
+        <Fact label="Vision" value={vision.model} />
+        {vision.endpoint ? <Fact label="Vision endpoint" value={vision.endpoint} /> : null}
         <Fact label="Embedding runtime" value={`${embeddingProviderName(config.embedding_provider)}: ${config.embed_model}`} />
         {config.embedding_provider !== "fastembed" ? <Fact label="Embedding endpoint" value={config.embedding_base_url} /> : null}
         <Fact label="Reranker model" value={config.reranker_model} />
@@ -1795,102 +1797,6 @@ function CurrentRagStatus({ config }: { config: RagConfig }) {
   );
 }
 
-function VllmDeploymentSection({
-  applyPending,
-  applyingService,
-  config,
-  draft,
-  draftIsDirty,
-  formIsValid,
-  loadError,
-  loadFailed,
-  restartConfirmed,
-  savePending,
-  onApply,
-  onDraftChange,
-  onRestartConfirmedChange,
-  onSave,
-}: VllmDeploymentSectionProps) {
-  const updateServiceDraft = (service: VllmDeploymentService, limits: VllmServiceDeploymentFormState) => {
-    onDraftChange({ ...draft, [service]: limits });
-    onRestartConfirmedChange({ ...restartConfirmed, [service]: false });
-  };
-  const updateRestartConfirmed = (service: VllmDeploymentService, confirmed: boolean) => {
-    onRestartConfirmedChange({ ...restartConfirmed, [service]: confirmed });
-  };
-
-  return (
-    <section className="mt-6 border-t border-surface-border pt-5" aria-labelledby="vllm-launch-limits-title">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Boxes size={18} className="text-primary" />
-          <div>
-            <h3 id="vllm-launch-limits-title" className="text-title-md">vLLM launch limits</h3>
-            <p className="mt-1 text-body-md text-secondary">
-              Advanced limits for the bundled vLLM services. Each service is saved in Runtime Settings, then restarted
-              independently when you choose its apply action.
-            </p>
-          </div>
-        </div>
-        {draftIsDirty ? (
-          <span className="rounded border border-warning-amber/50 bg-warning-amber/10 px-2 py-1 text-label-sm text-warning-amber">
-            Unsaved draft
-          </span>
-        ) : null}
-      </div>
-
-      {config ? (
-        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          {VLLM_DEPLOYMENT_SERVICES.map((service) => (
-            <VllmLimitsEditor
-              key={service.key}
-              applyPending={applyPending && applyingService === service.key}
-              deploymentBusy={applyPending}
-              canApply={formIsValid}
-              description={service.description}
-              includeKvCache={service.includeKvCache}
-              limits={draft[service.key]}
-              restartConfirmed={restartConfirmed[service.key]}
-              serviceName={service.composeService}
-              title={service.title}
-              onApply={() => onApply(service.key)}
-              onChange={(limits) => updateServiceDraft(service.key, limits)}
-              onRestartConfirmedChange={(confirmed) => updateRestartConfirmed(service.key, confirmed)}
-            />
-          ))}
-        </div>
-      ) : (
-        <p aria-live="polite" className="mt-3 text-body-md text-secondary">Loading vLLM deployment limits...</p>
-      )}
-
-      {config ? (
-        <dl className="mt-4 grid gap-3 sm:grid-cols-3">
-          <Fact label="Source" value={labelize(config.source)} />
-          <Fact label="Apply status" value={labelize(config.apply_status)} />
-          <Fact label="Restart scope" value="Selected vLLM service" />
-        </dl>
-      ) : null}
-      {config?.message ? (
-        <InlineMessage tone={config.apply_status === "failed" ? "error" : "warning"}>{config.message}</InlineMessage>
-      ) : null}
-      <div className="mt-4 flex flex-wrap gap-3">
-        <button
-          type="button"
-          className="sv-action-secondary"
-          disabled={!formIsValid || savePending || applyPending}
-          onClick={onSave}
-        >
-          <Save size={16} />
-          {savePending ? "Saving" : "Save launch limits"}
-        </button>
-      </div>
-      {!formIsValid ? <InlineMessage tone="error">vLLM launch limits contain an invalid value.</InlineMessage> : null}
-      {loadFailed ? (
-        <InlineMessage tone="error">{errorMessage(loadError, "Unable to load vLLM deployment limits.")}</InlineMessage>
-      ) : null}
-    </section>
-  );
-}
 
 type VllmDeploymentSectionProps = {
   applyPending: boolean;
@@ -1909,160 +1815,8 @@ type VllmDeploymentSectionProps = {
   onSave: () => void;
 };
 
-function VllmLimitsEditor({
-  applyPending,
-  canApply,
-  deploymentBusy,
-  description,
-  includeKvCache = false,
-  limits,
-  onApply,
-  onChange,
-  onRestartConfirmedChange,
-  restartConfirmed,
-  serviceName,
-  title,
-}: VllmLimitsEditorProps) {
-  const update = (patch: Partial<VllmServiceDeploymentFormState>) => onChange({ ...limits, ...patch });
-  return (
-    <section className="rounded border border-surface-border bg-surface-container-low p-4">
-      <h3 className="text-title-md">{title}</h3>
-      <p className="mt-1 text-body-md text-secondary">{description}</p>
-      <div className="mt-3 grid gap-3">
-        <label className="sv-field">
-          <span className="sv-label">Max model length</span>
-          <input
-            type="number"
-            min={256}
-            max={262144}
-            value={limits.max_model_len}
-            onChange={(event) => update({ max_model_len: event.target.value })}
-            className="sv-input"
-          />
-          <span className="text-body-md text-secondary">Context length exposed by this vLLM service.</span>
-        </label>
-        <label className="sv-field">
-          <span className="sv-label">GPU memory utilization</span>
-          <input
-            type="number"
-            min={0.01}
-            max={1}
-            step={0.01}
-            value={limits.gpu_memory_utilization}
-            onChange={(event) => update({ gpu_memory_utilization: event.target.value })}
-            className="sv-input"
-          />
-          <span className="text-body-md text-secondary">Fraction of GPU memory vLLM may reserve.</span>
-        </label>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="sv-field">
-            <span className="sv-label">Max sequences</span>
-            <input
-              type="number"
-              min={1}
-              max={1024}
-              value={limits.max_num_seqs}
-              onChange={(event) => update({ max_num_seqs: event.target.value })}
-              className="sv-input"
-            />
-            <span className="text-body-md text-secondary">Concurrent sequences accepted by this service.</span>
-          </label>
-          <label className="sv-field">
-            <span className="sv-label">Batched tokens</span>
-            <input
-              type="number"
-              min={256}
-              max={262144}
-              value={limits.max_num_batched_tokens}
-              onChange={(event) => update({ max_num_batched_tokens: event.target.value })}
-              className="sv-input"
-            />
-            <span className="text-body-md text-secondary">Token budget available to each scheduler batch.</span>
-          </label>
-        </div>
-        {includeKvCache ? (
-          <label className="sv-field">
-            <span className="sv-label">KV cache memory</span>
-            <input
-              value={limits.kv_cache_memory_bytes}
-              onChange={(event) => update({ kv_cache_memory_bytes: event.target.value })}
-              placeholder="2G"
-              className="sv-input"
-            />
-            <span className="text-body-md text-secondary">Optional explicit KV cache size, such as 2G.</span>
-          </label>
-        ) : null}
-      </div>
-      <div className="mt-4 border-t border-surface-border pt-3">
-        <label className="flex items-start gap-2 text-body-md">
-          <input
-            type="checkbox"
-            checked={restartConfirmed}
-            disabled={!canApply || deploymentBusy}
-            onChange={(event) => onRestartConfirmedChange(event.target.checked)}
-          />
-          <span>
-            Restart only <span className="font-semibold text-primary">{serviceName}</span>. Active requests using this service
-            may stop while the container is recreated.
-          </span>
-        </label>
-        <button
-          type="button"
-          className="sv-action-secondary mt-3 w-full justify-center"
-          disabled={!canApply || !restartConfirmed || deploymentBusy}
-          onClick={onApply}
-        >
-          <RefreshCw size={16} />
-          {applyPending ? "Restarting" : `Restart ${serviceName}`}
-        </button>
-      </div>
-    </section>
-  );
-}
 
-type VllmLimitsEditorProps = {
-  applyPending: boolean;
-  canApply: boolean;
-  deploymentBusy: boolean;
-  description: string;
-  title: string;
-  limits: VllmServiceDeploymentFormState;
-  includeKvCache?: boolean;
-  restartConfirmed: boolean;
-  serviceName: string;
-  onApply: () => void;
-  onChange: (limits: VllmServiceDeploymentFormState) => void;
-  onRestartConfirmedChange: (confirmed: boolean) => void;
-};
 
-function ProviderPresetSelector({ onChange, value }: { value: "ollama" | "vllm"; onChange: (value: "ollama" | "vllm") => void }) {
-  return (
-    <fieldset>
-      <legend className="sv-label">Provider preset</legend>
-      <div className="mt-2 inline-flex rounded border border-surface-border bg-surface-container-low p-1">
-        {(["ollama", "vllm"] as const).map((provider) => (
-          <label key={provider} className="cursor-pointer">
-            <input
-              type="radio"
-              name="inference-provider"
-              value={provider}
-              checked={value === provider}
-              onChange={() => onChange(provider)}
-              className="peer sr-only"
-            />
-            <span className="flex min-h-10 items-center gap-2 rounded px-4 text-label-md text-secondary peer-checked:bg-surface-container-high peer-checked:text-on-surface peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-primary">
-              {provider === "ollama" ? <Cpu size={16} /> : <Boxes size={16} />}
-              Mostly {providerName(provider)}
-            </span>
-          </label>
-        ))}
-      </div>
-      <p className="mt-2 text-body-md text-secondary">
-        Applies a starting point to language roles. Individual rows can still use another provider.
-      </p>
-    </fieldset>
-  );
-}
 
 function InferenceRoleMatrix({
   canFetchModels,
@@ -2739,11 +2493,22 @@ function providerName(provider: string) {
   return provider === "vllm" ? "vLLM" : "Ollama";
 }
 
-function activeStackLabel(config: RagConfig) {
+export function activeStackLabel(config: RagConfig) {
   const provider = providerName(config.provider);
   const embedding = embeddingProviderName(config.embedding_provider);
-  const visionProvider = providerName(config.vision_provider ?? config.ingestion_provider ?? config.provider);
-  return `${provider} text, ${embedding} embeddings, ${visionProvider} vision`;
+  const vision = config.vision_model?.trim()
+    ? `${providerName(config.vision_provider ?? config.ingestion_provider ?? config.provider)} vision`
+    : "vision not configured";
+  return `${provider} text, ${embedding} embeddings, ${vision}`;
+}
+
+export function activeVisionStatus(config: RagConfig): { endpoint: string | null; model: string } {
+  const visionModel = config.vision_model?.trim();
+  if (!visionModel) return { endpoint: null, model: "Not configured" };
+  return {
+    endpoint: config.vision_base_url ?? config.ingestion_base_url ?? config.base_url,
+    model: `${providerName(config.vision_provider ?? config.ingestion_provider ?? config.provider)}: ${visionModel}`,
+  };
 }
 
 export function stackTemplateFromForm(form: RagConfigFormState): StackTemplate {

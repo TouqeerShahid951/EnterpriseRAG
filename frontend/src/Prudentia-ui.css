@@ -58,13 +58,50 @@
   --color-info-blue: oklch(0.69 0.13 250);
   --color-champagne-stone: #b8a77a;
 
-  --font-sans: Inter, "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --font-mono: "SFMono-Regular", "Cascadia Code", "Cascadia Mono", "Roboto Mono", Consolas, "Liberation Mono", monospace;
   --font-inter: var(--font-sans);
   --font-jetbrains: var(--font-mono);
 }
 
 :root {
+  --radius-xs: 0.375rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.75rem;
+  --control-height-sm: 2.25rem;
+  --control-height-md: 2.75rem;
+  --control-height-lg: 3rem;
+  --space-page: clamp(0.875rem, 1.25vw, 1.5rem);
+  --space-section: clamp(1rem, 1.5vw, 1.5rem);
+  --shadow-raised: 0 1px 2px oklch(0.04 0.012 285 / 0.28);
+  --shadow-overlay: 0 1.5rem 4rem oklch(0.04 0.012 285 / 0.42);
+  --motion-instant: 100ms;
+  --motion-fast: 140ms;
+  --motion-standard: 200ms;
+  --motion-panel: 240ms;
+  --ease-out-product: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-product: cubic-bezier(0.4, 0, 1, 1);
+  --focus-ring: oklch(0.8 0.09 87);
+  --font-size-ui-body: 14px;
+  --font-size-ui-control: 13px;
+  --font-size-ui-meta: 12px;
+  --font-size-ui-micro: 11px;
+  --font-size-ui-section: 16px;
+  --font-size-ui-page-title: 24px;
+  --font-size-ui-page-subtitle: 14px;
+  --desktop-page-gutter: 20px;
+  --desktop-panel-gap: 16px;
+  --desktop-panel-padding: 20px;
+  --desktop-control-height: 44px;
+  --desktop-canvas-standard: 80rem;
+  --desktop-canvas-form: 68rem;
+  --desktop-canvas-dashboard: 92rem;
+  --desktop-canvas-workbench: 108rem;
+  --desktop-chat-history-width: 14rem;
+  --desktop-chat-canvas-width: 72rem;
+  --desktop-answer-measure: 58rem;
+  --desktop-evidence-width: 26rem;
   --app-bg: oklch(0.13 0.018 285);
   --app-text: oklch(0.965 0.012 285);
   --app-root-bg: oklch(0.108 0.018 285);
@@ -76,6 +113,9 @@
 }
 
 :root.light {
+  --shadow-raised: 0 1px 2px oklch(0.38 0.018 274 / 0.12);
+  --shadow-overlay: 0 1.5rem 4rem oklch(0.28 0.018 274 / 0.2);
+  --focus-ring: oklch(0.42 0.09 87);
   --app-bg: oklch(0.966 0.008 272);
   --app-text: oklch(0.22 0.018 274);
   --app-root-bg: oklch(0.948 0.011 272);
@@ -97,7 +137,7 @@
   --color-on-error: oklch(0.985 0.005 274);
   --color-surface-container-high: oklch(0.925 0.012 272 / 0.98);
   --color-secondary-container: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface-container-low));
-  --color-secondary: oklch(0.43 0.022 274 / 0.72);
+  --color-secondary: oklch(0.37 0.022 274);
   --color-on-secondary-container: oklch(0.22 0.018 274);
   --color-on-tertiary-container: oklch(0.22 0.018 274);
   --color-on-surface-variant: oklch(0.38 0.022 274 / 0.78);
@@ -139,6 +179,54 @@
   --color-info-blue: oklch(0.48 0.12 250);
 }
 
+@media (min-width: 1680px) {
+  :root {
+    --font-size-ui-body: 15px;
+    --font-size-ui-control: 14px;
+    --font-size-ui-meta: 12px;
+    --font-size-ui-micro: 11px;
+    --font-size-ui-section: 17px;
+    --font-size-ui-page-title: 26px;
+    --font-size-ui-page-subtitle: 15px;
+    --desktop-page-gutter: 24px;
+    --desktop-panel-gap: 18px;
+    --desktop-panel-padding: 22px;
+    --desktop-control-height: 46px;
+    --desktop-canvas-standard: 90rem;
+    --desktop-canvas-form: 76rem;
+    --desktop-canvas-dashboard: 104rem;
+    --desktop-canvas-workbench: 112rem;
+    --desktop-chat-history-width: 15rem;
+    --desktop-chat-canvas-width: 84rem;
+    --desktop-answer-measure: 62rem;
+    --desktop-evidence-width: 28rem;
+  }
+}
+
+@media (min-width: 2400px) {
+  :root {
+    --font-size-ui-body: 16px;
+    --font-size-ui-control: 15px;
+    --font-size-ui-meta: 13px;
+    --font-size-ui-micro: 12px;
+    --font-size-ui-section: 18px;
+    --font-size-ui-page-title: 30px;
+    --font-size-ui-page-subtitle: 16px;
+    --desktop-page-gutter: 28px;
+    --desktop-panel-gap: 20px;
+    --desktop-panel-padding: 24px;
+    --desktop-control-height: 48px;
+    --desktop-canvas-standard: 100rem;
+    --desktop-canvas-form: 82rem;
+    --desktop-canvas-dashboard: 120rem;
+    --desktop-canvas-workbench: 136rem;
+    --desktop-chat-history-width: 16rem;
+    --desktop-chat-canvas-width: 96rem;
+    --desktop-answer-measure: 64rem;
+    --desktop-evidence-width: 32rem;
+  }
+}
+
 @layer base {
   html {
     color-scheme: dark;
@@ -169,9 +257,7 @@
 
   #root {
     @apply w-full h-full relative overflow-hidden;
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--color-surface-container-high) 18%, transparent), transparent 18rem),
-      var(--app-root-bg);
+    background: var(--app-root-bg);
   }
 
   img,
@@ -199,7 +285,6 @@
 }
 
 @layer utilities {
-  .text-display-lg { font-size: 32px; line-height: 40px; letter-spacing: 0; font-weight: 700; font-family: var(--font-inter); }
   .text-headline-md { font-size: 28px; line-height: 36px; letter-spacing: 0; font-weight: 700; font-family: var(--font-inter); }
   .text-headline-sm { font-size: 18px; line-height: 26px; font-weight: 700; font-family: var(--font-inter); }
   .text-body-lg { font-size: 16px; line-height: 24px; font-weight: 400; font-family: var(--font-inter); }

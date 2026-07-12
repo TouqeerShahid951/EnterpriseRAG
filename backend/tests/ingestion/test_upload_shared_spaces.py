@@ -10,10 +10,11 @@ from starlette.datastructures import Headers
 
 from rag.api.routes import upload_routes
 from rag.core.config import settings
+from rag.ingestion.contracts import IngestJobPayload
 from rag.repositories.document_memory import InMemoryDocumentRepository
+from rag.repositories.ingest_job_models import IngestJobRepository
 from rag.repositories.identity import InMemoryIdentityRepository, UserRecord
 from rag.services.file_scanning import NoopFileScanner
-from rag.ingestion.contracts import IngestJobPayload
 from rag.services.upload_storage import StoredUpload
 
 
@@ -45,7 +46,8 @@ def test_upload_can_share_document_with_multiple_spaces_as_global_admin() -> Non
         queue=queue,
     )
 
-    job = document_repo.get_ingest_job(response.job_id)
+    job_repo: IngestJobRepository = document_repo
+    job = job_repo.get_ingest_job(response.job_id)
     document = document_repo.get_document(job.doc_id) if job else None
     assert document is not None
     assert document.owner_group_path == "/legal"
@@ -70,7 +72,8 @@ def test_space_admin_can_share_upload_only_with_managed_spaces() -> None:
         queue=queue,
     )
 
-    job = document_repo.get_ingest_job(response.job_id)
+    job_repo: IngestJobRepository = document_repo
+    job = job_repo.get_ingest_job(response.job_id)
     document = document_repo.get_document(job.doc_id) if job else None
     assert document is not None
     assert list(document.shared_group_paths) == ["/finance"]

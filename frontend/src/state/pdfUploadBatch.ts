@@ -1,7 +1,7 @@
 import type { UploadDocumentRequest } from "../api/contracts";
 import type { PdfUploadDraft } from "../types/chat";
 
-export const DOCUMENT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+const DOCUMENT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
 export interface DocumentFileValidation {
   accepted: File[];

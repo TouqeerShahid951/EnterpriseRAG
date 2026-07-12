@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   Database,
   FileSearch,
@@ -38,10 +37,17 @@ import {
 } from "../../routes";
 import type { User as AuthUser } from "../../types/api";
 
-export const Prudentia_SIDEBAR_MIN_WIDTH = 196;
-export const Prudentia_SIDEBAR_MAX_WIDTH = 288;
-export const Prudentia_SIDEBAR_DEFAULT_WIDTH = 224;
-export const Prudentia_SIDEBAR_COLLAPSED_WIDTH = 56;
+export const Prudentia_SIDEBAR_MIN_WIDTH = 216;
+export const Prudentia_SIDEBAR_MAX_WIDTH = 336;
+const Prudentia_SIDEBAR_DEFAULT_WIDTH = 224;
+export const Prudentia_SIDEBAR_COLLAPSED_WIDTH = 64;
+
+export function getPrudentiaSidebarDefaultWidth(viewportWidth: number): number {
+  if (viewportWidth >= 2400) return 272;
+  if (viewportWidth >= 1680) return 256;
+  if (viewportWidth >= 1440) return 240;
+  return Prudentia_SIDEBAR_DEFAULT_WIDTH;
+}
 
 export function reviewQueueBadgeCount(ocrTotal: number | null | undefined, imageCandidateTotal: number | null | undefined): number | null {
   if (ocrTotal == null && imageCandidateTotal == null) return null;

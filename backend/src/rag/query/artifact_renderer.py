@@ -107,35 +107,32 @@ def _content_sections(content: ArtifactContent) -> list[ContentSection]:
 
 
 def _content_section(section: SemanticSection, claims: dict[str, SupportedClaim]) -> ContentSection:
-    section_evidence_ids = _section_evidence_ids(section, claims)
-    fallback_evidence_ids = section_evidence_ids or ["uncited"]
+    section_claims = [claims[claim_id] for claim_id in section.claim_ids if claim_id in claims]
+    claim_index = 0
     blocks: list[ContentBlock] = []
     for paragraph in section.paragraphs:
+        evidence_ids = list(section_claims[claim_index].evidence_ids) if claim_index < len(section_claims) else []
+        claim_index += 1
         blocks.append(
             ContentBlock(
                 kind="paragraph",
                 text=_strip_citation_tokens(paragraph),
-                evidence_ids=section_evidence_ids,
+                evidence_ids=evidence_ids,
             )
         )
     if section.bullets:
-        if section_evidence_ids:
-            blocks.append(
-                ContentBlock(
-                    kind="bullet_list",
-                    list_items=[
-                        ContentListItem(text=_strip_citation_tokens(item), evidence_ids=section_evidence_ids)
-                        for item in section.bullets
-                    ],
-                )
-            )
-        else:
-            blocks.extend(
-                ContentBlock(kind="paragraph", text=_strip_citation_tokens(item), evidence_ids=[])
-                for item in section.bullets
-            )
+        list_items: list[ContentListItem] = []
+        for item in section.bullets:
+            evidence_ids = list(section_claims[claim_index].evidence_ids) if claim_index < len(section_claims) else []
+            claim_index += 1
+            if evidence_ids:
+                list_items.append(ContentListItem(text=_strip_citation_tokens(item), evidence_ids=evidence_ids))
+            else:
+                blocks.append(ContentBlock(kind="paragraph", text=_strip_citation_tokens(item), evidence_ids=[]))
+        if list_items:
+            blocks.append(ContentBlock(kind="bullet_list", list_items=list_items))
     for table in section.tables:
-        blocks.append(_table_block(table, fallback_evidence_ids))
+        blocks.append(_table_block(table, ["uncited"]))
     if not blocks:
         blocks.append(ContentBlock(kind="paragraph", text="No supported content was generated.", evidence_ids=[]))
     return ContentSection(title=section.heading or "Summary", blocks=blocks)
@@ -179,17 +176,6 @@ def _presentation_slides(sections: list[ContentSection]) -> list[PresentationSli
             blocks=[ContentBlock(kind="paragraph", text="No supported content was generated.", evidence_ids=[])],
         )
     ]
-
-
-def _section_evidence_ids(section: SemanticSection, claims: dict[str, SupportedClaim]) -> list[str]:
-    return list(
-        dict.fromkeys(
-            evidence_id
-            for claim_id in section.claim_ids
-            if claim_id in claims
-            for evidence_id in claims[claim_id].evidence_ids
-        )
-    )
 
 
 def _citations(citations: tuple[ArtifactCitation, ...]) -> list[JobEvidenceCitation]:

@@ -3,21 +3,20 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from ...auth.document_access import can_write_document
 from ...auth.dependencies import require_review_user
 from ...core.config import settings
-from ...repositories.document_models import (
+from ...ingestion.contracts import IngestJobPayload
+from ...ingestion.queue import IngestQueue, get_ingest_queue
+from ...repositories.document_models import ImageReviewBatchClosedError, ImageReviewBatchRecord, ImageReviewCandidateRecord, ReviewItemRecord
+from ...repositories.documents import (
+    DocumentRepository,
     HumanReviewRepository,
-    ImageReviewBatchRecord,
-    ImageReviewCandidateRecord,
     ImageReviewRepository,
-    ReviewItemRecord,
-)
-from ...repositories.documents import DocumentRepository, get_document_repository
-from ...repositories.identity import UserRecord
-from ...repositories.ingest_job_models import IngestJobRepository
-from ...repositories.ingest_jobs import get_ingest_job_repository
-from ...repositories.reviews import (
+    get_document_repository,
     get_human_review_repository,
     get_image_review_repository,
 )
+from ...repositories.ingest_job_models import IngestJobRepository
+from ...repositories.ingest_jobs import get_ingest_job_repository
+from ...repositories.identity import UserRecord
 from ...schemas.review import (
     ImageReviewBatch,
     ImageReviewCandidate,
@@ -30,8 +29,6 @@ from ...schemas.review import (
     ReviewQueueResponse,
 )
 from ...services.document_image_asset_storage import DocumentImageAssetStorage, get_document_image_asset_storage
-from ...ingestion.contracts import IngestJobPayload
-from ...ingestion.queue import IngestQueue, get_ingest_queue
 
 router = APIRouter(prefix="/review-queue", tags=["review-queue"])
 
@@ -119,51 +116,81 @@ async def decide_image_review_batch(
             detail={"code": "image_review_batch_not_found", "message": "Image review batch was not found."},
         )
     _require_review_document_scope(user, document_repo, batch.doc_id)
-    decision = image_review_repo.apply_image_review_decisions(
-        batch_id,
-        approve_candidate_ids=payload.approve_candidate_ids,
-        skip_candidate_ids=payload.skip_candidate_ids,
-        approve_recommended=payload.approve_recommended,
-        skip_remaining=payload.skip_remaining,
-        reviewer_id=user.id,
-    )
+    try:
+        decision = image_review_repo.apply_image_review_decisions(
+            batch_id,
+            approve_candidate_ids=payload.approve_candidate_ids,
+            skip_candidate_ids=payload.skip_candidate_ids,
+            approve_recommended=payload.approve_recommended,
+            skip_remaining=payload.skip_remaining,
+            reviewer_id=user.id,
+        )
+    except ImageReviewBatchClosedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "image_review_batch_closed", "message": "Image review batch is already closed."},
+        ) from exc
     if decision is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "image_review_batch_not_found", "message": "Image review batch was not found."},
         )
+    resumed = False
     if decision.batch_complete:
         job = job_repo.get_ingest_job(decision.batch.job_id)
-        if job is not None and job.status == "cancelled":
-            document_repo.append_audit_event(
-                event_type="image_review.resume_skipped",
-                actor_id=user.id,
-                target_type="image_review_batch",
-                target_id=decision.batch.id,
-                payload={"doc_id": decision.batch.doc_id, "reason": "ingest_cancelled"},
+        if job is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "ingest_job_not_found",
+                    "message": "The ingestion job for this review batch was not found.",
+                },
             )
-        else:
+        if job.status == "cancelled":
+            if decision.candidates:
+                document_repo.append_audit_event(
+                    event_type="image_review.resume_skipped",
+                    actor_id=user.id,
+                    target_type="image_review_batch",
+                    target_id=decision.batch.id,
+                    payload={"doc_id": decision.batch.doc_id, "reason": "ingest_cancelled"},
+                )
+        elif job.status == "human_review":
             resume_payload = dict(decision.batch.resume_payload)
             resume_payload["image_review_batch_id"] = decision.batch.id
-            try:
-                queue.enqueue(IngestJobPayload.from_dict(resume_payload))
-                job_repo.update_ingest_job(decision.batch.job_id, status="queued", progress_pct=0)
-            except RuntimeError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={"code": "queue_unavailable", "message": "Upload queue is unavailable."},
-                ) from exc
-    document_repo.append_audit_event(
-        event_type="image_review.decided",
-        actor_id=user.id,
-        target_type="image_review_batch",
-        target_id=decision.batch.id,
-        payload={
-            "doc_id": decision.batch.doc_id,
-            "batch_complete": decision.batch_complete,
-            "changed_count": len(decision.candidates),
-        },
-    )
+            claimed = job_repo.update_ingest_job(
+                decision.batch.job_id,
+                status="queued",
+                progress_pct=0,
+                expected_statuses=frozenset({"human_review"}),
+            )
+            if claimed.changed:
+                try:
+                    queue.enqueue(IngestJobPayload.from_dict(resume_payload))
+                    resumed = True
+                except RuntimeError as exc:
+                    job_repo.update_ingest_job(
+                        decision.batch.job_id,
+                        status="human_review",
+                        progress_pct=35,
+                        expected_statuses=frozenset({"queued"}),
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail={"code": "queue_unavailable", "message": "Upload queue is unavailable."},
+                    ) from exc
+    if decision.candidates or resumed:
+        document_repo.append_audit_event(
+            event_type="image_review.decided",
+            actor_id=user.id,
+            target_type="image_review_batch",
+            target_id=decision.batch.id,
+            payload={
+                "doc_id": decision.batch.doc_id,
+                "batch_complete": decision.batch_complete,
+                "changed_count": len(decision.candidates),
+            },
+        )
     candidates = image_review_repo.list_image_review_candidates_for_batch(decision.batch.id)
     return _image_review_decision_response(decision.batch.id, decision.batch.status, decision.batch_complete, candidates)
 
@@ -184,12 +211,26 @@ async def approve_review_item(
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     queue: IngestQueue = Depends(get_ingest_queue),
 ) -> ReviewDecisionResponse:
-    _require_visible_pending_review_item(user, document_repo, review_repo, item_id)
+    review_item = _require_visible_approvable_review_item(
+        user,
+        document_repo,
+        review_repo,
+        item_id,
+    )
     decision = review_repo.approve_review_item(item_id, corrected_text=payload.corrected_text, reviewer_id=user.id)
     if decision is None:
         raise HTTPException(status_code=404, detail={"code": "review_item_not_found", "message": "Review item was not found."})
+    resume_claimed = False
     if decision.batch_complete:
         job = job_repo.get_ingest_job(decision.batch.job_id)
+        if job is None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "ingest_job_not_found",
+                    "message": "The ingestion job for this review batch was not found.",
+                },
+            )
         if job is not None and job.status == "cancelled":
             document_repo.append_audit_event(
                 event_type="review.resume_skipped",
@@ -207,18 +248,32 @@ async def approve_review_item(
             )
         resume_payload = dict(decision.batch.resume_payload)
         resume_payload["review_batch_id"] = decision.batch.id
-        try:
-            queue.enqueue(IngestJobPayload.from_dict(resume_payload))
-            job_repo.update_ingest_job(decision.batch.job_id, status="queued", progress_pct=0)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail={"code": "queue_unavailable", "message": "Upload queue is unavailable."}) from exc
-    document_repo.append_audit_event(
-        event_type="review.approved",
-        actor_id=user.id,
-        target_type="review_item",
-        target_id=decision.item.id,
-        payload={"batch_id": decision.batch.id, "doc_id": decision.batch.doc_id, "batch_complete": decision.batch_complete},
-    )
+        claimed = job_repo.update_ingest_job(
+            decision.batch.job_id,
+            status="queued",
+            progress_pct=0,
+            expected_statuses=frozenset({"human_review"}),
+        )
+        resume_claimed = claimed.changed
+        if resume_claimed:
+            try:
+                queue.enqueue(IngestJobPayload.from_dict(resume_payload))
+            except RuntimeError as exc:
+                job_repo.update_ingest_job(
+                    decision.batch.job_id,
+                    status="human_review",
+                    progress_pct=35,
+                    expected_statuses=frozenset({"queued"}),
+                )
+                raise HTTPException(status_code=503, detail={"code": "queue_unavailable", "message": "Upload queue is unavailable."}) from exc
+    if review_item.status == "pending" or resume_claimed:
+        document_repo.append_audit_event(
+            event_type="review.approved",
+            actor_id=user.id,
+            target_type="review_item",
+            target_id=decision.item.id,
+            payload={"batch_id": decision.batch.id, "doc_id": decision.batch.doc_id, "batch_complete": decision.batch_complete},
+        )
     return ReviewDecisionResponse(
         id=decision.item.id,
         status="approved",
@@ -280,6 +335,27 @@ def _require_visible_pending_review_item(
         raise HTTPException(status_code=404, detail={"code": "review_item_not_found", "message": "Review item was not found."})
     _require_review_document_scope(user, document_repo, item.doc_id)
     return item
+
+
+def _require_visible_approvable_review_item(
+    user: UserRecord,
+    document_repo: DocumentRepository,
+    review_repo: HumanReviewRepository,
+    item_id: str,
+) -> ReviewItemRecord:
+    for item_status in ("pending", "approved"):
+        item = next(
+            (
+                candidate
+                for candidate in review_repo.list_review_items(status=item_status)
+                if candidate.id == item_id
+            ),
+            None,
+        )
+        if item is not None:
+            _require_review_document_scope(user, document_repo, item.doc_id)
+            return item
+    raise HTTPException(status_code=404, detail={"code": "review_item_not_found", "message": "Review item was not found."})
 
 
 def _require_review_document_scope(user: UserRecord, document_repo: DocumentRepository, doc_id: str) -> None:

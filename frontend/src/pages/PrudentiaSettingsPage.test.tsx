@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  activeStackLabel,
+  activeVisionStatus,
   endpointsFromForm,
   discoveryHealthLabel,
   modelPlaceholderForStatus,
@@ -15,6 +17,7 @@ import {
   thresholdPercentFromConfig,
   type RagConfigFormState,
 } from "./PrudentiaSettingsPage";
+import type { RagConfig } from "../types/api";
 
 const ollamaForm: RagConfigFormState = {
   provider: "ollama",
@@ -284,6 +287,43 @@ describe("inference settings helpers", () => {
 
     expect(request.ingestion_model).toBe("qwen3:8b");
     expect(request.vision_model).toBe("llava:latest");
+  });
+
+  it("does not present a fallback text model as an active vision model", () => {
+    const config = {
+      provider: "ollama",
+      embedding_provider: "ollama",
+      vision_provider: "ollama",
+      ingestion_provider: "ollama",
+      base_url: "http://ollama:11434",
+      ingestion_base_url: "http://ollama:11434",
+      vision_base_url: "http://ollama:11434",
+      chat_model: "llama3.1:8b",
+      ingestion_model: "llama3.1:8b",
+      vision_model: null,
+    } as RagConfig;
+
+    expect(activeVisionStatus(config)).toEqual({ endpoint: null, model: "Not configured" });
+    expect(activeStackLabel(config)).toBe("Ollama text, Ollama embeddings, vision not configured");
+  });
+
+  it("shows a vision endpoint only when an explicit vision model is active", () => {
+    const config = {
+      provider: "vllm",
+      embedding_provider: "fastembed",
+      vision_provider: "ollama",
+      ingestion_provider: "vllm",
+      base_url: "http://vllm:8000",
+      ingestion_base_url: "http://vllm:8005",
+      vision_base_url: "http://ollama:11434",
+      vision_model: "llava:latest",
+    } as RagConfig;
+
+    expect(activeVisionStatus(config)).toEqual({
+      endpoint: "http://ollama:11434",
+      model: "Ollama: llava:latest",
+    });
+    expect(activeStackLabel(config)).toBe("vLLM text, FastEmbed local embeddings, Ollama vision");
   });
 
   it("does not show reranker options before the cached catalog arrives", () => {

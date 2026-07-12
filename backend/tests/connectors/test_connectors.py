@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from fastapi import HTTPException
 
 from rag.connectors.crypto import decrypt_secret, encrypt_secret, keyring_from_settings, redact_secrets
 from rag.connectors.models import CONNECTOR_RECORD_CONTENT_TYPE
@@ -22,25 +21,19 @@ from rag.connectors.registry import (
     default_connector_registry,
 )
 from rag.connectors.schema_enrichment import (
-    SchemaEnrichmentError,
-    enrich_schema_catalog_with_llm,
     enrich_schema_table_with_llm,
     initialize_schema_catalog_enrichment,
-    schema_catalog_with_enrichment_failure,
     schema_catalog_with_table_enrichment_failure,
 )
-from rag.connectors.repositories import InMemoryConnectorProfileRepository
 from rag.connectors.sql_safety import (
     SqlValidationError,
-    validate_live_sql_for_approved_selection,
     validate_live_sql_for_approved_catalog,
     validate_read_only_sql,
-    wrap_approved_selection_query,
 )
 from rag.repositories.document_memory import InMemoryDocumentRepository
 from rag.repositories.folder_schedule_memory import InMemoryFolderScheduleRepository
 from rag.repositories.identity_memory import InMemoryIdentityRepository
-from rag.services.folder_ingestion import create_connector_schedule, create_local_folder_schedule, dispatch_due_schedules
+from rag.services.folder_ingestion import create_local_folder_schedule, dispatch_due_schedules
 from rag.services.folder_sources import LocalFolderSource, list_local_folder_directories
 from rag.ingestion.queue import InMemoryIngestQueue
 from rag.services.upload_storage import StoredUpload
@@ -60,14 +53,6 @@ class MemoryStorage:
         object_path = f"memory://{len(self.objects)}-{filename}"
         self.objects[object_path] = content
         return StoredUpload(object_path=object_path, size_bytes=len(content), content_type=content_type)
-
-
-class FakeQdrant:
-    def __init__(self) -> None:
-        self.status_updates: list[tuple[str, str, bool]] = []
-
-    def set_document_retrieval_status(self, doc_id: str, *, retrieval_status: str, source_deleted: bool) -> None:
-        self.status_updates.append((doc_id, retrieval_status, source_deleted))
 
 
 class FakeSchemaEnrichmentLlm:
@@ -120,33 +105,6 @@ def test_postgres_validation_blocks_unsafe_statements() -> None:
     ]:
         with pytest.raises(SqlValidationError):
             validate_read_only_sql(query, connector_type="postgres")
-
-
-def test_live_sql_validation_allows_only_approved_selection() -> None:
-    assert (
-        validate_live_sql_for_approved_selection(
-            "SELECT status, COUNT(*) AS total FROM approved_selection GROUP BY status",
-            connector_type="postgres",
-        )
-        == "SELECT status, COUNT(*) AS total FROM approved_selection GROUP BY status"
-    )
-    wrapped = wrap_approved_selection_query(
-        "SELECT id, status FROM public.cases",
-        "SELECT status FROM approved_selection",
-        connector_type="postgres",
-    )
-    assert wrapped.startswith("WITH approved_selection AS")
-    assert "SELECT status FROM approved_selection" in wrapped
-
-    for query in [
-        "SELECT * FROM public.cases",
-        "SELECT * FROM approved_selection JOIN public.people ON true",
-        "WITH leaked AS (SELECT * FROM public.cases) SELECT * FROM approved_selection",
-        "SELECT * FROM approved_selection; SELECT * FROM public.cases",
-        "UPDATE approved_selection SET status = 'closed'",
-    ]:
-        with pytest.raises(SqlValidationError):
-            validate_live_sql_for_approved_selection(query, connector_type="postgres")
 
 
 def test_live_sql_validation_allows_only_approved_catalog_scope() -> None:
@@ -333,63 +291,6 @@ def test_connector_introspection_helpers_shape_relational_metadata() -> None:
     assert _quote_postgres_ident('case"records') == '"case""records"'
 
 
-def test_schema_enrichment_merges_descriptions_without_changing_scope() -> None:
-    catalog = {
-        "tables": [
-            {
-                "key": "public.cases",
-                "schema": "public",
-                "name": "cases",
-                "allowed": True,
-                "sensitive": False,
-                "columns": [
-                    {"name": "id", "allowed": True, "sensitive": False},
-                    {"name": "secret_note", "allowed": False, "sensitive": True},
-                ],
-            }
-        ],
-        "relationships": [],
-    }
-    llm = FakeSchemaEnrichmentLlm(
-        """
-        {
-          "tables": [
-            {
-              "key": "public.cases",
-              "description": "Case records tracked by operations.",
-              "synonyms": ["incidents", "case files"],
-              "columns": [
-                {"name": "id", "description": "Stable case identifier.", "synonyms": ["case id"]},
-                {"name": "secret_note", "description": "Restricted internal note."}
-              ]
-            },
-            {"key": "public.unapproved", "description": "Should not be added."}
-          ],
-          "business_rules": ["Use approved columns only."]
-        }
-        """
-    )
-
-    enriched = enrich_schema_catalog_with_llm(
-        catalog,
-        connector_type="postgres",
-        profile_name="Cases",
-        llm=llm,
-        model=None,
-    )
-
-    table = enriched["tables"][0]
-    assert table["description"] == "Case records tracked by operations."
-    assert table["synonyms"] == ["incidents", "case files"]
-    assert len(enriched["tables"]) == 1
-    assert table["columns"][0]["description"] == "Stable case identifier."
-    assert table["columns"][1]["description"] == "Restricted internal note."
-    assert table["columns"][1]["allowed"] is False
-    assert table["columns"][1]["sensitive"] is True
-    assert enriched["business_rules"] == ["Use approved columns only."]
-    assert enriched["ai_enrichment"]["requires_admin_review"] is True
-
-
 def test_schema_table_enrichment_checkpoints_each_table_without_changing_scope() -> None:
     catalog = initialize_schema_catalog_enrichment(
         {
@@ -501,107 +402,6 @@ def test_schema_table_enrichment_requires_descriptions_for_every_column() -> Non
     assert enriched["ai_enrichment"]["failed_tables"] == 1
 
 
-def test_schema_enrichment_rejects_bad_json() -> None:
-    with pytest.raises(SchemaEnrichmentError):
-        enrich_schema_catalog_with_llm(
-            {"tables": []},
-            connector_type="postgres",
-            profile_name="Cases",
-            llm=FakeSchemaEnrichmentLlm("not json"),
-            model=None,
-        )
-
-
-def test_schema_enrichment_accepts_json_wrapped_in_text() -> None:
-    llm = FakeSchemaEnrichmentLlm(
-        """
-        Here is the metadata:
-
-        ```json
-        {"tables":[{"key":"public.cases","description":"Case records."}],"business_rules":[]}
-        ```
-        """
-    )
-
-    enriched = enrich_schema_catalog_with_llm(
-        {"tables": [{"key": "public.cases", "description": "", "columns": []}], "relationships": []},
-        connector_type="postgres",
-        profile_name="Cases",
-        llm=llm,
-        model=None,
-    )
-
-    assert enriched["tables"][0]["description"] == "Case records."
-
-
-def test_schema_enrichment_retries_invalid_json_with_smaller_prompt() -> None:
-    llm = FakeSchemaEnrichmentLlm(
-        [
-            "not json",
-            '{"tables":[{"key":"public.cases","description":"Retried case records."}],"business_rules":[]}',
-        ]
-    )
-
-    enriched = enrich_schema_catalog_with_llm(
-        {"tables": [{"key": "public.cases", "description": "", "columns": []}], "relationships": []},
-        connector_type="postgres",
-        profile_name="Cases",
-        llm=llm,
-        model=None,
-    )
-
-    assert llm.calls == 2
-    assert enriched["tables"][0]["description"] == "Retried case records."
-
-
-def test_schema_enrichment_salvages_complete_tables_from_truncated_json() -> None:
-    llm = FakeSchemaEnrichmentLlm(
-        '{"tables":[{"key":"public.cases","description":"Recovered case records.","columns":[]},'
-        '{"key":"public.people","description":"'
-    )
-
-    enriched = enrich_schema_catalog_with_llm(
-        {
-            "tables": [
-                {"key": "public.cases", "description": "", "columns": []},
-                {"key": "public.people", "description": "", "columns": []},
-            ],
-            "relationships": [],
-        },
-        connector_type="postgres",
-        profile_name="Cases",
-        llm=llm,
-        model=None,
-    )
-
-    assert enriched["tables"][0]["description"] == "Recovered case records."
-    assert enriched["ai_enrichment"]["status"] == "generated"
-
-
-def test_schema_enrichment_failure_keeps_reviewable_catalog_scope() -> None:
-    catalog = {
-        "source": "connector_introspection",
-        "sample_values_included": False,
-        "tables": [
-            {
-                "key": "public.cases",
-                "allowed": True,
-                "sensitive": False,
-                "columns": [{"name": "id", "allowed": True, "sensitive": False}],
-            }
-        ],
-    }
-
-    fallback = schema_catalog_with_enrichment_failure(catalog, error_message="model returned invalid JSON")
-
-    assert fallback["source"] == "connector_introspection_ai_draft_fallback"
-    assert fallback["tables"] == catalog["tables"]
-    assert fallback["sample_values_included"] is False
-    assert fallback["ai_enrichment"]["status"] == "failed"
-    assert fallback["ai_enrichment"]["requires_admin_review"] is True
-    assert fallback["ai_enrichment"]["error_message"] == "model returned invalid JSON"
-
-
 def test_connector_record_parser_uses_direct_chunk_shape() -> None:
     parsed = parse_document(
         b'{"title":"FIR row","identity":{"id":123},"data":{"fir_number":"FIR-2024-88","status":"Open"}}',
@@ -614,43 +414,6 @@ def test_connector_record_parser_uses_direct_chunk_shape() -> None:
     assert parsed.provenance["routing_mode"] == "direct_chunks"
     assert parsed.items[0].parser == "connector_record"
     assert "FIR-2024-88" in parsed.items[0].text
-
-
-def test_connector_schedule_creation_is_retired() -> None:
-    identity_repo, user = _identity()
-    document_repo = InMemoryDocumentRepository()
-    schedule_repo = InMemoryFolderScheduleRepository()
-    profile_repo = InMemoryConnectorProfileRepository()
-
-    with pytest.raises(HTTPException) as exc:
-        create_connector_schedule(
-            name="Fake cases sync",
-            connector_profile_id="profile-1",
-            selection={},
-            identity_fields=["id"],
-            ingestion_mode="json_snapshot",
-            deletion_policy="keep_deleted_documents",
-            batch_size=100,
-            row_limit=100,
-            group_path="/ops",
-            clearance_level="NATO_RESTRICTED",
-            effective_date=None,
-            expiry_date=None,
-            doc_type="case record",
-            description=None,
-            schedule_type="recurring",
-            timezone_name="Asia/Karachi",
-            scheduled_at=None,
-            recurrence={"days_of_week": [0, 1, 2, 3, 4, 5, 6], "start_time": "00:00", "end_time": "23:59"},
-            user=user,
-            identity_repo=identity_repo,
-            document_repo=document_repo,
-            schedule_repo=schedule_repo,
-            connector_profile_repo=profile_repo,
-        )
-
-    assert exc.value.status_code == 410
-    assert exc.value.detail["code"] == "connector_schedules_retired"
 
 
 def test_dispatch_cancels_legacy_connector_schedules_without_syncing() -> None:

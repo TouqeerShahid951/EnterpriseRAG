@@ -11,10 +11,6 @@ from rag.artifact_jobs.composer import (
     compose_document_bundle,
     normalize_bundle_evidence_ids,
 )
-from rag.artifact_jobs.grounded_response import (
-    build_grounded_artifact_payload,
-    response_is_artifact_ready,
-)
 from rag.artifact_jobs.contracts import (
     ArtifactContentBundle,
     ContentBlock,
@@ -48,7 +44,6 @@ from rag.repositories.document_models import DocumentRecord
 from rag.repositories.generated_artifact_memory import InMemoryGeneratedArtifactRepository
 from rag.repositories.identity_models import UserRecord
 from rag.repositories.rag_config_models import RagConfigRecord
-from rag.schemas.query import RAGResponse, SourceAnchor
 from rag.services.generated_artifact_storage import LocalGeneratedArtifactStorage
 
 
@@ -316,46 +311,6 @@ def test_formatter_llm_chooses_presentation_title_subtitle_and_slides() -> None:
     assert [slide.title for slide in bundle.presentation.slides] == ["Priority Risks", "Actions"]
 
 
-def test_grounded_response_payload_uses_displayed_answer_and_sources() -> None:
-    response = _rag_response()
-
-    assert response_is_artifact_ready(response, faithfulness_threshold=0.8)
-    plan, evidence, bundle = build_grounded_artifact_payload(
-        original_request="Generate a docx file summarizing the crimes",
-        content_query="summarizing the crimes",
-        response=response,
-    )
-
-    assert plan.sections[0].retrieval_queries == ["summarizing the crimes"]
-    assert [record.doc_title for record in evidence.records] == ["FIR_03_robbery.pdf"]
-    assert bundle.content.sections[0].blocks[0].text == response.answer
-    assert bundle.content.citations[0].doc_title == "FIR_03_robbery.pdf"
-
-
-def test_grounded_response_allows_low_faithfulness_when_sources_exist() -> None:
-    response = _rag_response().model_copy(update={
-        "degraded": True,
-        "degraded_reason": "faithfulness_check_failed",
-        "faithfulness_score": 0.0,
-        "faithfulness_status": "failed",
-        "unfounded_claims": ["faithfulness_check_failed"],
-    })
-
-    assert response_is_artifact_ready(response, faithfulness_threshold=0.8)
-
-
-def test_grounded_response_still_blocks_when_sources_are_missing() -> None:
-    response = _rag_response().model_copy(update={
-        "sources": [],
-        "degraded": True,
-        "degraded_reason": "Insufficient relevant evidence after retrieval retries",
-        "faithfulness_score": 0.0,
-        "faithfulness_status": "failed",
-    })
-
-    assert not response_is_artifact_ready(response, faithfulness_threshold=0.8)
-
-
 def test_planner_extracts_topic_from_detailed_presentation_request() -> None:
     plan = plan_document(
         _job(
@@ -493,11 +448,9 @@ def test_retrieval_does_not_scan_every_structured_row_without_scope(monkeypatch)
 def test_seeded_response_job_renders_without_artifact_composition(tmp_path) -> None:
     job_repo = InMemoryArtifactJobRepository()
     job = _job(repo=job_repo)
-    plan, evidence, bundle = build_grounded_artifact_payload(
-        original_request=job.original_request,
-        content_query="summarizing the crimes",
-        response=_rag_response(),
-    )
+    plan = _plan()
+    evidence = _evidence_manifest([_evidence_record(evidence_id="ev_E1")])
+    bundle = normalize_bundle_evidence_ids(_bundle(), evidence)
     job_repo.update_job(job.id, {
         "plan_json": plan.model_dump(mode="json"),
         "evidence_manifest_json": evidence.model_dump(mode="json"),
@@ -536,11 +489,9 @@ def test_seeded_response_job_renders_without_artifact_composition(tmp_path) -> N
 def test_seeded_response_job_normalizes_recoverable_evidence_ids(tmp_path) -> None:
     job_repo = InMemoryArtifactJobRepository()
     job = _job(repo=job_repo)
-    plan, evidence, bundle = build_grounded_artifact_payload(
-        original_request=job.original_request,
-        content_query="summarizing the crimes",
-        response=_rag_response(),
-    )
+    plan = _plan()
+    evidence = _evidence_manifest([_evidence_record(evidence_id="ev_E1")])
+    bundle = normalize_bundle_evidence_ids(_bundle(), evidence)
     bad_id = evidence.records[0].evidence_id.removeprefix("ev_")
     broken_block = bundle.content.sections[0].blocks[0].model_copy(update={"evidence_ids": [bad_id]})
     broken_section = bundle.content.sections[0].model_copy(update={"blocks": [broken_block]})
@@ -966,11 +917,11 @@ def test_deterministic_pptx_skips_generated_references_content_slide() -> None:
     reference_slide_texts = [
         _slide_text(slide)
         for slide in presentation.slides
-        if _slide_text(slide).startswith("References")
+        if "References" in _slide_text(slide).splitlines()
     ]
     assert len(reference_slide_texts) == 1
     assert "FIR_02_kidnapping.pdf" in reference_slide_texts[0]
-    assert "References\nReferences" not in reference_slide_texts[0]
+    assert reference_slide_texts[0].splitlines().count("References") == 1
 
 
 def test_normalizer_drops_generated_references_content_slide() -> None:
@@ -1450,37 +1401,6 @@ def _slide_background_hex(slide) -> str:
     return str(slide.background.fill.fore_color.rgb)
 
 
-def _rag_response() -> RAGResponse:
-    source = SourceAnchor(
-        doc_id="doc-1",
-        doc_title="FIR_03_robbery.pdf",
-        chunk_id="chunk-E1",
-        page=1,
-        page_start=1,
-        page_end=1,
-        excerpt="The complainant reported a robbery involving stolen cash and a mobile phone.",
-        group_path="/",
-    )
-    return RAGResponse(
-        trace_id="trace-1",
-        answer="The retrieved FIR evidence describes a robbery involving stolen cash and a mobile phone.",
-        sources=[source],
-        artifacts=[],
-        artifact_job=None,
-        conflict_flag=False,
-        conflict_detail=None,
-        faithfulness_score=0.98,
-        faithfulness_status="checked",
-        unfounded_claims=[],
-        intent="factual_simple",
-        session_id="session-1",
-        latency_ms=10,
-        node_timings=[],
-        degraded=False,
-        degraded_reason=None,
-    )
-
-
 class _CapturingSectionInference:
     def __init__(self) -> None:
         self.prompts: list[str] = []
@@ -1681,8 +1601,8 @@ class _DocumentRepo:
     def __init__(self) -> None:
         self.events: list[dict[str, object]] = []
 
-    def get_document(self, _document_id: str):
-        return None
+    def get_document(self, document_id: str):
+        return _document(document_id, "Authorized source")
 
     def append_audit_event(self, **kwargs):
         self.events.append(kwargs)

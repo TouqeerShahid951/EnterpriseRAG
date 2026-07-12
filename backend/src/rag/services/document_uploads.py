@@ -17,7 +17,6 @@ DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessin
 JPEG_CONTENT_TYPE = "image/jpeg"
 PNG_CONTENT_TYPE = "image/png"
 JSON_CONTENT_TYPE = "application/json"
-SUPPORTED_CONTENT_TYPES = {PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, JPEG_CONTENT_TYPE, PNG_CONTENT_TYPE, JSON_CONTENT_TYPE}
 
 
 def validate_upload_size(content: bytes, *, max_bytes: int | None = None) -> None:

@@ -58,7 +58,7 @@
 
 .rag-eval-tab span {
   font-size: 0.76rem;
-  font-weight: 850;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -66,7 +66,7 @@
   overflow: hidden;
   color: var(--color-secondary);
   font-size: 0.68rem;
-  font-weight: 720;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -127,7 +127,7 @@
   border-radius: 999px;
   background: var(--color-primary-container);
   color: var(--color-primary);
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .rag-eval-workflow-step strong,
@@ -285,7 +285,7 @@
 .rag-eval-format-tooltip strong {
   color: var(--color-on-surface);
   font-size: 0.78rem;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .rag-eval-format-tooltip p,
@@ -342,13 +342,6 @@
   display: block;
   margin-top: 0.35rem;
   color: var(--color-on-surface-variant);
-}
-
-.rag-eval-control-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.78fr);
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
 }
 
 .rag-eval-form-grid {
@@ -472,7 +465,7 @@
     color-mix(in srgb, var(--color-surface-container-low) 90%, transparent);
   padding: 0.22rem 0.55rem;
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1;
   white-space: nowrap;
 }
@@ -531,7 +524,7 @@
 .rag-eval-case-detail h4 {
   margin: 0;
   color: var(--color-on-surface);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-eval-breakdown p,
@@ -674,23 +667,16 @@
   font-size: 0.78rem;
 }
 
-.rag-eval-source-list,
 .rag-eval-timing-list {
   display: grid;
   gap: 0.55rem;
 }
 
-.rag-eval-source-list div,
 .rag-eval-timing-list span {
   border: 1px solid var(--color-surface-border);
   border-radius: 0.5rem;
   padding: 0.65rem;
   background: var(--color-surface-container-low);
-}
-
-.rag-eval-source-list small {
-  display: block;
-  color: var(--color-on-surface-variant);
 }
 
 .rag-eval-diagnostics {
@@ -711,7 +697,7 @@
   margin: 0;
   color: var(--color-on-surface);
   font-size: 0.9rem;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .rag-eval-diagnostic-section-header p {
@@ -824,7 +810,7 @@
   gap: 0.4rem;
   color: var(--color-on-surface-variant);
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -862,7 +848,7 @@
   margin-top: 0.45rem;
   color: var(--color-on-surface-variant);
   font-size: 0.72rem;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .rag-eval-coverage-values {
@@ -897,13 +883,13 @@
 .rag-eval-coverage-value strong {
   color: var(--color-primary);
   font-size: 0.7rem;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .rag-eval-coverage-more,
 .rag-eval-coverage-empty {
   color: var(--color-on-surface-variant);
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .rag-eval-candidate-grid {
@@ -967,7 +953,7 @@
 .rag-eval-candidate-table th {
   color: var(--color-on-surface-variant);
   font-size: 0.7rem;
-  font-weight: 800;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -998,7 +984,7 @@
   padding: 0.12rem 0.42rem;
   color: var(--color-on-surface-variant);
   font-size: 0.7rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-eval-rerank-status[data-status="scored"] {
@@ -1022,7 +1008,7 @@
   padding: 0.65rem 0.75rem;
   color: var(--color-on-surface);
   cursor: pointer;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-eval-raw-details .rag-eval-json {
@@ -1061,7 +1047,7 @@
   padding: 0.62rem 0.75rem;
   color: var(--color-on-surface);
   font-size: 0.78rem;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .rag-eval-tracker-notice svg {
@@ -1101,7 +1087,7 @@
   background: transparent;
   color: var(--color-on-surface-variant);
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-eval-tracker-source-segments button:hover:not(:disabled),
@@ -1160,7 +1146,7 @@
 .rag-eval-tracker-scope > span {
   color: var(--color-on-surface-variant);
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -1175,7 +1161,7 @@
   padding: 0.28rem 0.55rem;
   color: var(--color-on-surface);
   font-size: 0.75rem;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .rag-eval-tracker-scope button:hover:not(:disabled) {
@@ -1193,7 +1179,7 @@
   padding: 0.28rem 0.6rem;
   color: var(--color-on-surface-variant);
   font-size: 0.75rem;
-  font-weight: 850;
+  font-weight: 700;
 }
 
 .rag-eval-tracker-live.active {
@@ -1234,7 +1220,7 @@
 .rag-eval-tracker-fact small {
   color: var(--color-on-surface-variant);
   font-size: 0.7rem;
-  font-weight: 850;
+  font-weight: 700;
   text-transform: uppercase;
 }
 
@@ -1323,7 +1309,7 @@
 .rag-eval-tracker-timeline-meta {
   color: var(--color-on-surface-variant);
   font-size: 0.72rem;
-  font-weight: 850;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -1356,7 +1342,7 @@
   padding: 0.28rem 0.58rem;
   color: var(--color-warning-amber);
   font-size: 0.74rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .rag-eval-tracker-source-list article,
@@ -1387,7 +1373,7 @@
   min-width: 4rem;
   color: var(--color-primary);
   font-size: 0.86rem;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 @container (max-width: 48rem) {
@@ -1456,7 +1442,6 @@
     gap: 1rem;
   }
 
-  .rag-eval-control-grid,
   .rag-eval-form-grid {
     gap: 1rem;
   }
@@ -1601,14 +1586,13 @@
 }
 
 @media (max-width: 1100px) {
-  .rag-eval-control-grid,
   .rag-eval-overview-grid,
-  .rag-eval-datasets-grid,
-  .rag-eval-new-run-grid,
-  .rag-eval-main-grid,
-  .rag-eval-detail-grid,
-  .rag-eval-tracker-grid,
-  .rag-eval-tracker-detail-grid {
+.rag-eval-datasets-grid,
+.rag-eval-new-run-grid,
+.rag-eval-main-grid,
+.rag-eval-detail-grid,
+.rag-eval-tracker-grid,
+.rag-eval-tracker-detail-grid {
     grid-template-columns: 1fr;
   }
 

@@ -364,17 +364,6 @@ class BackendInternalClient:
         )
         return str(payload["image_review_batch_id"])
 
-    def get_image_review_approved_keys(self, *, image_review_batch_id: str) -> list[str]:
-        payload = request_json(
-            self.base_url,
-            f"/internal/image-review-batches/{image_review_batch_id}/approved-keys",
-            service="backend",
-            headers={"X-Service-Token": self.service_token},
-            timeout_seconds=self.timeout_seconds,
-        )
-        keys = payload.get("candidate_keys")
-        return [str(key) for key in keys] if isinstance(keys, list) else []
-
     def get_image_review_resume(self, *, image_review_batch_id: str) -> dict[str, Any]:
         payload = request_json(
             self.base_url,
@@ -481,9 +470,6 @@ def _runtime_config_from_payload(payload: dict[str, Any]) -> InferenceRuntimeCon
         embed_timeout_seconds=float(payload["embed_timeout_seconds"]),
         thinking_enabled=bool(payload.get("thinking_enabled", False)),
     )
-
-
-OllamaRuntimeConfig = InferenceRuntimeConfig
 
 
 def _string_list(value: Any) -> list[str]:

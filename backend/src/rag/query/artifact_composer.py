@@ -6,8 +6,6 @@ from collections import OrderedDict
 import re
 from typing import Protocol
 
-from rag.shared.contracts.structured_payloads import normalized_match_tokens
-
 from .artifact_models import (
     ArtifactContent,
     ArtifactFieldDefinition,
@@ -250,15 +248,7 @@ def _evidence_ids_for_text(text: str, units: tuple[EvidenceUnit, ...]) -> tuple[
         for label in _CITATION_RE.findall(text)
         if label in labels
     )
-    if explicit:
-        return tuple(dict.fromkeys(explicit))
-    text_tokens = normalized_match_tokens(_CITATION_RE.sub("", text))
-    scored = [
-        (len(text_tokens & normalized_match_tokens(unit.text)), unit)
-        for unit in units
-    ]
-    score, best = max(scored, default=(0, None), key=lambda item: item[0])
-    return (best.evidence_id,) if best is not None and score >= min(2, max(1, len(text_tokens))) else ()
+    return tuple(dict.fromkeys(explicit))
 
 
 def _composition_prompt(plan: ArtifactPlan) -> str:

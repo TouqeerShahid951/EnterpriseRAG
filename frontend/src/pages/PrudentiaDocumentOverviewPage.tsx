@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Archive, CalendarClock, CheckCircle2, FileCheck2, FileClock, FileSearch, FolderOpen, History, Hourglass, Trash2, Upload, XCircle } from "lucide-react";
+import { AlertTriangle, Archive, CalendarClock, CheckCircle2, FileCheck2, FileClock, FilePlus2, FileSearch, FolderOpen, History, Hourglass, Trash2, Upload, XCircle } from "lucide-react";
 
 import { documentsApi, ingestJobsApi } from "../api/contracts";
 import { InlineMessage, Skeleton } from "../components/layout/Common";
@@ -17,10 +17,11 @@ const EXPIRING_SOON_DAYS = 30;
 export function PrudentiaDocumentOverviewPage({ documents, documentsLoading, onLogout, onNavigate, uploadJobs, user }: Props) {
   const canViewJobs = canAccessRoute(user, "ingestion-jobs");
   const canViewDocuments = canAccessRoute(user, "documents");
+  const canViewTrash = canAccessRoute(user, "document-trash");
   const trashQuery = useQuery({
     queryKey: ["documents", "list", "deleted"],
     queryFn: () => documentsApi.list({ state: "deleted" }),
-    enabled: canAccessRoute(user, "document-trash"),
+    enabled: canViewTrash,
     staleTime: 15000,
     retry: false,
   });
@@ -59,9 +60,20 @@ export function PrudentiaDocumentOverviewPage({ documents, documentsLoading, onL
   const expiringSoonCount = documents.filter((doc) => doc.is_current && isExpiringSoon(doc.expiry_date)).length;
   const trashCount = trashQuery.data?.total ?? 0;
   const canUpload = canAccessRoute(user, "upload");
+  const canOpenFolderSources = canAccessRoute(user, "document-extraction");
+  const canOpenSpaces = canAccessRoute(user, "knowledge-spaces");
+  const isGenuinelyEmpty = isDocumentWorkspaceEmpty({
+    documentsCount: documents.length,
+    documentsLoading,
+    jobsKnown: !canViewJobs || jobsSummaryQuery.isSuccess,
+    jobsTotal: summary?.total ?? 0,
+    trashCount,
+    trashKnown: !canViewTrash || trashQuery.isSuccess,
+    uploadJobsCount: uploadJobs.length,
+  });
   const nextStep = buildNextStep({
     activeJobs,
-    canOpenFolderSources: canAccessRoute(user, "document-extraction"),
+    canOpenFolderSources,
     canUpload,
     canViewJobs,
     documentAttentionCount,
@@ -92,45 +104,118 @@ export function PrudentiaDocumentOverviewPage({ documents, documentsLoading, onL
           {trashQuery.isError ? <InlineMessage tone="warning">{errorMessage(trashQuery.error, "Trash count could not be loaded.")}</InlineMessage> : null}
           {recentActivityQuery.isError ? <InlineMessage tone="warning">{errorMessage(recentActivityQuery.error, "Recent activity could not be loaded.")}</InlineMessage> : null}
 
-          <section className="sv-panel overflow-hidden">
-            <div className="knowledge-job-metrics" aria-label="Document workspace summary">
-              <Metric label="Active documents" loading={documentsLoading} value={documents.length} />
-              <Metric label="Current versions" loading={documentsLoading} value={currentCount} tone="success" />
-              <Metric label="Active processing" loading={jobsSummaryQuery.isLoading && canViewJobs} value={activeJobs} />
-              <Metric label="Needs attention" loading={documentsLoading} value={needsAttention} tone={needsAttention > 0 ? "warning" : "success"} />
-              <Metric label="Trash" loading={trashQuery.isLoading} value={trashCount} />
-            </div>
-            <OverviewStatus
-              indexedCurrentCount={indexedCurrentCount}
-              needsAttention={needsAttention}
-              nextStep={nextStep}
+          {isGenuinelyEmpty ? (
+            <DocumentEmptyWorkspace
+              canOpenFolderSources={canOpenFolderSources}
+              canOpenSpaces={canOpenSpaces}
+              canUpload={canUpload}
               onNavigate={onNavigate}
-              processingCount={processingCount}
             />
-            <StatusShortcutGrid loading={documentsLoading || (canViewJobs && jobsSummaryQuery.isLoading)} onNavigate={onNavigate} shortcuts={statusShortcuts} />
-            <LifecycleStrip loading={documentsLoading || trashQuery.isLoading} onNavigate={onNavigate} items={lifecycleItems} />
-          </section>
-
-          <div className={canViewJobs ? "mt-4 grid gap-4 xl:grid-cols-3" : "mt-4 grid gap-4 lg:grid-cols-2"}>
-            <section className="sv-panel overflow-hidden">
-              <PanelHeader actionIcon={attentionPanelShowsUploads ? Upload : FileSearch} actionLabel={attentionPanelShowsUploads ? "Open Uploads" : "Open Attention"} actionRoute={attentionPanelShowsUploads ? "upload" : "documents"} actionSearch={attentionPanelShowsUploads ? undefined : "?ingest=active"} countLabel={documentsLoading ? "Loading" : `${attentionDocs.length} shown`} description={failedUploadJobs > 0 ? `Document issues appear here. Recent upload failures are listed ${canUpload ? "on the Upload page" : "outside this document list"}.` : "Failed, unknown, and review-required documents appear here first."} onNavigate={onNavigate} title="Needs Attention" />
-              {documentsLoading ? <PanelSkeleton /> : attentionDocs.length ? <AttentionList documents={attentionDocs} onNavigate={onNavigate} /> : <Empty actionLabel={attentionPanelShowsUploads ? "Open Uploads" : undefined} actionRoute={attentionPanelShowsUploads ? "upload" : undefined} icon={CheckCircle2} onNavigate={onNavigate} title="No document issues" text={failedUploadJobs > 0 ? `${failedUploadJobs} recent upload${failedUploadJobs === 1 ? "" : "s"} need attention${canUpload ? " on the Upload page" : ""}.` : "The visible library has no failed, unknown, or review-required document status."} />}
-            </section>
-            {canViewJobs ? (
+          ) : (
+            <>
               <section className="sv-panel overflow-hidden">
-                <PanelHeader actionIcon={History} actionLabel="Open Activity" actionRoute="ingestion-jobs" countLabel={recentActivityQuery.isLoading ? "Loading" : `${recentActivityQuery.data?.items.length ?? 0} latest`} description="Latest intake, folder, restore, and reingestion runs across visible spaces." onNavigate={onNavigate} title="Recent Activity" />
-                <RecentActivityList isLoading={recentActivityQuery.isLoading} jobs={recentActivityQuery.data?.items ?? []} onNavigate={onNavigate} />
+                <div className="knowledge-job-metrics" aria-label="Document workspace summary">
+                  <Metric label="Active documents" loading={documentsLoading} value={documents.length} />
+                  <Metric label="Current versions" loading={documentsLoading} value={currentCount} tone="success" />
+                  <Metric label="Active processing" loading={jobsSummaryQuery.isLoading && canViewJobs} value={activeJobs} />
+                  <Metric label="Needs attention" loading={documentsLoading} value={needsAttention} tone={needsAttention > 0 ? "warning" : "success"} />
+                  <Metric label="Trash" loading={trashQuery.isLoading} value={trashCount} />
+                </div>
+                <OverviewStatus
+                  indexedCurrentCount={indexedCurrentCount}
+                  needsAttention={needsAttention}
+                  nextStep={nextStep}
+                  onNavigate={onNavigate}
+                  processingCount={processingCount}
+                />
+                <StatusShortcutGrid loading={documentsLoading || (canViewJobs && jobsSummaryQuery.isLoading)} onNavigate={onNavigate} shortcuts={statusShortcuts} />
+                <LifecycleStrip loading={documentsLoading || trashQuery.isLoading} onNavigate={onNavigate} items={lifecycleItems} />
               </section>
-            ) : null}
-            <section className="sv-panel overflow-hidden">
-              <PanelHeader actionIcon={FolderOpen} actionLabel="Open Spaces" actionRoute="knowledge-spaces" countLabel={`${spaceRows.length} spaces`} description="Spaces are ranked by attention items first, then document volume." onNavigate={onNavigate} title="Library by Space" />
-              {documentsLoading ? <PanelSkeleton /> : spaceRows.length ? <SpaceList rows={spaceRows.slice(0, 6)} onNavigate={onNavigate} /> : <Empty icon={FolderOpen} actionLabel={canAccessRoute(user, "upload") ? "Add Files" : "Open Spaces"} actionRoute={canAccessRoute(user, "upload") ? "upload" : "knowledge-spaces"} onNavigate={onNavigate} title="No documents yet" text="Add files or open Knowledge Spaces to prepare the library." />}
-            </section>
-          </div>
+
+              <div className={canViewJobs ? "mt-4 grid gap-4 xl:grid-cols-3" : "mt-4 grid gap-4 lg:grid-cols-2"}>
+                <section className="sv-panel overflow-hidden">
+                  <PanelHeader actionIcon={attentionPanelShowsUploads ? Upload : FileSearch} actionLabel={attentionPanelShowsUploads ? "Open Uploads" : "Open Attention"} actionRoute={attentionPanelShowsUploads ? "upload" : "documents"} actionSearch={attentionPanelShowsUploads ? undefined : "?ingest=active"} countLabel={documentsLoading ? "Loading" : `${attentionDocs.length} shown`} description={failedUploadJobs > 0 ? `Document issues appear here. Recent upload failures are listed ${canUpload ? "on the Upload page" : "outside this document list"}.` : "Failed, unknown, and review-required documents appear here first."} onNavigate={onNavigate} title="Needs Attention" />
+                  {documentsLoading ? <PanelSkeleton /> : attentionDocs.length ? <AttentionList documents={attentionDocs} onNavigate={onNavigate} /> : <Empty actionLabel={attentionPanelShowsUploads ? "Open Uploads" : undefined} actionRoute={attentionPanelShowsUploads ? "upload" : undefined} icon={CheckCircle2} onNavigate={onNavigate} title="No document issues" text={failedUploadJobs > 0 ? `${failedUploadJobs} recent upload${failedUploadJobs === 1 ? "" : "s"} need attention${canUpload ? " on the Upload page" : ""}.` : "The visible library has no failed, unknown, or review-required document status."} />}
+                </section>
+                {canViewJobs ? (
+                  <section className="sv-panel overflow-hidden">
+                    <PanelHeader actionIcon={History} actionLabel="Open Activity" actionRoute="ingestion-jobs" countLabel={recentActivityQuery.isLoading ? "Loading" : `${recentActivityQuery.data?.items.length ?? 0} latest`} description="Latest intake, folder, restore, and reingestion runs across visible spaces." onNavigate={onNavigate} title="Recent Activity" />
+                    <RecentActivityList isLoading={recentActivityQuery.isLoading} jobs={recentActivityQuery.data?.items ?? []} onNavigate={onNavigate} />
+                  </section>
+                ) : null}
+                <section className="sv-panel overflow-hidden">
+                  <PanelHeader actionIcon={FolderOpen} actionLabel="Open Spaces" actionRoute="knowledge-spaces" countLabel={`${spaceRows.length} spaces`} description="Spaces are ranked by attention items first, then document volume." onNavigate={onNavigate} title="Library by Space" />
+                  {documentsLoading ? <PanelSkeleton /> : spaceRows.length ? <SpaceList rows={spaceRows.slice(0, 6)} onNavigate={onNavigate} /> : <Empty icon={FolderOpen} actionLabel={canUpload ? "Add Files" : "Open Spaces"} actionRoute={canUpload ? "upload" : "knowledge-spaces"} onNavigate={onNavigate} title="No documents yet" text="Add files or open Knowledge Spaces to prepare the library." />}
+                </section>
+              </div>
+            </>
+          )}
         </div>
       </main>
     </PrudentiaWorkspace>
   );
+}
+
+function DocumentEmptyWorkspace({ canOpenFolderSources, canOpenSpaces, canUpload, onNavigate }: DocumentEmptyWorkspaceProps) {
+  const primaryRoute: RouteId | null = canUpload ? "upload" : canOpenSpaces ? "knowledge-spaces" : null;
+  const secondaryRoute: RouteId | null = canOpenFolderSources ? "document-extraction" : canUpload && canOpenSpaces ? "knowledge-spaces" : null;
+
+  return (
+    <section className="sv-panel document-overview-empty-state overflow-hidden" aria-labelledby="document-empty-title">
+      <div className="grid gap-8 p-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)] lg:p-8">
+        <div className="max-w-2xl">
+          <span className="mb-5 flex h-12 w-12 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
+            <FilePlus2 size={22} aria-hidden="true" />
+          </span>
+          <p className="sv-eyebrow">Library setup</p>
+          <h2 id="document-empty-title" className="mt-2 text-headline-md text-on-surface">Build your searchable evidence library</h2>
+          <p className="mt-3 text-body-lg text-on-surface-variant">
+            The library is empty for your current access scope. Add the first trusted source and Prudentia will track it from ingestion through retrieval readiness.
+          </p>
+          {primaryRoute ? (
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button type="button" className="sv-action-primary" onClick={() => onNavigate(primaryRoute)}>
+                {canUpload ? <Upload size={16} aria-hidden="true" /> : <FolderOpen size={16} aria-hidden="true" />}
+                {canUpload ? "Add first files" : "Open Knowledge Spaces"}
+              </button>
+              {secondaryRoute ? (
+                <button type="button" className="sv-action-secondary" onClick={() => onNavigate(secondaryRoute)}>
+                  {secondaryRoute === "document-extraction" ? "Set up a folder source" : "Browse Knowledge Spaces"}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+        <ol className="document-overview-empty-steps border-t border-surface-border pt-2 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0" aria-label="Library setup steps">
+          <SetupStep index="1" title="Confirm ownership" detail="Choose the Knowledge Space that should own the source and its access boundary." />
+          <SetupStep index="2" title="Add trusted material" detail="Upload files or configure a governed folder source for recurring intake." />
+          <SetupStep index="3" title="Verify retrieval readiness" detail="Follow ingestion activity until the source is indexed, then test it in Query Intelligence." />
+        </ol>
+      </div>
+    </section>
+  );
+}
+
+function SetupStep({ detail, index, title }: { detail: string; index: string; title: string }) {
+  return (
+    <li className="flex gap-4 border-b border-surface-border py-4 first:pt-2 last:border-b-0 last:pb-0">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary/30 text-label-md font-semibold text-primary" aria-hidden="true">{index}</span>
+      <span>
+        <strong className="block text-headline-sm text-on-surface">{title}</strong>
+        <span className="mt-1 block text-body-md text-on-surface-variant">{detail}</span>
+      </span>
+    </li>
+  );
+}
+
+export function isDocumentWorkspaceEmpty({ documentsCount, documentsLoading, jobsKnown, jobsTotal, trashCount, trashKnown, uploadJobsCount }: DocumentWorkspaceEmptyInput) {
+  return !documentsLoading
+    && jobsKnown
+    && trashKnown
+    && documentsCount === 0
+    && jobsTotal === 0
+    && trashCount === 0
+    && uploadJobsCount === 0;
 }
 
 function Metric({ label, loading, tone, value }: { label: string; loading: boolean; tone?: "success" | "warning"; value: number }) {
@@ -202,6 +287,8 @@ function isProcessingStatus(status: DocumentIngestStatus) {
 }
 
 type Props = { documents: Document[]; documentsLoading: boolean; onLogout: () => void; onNavigate: (route: RouteId, options?: NavigateOptions) => void; uploadJobs: UploadBatchItemView[]; user: AuthUser };
+type DocumentEmptyWorkspaceProps = { canOpenFolderSources: boolean; canOpenSpaces: boolean; canUpload: boolean; onNavigate: Props["onNavigate"] };
+type DocumentWorkspaceEmptyInput = { documentsCount: number; documentsLoading: boolean; jobsKnown: boolean; jobsTotal: number; trashCount: number; trashKnown: boolean; uploadJobsCount: number };
 type LifecycleInput = { currentCount: number; expiringSoonCount: number; supersededCount: number; trashCount: number; user: AuthUser };
 type NextStepInput = { activeJobs: number; canOpenFolderSources: boolean; canUpload: boolean; canViewJobs: boolean; documentAttentionCount: number; documentsCount: number; failedUploadJobs: number; indexedCurrentCount: number };
 type StatusShortcutInput = { canUpload: boolean; canViewDocuments: boolean; canViewJobs: boolean; failedCount: number; failedDocumentCount: number; failedUploadJobs: number; indexedCurrentCount: number; processingCount: number; reviewCount: number; user: AuthUser };

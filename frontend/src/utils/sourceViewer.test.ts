@@ -12,7 +12,6 @@ import {
   jsonHighlightRange,
   sourcePageFromInput,
   sourceDocumentKind,
-  sourceRegionsForPage,
   sourceTextCandidates,
   sourceViewerHref,
   sourceViewerParams,
@@ -68,7 +67,6 @@ describe("source viewer utilities", () => {
 
   it("uses cited-page geometry and de-duplicates text-match candidates", () => {
     expect(citedSourcePage(source)).toBe(4);
-    expect(sourceRegionsForPage(source, 4)).toHaveLength(1);
     expect(sourceTextCandidates(source)).toEqual(["Records must be retained for seven years."]);
   });
 
@@ -95,7 +93,6 @@ describe("source viewer utilities", () => {
     };
 
     expect(citedSourcePage(oldSource)).toBe(1);
-    expect(sourceRegionsForPage(oldSource, 1)).toEqual([]);
     expect(sourceTextCandidates(oldSource)).toEqual(["Legacy excerpt"]);
   });
 

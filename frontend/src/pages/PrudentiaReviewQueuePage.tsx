@@ -5,7 +5,7 @@ import { AlertTriangle, CheckCircle2, CheckSquare, ExternalLink, FileText, Image
 import { reviewApi, documentsApi } from "../api/contracts";
 import { DocumentRegionViewer, type DocumentRegion } from "../components/document/DocumentRegionViewer";
 import { useToast } from "../components/feedback/ToastProvider";
-import { EmptyPanel, InlineMessage, Skeleton } from "../components/layout/Common";
+import { InlineMessage, Skeleton } from "../components/layout/Common";
 import { PrudentiaWorkspace } from "../components/layout/PrudentiaWorkspace";
 import type { RouteId } from "../routes";
 import type { ImageReviewBatch, ImageReviewCandidate, ReviewItem, User as AuthUser } from "../types/api";
@@ -809,13 +809,6 @@ function confidencePillClass(item: ReviewItem): string {
 export function confidencePercent(item: ReviewItem): number {
   if (item.confidence === null) return 0;
   return Math.max(0, Math.min(100, Math.round(item.confidence * 100)));
-}
-
-function lowestConfidenceLabel(items: ReviewItem[]): string {
-  const confidences = items.map((item) => item.confidence).filter((confidence): confidence is number => confidence !== null);
-  if (items.length === 0) return "None";
-  if (confidences.length === 0) return "Missing";
-  return `${Math.round(Math.min(...confidences) * 100)}%`;
 }
 
 function pageRange(item: ReviewItem): string {

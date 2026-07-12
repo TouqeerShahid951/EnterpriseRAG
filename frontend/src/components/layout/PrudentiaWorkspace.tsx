@@ -4,23 +4,22 @@ import {
   useEffect,
   useState,
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 
 import {
   Prudentia_SIDEBAR_COLLAPSED_WIDTH,
-  Prudentia_SIDEBAR_DEFAULT_WIDTH,
   Prudentia_SIDEBAR_MAX_WIDTH,
   Prudentia_SIDEBAR_MIN_WIDTH,
   PrudentiaSidebar,
+  getPrudentiaSidebarDefaultWidth,
 } from "../navigation/PrudentiaSidebar";
 import type { RouteId } from "../../routes";
 import { readStoredBoolean, readStoredNumber, writeStoredBoolean, writeStoredNumber } from "../../state/uiPreferences";
 import type { User as AuthUser } from "../../types/api";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "Prudentia-sidebar-collapsed";
-const SIDEBAR_WIDTH_STORAGE_KEY = "Prudentia-sidebar-width-compact-v3";
+const SIDEBAR_WIDTH_STORAGE_KEY = "Prudentia-sidebar-width-comfortable-v4";
 
 const SidebarHeaderContext = createContext<SidebarChromeContext>({
   headerContent: null,
@@ -54,7 +53,6 @@ export function PrudentiaWorkspace({ activeRoute, children, onLogout, onNavigate
     <div
       className={sidebarCollapsed ? "Prudentia-shell Prudentia-shell-sidebar-collapsed" : "Prudentia-shell"}
       data-route={activeRoute}
-      onPointerMove={updateCursorGlow}
       style={{ "--sidebar-width": `${visibleSidebarWidth}px` } as CSSProperties}
     >
       <PrudentiaSidebar
@@ -122,27 +120,17 @@ type BasicProps = Props & {
 };
 
 function pageInnerModeClass(route: RouteId): string {
-  if (route === "settings" || route === "access") return "sv-page-inner-workbench";
+  if (route === "access") return "sv-page-inner-workbench";
   if (route === "overview") return "sv-page-inner-dashboard";
-  if (route === "account") return "sv-page-inner-form";
+  if (route === "settings" || route === "account") return "sv-page-inner-form";
   return "";
 }
 
 function readStoredSidebarWidth(): number {
+  const viewportWidth = typeof window === "undefined" ? 0 : window.innerWidth;
   return readStoredNumber(SIDEBAR_WIDTH_STORAGE_KEY, {
-    fallback: Prudentia_SIDEBAR_DEFAULT_WIDTH,
+    fallback: getPrudentiaSidebarDefaultWidth(viewportWidth),
     max: Prudentia_SIDEBAR_MAX_WIDTH,
     min: Prudentia_SIDEBAR_MIN_WIDTH,
   });
-}
-
-function updateCursorGlow(event: ReactPointerEvent<HTMLDivElement>) {
-  if (event.pointerType === "touch") return;
-  const target = event.target instanceof Element
-    ? event.target.closest<HTMLElement>("[data-cursor-glow]")
-    : null;
-  if (!target || !event.currentTarget.contains(target)) return;
-  const bounds = target.getBoundingClientRect();
-  target.style.setProperty("--cursor-x", `${event.clientX - bounds.left}px`);
-  target.style.setProperty("--cursor-y", `${event.clientY - bounds.top}px`);
 }

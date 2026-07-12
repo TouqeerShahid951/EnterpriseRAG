@@ -101,7 +101,6 @@ def render_document(
 def _render_docx(bundle: ArtifactContentBundle, generated_at: datetime, profile: ArtifactLayoutProfile) -> bytes:
     from docx import Document
     from docx.enum.section import WD_ORIENT
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Inches
 
     document = Document()
@@ -743,7 +742,7 @@ def _render_pptx(
 ) -> bytes:
     from pptx import Presentation
     from pptx.dml.color import RGBColor
-    from pptx.util import Inches, Pt
+    from pptx.util import Inches
 
     presentation = Presentation()
     presentation.slide_width = Inches(13.333)
@@ -1513,7 +1512,3 @@ def _safe_filename(value: str) -> str:
 def _compact(value: str, limit: int) -> str:
     normalized = re.sub(r"\s+", " ", value).strip()
     return normalized if len(normalized) <= limit else normalized[: max(0, limit - 3)].rstrip() + "..."
-
-
-def _chunks(values: list[str], size: int) -> list[list[str]]:
-    return [values[offset : offset + size] for offset in range(0, len(values), size)]

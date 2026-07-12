@@ -13,8 +13,11 @@ from .generated_artifact_postgres import PostgresGeneratedArtifactRepository
 @lru_cache
 def default_generated_artifact_repository() -> GeneratedArtifactRepository:
     if settings.document_repository == "memory":
-        return InMemoryGeneratedArtifactRepository()
-    return PostgresGeneratedArtifactRepository(settings.database_url)
+        return InMemoryGeneratedArtifactRepository(settings.artifact_retention_days)
+    return PostgresGeneratedArtifactRepository(
+        settings.database_url,
+        default_retention_days=settings.artifact_retention_days,
+    )
 
 
 def get_generated_artifact_repository() -> GeneratedArtifactRepository:

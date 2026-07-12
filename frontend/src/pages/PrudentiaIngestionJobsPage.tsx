@@ -271,7 +271,7 @@ function JobTable({ cancelingJobId, cancellingGraphTaskId, enrichingJobId, graph
             <th>Progress</th>
             <th>Started</th>
             <th>Details</th>
-            <th>Actions</th>
+            <th className="ingest-job-actions-heading">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -328,8 +328,8 @@ function JobTable({ cancelingJobId, cancellingGraphTaskId, enrichingJobId, graph
                   {job.parser_provenance ? <ParserProvenanceDetails provenance={job.parser_provenance} /> : null}
                   <small>{formatIngestRunLabel(job)}</small>
                 </td>
-                <td data-label="Actions">
-                  <div className="knowledge-row-actions">
+                <td className="ingest-job-actions-cell" data-label="Actions">
+                  <div className="knowledge-row-actions ingest-job-actions">
                     {canCancel ? (
                       <CancelJobControl
                         disabled={cancelingJobId === job.job_id}
@@ -373,7 +373,7 @@ function JobTable({ cancelingJobId, cancellingGraphTaskId, enrichingJobId, graph
 function CancelGraphControl({ disabled, onCancel, state }: { disabled: boolean; onCancel: () => void; state: GraphEnrichmentTask["state"] }) {
   return (
     <button
-      className="inline-flex items-center gap-1 rounded-md border border-error-red/30 px-2 py-1 text-label-md font-bold text-error-red hover:bg-error-container disabled:cursor-not-allowed disabled:opacity-50"
+      className="ingest-job-action inline-flex items-center gap-1 rounded-md border border-error-red/30 px-2 py-1 text-label-md font-bold text-error-red hover:bg-error-container disabled:cursor-not-allowed disabled:opacity-50"
       disabled={disabled}
       onClick={onCancel}
       title={`Cancel ${state} graph enrichment`}
@@ -397,7 +397,7 @@ function EnrichGraphControl({ chip, disabled, isQueueing, onEnrich, title }: { c
           : "Enrich graph";
   return (
     <button
-      className="inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+      className="ingest-job-action inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
       disabled={disabled}
       onClick={onEnrich}
       title={chip?.detail ?? `Enrich graph for ${title}`}
@@ -426,7 +426,7 @@ function ReingestJobControl({ disabled, job, onReingest }: { disabled: boolean; 
   const isRetry = job.status === "failed" || job.status === "cancelled";
   return (
     <button
-      className="inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface hover:text-primary disabled:opacity-50"
+      className="ingest-job-action inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface hover:text-primary disabled:opacity-50"
       disabled={disabled}
       onClick={onReingest}
       title={`${isRetry ? "Retry ingestion for" : "Reingest"} ${job.document_title}`}
@@ -442,9 +442,9 @@ function CancelJobControl({ disabled, onCancel }: { disabled: boolean; onCancel:
   const [confirming, setConfirming] = useState(false);
   if (confirming) {
     return (
-      <div className="flex min-w-32 flex-wrap gap-1.5">
+      <div className="ingest-job-cancel-confirmation">
         <button
-          className="rounded-md border border-error-red/30 px-2 py-1 text-label-md font-bold text-error-red hover:bg-error-container disabled:opacity-50"
+          className="ingest-job-action rounded-md border border-error-red/30 px-2 py-1 text-label-md font-bold text-error-red hover:bg-error-container disabled:opacity-50"
           disabled={disabled}
           onClick={() => {
             onCancel();
@@ -454,7 +454,7 @@ function CancelJobControl({ disabled, onCancel }: { disabled: boolean; onCancel:
         >
           {disabled ? "Cancelling" : "Cancel"}
         </button>
-        <button className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface" disabled={disabled} onClick={() => setConfirming(false)} type="button">
+        <button className="ingest-job-action rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface" disabled={disabled} onClick={() => setConfirming(false)} type="button">
           Keep
         </button>
       </div>
@@ -462,7 +462,7 @@ function CancelJobControl({ disabled, onCancel }: { disabled: boolean; onCancel:
   }
   return (
     <button
-      className="inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface hover:text-error-red disabled:opacity-50"
+      className="ingest-job-action inline-flex items-center gap-1 rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-secondary hover:bg-surface hover:text-error-red disabled:opacity-50"
       disabled={disabled}
       onClick={() => setConfirming(true)}
       type="button"

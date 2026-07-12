@@ -34,7 +34,7 @@
   margin-top: 0.25rem;
   color: var(--color-on-surface);
   font-size: 1.24rem;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
@@ -60,7 +60,7 @@
   border: 1px solid var(--color-surface-border);
   border-radius: 0.5rem;
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .source-viewer-back {
@@ -108,7 +108,7 @@
 .source-viewer-state h2 {
   color: var(--color-on-surface);
   font-size: 1rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .source-viewer-state p {
@@ -208,7 +208,7 @@
   background: var(--color-surface-container-low);
   color: var(--color-on-surface);
   font-size: 0.76rem;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .source-viewer-page-input-label {
@@ -265,7 +265,7 @@
 .source-viewer-page-controls > span {
   color: var(--color-on-surface);
   font-size: 0.8125rem;
-  font-weight: 800;
+  font-weight: 700;
   text-align: center;
 }
 

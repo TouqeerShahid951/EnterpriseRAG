@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from ..shared.ollama_models import is_ollama_cloud_model
 from .cancellation import QueryCancellationToken
 from .http import ServiceRequestError, request_json, stream_json_lines
 
@@ -182,15 +183,16 @@ class OllamaClient:
         model: str | None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
+        selected_model = model or self.chat_model
         payload = request_json(
             self.base_url,
             "/api/chat",
             service="ollama",
             method="POST",
             payload={
-                "model": model or self.chat_model,
+                "model": selected_model,
                 "stream": False,
-                "format": "json",
+                **_json_format_option(selected_model),
                 "think": self.thinking_enabled,
                 "options": _ollama_options(
                     temperature=0.0,
@@ -214,15 +216,16 @@ class OllamaClient:
         model: str | None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
+        selected_model = model or self.chat_model
         payload = request_json(
             self.base_url,
             "/api/chat",
             service="ollama",
             method="POST",
             payload={
-                "model": model or self.chat_model,
+                "model": selected_model,
                 "stream": False,
-                "format": "json",
+                **_json_format_option(selected_model),
                 "think": self.thinking_enabled,
                 "options": _ollama_options(
                     temperature=0.0,
@@ -312,15 +315,16 @@ class OllamaClient:
         cancellation_token: QueryCancellationToken | None,
         num_predict: int = REASONING_NUM_PREDICT,
     ) -> str:
+        selected_model = model or self.chat_model
         payload = request_json(
             self.base_url,
             "/api/chat",
             service="ollama",
             method="POST",
             payload={
-                "model": model or self.chat_model,
+                "model": selected_model,
                 "stream": False,
-                "format": "json",
+                **_json_format_option(selected_model),
                 "think": self.thinking_enabled,
                 "options": _ollama_options(temperature=0.0, num_predict=num_predict, num_ctx=self.num_ctx),
                 "messages": [
@@ -392,6 +396,10 @@ def _ollama_options(*, temperature: float, num_predict: int, num_ctx: int | None
     if num_ctx is not None:
         options["num_ctx"] = num_ctx
     return options
+
+
+def _json_format_option(model: str) -> dict[str, str]:
+    return {} if is_ollama_cloud_model(model) else {"format": "json"}
 
 
 def _coerce_vector(value: Any) -> list[float]:

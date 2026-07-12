@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Clock3, FileText, Search, Upload, Users } from "lucide-react";
+import { Activity, ArrowRight, FileText, Search, Upload, Users } from "lucide-react";
 
 import { adminApi, reviewApi } from "../api/contracts";
 import { accountTypeLabel, isGlobalAdmin } from "../authz";
@@ -35,6 +35,13 @@ export function PrudentiaOverviewPage({ documents, documentsLoading, onLogout, o
     { icon: <Users size={18} />, label: "User Management", description: "Create users and assign Knowledge Space access.", onClick: () => onNavigate("access"), route: "access" },
   ] satisfies OverviewActionProps[];
   const visibleActions = actions.filter((action) => canAccessRoute(user, action.route));
+  const priorityRoute = !documentsLoading && currentCount === 0 && canUpload
+    ? "upload"
+    : canQuery
+      ? "chat"
+      : visibleActions[0]?.route;
+  const priorityAction = visibleActions.find((action) => action.route === priorityRoute) ?? visibleActions[0] ?? null;
+  const supportingActions = visibleActions.filter((action) => action.route !== priorityAction?.route);
 
   return (
     <PrudentiaBasicPage activeRoute="overview" onLogout={onLogout} onNavigate={onNavigate} title="Workspace Summary" subtitle="High-level corpus, access, and review facts with shortcuts into focused operational workspaces." user={user}>
@@ -61,7 +68,7 @@ export function PrudentiaOverviewPage({ documents, documentsLoading, onLogout, o
               ) : null}
             </div>
           </div>
-          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="workspace-overview-metrics mt-6 grid md:grid-cols-2 xl:grid-cols-4">
             <Metric label="Current documents" value={String(currentCount)} detail={`${supersededCount} superseded`} loading={documentsLoading} />
             <Metric label="Knowledge Spaces" value={valueOrUnavailable(spaceCount)} detail={isAdmin ? "Workspace hierarchy" : user.group_paths[0] ?? "No space assigned"} loading={isAdmin && groupsQuery.isLoading} />
             <Metric label="Users" value={isAdmin ? valueOrUnavailable(userCount) : role} detail={isAdmin ? "Provisioned accounts" : `Permission v${user.permission_version}`} loading={isAdmin && usersQuery.isLoading} />
@@ -72,61 +79,62 @@ export function PrudentiaOverviewPage({ documents, documentsLoading, onLogout, o
           {reviewQuery.isError ? <InlineMessage tone="warning">{errorMessage(reviewQuery.error, "Unable to load review queue.")}</InlineMessage> : null}
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-4">
-          {visibleActions.map((action) => (
-            <OverviewAction key={action.label} {...action} />
-          ))}
-        </section>
+        {priorityAction ? (
+          <section className="workspace-overview-actions" aria-labelledby="workspace-actions-title">
+            <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="sv-eyebrow">Operational workspaces</p>
+                <h2 id="workspace-actions-title" className="mt-2 text-headline-sm text-on-surface">Choose the next task</h2>
+              </div>
+              <p className="max-w-xl text-body-md text-on-surface-variant sm:text-right">Each workspace stays focused on one stage of the evidence lifecycle.</p>
+            </div>
+            <div className="workspace-overview-action-layout grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
+              <OverviewAction {...priorityAction} priority />
+              {supportingActions.length ? (
+                <div className="sv-panel workspace-overview-action-list overflow-hidden" aria-label="More operational workspaces">
+                  {supportingActions.map((action) => <OverviewAction key={action.label} {...action} />)}
+                </div>
+              ) : null}
+            </div>
+          </section>
+        ) : null}
       </div>
     </PrudentiaBasicPage>
   );
 }
 
-export function PrudentiaPlannedPage({ activeRoute, onLogout, onNavigate, subtitle, title, user }: PlannedProps) {
-  const canQuery = canAccessRoute(user, "chat");
-  const canUpload = canAccessRoute(user, "upload");
-  const canViewSpaces = canAccessRoute(user, "knowledge-spaces");
+function OverviewAction({ description, icon, label, onClick, priority = false }: OverviewActionProps & { priority?: boolean }) {
+  if (priority) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="sv-card workspace-overview-action workspace-overview-action-priority flex min-h-56 flex-col p-6 text-left transition-colors hover:bg-surface-container-high"
+        data-cursor-glow
+        aria-label={`Open ${label}`}
+      >
+        <span className="mb-5 flex h-11 w-11 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">{icon}</span>
+        <span className="sv-eyebrow">{label === "Document Intake" ? "Build the corpus" : "Primary workflow"}</span>
+        <strong className="mt-2 block text-headline-md text-on-surface">{label}</strong>
+        <span className="mt-2 block max-w-xl text-body-md text-on-surface-variant">{description}</span>
+        <span className="mt-auto flex items-center gap-2 pt-6 text-label-md font-semibold text-primary">Open workspace <ArrowRight size={16} aria-hidden="true" /></span>
+      </button>
+    );
+  }
 
   return (
-    <PrudentiaBasicPage activeRoute={activeRoute} onLogout={onLogout} onNavigate={onNavigate} title={title} subtitle={subtitle} user={user}>
-      <section className="sv-panel p-6">
-        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">
-          <Clock3 size={22} />
-        </div>
-        <p className="max-w-2xl text-body-lg font-semibold text-on-surface">This area is planned and not presented as a live feature yet.</p>
-        <p className="mt-2 max-w-2xl text-body-md text-on-surface-variant">
-          The active workflow is Document Intake for adding sources, Document Library for indexed files and access boundaries, and Query Intelligence for grounded answers.
-        </p>
-        {canQuery || canUpload || canViewSpaces ? (
-          <div className="mt-5 flex flex-wrap gap-3">
-            {canQuery ? (
-              <button type="button" onClick={() => onNavigate("chat")} className="sv-action-primary">
-                Open Query Intelligence
-              </button>
-            ) : null}
-            {canUpload ? (
-              <button type="button" onClick={() => onNavigate("upload")} className="sv-action-secondary">
-                Open Document Intake
-              </button>
-            ) : null}
-            {!canQuery && !canUpload && canViewSpaces ? (
-              <button type="button" onClick={() => onNavigate("knowledge-spaces")} className="sv-action-secondary">
-                Open Knowledge Spaces
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </section>
-    </PrudentiaBasicPage>
-  );
-}
-
-function OverviewAction({ description, icon, label, onClick }: OverviewActionProps) {
-  return (
-    <button type="button" onClick={onClick} className="sv-card p-5 text-left transition-colors hover:bg-surface-container-high" data-cursor-glow>
-      <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">{icon}</span>
-      <strong className="block text-headline-sm text-on-surface">{label}</strong>
-      <span className="mt-2 block text-body-md text-on-surface-variant">{description}</span>
+    <button
+      type="button"
+      onClick={onClick}
+      className="workspace-overview-action workspace-overview-action-supporting flex w-full items-start gap-4 border-b border-surface-border p-4 text-left transition-colors last:border-b-0 hover:bg-surface-container-high"
+      aria-label={`Open ${label}`}
+    >
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/20 bg-primary/10 text-primary">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <strong className="block text-title-md text-on-surface">{label}</strong>
+        <span className="mt-1 block text-body-md text-on-surface-variant">{description}</span>
+      </span>
+      <ArrowRight className="mt-1 shrink-0 text-secondary" size={16} aria-hidden="true" />
     </button>
   );
 }
@@ -165,12 +173,6 @@ type SharedProps = {
 type OverviewProps = SharedProps & {
   documents: Document[];
   documentsLoading: boolean;
-};
-
-type PlannedProps = SharedProps & {
-  activeRoute: RouteId;
-  subtitle: string;
-  title: string;
 };
 
 type OverviewActionProps = {

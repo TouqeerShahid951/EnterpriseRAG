@@ -1,9 +1,8 @@
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import Field
 
-from ..shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
 from .common import ContractModel
 
 
@@ -31,17 +30,6 @@ UploadJobStage = Literal[
 ]
 UploadJobStepState = Literal["pending", "active", "complete", "failed", "needs_review", "cancelled"]
 UploadJobProgressUnit = Literal["pages", "chunks", "vectors", "files", "metadata", "images"]
-
-
-class UploadMetadata(ContractModel):
-    group_path: str = Field(..., min_length=1)
-    shared_group_paths: list[str] = Field(default_factory=list)
-    clearance_level: ClearanceLevel = DEFAULT_CLEARANCE_LEVEL
-    effective_date: date | None = None
-    expiry_date: date | None = None
-    doc_type: DocType | None = Field(default=None, max_length=80)
-    supersedes: list[str] = Field(default_factory=list)
-    description: str | None = Field(default=None, max_length=2000)
 
 
 class UploadResponse(ContractModel):

@@ -95,10 +95,6 @@ class RedisRefreshSessionStore:
         return f"{self._prefix}:{_digest(refresh_token)}"
 
 
-def refresh_ttl_seconds() -> int:
-    return int(timedelta(days=settings.jwt_refresh_token_expire_days).total_seconds())
-
-
 def auth_idle_ttl_seconds() -> int:
     return int(timedelta(minutes=settings.auth_idle_timeout_minutes).total_seconds())
 

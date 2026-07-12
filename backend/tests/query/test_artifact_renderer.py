@@ -17,7 +17,7 @@ from rag.query.artifact_models import (
     SemanticSection,
     SupportedClaim,
 )
-from rag.query.artifact_renderer import render_artifact
+from rag.query.artifact_renderer import _artifact_bundle, render_artifact
 
 
 def test_query_pptx_uses_shared_adaptive_layout_renderer() -> None:
@@ -71,6 +71,42 @@ def test_query_renderer_keeps_legacy_response_adapter_on_shared_renderer() -> No
 
     assert "EVIDENCE BRIEF" in _presentation_text(presentation)
     assert "Legacy Evidence Report" in _presentation_text(presentation)
+
+
+def test_query_renderer_preserves_claim_level_evidence_ids() -> None:
+    base = _timeline_content()
+    content = ArtifactContent(
+        title=base.title,
+        purpose=base.purpose,
+        sections=(
+            SemanticSection(
+                heading="Findings",
+                paragraphs=("First finding.", "Second finding."),
+                claim_ids=("claim-1", "claim-2"),
+            ),
+        ),
+        claims=(
+            SupportedClaim(claim_id="claim-1", text="First finding.", evidence_ids=("E1",)),
+            SupportedClaim(claim_id="claim-2", text="Second finding.", evidence_ids=("E2",)),
+        ),
+        citations=(
+            base.citations[0],
+            ArtifactCitation(
+                evidence_id="E2",
+                doc_id="doc-2",
+                doc_title="Second report.pdf",
+                chunk_id="chunk-2",
+                page_start=2,
+                page_end=2,
+            ),
+        ),
+        coverage=base.coverage,
+    )
+
+    bundle = _artifact_bundle(content)
+
+    assert bundle.content.sections[0].blocks[0].evidence_ids == ["E1"]
+    assert bundle.content.sections[0].blocks[1].evidence_ids == ["E2"]
 
 
 def _timeline_content() -> ArtifactContent:

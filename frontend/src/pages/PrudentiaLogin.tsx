@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 
 import { authApi } from "../api/contracts";
 import { PrudentiaWordmark } from "../components/brand/PrudentiaBrand";
@@ -8,8 +9,9 @@ import type { User as AuthUser } from "../types/api";
 import { errorMessage } from "../utils/format";
 
 export function PrudentiaLogin({ onAuthChanged, sessionExpired = false }: Props) {
-  const [email, setEmail] = useState("admin@prudentia.ai");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const loginMutation = useMutation({
     mutationFn: () => authApi.login({ email: email.trim(), password }),
     onSuccess: (response) => onAuthChanged(response.user),
@@ -26,9 +28,9 @@ export function PrudentiaLogin({ onAuthChanged, sessionExpired = false }: Props)
         <section className="p-6 sm:p-8">
           <div className="mb-8">
             <PrudentiaWordmark className="Prudentia-login-wordmark" />
-            <p className="sv-eyebrow">Enterprise RAG Workspace</p>
-            <h2 className="mt-2 text-headline-md text-on-surface">Secure Login</h2>
-            <p className="mt-2 text-body-md text-on-surface-variant">Enter your enterprise credentials to open the Prudentia AI workspace.</p>
+            <p className="sv-eyebrow">Secure enterprise workspace</p>
+            <h1 className="mt-2 text-headline-md text-on-surface">Sign in to Prudentia</h1>
+            <p className="mt-2 text-body-md text-on-surface-variant">Use your organization credentials to continue.</p>
           </div>
           {sessionExpired ? (
             <div className="mb-4">
@@ -44,15 +46,33 @@ export function PrudentiaLogin({ onAuthChanged, sessionExpired = false }: Props)
             </label>
             <label className="sv-field">
               <span className="sv-label">Password</span>
-              <input autoComplete="current-password" type="password" required value={password} onChange={(event) => setPassword(event.target.value)} className="sv-input text-code-sm" />
+              <span className="sv-password-field">
+                <input
+                  autoComplete="current-password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="sv-input text-code-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                >
+                  {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
+                </button>
+              </span>
             </label>
-            <button type="submit" disabled={loginMutation.isPending || !email.trim() || !password} className="sv-action-primary w-full">
-              {loginMutation.isPending ? "Authenticating" : "Authenticate Session"}
+            <button type="submit" disabled={loginMutation.isPending || !email.trim() || !password} className="sv-action-primary w-full" aria-busy={loginMutation.isPending}>
+              {loginMutation.isPending ? "Signing in" : "Sign in"}
             </button>
           </form>
           {loginMutation.isError ? <InlineMessage tone="error">{errorMessage(loginMutation.error, "Sign in failed.")}</InlineMessage> : null}
-          <div className="mt-8 border-t border-surface-border pt-4">
-            <p className="text-[12px] font-semibold text-secondary">Secured by Enterprise JWT and CSRF-aware API calls.</p>
+          <div className="Prudentia-login-assurance mt-8 border-t border-surface-border pt-4">
+            <ShieldCheck size={16} aria-hidden="true" />
+            <p>Access follows your assigned role and Knowledge Spaces.</p>
           </div>
         </section>
       </main>

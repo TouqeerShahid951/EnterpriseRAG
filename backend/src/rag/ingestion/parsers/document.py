@@ -144,7 +144,6 @@ def parse_document(
     pdf_image_analysis_max_images: int | None = None,
     pdf_image_analysis_max_full_page_fallbacks: int | None = DEFAULT_PDF_IMAGE_MAX_FULL_PAGE_FALLBACKS,
     pdf_image_review_threshold: int | None = None,
-    pdf_image_review_approved_keys: set[str] | None = None,
     scanned_visual_region_enabled: bool = True,
     scanned_visual_min_area_ratio: float = 0.03,
     scanned_visual_max_regions_per_page: int = -1,
@@ -225,9 +224,7 @@ def parse_document(
             scanned_visual_region_pages=scanned_visual_regions.visual_region_pages,
             scanned_visual_fallback_pages=scanned_visual_regions.whole_page_fallback_pages,
         )
-        if pdf_image_review_approved_keys is not None:
-            image_selection = _filter_pdf_image_selection_for_review(image_selection, pdf_image_review_approved_keys)
-        elif (
+        if (
             pdf_image_review_threshold is not None
             and pdf_image_review_threshold > 0
             and len(image_selection.sources) > pdf_image_review_threshold
@@ -1239,20 +1236,6 @@ def _select_pdf_image_sources_for_analysis(
         skipped_duplicate_count=skipped_duplicate_count,
         skipped_full_page_fallback_count=skipped_full_page_fallback_count,
         skipped_limit_count=len(selected) - len(limited_sources),
-    )
-
-
-def _filter_pdf_image_selection_for_review(selection: PdfImageSelection, approved_keys: set[str]) -> PdfImageSelection:
-    approved_sources = [source for source in selection.sources if image_source_candidate_key(source) in approved_keys]
-    approved_scores = {
-        image_source_candidate_key(source): selection.source_scores.get(image_source_candidate_key(source), 0)
-        for source in approved_sources
-    }
-    return replace(
-        selection,
-        sources=approved_sources,
-        source_scores=approved_scores,
-        skipped_review_count=selection.skipped_review_count + len(selection.sources) - len(approved_sources),
     )
 
 

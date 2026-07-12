@@ -1,6 +1,6 @@
 import type { Group } from "../types/api";
 
-export const GROUP_PATH_PATTERN = /^\/[a-z0-9][a-z0-9-]*$/;
+const GROUP_PATH_PATTERN = /^\/[a-z0-9][a-z0-9-]*$/;
 
 export type GroupOption = {
   depth: number;
@@ -50,7 +50,7 @@ export function groupPathIssue(path: string, pathExists: boolean): string | null
   return null;
 }
 
-export function displayNameFromPath(path: string): string {
+function displayNameFromPath(path: string): string {
   const segment = path.split("/").filter(Boolean).at(-1) ?? path;
   return segment
     .split("-")

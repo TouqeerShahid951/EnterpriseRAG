@@ -1,8 +1,8 @@
 import type { GraphRAGStatus, JobStatus, ParserProvenance, UploadJobStageProgress, UploadJobState, UploadJobStep } from "../types/api";
 import type { UploadJobView } from "../types/chat";
 
-export const uploadTerminalStatuses: ReadonlySet<UploadJobState> = new Set(["complete", "failed", "human_review", "cancelled"]);
-export const uploadCancellableStatuses: ReadonlySet<UploadJobState> = new Set(["scheduled", "queued", "processing", "human_review"]);
+const uploadTerminalStatuses: ReadonlySet<UploadJobState> = new Set(["complete", "failed", "human_review", "cancelled"]);
+const uploadCancellableStatuses: ReadonlySet<UploadJobState> = new Set(["scheduled", "queued", "processing", "human_review"]);
 
 export const uploadFallbackSteps: UploadJobStep[] = [
   { id: "scheduled", label: "Scheduled", detail: "Waiting for the scheduled ingestion window.", state: "active" },
@@ -90,7 +90,7 @@ function positiveInt(value: number | null | undefined, fallback: number): number
   return Number.isFinite(value) && Number(value) > 0 ? Math.floor(Number(value)) : fallback;
 }
 
-export type GraphEnrichmentChipState = "queued" | "running" | "unavailable";
+type GraphEnrichmentChipState = "queued" | "running" | "unavailable";
 
 export interface GraphEnrichmentChip {
   state: GraphEnrichmentChipState;

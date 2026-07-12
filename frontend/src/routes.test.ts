@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { accountTypeLabel, accountTypeOptions, canAssignAccountType, canUploadToSpace, canWriteDocument } from "./authz";
-import { canAccessRoute, defaultRouteForUser, navigationGroupForRoute, routeFromLocation, visibleNavigation, type RouteId } from "./routes";
+import { authenticatedRouteForUser, canAccessRoute, defaultRouteForUser, navigationGroupForRoute, routeFromLocation, visibleNavigation, type RouteId } from "./routes";
 import type { AccountType, ClearanceLevel, User } from "./types/api";
 
 describe("account type route access", () => {
@@ -97,6 +97,19 @@ describe("account type route access", () => {
     expect(routeFromLocation("/knowledge-spaces", "?tab=jobs")).toBe("ingestion-jobs");
     expect(routeFromLocation("/knowledge-spaces", "?space=%2Ffinance")).toBe("knowledge-spaces");
     expect(routeFromLocation("/documents/overview", "")).toBe("document-overview");
+  });
+
+  it("resolves authenticated locations to an accessible canonical route", () => {
+    expect(authenticatedRouteForUser(makeUser("member"), "advanced-search")).toBe("chat");
+    expect(authenticatedRouteForUser(makeUser("system_admin"), "workspace-settings")).toBe("chat");
+    expect(authenticatedRouteForUser(makeUser("auditor"), "documents")).toBe("documents");
+    expect(authenticatedRouteForUser(makeUser("user_manager"), null)).toBe("access");
+  });
+
+  it("keeps password-change enforcement ahead of requested routes", () => {
+    const user = { ...makeUser("member"), must_change_password: true };
+
+    expect(authenticatedRouteForUser(user, "chat")).toBe("account");
   });
 
   it("filters nested navigation by role and resolves active groups", () => {

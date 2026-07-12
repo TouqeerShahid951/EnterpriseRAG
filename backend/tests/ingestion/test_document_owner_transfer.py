@@ -181,7 +181,6 @@ def _transfer(
             _csrf_request(),
             user=user,
             repo=repo,
-            job_repo=repo,
             identity_repo=identity_repo,
             qdrant=qdrant,  # type: ignore[arg-type]
             graphrag=FakeGraphRAGDeletionService(),  # type: ignore[arg-type]

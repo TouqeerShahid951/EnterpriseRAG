@@ -22,6 +22,7 @@ import { withSourceDocumentTitle } from "../utils/sourceDocument";
 
 const CHAT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 const CHAT_HISTORY_COLLAPSED_STORAGE_KEY = "Prudentia-chat-history-collapsed";
+const CHAT_BOTTOM_FOLLOW_THRESHOLD_PX = 96;
 
 export function PrudentiaChatPage(props: Props) {
   const activeSpaceDocuments = useMemo(
@@ -37,18 +38,87 @@ export function PrudentiaChatPage(props: Props) {
   const sourceCount = props.latestResponse?.sources.length ?? 0;
   const sourceNumber = selectedSourceNumber(props.latestResponse?.sources ?? [], props.selectedSource);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const shouldFollowStreamRef = useRef(true);
+  const streamIdentityRef = useRef<string | null>(null);
+  const mobileHistoryRef = useRef<HTMLDivElement | null>(null);
   const streamPositionKey = useMemo(() => chatStreamPositionKey(props.chatTurns), [props.chatTurns]);
+  const lastTurnId = props.chatTurns.at(-1)?.id ?? "empty";
+  const streamIdentity = `${props.activeSessionId ?? "new"}:${lastTurnId}`;
   const [historyCollapsed, setHistoryCollapsed] = useState(() => readStoredBoolean(CHAT_HISTORY_COLLAPSED_STORAGE_KEY, false));
+  const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
 
   useEffect(() => {
-    const scrollNode = scrollRef.current;
-    if (!scrollNode) return;
-    scrollNode.scrollTo({ top: scrollNode.scrollHeight, behavior: "smooth" });
-  }, [streamPositionKey, source?.chunk_id]);
+    const streamChanged = streamIdentityRef.current !== streamIdentity;
+    streamIdentityRef.current = streamIdentity;
+    if (streamChanged) shouldFollowStreamRef.current = true;
+    if (!shouldFollowStreamRef.current || scrollFrameRef.current !== null) return;
+
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      const scrollNode = scrollRef.current;
+      if (!scrollNode || !shouldFollowStreamRef.current) return;
+      scrollNode.scrollTo({ top: scrollNode.scrollHeight, behavior: "auto" });
+    });
+  }, [source?.chunk_id, streamIdentity, streamPositionKey]);
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     writeStoredBoolean(CHAT_HISTORY_COLLAPSED_STORAGE_KEY, historyCollapsed);
   }, [historyCollapsed]);
+
+  useEffect(() => {
+    document.body.classList.toggle("rag-mobile-history-open", mobileHistoryOpen);
+    if (mobileHistoryOpen) {
+      window.requestAnimationFrame(() => {
+        mobileHistoryRef.current?.querySelector<HTMLElement>("button:not([disabled])")?.focus();
+      });
+    }
+    return () => document.body.classList.remove("rag-mobile-history-open");
+  }, [mobileHistoryOpen]);
+
+  function closeMobileHistory() {
+    setMobileHistoryOpen(false);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>("[data-chat-history-trigger]")?.focus();
+    });
+  }
+
+  function handleChatScroll() {
+    const scrollNode = scrollRef.current;
+    if (!scrollNode) return;
+    shouldFollowStreamRef.current = isNearChatBottom(scrollNode);
+  }
+
+  function handleMobileHistoryKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMobileHistory();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(
+      mobileHistoryRef.current?.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), a[href], select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])",
+      ) ?? [],
+    ).filter((element) => element.offsetParent !== null);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
 
   const chatBodyClassName = [
     "rag-chat-body",
@@ -59,7 +129,7 @@ export function PrudentiaChatPage(props: Props) {
   return (
     <PrudentiaWorkspace activeRoute="chat" onLogout={props.onLogout} onNavigate={props.onNavigate} user={props.user}>
       <main className="rag-chat-page" id="main-content">
-        <ChatWorkspaceHeader />
+        <ChatWorkspaceHeader onOpenHistory={() => setMobileHistoryOpen(true)} savedSessionsTotal={props.savedSessionsTotal} />
         <div className={chatBodyClassName}>
           <CorpusRail
             activeSessionId={props.activeSessionId}
@@ -80,8 +150,8 @@ export function PrudentiaChatPage(props: Props) {
             savedSessionsTotal={props.savedSessionsTotal}
           />
           <section className="rag-chat-thread" aria-label="Document chat">
-            <div className="rag-chat-scroll" ref={scrollRef}>
-              <div className="rag-chat-inner">
+            <div className="rag-chat-scroll" onScroll={handleChatScroll} ref={scrollRef}>
+              <div className={props.chatTurns.length === 0 ? "rag-chat-inner rag-chat-inner-empty" : "rag-chat-inner"}>
                 {props.chatTurns.length === 0 ? (
                   <ChatEmptyState hasCorpus={hasCorpus} />
                 ) : (
@@ -103,6 +173,45 @@ export function PrudentiaChatPage(props: Props) {
           </section>
           {source ? <EvidenceInspector onClose={() => props.onSelectSource(null)} source={source} sourceCount={sourceCount} sourceNumber={sourceNumber} /> : null}
         </div>
+        {mobileHistoryOpen ? (
+          <div className="rag-mobile-history-layer">
+            <button type="button" className="rag-mobile-history-backdrop" onClick={closeMobileHistory} aria-label="Close chat history" />
+            <div
+              ref={mobileHistoryRef}
+              className="rag-mobile-history-panel"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Chat history"
+              onKeyDown={handleMobileHistoryKeyDown}
+            >
+              <CorpusRail
+                activeSessionId={props.activeSessionId}
+                collapsed={false}
+                generatingSessionId={props.generatingSessionId}
+                onCollapsedChange={closeMobileHistory}
+                onDeleteSession={props.deleteChatSession}
+                onLoadSession={(sessionId) => {
+                  props.loadChatSession(sessionId);
+                  closeMobileHistory();
+                }}
+                onLoadMoreSessions={props.loadMoreSavedSessions}
+                onReset={() => {
+                  props.onReset();
+                  closeMobileHistory();
+                }}
+                loading={props.savedSessionsLoading}
+                loadingSessionId={props.loadingSessionId}
+                errorMessage={props.savedSessionsError}
+                loadErrorMessage={props.savedSessionLoadError}
+                mobile
+                savedSessions={props.savedSessions}
+                savedSessionsFetchingMore={props.savedSessionsFetchingMore}
+                savedSessionsHasMore={props.savedSessionsHasMore}
+                savedSessionsTotal={props.savedSessionsTotal}
+              />
+            </div>
+          </div>
+        ) : null}
       </main>
     </PrudentiaWorkspace>
   );
@@ -119,6 +228,11 @@ function chatStreamPositionKey(chatTurns: ChatTurn[]): string {
     lastTurn.streamText?.length ?? 0,
     lastTurn.response?.sources.length ?? 0,
   ].join(":");
+}
+
+function isNearChatBottom(scrollNode: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">): boolean {
+  const distanceFromBottom = scrollNode.scrollHeight - scrollNode.scrollTop - scrollNode.clientHeight;
+  return distanceFromBottom <= CHAT_BOTTOM_FOLLOW_THRESHOLD_PX;
 }
 
 function selectedSourceNumber(sources: SourceAnchor[], selectedSource: SourceAnchor | null): number | null {
@@ -328,7 +442,7 @@ function ChatComposer({
           </div>
         ) : null}
         <div className="rag-composer-box relative">
-          <textarea ref={inputRef} value={question} onChange={(event) => onQuestionChange(event.target.value)} onKeyDown={handleQuestionKeyDown} className={`rag-composer-input ${canUploadActiveSpace ? "rag-composer-input-with-upload" : "rag-composer-input-with-send"}`} placeholder={composerPlaceholder(sourceMode, hasCorpus, querySources.length)} rows={1} />
+          <textarea ref={inputRef} value={question} onChange={(event) => onQuestionChange(event.target.value)} onKeyDown={handleQuestionKeyDown} className={`rag-composer-input ${canUploadActiveSpace ? "rag-composer-input-with-upload" : "rag-composer-input-with-send"}`} aria-label="Ask a question" placeholder={composerPlaceholder(sourceMode, hasCorpus, querySources.length)} rows={1} />
           {canUploadActiveSpace ? (
             <>
               <input ref={fileInputRef} className="hidden" type="file" accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png,application/json,.json" onChange={handleFileChange} tabIndex={-1} aria-hidden="true" />

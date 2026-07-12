@@ -1,5 +1,8 @@
 .DS_Store
 ._*
+.~lock.*
+~$*
+.playwright-cli/
 .env
 .env.*
 !.env.example
@@ -25,6 +28,7 @@ frontend/vite.config.js
 frontend/vite.config.d.ts
 out/
 output/
+outputs/
 input.json
 program.py
 bootstrap.py

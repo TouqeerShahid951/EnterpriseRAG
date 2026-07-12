@@ -151,7 +151,7 @@ export interface CreateLocalFolderScheduleRequest {
   recurrence?: RecurrenceWindow | null;
 }
 
-export interface LocalFolderDirectory {
+interface LocalFolderDirectory {
   name: string;
   path: string;
   has_children: boolean;
@@ -431,7 +431,7 @@ export interface ChatSessionListRequest {
   offset?: number;
 }
 
-export const apiClient = new ApiClient();
+const apiClient = new ApiClient();
 
 export const authApi = {
   login: async (request: LoginRequest) => {

@@ -1,4 +1,4 @@
-import type { SourceAnchor, SourceRegion } from "../types/api";
+import type { SourceAnchor } from "../types/api";
 
 export type SourceDocumentKind = "docx" | "image" | "json" | "pdf" | "unsupported";
 
@@ -100,7 +100,7 @@ export function stepSourceZoom(currentScale: number, direction: "in" | "out"): n
   return SOURCE_VIEWER_ZOOM_STEPS[0];
 }
 
-export function clampSourceZoom(scale: number): number {
+function clampSourceZoom(scale: number): number {
   const maxScale = SOURCE_VIEWER_ZOOM_STEPS[SOURCE_VIEWER_ZOOM_STEPS.length - 1];
   const minScale = SOURCE_VIEWER_ZOOM_STEPS[0];
   return Math.min(maxScale, Math.max(minScale, scale));
@@ -148,10 +148,6 @@ export function sourceDocumentKind(contentType: string, title: string): SourceDo
 
 export function citedSourcePage(source: SourceAnchor): number {
   return source.page_start ?? source.page ?? source.source_regions?.find((region) => region.page !== null)?.page ?? 1;
-}
-
-export function sourceRegionsForPage(source: SourceAnchor, page: number): SourceRegion[] {
-  return (source.source_regions ?? []).filter((region) => region.page === page && region.bbox !== null);
 }
 
 export function sourceTextCandidates(source: SourceAnchor): string[] {

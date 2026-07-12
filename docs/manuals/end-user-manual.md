@@ -35,7 +35,8 @@ Can do:
 
 - Manage all users, including other Platform Admins.
 - Manage all Knowledge Spaces and visible documents.
-- Configure model providers, runtime roles, ingestion controls, and vLLM limits.
+- Configure model providers, runtime roles, **Ingestion Controls**, and vLLM
+  limits.
 - Use RAG Evaluation, System Audit, Review Queue, database connectors, uploads,
   document lifecycle actions, and Query Intelligence.
 

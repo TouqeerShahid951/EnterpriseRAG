@@ -12,7 +12,6 @@ from .artifact_intent import ArtifactRequest
 from .artifact_models import (
     ArtifactCitation,
     ArtifactContent,
-    ArtifactFieldDefinition,
     ArtifactOperation,
     ArtifactPlan,
     ArtifactTask,
@@ -105,7 +104,7 @@ def assess_artifact_evidence(
 ) -> ArtifactEvidenceAssessment:
     units = tuple(evidence_unit_from_hit(hit) for hit in hits)
     scoped = bool(document_ids)
-    relevant = tuple(unit for unit in units if scoped or _is_relevant(unit, plan))
+    relevant = tuple(unit for unit in units if _is_relevant(unit, plan))
     if plan.primary_operation in {"enumerate", "extract"}:
         relevant = tuple(
             unit

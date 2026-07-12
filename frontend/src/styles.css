@@ -7,3 +7,6 @@
 /* Keep review queue styles in the main bundle for Vite's CSS import graph. */
 @import "./styles/review-queue.css";
 @import "./styles/rag-evaluations.css";
+@import "./styles/product-surface.css";
+@import "./styles/adaptive-desktop.css";
+@import "./styles/interface-polish.css";

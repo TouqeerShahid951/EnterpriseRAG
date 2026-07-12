@@ -11,17 +11,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from ...auth.abac import normalize_group_path
 from ...auth.dependencies import require_admin_user, require_csrf, require_current_user
-from ...auth.document_access import can_manage_document_ingestion, can_read_document
+from ...auth.document_access import can_manage_document_ingestion
 from ...auth.permissions import can_read_document_metadata, is_global_admin
 from ...core.config import settings
 from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient as RetrievalQdrantClient
 from ...shared.contracts.clearance import ClearanceLevel, clearance_levels_at_or_below
 from ...repositories.documents import DocumentRepository, get_document_repository
-from ...repositories.identity import UserRecord
-from ...repositories.ingest_job_models import IngestJobRepository
-from ...repositories.ingest_job_postgres import PostgresIngestJobRepository, job_from_row
+from ...repositories.ingest_job_models import (
+    IngestJobAccess,
+    IngestJobFilters,
+    IngestJobRepository,
+    IngestJobSearchRepository,
+    IngestJobView,
+)
 from ...repositories.ingest_jobs import get_ingest_job_repository
+from ...repositories.identity import UserRecord
 from ...repositories.ingest_config import IngestConfigRepository, effective_ingest_config, get_ingest_config_repository
 from ...schemas.common import ErrorResponse
 from ...schemas.ingest_jobs import (
@@ -54,7 +59,7 @@ from ...ingestion.worker_control import (
     get_graphrag_worker_control,
     get_ingest_worker_control,
 )
-from ...services.upload_status import build_job_status_response, stage_for_job_status
+from ...services.upload_status import build_job_status_response
 
 
 router = APIRouter(prefix="/ingest-jobs", tags=["ingest-jobs"])
@@ -78,13 +83,12 @@ async def list_ingest_jobs(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     user: UserRecord = Depends(require_current_user),
-    repo: DocumentRepository = Depends(get_document_repository),
-    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
+    job_repo: IngestJobSearchRepository = Depends(get_ingest_job_repository),
 ) -> IngestJobListResponse:
     status_filter = _job_status(job_status)
     origin_filter = _job_origin(origin)
     normalized_group = normalize_group_path(group_path) if group_path else None
-    fast_response = _postgres_visible_job_response(
+    return _repository_visible_job_response(
         user,
         job_repo,
         status_filter=status_filter,
@@ -97,21 +101,6 @@ async def list_ingest_jobs(
         limit=limit,
         offset=offset,
     )
-    if fast_response is not None:
-        return fast_response
-    items = _visible_job_items(
-        user,
-        repo,
-        job_repo,
-        status_filter=status_filter,
-        origin_filter=origin_filter,
-        group_path=normalized_group,
-        search=search,
-        created_from=created_from,
-        created_to=created_to,
-        uploaded_by_user_id=user.id if uploaded_by_me else None,
-    )
-    return IngestJobListResponse(items=items[offset:offset + limit], total=len(items), limit=limit, offset=offset)
 
 
 @router.get("/summary", response_model=IngestJobSummaryResponse, summary="Summarize visible ingestion jobs")
@@ -120,36 +109,15 @@ async def summarize_ingest_jobs(
     created_from: datetime | None = Query(default=None),
     created_to: datetime | None = Query(default=None),
     user: UserRecord = Depends(require_current_user),
-    repo: DocumentRepository = Depends(get_document_repository),
-    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
+    job_repo: IngestJobSearchRepository = Depends(get_ingest_job_repository),
 ) -> IngestJobSummaryResponse:
     normalized_group = normalize_group_path(group_path) if group_path else None
-    fast_summary = _postgres_ingest_job_summary(
+    return _repository_ingest_job_summary(
         user,
         job_repo,
         group_path=normalized_group,
         created_from=created_from,
         created_to=created_to,
-    )
-    if fast_summary is not None:
-        return fast_summary
-
-    items = _visible_job_items(
-        user,
-        repo,
-        job_repo,
-        group_path=normalized_group,
-        created_from=created_from,
-        created_to=created_to,
-    )
-    status_counts = _count_by(items, "status")
-    return IngestJobSummaryResponse(
-        total=len(items),
-        active=sum(status_counts.get(value, 0) for value in ACTIVE_JOB_STATUSES),
-        needs_attention=_latest_attention_count(items),
-        status_counts=status_counts,
-        stage_counts=_count_by(items, "stage"),
-        origin_counts=_count_by(items, "origin"),
     )
 
 
@@ -442,77 +410,42 @@ async def requeue_stale_job(
     )
 
 
-def _postgres_ingest_job_summary(
+def _repository_ingest_job_summary(
     user: UserRecord,
-    repo: IngestJobRepository,
+    job_repo: IngestJobSearchRepository,
     *,
     group_path: str | None,
     created_from: datetime | None,
     created_to: datetime | None,
-) -> IngestJobSummaryResponse | None:
-    if not isinstance(repo, PostgresIngestJobRepository):
-        return None
+) -> IngestJobSummaryResponse:
     if not can_read_document_metadata(user):
         return IngestJobSummaryResponse()
-    filter_result = _postgres_ingest_job_filters(
-        user,
-        status_filter=None,
-        origin_filter=None,
-        group_path=group_path,
-        search=None,
-        created_from=created_from,
-        created_to=created_to,
+    page = job_repo.search_visible_ingest_jobs(
+        access=_ingest_job_access(user),
+        filters=IngestJobFilters(
+            group_path=group_path,
+            created_from=created_from,
+            created_to=created_to,
+        ),
+        limit=None,
+        offset=0,
     )
-    if filter_result is None:
-        return IngestJobSummaryResponse()
-    where_sql, params = filter_result
-
-    rows = repo._execute_all(
-        f"""
-        SELECT job.id, job.doc_id, job.status, job.progress_pct, job.stage_progress, job.created_at, job.updated_at, COALESCE(job.origin, 'unknown') AS origin, document.clearance_level
-        FROM ingest_jobs job
-        JOIN documents document ON document.id = job.doc_id
-        WHERE {where_sql}
-        """,
-        tuple(params),
-    )
-    status_counts: dict[str, int] = {}
-    stage_counts: dict[str, int] = {}
-    origin_counts: dict[str, int] = {}
-    latest_by_doc: dict[str, tuple[datetime | None, str, str]] = {}
-    total = 0
-    for row in rows:
-        status_value = str(row["status"])
-        origin_value = str(row["origin"] if row["origin"] in JOB_ORIGINS else "unknown")
-        stage_progress = row.get("stage_progress")
-        stage_value = stage_for_job_status(
-            status_value,
-            int(row["progress_pct"]),
-            stage_progress=stage_progress if isinstance(stage_progress, dict) else None,
-        )
-        total += 1
-        status_counts[status_value] = status_counts.get(status_value, 0) + 1
-        stage_counts[stage_value] = stage_counts.get(stage_value, 0) + 1
-        origin_counts[origin_value] = origin_counts.get(origin_value, 0) + 1
-        doc_id = str(row["doc_id"])
-        candidate = (_latest_timestamp(row.get("created_at"), row.get("updated_at")), str(row["id"]), status_value)
-        current = latest_by_doc.get(doc_id)
-        if current is None or _latest_row_key(candidate) > _latest_row_key(current):
-            latest_by_doc[doc_id] = candidate
+    items = [_ingest_job_item_from_view(view) for view in page.items]
+    status_counts = _count_by(items, "status")
 
     return IngestJobSummaryResponse(
-        total=total,
+        total=page.total,
         active=sum(status_counts.get(value, 0) for value in ACTIVE_JOB_STATUSES),
-        needs_attention=sum(1 for _, _, status_value in latest_by_doc.values() if status_value in ATTENTION_JOB_STATUSES),
+        needs_attention=_latest_attention_count(items),
         status_counts=status_counts,
-        stage_counts=stage_counts,
-        origin_counts=origin_counts,
+        stage_counts=_count_by(items, "stage"),
+        origin_counts=_count_by(items, "origin"),
     )
 
 
-def _postgres_visible_job_response(
+def _repository_visible_job_response(
     user: UserRecord,
-    repo: IngestJobRepository,
+    job_repo: IngestJobSearchRepository,
     *,
     status_filter: str | None = None,
     origin_filter: IngestJobOrigin | None = None,
@@ -523,200 +456,55 @@ def _postgres_visible_job_response(
     limit: int,
     offset: int,
     uploaded_by_user_id: str | None = None,
-) -> IngestJobListResponse | None:
-    if not isinstance(repo, PostgresIngestJobRepository):
-        return None
+) -> IngestJobListResponse:
     if not can_read_document_metadata(user):
         return IngestJobListResponse(items=[], total=0, limit=limit, offset=offset)
-    filter_result = _postgres_ingest_job_filters(
-        user,
-        status_filter=status_filter,
-        origin_filter=origin_filter,
-        group_path=group_path,
-        search=search,
-        created_from=created_from,
-        created_to=created_to,
-        uploaded_by_user_id=uploaded_by_user_id,
-    )
-    if filter_result is None:
-        return IngestJobListResponse(items=[], total=0, limit=limit, offset=offset)
-    where_sql, params = filter_result
-    total_row = repo._execute_one(
-        f"""
-        SELECT COUNT(*) AS count
-        FROM ingest_jobs job
-        JOIN documents document ON document.id = job.doc_id
-        WHERE {where_sql}
-        """,
-        tuple(params),
-    )
-    rows = repo._execute_all(
-        f"""
-        SELECT
-            job.id::text AS id,
-            job.doc_id::text AS doc_id,
-            job.retry_of_job_id::text AS retry_of_job_id,
-            COALESCE(job.origin, 'unknown') AS origin,
-            job.status,
-            job.progress_pct,
-            job.stage_progress,
-            job.attempt_count,
-            job.last_heartbeat_at,
-            job.warnings,
-            job.parser_provenance,
-            job.error_code,
-            job.error_message_safe,
-            job.created_at,
-            job.updated_at,
-            job.completed_at,
-            COALESCE(document.title, document.id::text) AS document_title,
-            document.group_path,
-            document.clearance_level,
-            document.uploaded_by
-        FROM ingest_jobs job
-        JOIN documents document ON document.id = job.doc_id
-        WHERE {where_sql}
-        ORDER BY job.created_at DESC, job.id DESC
-        LIMIT %s OFFSET %s
-        """,
-        (*params, limit, offset),
+    page = job_repo.search_visible_ingest_jobs(
+        access=_ingest_job_access(user),
+        filters=IngestJobFilters(
+            status=status_filter,
+            origin=origin_filter,
+            group_path=group_path,
+            search=search,
+            created_from=created_from,
+            created_to=created_to,
+            uploaded_by_user_id=uploaded_by_user_id,
+        ),
+        limit=limit,
+        offset=offset,
     )
     return IngestJobListResponse(
-        items=[_ingest_job_item_from_postgres_row(row) for row in rows],
-        total=int(total_row["count"]),
+        items=[_ingest_job_item_from_view(view) for view in page.items],
+        total=page.total,
         limit=limit,
         offset=offset,
     )
 
 
-def _postgres_ingest_job_filters(
-    user: UserRecord,
-    *,
-    status_filter: str | None,
-    origin_filter: IngestJobOrigin | None,
-    group_path: str | None,
-    search: str | None,
-    created_from: datetime | None,
-    created_to: datetime | None,
-    uploaded_by_user_id: str | None = None,
-) -> tuple[str, list[object]] | None:
-    clauses = ["document.clearance_level = ANY(%s::text[])"]
-    params: list[object] = [list(clearance_levels_at_or_below(user.clearance_level))]
-    if not is_global_admin(user):
-        visible_groups = sorted({normalize_group_path(path) for path in user.group_paths})
-        if not visible_groups:
-            return None
-        clauses.append(
-            """
-            (
-                document.group_path = ANY(%s::text[])
-                OR EXISTS (
-                    SELECT 1
-                    FROM document_shares share
-                    WHERE share.document_id = document.id
-                      AND share.group_path = ANY(%s::text[])
-                )
-            )
-            """
-        )
-        params.extend([visible_groups, visible_groups])
-    if status_filter:
-        clauses.append("job.status = %s")
-        params.append(status_filter)
-    if origin_filter:
-        clauses.append("job.origin = %s")
-        params.append(origin_filter)
-    if group_path:
-        clauses.append("document.group_path = %s")
-        params.append(group_path)
-    query = (search or "").strip().lower()
-    if query:
-        pattern = f"%{query}%"
-        clauses.append(
-            """
-            (
-                lower(job.id::text) LIKE %s
-                OR lower(job.doc_id::text) LIKE %s
-                OR lower(COALESCE(document.title, '')) LIKE %s
-                OR lower(document.group_path) LIKE %s
-            )
-            """
-        )
-        params.extend([pattern, pattern, pattern, pattern])
-    if created_from:
-        clauses.append("job.created_at >= %s")
-        params.append(created_from)
-    if created_to:
-        clauses.append("job.created_at <= %s")
-        params.append(created_to)
-    if uploaded_by_user_id:
-        clauses.append("document.uploaded_by = %s")
-        params.append(uploaded_by_user_id)
-    return " AND ".join(f"({clause})" for clause in clauses), params
+def _ingest_job_access(user: UserRecord) -> IngestJobAccess:
+    return IngestJobAccess(
+        clearance_levels=tuple(clearance_levels_at_or_below(user.clearance_level)),
+        group_paths=(
+            None
+            if is_global_admin(user)
+            else tuple(sorted({normalize_group_path(path) for path in user.group_paths}))
+        ),
+    )
 
 
-def _ingest_job_item_from_postgres_row(row: dict[str, object]) -> IngestJobItem:
-    job = job_from_row(row)
+def _ingest_job_item_from_view(view: IngestJobView) -> IngestJobItem:
+    job = view.job
     status_payload = build_job_status_response(job)
     return IngestJobItem(
         **status_payload.model_dump(),
         document_id=job.doc_id,
-        document_title=str(row.get("document_title") or job.doc_id),
+        document_title=view.document_title or job.doc_id,
         retry_of_job_id=job.retry_of_job_id,
-        group_path=str(row["group_path"]),
-        clearance_level=cast(ClearanceLevel, row["clearance_level"]),
-        uploaded_by=str(row["uploaded_by"]) if row.get("uploaded_by") else None,
+        group_path=view.group_path,
+        clearance_level=cast(ClearanceLevel, view.clearance_level),
+        uploaded_by=view.uploaded_by,
         origin=cast(IngestJobOrigin, job.origin if job.origin in JOB_ORIGINS else "unknown"),
     )
-
-
-def _visible_job_items(
-    user: UserRecord,
-    repo: DocumentRepository,
-    job_repo: IngestJobRepository,
-    *,
-    status_filter: str | None = None,
-    origin_filter: IngestJobOrigin | None = None,
-    group_path: str | None = None,
-    search: str | None = None,
-    created_from: datetime | None = None,
-    created_to: datetime | None = None,
-    uploaded_by_user_id: str | None = None,
-) -> list[IngestJobItem]:
-    query = (search or "").strip().lower()
-    items: list[IngestJobItem] = []
-    for job in job_repo.list_ingest_jobs():
-        document = repo.get_document(job.doc_id, include_deleted=True)
-        if document is None or not can_read_document(user, document):
-            continue
-        if uploaded_by_user_id and document.uploaded_by != uploaded_by_user_id:
-            continue
-        if status_filter and job.status != status_filter:
-            continue
-        if origin_filter and job.origin != origin_filter:
-            continue
-        if group_path and not _matches_group(document.group_path, group_path):
-            continue
-        if created_from and (job.created_at is None or job.created_at < created_from):
-            continue
-        if created_to and (job.created_at is None or job.created_at > created_to):
-            continue
-        if query and query not in " ".join((job.id, job.doc_id, document.title or "", document.group_path)).lower():
-            continue
-        status_payload = build_job_status_response(job)
-        items.append(
-            IngestJobItem(
-                **status_payload.model_dump(),
-                document_id=document.id,
-                document_title=document.title or document.id,
-                retry_of_job_id=job.retry_of_job_id,
-                group_path=document.group_path,
-                clearance_level=document.clearance_level,
-                uploaded_by=document.uploaded_by,
-                origin=cast(IngestJobOrigin, job.origin if job.origin in JOB_ORIGINS else "unknown"),
-            )
-        )
-    return items
 
 
 def _job_status(value: str | None) -> str | None:
@@ -741,11 +529,6 @@ def _job_origin(value: str | None) -> IngestJobOrigin | None:
     return cast(IngestJobOrigin, value)
 
 
-def _matches_group(candidate: str, group_path: str) -> bool:
-    normalized = normalize_group_path(candidate)
-    return normalized == group_path
-
-
 def _count_by(items: list[IngestJobItem], field: Literal["status", "stage", "origin"]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for item in items:
@@ -759,11 +542,6 @@ def _latest_attention_count(items: list[IngestJobItem]) -> int:
     for item in sorted(items, key=lambda value: (_latest_timestamp(value.created_at, value.updated_at), value.job_id), reverse=True):
         latest_by_doc.setdefault(item.document_id, item)
     return sum(1 for item in latest_by_doc.values() if item.status in ATTENTION_JOB_STATUSES)
-
-
-def _latest_row_key(value: tuple[datetime | None, str, str]) -> tuple[datetime, str]:
-    created_at, job_id, _ = value
-    return created_at or datetime.min.replace(tzinfo=timezone.utc), job_id
 
 
 def _latest_timestamp(*values: object) -> datetime | None:

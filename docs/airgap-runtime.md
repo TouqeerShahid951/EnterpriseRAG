@@ -7,7 +7,7 @@ skipping vLLM initially, see [Windows Airgapped Runtime Runbook](windows-airgap-
 
 ## Runtime Defaults
 
-The Compose stack sets these flags for API, workers, ingestion, artifact sandbox, and vLLM services:
+The Compose stack sets these flags for API, background workers, ingestion, and vLLM services:
 
 - `AIRGAP_RUNTIME_OFFLINE=1`
 - `HF_HUB_OFFLINE=1`
@@ -104,7 +104,9 @@ Keep the active backend/workspace RAG provider on `ollama` until those services 
 To apply offline env changes to already-running containers without rebuilding or pulling images:
 
 ```sh
-docker compose up -d --no-build --force-recreate --no-deps api artifact-sandbox artifact-worker evaluation-worker folder-scheduler ingest-maintenance ingestion-worker clamav
+docker compose up -d --no-build --force-recreate --no-deps api artifact-worker artifact-maintenance evaluation-worker folder-scheduler ingest-maintenance ingestion-worker clamav
 ```
+
+The artifact maintenance service enforces `ARTIFACT_RETENTION_DAYS` and reconciles old unreferenced artifact objects. When `UPLOAD_STORAGE_BACKEND=local`, `api`, `query-api`, `artifact-worker`, and `artifact-maintenance` share the Compose-managed `local-upload-data` volume at `UPLOAD_STORAGE_DIR`.
 
 This is not a hard network isolation boundary. For strict airgap enforcement, also block container egress at the host/network layer.

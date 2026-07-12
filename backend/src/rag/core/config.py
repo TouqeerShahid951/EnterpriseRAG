@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -11,7 +12,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
     app_name: str = "AgenticRAG Backend"
-    environment: str = "pilot"
     api_version: str = "0.0.0"
     public_api_prefix: str = "/api/v1"
     internal_api_prefix: str = "/internal"
@@ -35,7 +35,6 @@ class Settings(BaseSettings):
     deployment_controller_url: str = "http://deployment-controller:8080"
     deployment_controller_timeout_seconds: float = Field(default=600.0, gt=0, le=1800)
     jwt_secret_key: str = "replace-with-local-jwt-secret"
-    jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 7
     auth_idle_timeout_minutes: int = 30
@@ -84,7 +83,6 @@ class Settings(BaseSettings):
     ollama_vision_model: str | None = None
     ollama_thinking_enabled: bool = False
     ollama_num_ctx: int = Field(default=16384, ge=1024, le=262144)
-    ollama_vision_num_ctx: int = Field(default=8192, ge=1024, le=262144)
     rag_http_timeout_seconds: float = 45.0
     rag_ollama_chat_timeout_seconds: float = 180.0
     rag_ollama_embed_timeout_seconds: float = 45.0
@@ -137,11 +135,12 @@ class Settings(BaseSettings):
     rag_route_llm_verifier_model: str | None = None
     rag_reasoning_model: str | None = None
     rag_ingestion_model: str | None = None
-    artifact_pipeline_version: str = "v2"
+    artifact_pipeline_version: Literal["v1", "v2"] = "v2"
     artifact_queue_backend: str = "celery"
     artifact_queue_name: str = "artifact:jobs"
     artifact_task_name: str = "rag.artifact_jobs.tasks.generate_artifact_job"
     artifact_retention_days: int = Field(default=30, ge=1, le=365)
+    artifact_maintenance_interval_seconds: int = Field(default=300, ge=30)
     artifact_worker_timeout_seconds: float = Field(default=1800.0, ge=30.0)
     artifact_libreoffice_required: bool = False
     artifact_reranker_max_candidates: int = Field(default=8, ge=1, le=128)
@@ -154,8 +153,6 @@ class Settings(BaseSettings):
     evaluation_diagnostic_top_k: int = Field(default=10, ge=1, le=100)
     evaluation_answer_llm_verifier_enabled: bool = True
     evaluation_answer_llm_verifier_model: str | None = None
-    rag_chunk_max_chars: int = 1200
-    rag_chunk_overlap_chars: int = 160
     rag_session_store: str = "redis"
     rag_session_prefix: str = "rag:session"
     rag_session_ttl_seconds: int = 14400
@@ -181,8 +178,6 @@ class Settings(BaseSettings):
     ingest_stale_after_seconds: int = Field(default=120, ge=60)
     connector_secrets_key: str = "replace-with-local-connector-secrets-key"
     connector_secrets_key_ring: str = ""
-    connector_default_batch_size: int = Field(default=500, ge=1, le=5000)
-    connector_default_row_limit: int = Field(default=5000, ge=1, le=1000000)
     connector_include_stale_in_retrieval: bool = False
     connector_live_sql_enabled: bool = True
     connector_live_sql_max_rows: int = Field(default=100, ge=1, le=10000)

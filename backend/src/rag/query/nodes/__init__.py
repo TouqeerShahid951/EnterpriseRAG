@@ -330,7 +330,6 @@ class QueryNodes:
                 distinct_doc_count=len(distinct_docs),
                 evidence_score=1.0,
                 outcome="pass",
-                hit_count=len(ctx["retrieved_hits"]),
             )
             ctx["verifier_decision"] = "pass"
             _mark_execution(ctx, "verifier", "deterministic", "graphrag_community_sources")
@@ -392,7 +391,6 @@ class QueryNodes:
             distinct_doc_count=len({unit.doc_id for unit in assessment.units}),
             evidence_score=assessment.relevance_coverage,
             outcome="degrade" if assessment.is_weak else "pass",
-            hit_count=len(ctx["retrieved_hits"]),
         )
         ctx["evidence_quality"] = quality
         if not assessment.is_weak:
@@ -551,6 +549,7 @@ class QueryNodes:
         ctx["unfounded_claims"] = list(validation.errors)
         ctx["response"] = ctx["response"].model_copy(update={
             "faithfulness_score": validation.support_score,
+            "faithfulness_status": "checked" if validation.passed else "failed",
             "unfounded_claims": list(validation.errors),
             "degraded": ctx["degraded"],
             "degraded_reason": ctx["degraded_reason"],
@@ -674,9 +673,15 @@ class QueryNodes:
         artifact_content = ctx.get("artifact_content")
         if validation is not None and not validation.passed:
             log_artifact_result(ctx, requested=True, skipped_reason="content_validation_failed")
+            ctx["response"] = response.model_copy(update={
+                "answer": "Artifact content could not be validated, so no file was created.",
+            })
             return ctx
         if artifact_content is None:
             log_artifact_result(ctx, requested=True, skipped_reason="content_missing")
+            ctx["response"] = response.model_copy(update={
+                "answer": "Artifact content was unavailable, so no file was created.",
+            })
             return ctx
         result = self.artifact_service.create_for_response(
             artifact_request=artifact_request,
@@ -693,9 +698,18 @@ class QueryNodes:
             degraded_reason = degraded_reason or (
                 "artifact_generation_failed" if not result.artifacts else "artifact_generation_partial"
             )
+        if not result.artifacts:
+            answer = "Artifact generation failed; no requested files were created."
+        elif result.failures:
+            generated_formats = ", ".join(artifact.format.upper() for artifact in result.artifacts)
+            failed_formats = ", ".join(item.upper() for item in result.failures)
+            answer = f"Generated {generated_formats}. Failed formats: {failed_formats}."
+        else:
+            answer = artifact_response_summary(artifact_content, requested_formats=artifact_request.formats)
         ctx["degraded"] = degraded
         ctx["degraded_reason"] = degraded_reason
         ctx["response"] = ctx["response"].model_copy(update={
+            "answer": answer,
             "artifacts": result.artifacts,
             "degraded": degraded,
             "degraded_reason": degraded_reason,

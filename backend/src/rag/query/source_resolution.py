@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 import re
-from typing import Any, Literal
+from typing import Literal
 
 from ..auth.context import UserContext
 from ..connectors.models import ConnectorSchemaCatalogRecord
@@ -271,8 +271,6 @@ def resolve_query_source(
         db_bias=db_bias if followup else 0,
         corpus_bias=corpus_bias if followup else 0,
     )
-    explicit = request.source_mode != "auto" or bool(request.query_source_id)
-
     if request.source_mode == "corpus_only":
         return _decision(
             request.source_mode,
