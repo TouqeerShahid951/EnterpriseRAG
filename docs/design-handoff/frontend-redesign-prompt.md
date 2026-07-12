@@ -38,7 +38,10 @@ Use the attached 1920 x 1200 desktop screenshots as the current-state baseline. 
 14. `14-configs-settings.png`: Runtime/configuration settings.
 15. `15-chat-light-theme.png`: Query Intelligence in the current light theme.
 
-Additional updated implementation screenshots are available in `design-handoff/champagne-stone-screenshots/`. These show the revised shared shell, navigation, cards, buttons, forms, tables, and Champagne Stone accent direction applied to the main authenticated screens.
+Additional updated implementation screenshots are available in
+`docs/design-handoff/champagne-stone-screenshots/`. These show the revised shared
+shell, navigation, cards, buttons, forms, tables, and Champagne Stone accent
+direction applied to the main authenticated screens.
 
 ## Redesign Goals
 

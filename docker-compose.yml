@@ -96,6 +96,7 @@ x-backend-env: &backend-env
   RAG_INGESTION_BASE_URL: ${RAG_INGESTION_BASE_URL:-}
   RAG_JSON_NUM_PREDICT: ${RAG_JSON_NUM_PREDICT:-4096}
   RAG_MODEL_PROVIDER: ${RAG_MODEL_PROVIDER:-ollama}
+  RAG_QUERY_PLANNER_ENABLED: ${RAG_QUERY_PLANNER_ENABLED:-true}
   RAG_OLLAMA_CHAT_TIMEOUT_SECONDS: ${RAG_OLLAMA_CHAT_TIMEOUT_SECONDS:-180}
   RAG_OLLAMA_EMBED_TIMEOUT_SECONDS: ${RAG_OLLAMA_EMBED_TIMEOUT_SECONDS:-45}
   RAG_REASONING_MODEL: ${RAG_REASONING_MODEL:-llama3.1:8b}
@@ -193,7 +194,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agenticrag-local-password}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s

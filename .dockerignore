@@ -13,4 +13,5 @@ frontend/*.tsbuildinfo
 model-cache
 out
 output
+outputs
 frontend.backup.*

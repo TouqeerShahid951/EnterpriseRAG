@@ -35,41 +35,13 @@ Before disconnecting the preparation machine, download any required installers
 for Docker Desktop, WSL updates, GPU drivers, Ollama, and internal security
 software. Do not rely on the offline target to fetch anything at first boot.
 
-## Preferred Scripted Flow
+## Preparation Flow
 
-From this repo on the connected preparation machine, build the USB-ready bundle:
-
-```sh
-bash scripts/airgap/prepare_bundle.sh \
-  --bundle-dir /tmp/agenticrag-airgap-bundle \
-  --platform linux/amd64
-```
-
-Use `--platform linux/arm64` only if the Windows target is ARM64. Most Windows
-Docker Desktop installations on Intel/AMD hardware need `linux/amd64`.
-
-Copy the contents of `/tmp/agenticrag-airgap-bundle` to the USB drive. On the
-offline Windows machine, open PowerShell in that copied bundle directory and run:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\deploy_windows.ps1
-```
-
-If `C:\AgenticRAG\AgenticRAG` already exists and you want to replace the source
-tree while keeping Docker data volumes, run:
-
-```powershell
-.\deploy_windows.ps1 -ReplaceSource
-```
-
-The bundle includes `backend-reranker-cache.tgz`. That archive contains the
-FastEmbed sparse model (`Qdrant/bm25`) and supported cross-encoder rerankers
-used by API, artifact, and evaluation workers at `/models/fastembed`. It also
-includes `backend-docling-cache.tgz`, which contains the Docling layout/table
-artifacts and RapidOCR model files used by the ingestion worker at
-`/models/docling`. On Windows these archives are imported into the visible
-workspace folders `model-cache/fastembed` and `model-cache/docling`.
+The repository currently documents the bundle process as explicit manual steps;
+it does not ship an automated USB-bundle script. Use an `amd64` preparation
+machine for most Intel/AMD Windows Docker Desktop targets, then follow the env,
+image, and cache steps below in order. Use `arm64` artifacts only when the target
+Windows machine is ARM64.
 
 ## Prepare the Runtime Env File
 
@@ -94,6 +66,7 @@ MINIO_BUCKET=agenticrag-uploads
 JWT_SECRET_KEY=replace-with-local-jwt-secret
 CSRF_SECRET_KEY=replace-with-local-csrf-secret
 SERVICE_TOKEN=replace-with-local-service-token
+DEPLOYMENT_CONTROLLER_TOKEN=replace-with-local-deployment-controller-token
 BOOTSTRAP_ADMIN_EMAIL=admin@prudentia.ai
 BOOTSTRAP_ADMIN_PASSWORD=replace-with-local-admin-password
 

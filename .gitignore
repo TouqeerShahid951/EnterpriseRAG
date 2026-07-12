@@ -29,6 +29,7 @@ frontend/vite.config.d.ts
 out/
 output/
 outputs/
+/*.pptx
 input.json
 program.py
 bootstrap.py
