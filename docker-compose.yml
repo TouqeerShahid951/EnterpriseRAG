@@ -203,14 +203,14 @@ services:
   redis:
     image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     restart: unless-stopped
-    entrypoint: ["sh", "/usr/local/bin/redis-aof-recover.sh"]
+    entrypoint: ["sh", "/usr/local/bin/redis-recovery-entrypoint.sh"]
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-agenticrag-local-redis-password}"]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-agenticrag-local-redis-password}
       REDIS_AOF_RECOVERY: ${REDIS_AOF_RECOVERY:-repair}
     volumes:
       - redis-data:/data
-      - ./infra/redis/redis-aof-recover.sh:/usr/local/bin/redis-aof-recover.sh:ro
+      - ./deploy/redis/entrypoint.sh:/usr/local/bin/redis-recovery-entrypoint.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
       interval: 10s

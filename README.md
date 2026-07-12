@@ -12,7 +12,7 @@ Docker Compose deployment.
 | `backend/` | FastAPI API, workers, background processes, deployment controller, feature code, and backend tests. |
 | `frontend/` | React/Vite browser application and frontend tests. |
 | `docs/` | Architecture, operator/user documentation, generated manuals, and design handoff material. |
-| `infra/` | Runtime initialization or recovery files mounted by infrastructure containers. |
+| `deploy/` | Container-specific startup and recovery files used by the local deployment. |
 | `scripts/` | Repository-level validation and documentation builders. |
 | `folder-sources/` | Local folder-ingestion mount point; contents are intentionally ignored. |
 | `model-cache/` | Ignored local model artifacts required for offline execution. |
