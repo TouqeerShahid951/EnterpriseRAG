@@ -136,14 +136,18 @@ def test_internal_worker_status_update_does_not_resurrect_cancelled_job() -> Non
     job = repo.create_ingest_job(doc_id=document.id, status="queued", progress_pct=0, origin="upload")
     repo.update_ingest_job(job.id, status="cancelled", progress_pct=20)
 
-    asyncio.run(
-        update_ingest_job_status(
-            job.id,
-            InternalJobStatusRequest(status="processing", progress_pct=55),
-            document_repo=repo,
-            service=ServiceTokenContext(service_name="ingestion-worker"),
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            update_ingest_job_status(
+                job.id,
+                InternalJobStatusRequest(status="processing", progress_pct=55),
+                document_repo=repo,
+                service=ServiceTokenContext(service_name="ingestion-worker"),
+            )
         )
-    )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ingest_job_lease_lost"
 
     updated = repo.get_ingest_job(job.id)
     assert updated is not None

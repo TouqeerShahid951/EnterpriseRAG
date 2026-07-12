@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import Lock
 from typing import Any
 
-from .http import request_json
+from .http import ServiceRequestError, request_json
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class IngestAttempt:
     attempt_count: int
     max_attempts: int
     job_status: str
+    run_token: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,9 @@ class BackendInternalClient:
         self.base_url = base_url
         self.service_token = service_token
         self.timeout_seconds = timeout_seconds
+        self._run_tokens: dict[str, str] = {}
+        self._lease_lost_jobs: set[str] = set()
+        self._lease_state_lock = Lock()
 
     def update_job(
         self,
@@ -97,43 +102,68 @@ class BackendInternalClient:
         error_code: str | None = None,
         error_message_safe: str | None = None,
         warnings: list[str] | None = None,
+        run_token: str | None = None,
     ) -> None:
+        selected_run_token = run_token or self._current_run_token(job_id)
         payload: dict[str, object | None] = {
             "status": status,
             "progress_pct": progress_pct,
             "error_code": error_code,
             "error_message_safe": error_message_safe,
         }
+        if selected_run_token is not None:
+            payload["run_token"] = selected_run_token
         if stage_progress is not None:
             payload["stage_progress"] = stage_progress
         if warnings is not None:
             payload["warnings"] = warnings
-        request_json(
-            self.base_url,
-            f"/internal/ingest/jobs/{job_id}/status",
-            service="backend",
-            method="POST",
-            payload=payload,
-            headers={"X-Service-Token": self.service_token},
-            timeout_seconds=self.timeout_seconds,
-        )
+        try:
+            request_json(
+                self.base_url,
+                f"/internal/ingest/jobs/{job_id}/status",
+                service="backend",
+                method="POST",
+                payload=payload,
+                headers={"X-Service-Token": self.service_token},
+                timeout_seconds=self.timeout_seconds,
+            )
+        except ServiceRequestError as exc:
+            if exc.status_code == 409 and selected_run_token is not None:
+                self._mark_lease_lost(job_id)
+            raise
+        if selected_run_token is not None:
+            if status == "processing":
+                self._bind_run_token(job_id, selected_run_token)
+            else:
+                self._clear_run_token(job_id)
 
-    def start_attempt(self, *, job_id: str) -> IngestAttempt:
+    def start_attempt(self, *, job_id: str, run_token: str) -> IngestAttempt:
         payload = request_json(
             self.base_url,
             f"/internal/ingest/jobs/{job_id}/attempt",
             service="backend",
             method="POST",
-            payload={},
+            payload={"run_token": run_token},
             headers={"X-Service-Token": self.service_token},
             timeout_seconds=self.timeout_seconds,
         )
+        response_run_token = payload.get("run_token")
+        accepted_run_token = (
+            str(response_run_token)
+            if payload.get("status") == "accepted" and response_run_token
+            else None
+        )
+        if payload.get("status") == "accepted" and accepted_run_token != run_token:
+            raise RuntimeError("backend returned an invalid ingestion job run token")
+        if accepted_run_token is not None:
+            self._bind_run_token(job_id, accepted_run_token)
         return IngestAttempt(
             accepted=payload.get("status") == "accepted",
             disposition=str(payload["status"]),
             attempt_count=int(payload["attempt_count"]),
             max_attempts=int(payload["max_attempts"]),
             job_status=str(payload["job_status"]),
+            run_token=accepted_run_token,
         )
 
     def get_job_status(self, *, job_id: str) -> IngestJobSnapshot:
@@ -151,15 +181,24 @@ class BackendInternalClient:
         )
 
     def heartbeat(self, *, job_id: str) -> None:
-        request_json(
-            self.base_url,
-            f"/internal/ingest/jobs/{job_id}/heartbeat",
-            service="backend",
-            method="POST",
-            payload={},
-            headers={"X-Service-Token": self.service_token},
-            timeout_seconds=self.timeout_seconds,
-        )
+        self.ensure_lease(job_id)
+        run_token = self._current_run_token(job_id)
+        if run_token is None:
+            return
+        try:
+            request_json(
+                self.base_url,
+                f"/internal/ingest/jobs/{job_id}/heartbeat",
+                service="backend",
+                method="POST",
+                payload={"run_token": run_token},
+                headers={"X-Service-Token": self.service_token},
+                timeout_seconds=self.timeout_seconds,
+            )
+        except ServiceRequestError as exc:
+            if exc.status_code == 409:
+                self._mark_lease_lost(job_id)
+            raise
 
     def record_event(self, *, job_id: str, event_type: str, payload: dict[str, object]) -> None:
         request_json(
@@ -173,15 +212,23 @@ class BackendInternalClient:
         )
 
     def record_parser_provenance(self, *, job_id: str, provenance: dict[str, object]) -> None:
-        request_json(
-            self.base_url,
-            f"/internal/ingest/jobs/{job_id}/parser-provenance",
-            service="backend",
-            method="POST",
-            payload={"provenance": provenance},
-            headers={"X-Service-Token": self.service_token},
-            timeout_seconds=self.timeout_seconds,
-        )
+        try:
+            request_json(
+                self.base_url,
+                f"/internal/ingest/jobs/{job_id}/parser-provenance",
+                service="backend",
+                method="POST",
+                payload={
+                    "run_token": self._require_run_token(job_id),
+                    "provenance": provenance,
+                },
+                headers={"X-Service-Token": self.service_token},
+                timeout_seconds=self.timeout_seconds,
+            )
+        except ServiceRequestError as exc:
+            if exc.status_code == 409:
+                self._mark_lease_lost(job_id)
+            raise
 
     def commit_supersession(self, *, new_doc_id: str, supersedes: list[str]) -> None:
         request_json(
@@ -371,6 +418,41 @@ class BackendInternalClient:
             graph_enrichment_enabled=bool(payload.get("graph_enrichment_enabled", False)),
             source=str(payload.get("source") or "workspace"),
         )
+
+    def _require_run_token(self, job_id: str) -> str:
+        self.ensure_lease(job_id)
+        run_token = self._current_run_token(job_id)
+        if run_token is not None:
+            return run_token
+        raise RuntimeError(f"ingestion job run token is not bound for job {job_id}")
+
+    def ensure_lease(self, job_id: str) -> None:
+        with self._lease_state_lock:
+            lease_lost = job_id in self._lease_lost_jobs
+        if lease_lost:
+            raise ServiceRequestError(
+                "backend",
+                '{"detail":{"code":"ingest_job_lease_lost"}}',
+                409,
+            )
+
+    def _current_run_token(self, job_id: str) -> str | None:
+        with self._lease_state_lock:
+            return self._run_tokens.get(job_id)
+
+    def _bind_run_token(self, job_id: str, run_token: str) -> None:
+        with self._lease_state_lock:
+            self._run_tokens[job_id] = run_token
+            self._lease_lost_jobs.discard(job_id)
+
+    def _clear_run_token(self, job_id: str) -> None:
+        with self._lease_state_lock:
+            self._run_tokens.pop(job_id, None)
+
+    def _mark_lease_lost(self, job_id: str) -> None:
+        with self._lease_state_lock:
+            self._run_tokens.pop(job_id, None)
+            self._lease_lost_jobs.add(job_id)
 
 
 def _runtime_config_from_payload(payload: dict[str, Any]) -> InferenceRuntimeConfig:

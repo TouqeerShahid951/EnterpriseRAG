@@ -124,6 +124,7 @@ class DocumentImageAssetsReplaceResponse(ContractModel):
 
 
 class InternalJobStatusRequest(ContractModel):
+    run_token: str | None = Field(default=None, min_length=1, max_length=100)
     status: UploadJobState
     progress_pct: int = Field(..., ge=0, le=100)
     stage_progress: UploadJobStageProgress | None = None
@@ -142,11 +143,20 @@ class InternalJobStatusResponse(ContractModel):
     status: UploadJobState
 
 
+class InternalJobAttemptRequest(ContractModel):
+    run_token: str | None = Field(default=None, min_length=1, max_length=100)
+
+
 class InternalJobAttemptResponse(ContractModel):
     status: Literal["accepted", "busy", "exhausted"]
     attempt_count: int = Field(..., ge=0)
     max_attempts: int = Field(..., ge=1)
     job_status: str
+    run_token: str | None = Field(default=None, max_length=100)
+
+
+class InternalJobLeaseRequest(ContractModel):
+    run_token: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class InternalJobEventRequest(ContractModel):
@@ -155,6 +165,7 @@ class InternalJobEventRequest(ContractModel):
 
 
 class InternalParserProvenanceRequest(ContractModel):
+    run_token: str | None = Field(default=None, min_length=1, max_length=100)
     provenance: dict[str, Any] = Field(default_factory=dict)
 
 

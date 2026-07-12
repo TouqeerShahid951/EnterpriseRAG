@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import time
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from rag.core.config import settings
 from rag.repositories.document_models import DocumentRepository, IngestJobRecord
@@ -17,6 +17,7 @@ from rag.repositories.ingest_config import (
 from rag.repositories.postgres import PostgresConnectionMixin
 from rag.ingestion.queue import IngestQueue, get_ingest_queue
 from rag.ingestion.recovery import (
+    IngestRecoveryError,
     MAX_INGEST_ATTEMPTS,
     list_stale_ingest_jobs,
     requeue_stale_ingest_job,
@@ -75,6 +76,10 @@ def reconcile_ingestion_jobs(
     control = control or get_ingest_worker_control()
     config = effective_ingest_config(repo=config_repo or get_ingest_config_repository())
     snapshot = control.apply(config.worker_concurrency)
+    observed_at = now or datetime.now(UTC)
+    stale_before = observed_at - timedelta(
+        seconds=settings.ingest_stale_after_seconds
+    )
     recovered: list[str] = []
 
     stale_jobs = list_stale_ingest_jobs(
@@ -82,12 +87,12 @@ def reconcile_ingestion_jobs(
         active_job_ids=snapshot.active_job_ids,
         stale_after_seconds=settings.ingest_stale_after_seconds,
         max_attempts=MAX_ATTEMPTS,
-        now=now,
+        now=observed_at,
     )
     for candidate in stale_jobs:
         job = candidate.job
         if job.attempt_count >= MAX_ATTEMPTS:
-            document_repo.update_ingest_job(
+            mutation = document_repo.update_ingest_job(
                 job.id,
                 status="failed",
                 progress_pct=100,
@@ -95,12 +100,21 @@ def reconcile_ingestion_jobs(
                 warnings=list(job.warnings),
                 error_code="retry_exhausted",
                 error_message_safe="Ingestion could not complete after three attempts.",
+                expected_statuses=frozenset({"processing"}),
+                stale_before=stale_before,
+                run_token=job.run_token,
             )
-            _audit(document_repo, job, "exhausted", {"attempt_count": job.attempt_count})
+            if mutation.changed:
+                _audit(
+                    document_repo,
+                    job,
+                    "exhausted",
+                    {"attempt_count": job.attempt_count},
+                )
             continue
 
         if not candidate.recoverable:
-            document_repo.update_ingest_job(
+            mutation = document_repo.update_ingest_job(
                 job.id,
                 status="failed",
                 progress_pct=100,
@@ -108,22 +122,35 @@ def reconcile_ingestion_jobs(
                 warnings=list(job.warnings),
                 error_code="recovery_source_unavailable",
                 error_message_safe="The source document is unavailable for ingestion recovery.",
+                expected_statuses=frozenset({"processing"}),
+                stale_before=stale_before,
+                run_token=job.run_token,
             )
-            _audit(document_repo, job, "unrecoverable", {"reason": candidate.recovery_code})
+            if mutation.changed:
+                _audit(
+                    document_repo,
+                    job,
+                    "unrecoverable",
+                    {"reason": candidate.recovery_code},
+                )
             continue
 
-        requeue_stale_ingest_job(
-            document_repo=document_repo,
-            queue=queue,
-            job_id=job.id,
-            active_job_ids=snapshot.active_job_ids,
-            stale_after_seconds=settings.ingest_stale_after_seconds,
-            actor_id=None,
-            audit_event_type="internal.ingest.recovered",
-            max_attempts=MAX_ATTEMPTS,
-            now=now,
-        )
-        recovered.append(job.id)
+        try:
+            requeue_stale_ingest_job(
+                document_repo=document_repo,
+                queue=queue,
+                job_id=job.id,
+                active_job_ids=snapshot.active_job_ids,
+                stale_after_seconds=settings.ingest_stale_after_seconds,
+                actor_id=None,
+                audit_event_type="internal.ingest.recovered",
+                max_attempts=MAX_ATTEMPTS,
+                now=observed_at,
+            )
+        except IngestRecoveryError:
+            continue
+        else:
+            recovered.append(job.id)
     return recovered
 
 

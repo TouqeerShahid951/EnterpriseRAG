@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
@@ -60,7 +61,14 @@ class QdrantClient:
         self._collection_mode = HYBRID_MODE
         self._ensure_payload_indexes()
 
-    def replace_document(self, *, doc_id: str, points: list[dict[str, Any]]) -> int:
+    def replace_document(
+        self,
+        *,
+        doc_id: str,
+        points: list[dict[str, Any]],
+        guard: Callable[[], None] | None = None,
+    ) -> int:
+        _run_guard(guard)
         self._delete_document_points(doc_id)
         current_point_ids = [
             str(point["id"])
@@ -71,16 +79,22 @@ class QdrantClient:
             point_for_collection_mode(_with_current_status(point, False), self._collection_mode)
             for point in points
         ]
-        self._upsert_points(staged_points)
-        self._set_points_current(current_point_ids)
+        self._upsert_points(staged_points, guard=guard)
+        self._set_points_current(current_point_ids, guard=guard)
         return len(points)
 
     def delete_document_points(self, doc_id: str) -> None:
         self._delete_document_points(doc_id)
 
-    def mark_documents_not_current(self, doc_ids: list[str]) -> None:
+    def mark_documents_not_current(
+        self,
+        doc_ids: list[str],
+        *,
+        guard: Callable[[], None] | None = None,
+    ) -> None:
         for doc_id in doc_ids:
             for point in self._document_points(doc_id):
+                _run_guard(guard)
                 point_id = point.get("id")
                 payload = point.get("payload")
                 if not point_id or not isinstance(payload, dict):
@@ -97,8 +111,14 @@ class QdrantClient:
             timeout_seconds=self.timeout_seconds,
         )
 
-    def _upsert_points(self, points: list[dict[str, Any]]) -> None:
+    def _upsert_points(
+        self,
+        points: list[dict[str, Any]],
+        *,
+        guard: Callable[[], None] | None = None,
+    ) -> None:
         for offset in range(0, len(points), self.upsert_batch_size):
+            _run_guard(guard)
             request_json(
                 self.base_url,
                 f"{self._collection_path}/points?wait=true",
@@ -108,8 +128,14 @@ class QdrantClient:
                 timeout_seconds=self.timeout_seconds,
             )
 
-    def _set_points_current(self, point_ids: list[str]) -> None:
+    def _set_points_current(
+        self,
+        point_ids: list[str],
+        *,
+        guard: Callable[[], None] | None = None,
+    ) -> None:
         for offset in range(0, len(point_ids), self.upsert_batch_size):
+            _run_guard(guard)
             request_json(
                 self.base_url,
                 f"{self._collection_path}/points/payload?wait=true",
@@ -152,7 +178,6 @@ class QdrantClient:
             payload={"payload": payload, "points": [point_id]},
             timeout_seconds=self.timeout_seconds,
         )
-
     def _ensure_payload_indexes(self) -> None:
         for field_name, field_schema in PAYLOAD_INDEXES:
             try:
@@ -167,6 +192,11 @@ class QdrantClient:
             except ServiceRequestError as exc:
                 if exc.status_code != 409:
                     raise
+
+
+def _run_guard(guard: Callable[[], None] | None) -> None:
+    if guard is not None:
+        guard()
 
 
 def _validated_mode(payload: dict[str, Any], vector_size: int) -> str:

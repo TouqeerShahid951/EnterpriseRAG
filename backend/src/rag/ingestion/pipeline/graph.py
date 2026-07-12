@@ -78,6 +78,9 @@ def _cancellable(
 
 def _raise_if_cancelled(state: IngestState, deps: IngestDependencies) -> None:
     job_id = state["payload"].job_id
+    ensure_lease = getattr(deps.backend, "ensure_lease", None)
+    if callable(ensure_lease):
+        ensure_lease(job_id)
     get_status = getattr(deps.backend, "get_job_status", None)
     if not callable(get_status):
         return

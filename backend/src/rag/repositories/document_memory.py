@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, date, datetime
+from threading import RLock
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -18,6 +19,9 @@ from .document_models import (
     ImageReviewBatchRecord,
     ImageReviewCandidateRecord,
     ImageReviewDecisionRecord,
+    IngestAttemptResult,
+    IngestJobCancellationResult,
+    IngestJobMutationResult,
     IngestJobRecord,
     ReviewBatchRecord,
     ReviewDecisionRecord,
@@ -39,6 +43,7 @@ class InMemoryDocumentRepository:
         self._edges: set[tuple[str, str]] = set()
         self._shares: dict[str, set[str]] = {}
         self.audit_events: list[dict[str, Any]] = []
+        self._ingest_lock = RLock()
 
     def create_document(self, **kwargs: Any) -> DocumentRecord:
         if any(document.source_id == kwargs["source_id"] for document in self._documents.values()):
@@ -322,6 +327,7 @@ class InMemoryDocumentRepository:
             stage_progress=None,
             attempt_count=0,
             last_heartbeat_at=None,
+            run_token=None,
             warnings=(),
             parser_provenance=None,
             error_code=None,
@@ -353,28 +359,60 @@ class InMemoryDocumentRepository:
         ]
         return sorted(jobs, key=lambda job: job.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)[0] if jobs else None
 
-    def update_ingest_job(self, job_id: str, **kwargs: Any) -> IngestJobRecord | None:
-        job = self._jobs.get(job_id)
-        if job is None:
-            return None
-        if job.status == "cancelled" and kwargs["status"] != "cancelled":
-            return job
-        now = datetime.now(UTC)
-        status = kwargs["status"]
-        updated = replace(
-            job,
-            status=status,
-            progress_pct=kwargs["progress_pct"],
-            stage_progress=kwargs.get("stage_progress"),
-            warnings=tuple(kwargs["warnings"]) if kwargs.get("warnings") is not None else job.warnings,
-            error_code=kwargs.get("error_code"),
-            error_message_safe=kwargs.get("error_message_safe"),
-            updated_at=now,
-            completed_at=now if status in {"complete", "failed", "human_review", "cancelled"} else None,
-        )
-        self._jobs[job_id] = updated
-        self._documents[job.doc_id] = replace(self._documents[job.doc_id], ingest_status=status, updated_at=now)
-        return updated
+    def update_ingest_job(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        progress_pct: int,
+        stage_progress: dict[str, Any] | None = None,
+        warnings: list[str] | None = None,
+        error_code: str | None = None,
+        error_message_safe: str | None = None,
+        expected_statuses: frozenset[str] | None = None,
+        stale_before: datetime | None = None,
+        run_token: str | None = None,
+    ) -> IngestJobMutationResult:
+        with self._ingest_lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return IngestJobMutationResult(job=None, changed=False)
+            if job.status == "cancelled" and status != "cancelled":
+                return IngestJobMutationResult(job=job, changed=False)
+            if expected_statuses is not None and job.status not in expected_statuses:
+                return IngestJobMutationResult(job=job, changed=False)
+            last_activity = job.last_heartbeat_at or job.updated_at or job.created_at
+            if stale_before is not None and last_activity is not None and last_activity >= stale_before:
+                return IngestJobMutationResult(job=job, changed=False)
+            if not _run_token_can_update(job, run_token=run_token, next_status=status):
+                return IngestJobMutationResult(job=job, changed=False)
+            now = datetime.now(UTC)
+            progress_is_stale = (
+                job.status == "processing"
+                and status == "processing"
+                and progress_pct < job.progress_pct
+            )
+            updated = replace(
+                job,
+                status=status,
+                progress_pct=max(job.progress_pct, progress_pct)
+                if job.status == "processing" and status == "processing"
+                else progress_pct,
+                stage_progress=job.stage_progress if progress_is_stale else stage_progress,
+                warnings=tuple(warnings) if warnings is not None else job.warnings,
+                error_code=error_code,
+                error_message_safe=error_message_safe,
+                run_token=_next_run_token(job, run_token=run_token, next_status=status),
+                updated_at=now,
+                completed_at=now if status in {"complete", "failed", "human_review", "cancelled"} else None,
+            )
+            self._jobs[job_id] = updated
+            self._documents[job.doc_id] = replace(
+                self._documents[job.doc_id],
+                ingest_status=status,
+                updated_at=now,
+            )
+            return IngestJobMutationResult(job=updated, changed=True)
 
     def requeue_stale_ingest_job(
         self,
@@ -383,30 +421,40 @@ class InMemoryDocumentRepository:
         stale_before: datetime,
         max_attempts: int,
     ) -> IngestJobRecord | None:
-        job = self._jobs.get(job_id)
-        last_activity = job.last_heartbeat_at or job.updated_at or job.created_at if job else None
-        if (
-            job is None
-            or job.status != "processing"
-            or job.attempt_count >= max_attempts
-            or (last_activity is not None and last_activity >= stale_before)
-        ):
-            return None
-        now = datetime.now(UTC)
-        updated = replace(
-            job,
-            status="queued",
-            progress_pct=0,
-            error_code=None,
-            error_message_safe=None,
-            completed_at=None,
-            updated_at=now,
-        )
-        self._jobs[job_id] = updated
-        document = self._documents.get(job.doc_id)
-        if document is not None:
-            self._documents[job.doc_id] = replace(document, ingest_status="queued", updated_at=now)
-        return updated
+        with self._ingest_lock:
+            job = self._jobs.get(job_id)
+            last_activity = (
+                job.last_heartbeat_at or job.updated_at or job.created_at
+                if job is not None
+                else None
+            )
+            if (
+                job is None
+                or job.status != "processing"
+                or job.attempt_count >= max_attempts
+                or (last_activity is not None and last_activity >= stale_before)
+            ):
+                return None
+            now = datetime.now(UTC)
+            updated = replace(
+                job,
+                status="queued",
+                progress_pct=0,
+                error_code=None,
+                error_message_safe=None,
+                run_token=None,
+                completed_at=None,
+                updated_at=now,
+            )
+            self._jobs[job_id] = updated
+            document = self._documents.get(job.doc_id)
+            if document is not None:
+                self._documents[job.doc_id] = replace(
+                    document,
+                    ingest_status="queued",
+                    updated_at=now,
+                )
+            return updated
 
     def start_ingest_attempt(
         self,
@@ -414,58 +462,153 @@ class InMemoryDocumentRepository:
         *,
         max_attempts: int,
         stale_after_seconds: int = 120,
+        run_token: str | None = None,
+    ) -> IngestAttemptResult:
+        with self._ingest_lock:
+            job = self._jobs.get(job_id)
+            if (
+                run_token is not None
+                and job is not None
+                and job.status == "processing"
+                and job.run_token == run_token
+            ):
+                return IngestAttemptResult(job=job, claimed=True)
+            now = datetime.now(UTC)
+            heartbeat = (
+                job.last_heartbeat_at or job.updated_at or job.created_at
+                if job is not None
+                else None
+            )
+            processing_is_stale = (
+                heartbeat is None
+                or (now - heartbeat).total_seconds() >= stale_after_seconds
+            )
+            if (
+                job is None
+                or job.status not in {"queued", "processing"}
+                or (job.status == "processing" and not processing_is_stale)
+                or job.attempt_count >= max_attempts
+            ):
+                return IngestAttemptResult(job=job, claimed=False)
+            updated = replace(
+                job,
+                status="processing",
+                attempt_count=job.attempt_count + 1,
+                last_heartbeat_at=now,
+                run_token=run_token,
+                error_code=None,
+                error_message_safe=None,
+                completed_at=None,
+                updated_at=now,
+            )
+            self._jobs[job_id] = updated
+            self._documents[job.doc_id] = replace(
+                self._documents[job.doc_id],
+                ingest_status="processing",
+                updated_at=now,
+            )
+            return IngestAttemptResult(job=updated, claimed=True)
+
+    def heartbeat_ingest_job(
+        self,
+        job_id: str,
+        *,
+        run_token: str | None = None,
+    ) -> IngestJobMutationResult:
+        with self._ingest_lock:
+            job = self._jobs.get(job_id)
+            if (
+                job is None
+                or job.status != "processing"
+                or job.run_token != run_token
+            ):
+                return IngestJobMutationResult(job=job, changed=False)
+            updated = replace(job, last_heartbeat_at=datetime.now(UTC))
+            self._jobs[job_id] = updated
+            return IngestJobMutationResult(job=updated, changed=True)
+
+    def record_ingest_parser_provenance(
+        self,
+        job_id: str,
+        *,
+        provenance: dict[str, Any],
+        run_token: str | None = None,
     ) -> IngestJobRecord | None:
-        job = self._jobs.get(job_id)
-        now = datetime.now(UTC)
-        heartbeat = job.last_heartbeat_at or job.updated_at or job.created_at if job else None
-        processing_is_stale = heartbeat is None or (now - heartbeat).total_seconds() >= stale_after_seconds
-        if (
-            job is None
-            or job.status not in {"queued", "processing"}
-            or (job.status == "processing" and not processing_is_stale)
-            or job.attempt_count >= max_attempts
-        ):
-            return job
-        updated = replace(
-            job,
-            status="processing",
-            attempt_count=job.attempt_count + 1,
-            last_heartbeat_at=now,
-            error_code=None,
-            error_message_safe=None,
-            completed_at=None,
-            updated_at=now,
-        )
-        self._jobs[job_id] = updated
-        self._documents[job.doc_id] = replace(self._documents[job.doc_id], ingest_status="processing", updated_at=now)
-        return updated
+        with self._ingest_lock:
+            job = self._jobs.get(job_id)
+            if (
+                job is None
+                or job.status != "processing"
+                or job.run_token != run_token
+            ):
+                return None
+            updated = replace(
+                job,
+                parser_provenance=dict(provenance),
+                updated_at=datetime.now(UTC),
+            )
+            self._jobs[job_id] = updated
+            self.append_audit_event(
+                event_type="internal.ingest.parser_provenance",
+                actor_id=None,
+                target_type="ingest_job",
+                target_id=job.id,
+                payload={"doc_id": job.doc_id, "provenance": dict(provenance)},
+            )
+            return updated
 
-    def heartbeat_ingest_job(self, job_id: str) -> IngestJobRecord | None:
-        job = self._jobs.get(job_id)
-        if job is None:
-            return None
-        updated = replace(job, last_heartbeat_at=datetime.now(UTC))
-        self._jobs[job_id] = updated
-        return updated
-
-    def record_ingest_parser_provenance(self, job_id: str, *, provenance: dict[str, Any]) -> IngestJobRecord | None:
-        job = self._jobs.get(job_id)
-        if job is None:
-            return None
-        updated = replace(job, parser_provenance=dict(provenance), updated_at=datetime.now(UTC))
-        self._jobs[job_id] = updated
-        self.append_audit_event(
-            event_type="internal.ingest.parser_provenance",
-            actor_id=None,
-            target_type="ingest_job",
-            target_id=job.id,
-            payload={"doc_id": job.doc_id, "provenance": dict(provenance)},
-        )
-        return updated
+    def cancel_ingest_job(
+        self,
+        job_id: str,
+        *,
+        allowed_statuses: frozenset[str],
+    ) -> IngestJobCancellationResult:
+        with self._ingest_lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return IngestJobCancellationResult(
+                    job=None,
+                    changed=False,
+                    review_items_closed=0,
+                )
+            if job.status not in allowed_statuses:
+                return IngestJobCancellationResult(
+                    job=job,
+                    changed=False,
+                    review_items_closed=0,
+                )
+            now = datetime.now(UTC)
+            review_items_closed = self._close_review_batches_for_job(job_id, now=now)
+            updated = replace(
+                job,
+                status="cancelled",
+                stage_progress=None,
+                error_code=None,
+                error_message_safe=None,
+                run_token=None,
+                updated_at=now,
+                completed_at=now,
+            )
+            self._jobs[job_id] = updated
+            document = self._documents.get(job.doc_id)
+            if document is not None:
+                self._documents[job.doc_id] = replace(
+                    document,
+                    ingest_status="cancelled",
+                    updated_at=now,
+                )
+            return IngestJobCancellationResult(
+                job=updated,
+                changed=True,
+                review_items_closed=review_items_closed,
+            )
 
     def cancel_review_batch_for_job(self, job_id: str) -> int:
+        with self._ingest_lock:
+            return self._close_review_batches_for_job(job_id, now=datetime.now(UTC))
+
+    def _close_review_batches_for_job(self, job_id: str, *, now: datetime) -> int:
         batches = [batch for batch in self._review_batches.values() if batch.job_id == job_id and batch.status == "pending"]
-        now = datetime.now(UTC)
         batch_ids = {batch.id for batch in batches}
         cancelled_items = 0
         for batch in batches:
@@ -833,6 +976,32 @@ def _has_path(edges: set[tuple[str, str]], start: str, target: str) -> bool:
 
 def _version_sort_key(document: DocumentRecord) -> tuple[date, str]:
     return (document.effective_date or date.min, document.id)
+
+
+def _run_token_can_update(
+    current: IngestJobRecord,
+    *,
+    run_token: str | None,
+    next_status: str,
+) -> bool:
+    if current.run_token is not None:
+        return current.run_token == run_token
+    if run_token is None:
+        return True
+    return current.status == "queued" and next_status == "processing"
+
+
+def _next_run_token(
+    current: IngestJobRecord,
+    *,
+    run_token: str | None,
+    next_status: str,
+) -> str | None:
+    if next_status != "processing":
+        return None
+    if current.run_token is None and run_token is not None:
+        return run_token
+    return current.run_token
 
 
 def _unique_text(values: list[str]) -> list[str]:

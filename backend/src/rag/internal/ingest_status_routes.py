@@ -5,10 +5,16 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..core.config import settings
-from ..repositories.documents import DocumentRepository, get_document_repository
+from ..repositories.documents import (
+    DocumentRepository,
+    IngestJobRecord,
+    get_document_repository,
+)
 from ..schemas.internal import (
+    InternalJobAttemptRequest,
     InternalJobAttemptResponse,
     InternalJobEventRequest,
+    InternalJobLeaseRequest,
     InternalJobStatusResponse,
     InternalJobStatusRequest,
     InternalParserProvenanceRequest,
@@ -61,8 +67,15 @@ async def update_ingest_job_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "job_not_found", "message": "Ingestion job was not found."},
         )
-    if current_job.status == "cancelled" and payload.status != "cancelled":
-        return InternalMutationResponse()
+    if current_job.status in TERMINAL_STATUSES:
+        if current_job.status == payload.status:
+            return InternalMutationResponse()
+        _raise_lease_lost()
+    _raise_if_lease_lost(
+        current_job,
+        payload.run_token,
+        next_status=payload.status,
+    )
     progress_pct = progress_for_status_update(
         current_job,
         next_status=payload.status,
@@ -72,7 +85,7 @@ async def update_ingest_job_status(
     if payload.status == "failed" and stage_progress is None:
         stage_progress = current_job.stage_progress
     warnings = payload.warnings if payload.warnings is not None else list(current_job.warnings)
-    job = document_repo.update_ingest_job(
+    mutation = document_repo.update_ingest_job(
         job_id,
         status=payload.status,
         progress_pct=progress_pct,
@@ -80,14 +93,25 @@ async def update_ingest_job_status(
         warnings=warnings,
         error_code=payload.error_code,
         error_message_safe=payload.error_message_safe,
+        expected_statuses=frozenset({current_job.status}),
+        run_token=payload.run_token,
     )
-    if job is None:
+    if mutation.job is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "job_not_found", "message": "Ingestion job was not found."},
         )
 
-    if payload.status in TERMINAL_STATUSES:
+    if not mutation.changed:
+        if (
+            mutation.job.status == payload.status
+            and mutation.job.run_token == payload.run_token
+        ):
+            return InternalMutationResponse()
+        _raise_lease_lost()
+    job = mutation.job
+
+    if job.status in TERMINAL_STATUSES:
         document_repo.append_audit_event(
             event_type="internal.ingest.status",
             actor_id=None,
@@ -110,29 +134,29 @@ async def update_ingest_job_status(
 )
 async def start_ingest_job_attempt(
     job_id: str,
+    payload: InternalJobAttemptRequest,
     document_repo: DocumentRepository = Depends(get_document_repository),
     service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalJobAttemptResponse:
     _ = service
-    current = document_repo.get_ingest_job(job_id)
-    if current is None:
-        raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Ingestion job was not found."})
-    job = document_repo.start_ingest_attempt(
+    attempt = document_repo.start_ingest_attempt(
         job_id,
         max_attempts=MAX_INGEST_ATTEMPTS,
         stale_after_seconds=settings.ingest_stale_after_seconds,
+        run_token=payload.run_token,
     )
-    if job is None:
+    if attempt.job is None:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Ingestion job was not found."})
-    accepted = job.attempt_count > current.attempt_count
-    disposition = "accepted" if accepted else (
-        "busy" if job.status == "processing" and job.attempt_count < MAX_INGEST_ATTEMPTS else "exhausted"
+    job = attempt.job
+    disposition = "accepted" if attempt.claimed else (
+        "busy" if job.status == "processing" else "exhausted"
     )
     return InternalJobAttemptResponse(
         status=disposition,
         attempt_count=job.attempt_count,
         max_attempts=MAX_INGEST_ATTEMPTS,
         job_status=job.status,
+        run_token=job.run_token if attempt.claimed else None,
     )
 
 
@@ -143,17 +167,23 @@ async def start_ingest_job_attempt(
 )
 async def heartbeat_ingest_job(
     job_id: str,
+    payload: InternalJobLeaseRequest,
     document_repo: DocumentRepository = Depends(get_document_repository),
     service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalMutationResponse:
     _ = service
-    current = document_repo.get_ingest_job(job_id)
-    if current is None:
+    heartbeat = document_repo.heartbeat_ingest_job(
+        job_id,
+        run_token=payload.run_token,
+    )
+    if heartbeat.job is None:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Ingestion job was not found."})
-    if current.status == "cancelled":
-        return InternalMutationResponse()
-    if document_repo.heartbeat_ingest_job(job_id) is None:
-        raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Ingestion job was not found."})
+    if not heartbeat.changed and heartbeat.job.status == "processing":
+        _raise_if_lease_lost(
+            heartbeat.job,
+            payload.run_token,
+            next_status=heartbeat.job.status,
+        )
     return InternalMutationResponse()
 
 
@@ -194,7 +224,49 @@ async def record_ingest_parser_provenance(
     service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalMutationResponse:
     _ = service
-    job = document_repo.record_ingest_parser_provenance(job_id, provenance=payload.provenance)
-    if job is None:
+    current_job = document_repo.get_ingest_job(job_id)
+    if current_job is None:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Ingestion job was not found."})
+    _raise_if_lease_lost(
+        current_job,
+        payload.run_token,
+        next_status=current_job.status,
+    )
+    job = document_repo.record_ingest_parser_provenance(
+        job_id,
+        provenance=payload.provenance,
+        run_token=payload.run_token,
+    )
+    if job is None:
+        latest = document_repo.get_ingest_job(job_id)
+        if latest is None:
+            raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Ingestion job was not found."})
+        _raise_lease_lost()
     return InternalMutationResponse()
+
+
+def _raise_if_lease_lost(
+    job: IngestJobRecord,
+    run_token: str | None,
+    *,
+    next_status: str,
+) -> None:
+    if job.run_token is not None:
+        if job.run_token == run_token:
+            return
+        _raise_lease_lost()
+    if run_token is None:
+        return
+    if job.status == "queued" and next_status == "processing":
+        return
+    _raise_lease_lost()
+
+
+def _raise_lease_lost() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "ingest_job_lease_lost",
+            "message": "Ingestion job execution lease is no longer valid.",
+        },
+    )

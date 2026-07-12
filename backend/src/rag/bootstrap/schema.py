@@ -186,6 +186,7 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
     stage_progress JSONB NULL,
     attempt_count INTEGER NOT NULL DEFAULT 0,
     last_heartbeat_at TIMESTAMPTZ NULL,
+    run_token TEXT NULL,
     warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
     parser_provenance JSONB NULL,
     error_code TEXT NULL,

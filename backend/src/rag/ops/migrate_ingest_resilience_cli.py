@@ -9,6 +9,7 @@ from rag.repositories.postgres import PostgresConnectionMixin
 DDL = """
 ALTER TABLE ingest_jobs ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE ingest_jobs ADD COLUMN IF NOT EXISTS last_heartbeat_at TIMESTAMPTZ NULL;
+ALTER TABLE ingest_jobs ADD COLUMN IF NOT EXISTS run_token TEXT NULL;
 ALTER TABLE ingest_jobs ADD COLUMN IF NOT EXISTS warnings JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE ingest_jobs DROP CONSTRAINT IF EXISTS ingest_jobs_attempt_count_nonnegative;
 ALTER TABLE ingest_jobs ADD CONSTRAINT ingest_jobs_attempt_count_nonnegative CHECK (attempt_count >= 0);

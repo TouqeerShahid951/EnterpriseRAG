@@ -139,6 +139,7 @@ def _job(
         stage_progress=stage_progress,
         attempt_count=1,
         last_heartbeat_at=None,
+        run_token=None,
         warnings=(),
         parser_provenance=None,
         error_code=None,

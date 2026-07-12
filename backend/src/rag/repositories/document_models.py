@@ -93,6 +93,26 @@ class IngestJobRecord:
     created_at: datetime | None
     updated_at: datetime | None
     completed_at: datetime | None
+    run_token: str | None = None
+
+
+@dataclass(frozen=True)
+class IngestJobMutationResult:
+    job: IngestJobRecord | None
+    changed: bool
+
+
+@dataclass(frozen=True)
+class IngestAttemptResult:
+    job: IngestJobRecord | None
+    claimed: bool
+
+
+@dataclass(frozen=True)
+class IngestJobCancellationResult:
+    job: IngestJobRecord | None
+    changed: bool
+    review_items_closed: int
 
 
 @dataclass(frozen=True)
@@ -295,7 +315,10 @@ class DocumentRepository(Protocol):
         warnings: list[str] | None = None,
         error_code: str | None = None,
         error_message_safe: str | None = None,
-    ) -> IngestJobRecord | None: ...
+        expected_statuses: frozenset[str] | None = None,
+        stale_before: datetime | None = None,
+        run_token: str | None = None,
+    ) -> IngestJobMutationResult: ...
     def requeue_stale_ingest_job(
         self,
         job_id: str,
@@ -309,9 +332,27 @@ class DocumentRepository(Protocol):
         *,
         max_attempts: int,
         stale_after_seconds: int = 120,
+        run_token: str | None = None,
+    ) -> IngestAttemptResult: ...
+    def heartbeat_ingest_job(
+        self,
+        job_id: str,
+        *,
+        run_token: str | None = None,
+    ) -> IngestJobMutationResult: ...
+    def record_ingest_parser_provenance(
+        self,
+        job_id: str,
+        *,
+        provenance: dict[str, Any],
+        run_token: str | None = None,
     ) -> IngestJobRecord | None: ...
-    def heartbeat_ingest_job(self, job_id: str) -> IngestJobRecord | None: ...
-    def record_ingest_parser_provenance(self, job_id: str, *, provenance: dict[str, Any]) -> IngestJobRecord | None: ...
+    def cancel_ingest_job(
+        self,
+        job_id: str,
+        *,
+        allowed_statuses: frozenset[str],
+    ) -> IngestJobCancellationResult: ...
     def cancel_review_batch_for_job(self, job_id: str) -> int: ...
     def mark_superseded(self, *, new_doc_id: str, old_doc_ids: list[str]) -> list[DocumentRecord]: ...
     def list_version_chain(self, document_id: str) -> list[DocumentRecord]: ...

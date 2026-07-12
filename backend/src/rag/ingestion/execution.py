@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from contextlib import contextmanager
 from typing import Any, Iterator
+from uuid import uuid4
 
 from billiard.exceptions import SoftTimeLimitExceeded
 from rag.ingestion.quality import parser_tuning_for_quality_preset
@@ -27,9 +28,15 @@ def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
     job = IngestJobPayload.from_dict(payload)
     config = WorkerConfig.from_env()
     backend = _build_backend(config)
-    attempt = _start_attempt(task, backend, job.job_id)
+    run_token = str(uuid4())
+    attempt = _start_attempt(task, backend, job.job_id, run_token)
     if not attempt.accepted:
-        resume_attempt = _resume_exhausted_review_attempt(backend, job, attempt)
+        resume_attempt = _resume_exhausted_review_attempt(
+            backend,
+            job,
+            attempt,
+            run_token,
+        )
         if resume_attempt is None:
             return _handle_rejected_attempt(backend, job, attempt)
         attempt = resume_attempt
@@ -71,15 +78,18 @@ def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
     except WorkerStepError as exc:
         if _job_is_cancelled(backend, job.job_id):
             return _cancelled_result(config, backend=backend, job=job, deps=deps)
-        backend.update_job(
-            job_id=job.job_id,
-            status="failed",
-            progress_pct=100,
+        lease_lost = _mark_failed_or_lease_lost(
+            backend,
+            job=job,
             error_code=exc.code,
             error_message_safe=exc.safe_message,
         )
+        if lease_lost is not None:
+            return lease_lost
         raise
     except ServiceRequestError as exc:
+        if _is_lease_lost(exc):
+            return _lease_lost_result(job)
         if is_transient_service_error(exc):
             return _retry_or_fail(
                 task,
@@ -92,24 +102,26 @@ def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
             )
         if _job_is_cancelled(backend, job.job_id):
             return _cancelled_result(config, backend=backend, job=job, deps=deps)
-        backend.update_job(
-            job_id=job.job_id,
-            status="failed",
-            progress_pct=100,
+        lease_lost = _mark_failed_or_lease_lost(
+            backend,
+            job=job,
             error_code=f"{exc.service}_failed",
             error_message_safe=exc.message[:500],
         )
+        if lease_lost is not None:
+            return lease_lost
         raise
     except Exception as exc:
         if _job_is_cancelled(backend, job.job_id):
             return _cancelled_result(config, backend=backend, job=job, deps=deps)
-        backend.update_job(
-            job_id=job.job_id,
-            status="failed",
-            progress_pct=100,
+        lease_lost = _mark_failed_or_lease_lost(
+            backend,
+            job=job,
             error_code="ingest_failed",
             error_message_safe=str(exc)[:500],
         )
+        if lease_lost is not None:
+            return lease_lost
         raise
     return {
         "job_id": job.job_id,
@@ -149,19 +161,26 @@ def _resume_exhausted_review_attempt(
     backend: BackendInternalClient,
     job: IngestJobPayload,
     attempt: IngestAttempt,
+    run_token: str,
 ) -> IngestAttempt | None:
     if not (job.review_batch_id or job.image_review_batch_id):
         return None
     if attempt.disposition != "exhausted" or attempt.job_status != "queued" or attempt.attempt_count < attempt.max_attempts:
         return None
-    updated = _update_job_best_effort(
-        backend,
-        job_id=job.job_id,
-        status="processing",
-        progress_pct=5,
-        error_code=None,
-        error_message_safe=None,
-    )
+    try:
+        updated = _update_job_best_effort(
+            backend,
+            job_id=job.job_id,
+            status="processing",
+            progress_pct=5,
+            error_code=None,
+            error_message_safe=None,
+            run_token=run_token,
+        )
+    except ServiceRequestError as exc:
+        if _is_lease_lost(exc):
+            return None
+        raise
     if not updated:
         return None
     _record_event(
@@ -176,12 +195,18 @@ def _resume_exhausted_review_attempt(
         attempt_count=attempt.attempt_count,
         max_attempts=attempt.max_attempts,
         job_status="processing",
+        run_token=run_token,
     )
 
 
-def _start_attempt(task: Any, backend: BackendInternalClient, job_id: str) -> IngestAttempt:
+def _start_attempt(
+    task: Any,
+    backend: BackendInternalClient,
+    job_id: str,
+    run_token: str,
+) -> IngestAttempt:
     try:
-        return backend.start_attempt(job_id=job_id)
+        return backend.start_attempt(job_id=job_id, run_token=run_token)
     except ServiceRequestError as exc:
         if is_transient_service_error(exc):
             raise task.retry(exc=exc, countdown=30, max_retries=12)
@@ -201,14 +226,19 @@ def _retry_or_fail(
     if _job_is_cancelled(backend, job.job_id):
         return _cancelled_result(config, backend=backend, job=job)
     if attempt.attempt_count >= attempt.max_attempts:
-        _update_job_best_effort(
-            backend,
-            job_id=job.job_id,
-            status="failed",
-            progress_pct=100,
-            error_code=error_code,
-            error_message_safe=str(exc)[:500],
-        )
+        try:
+            _update_job_best_effort(
+                backend,
+                job_id=job.job_id,
+                status="failed",
+                progress_pct=100,
+                error_code=error_code,
+                error_message_safe=str(exc)[:500],
+            )
+        except ServiceRequestError as lease_exc:
+            if _is_lease_lost(lease_exc):
+                return _lease_lost_result(job)
+            raise
         _record_event(
             backend,
             job.job_id,
@@ -218,14 +248,19 @@ def _retry_or_fail(
         raise exc
 
     countdown = 30 * (2 ** (attempt.attempt_count - 1))
-    requeued = _update_job_best_effort(
-        backend,
-        job_id=job.job_id,
-        status="queued",
-        progress_pct=0,
-        error_code=None,
-        error_message_safe=None,
-    )
+    try:
+        requeued = _update_job_best_effort(
+            backend,
+            job_id=job.job_id,
+            status="queued",
+            progress_pct=0,
+            error_code=None,
+            error_message_safe=None,
+        )
+    except ServiceRequestError as lease_exc:
+        if _is_lease_lost(lease_exc):
+            return _lease_lost_result(job)
+        raise
     retry_countdown = _retry_countdown(config, countdown, requeued=requeued)
     _record_event(
         backend,
@@ -259,6 +294,7 @@ def _update_job_best_effort(
     error_code: str | None = None,
     error_message_safe: str | None = None,
     warnings: list[str] | None = None,
+    run_token: str | None = None,
 ) -> bool:
     try:
         backend.update_job(
@@ -269,10 +305,43 @@ def _update_job_best_effort(
             error_code=error_code,
             error_message_safe=error_message_safe,
             warnings=warnings,
+            run_token=run_token,
         )
-    except ServiceRequestError:
+    except ServiceRequestError as exc:
+        if _is_lease_lost(exc):
+            raise
         return False
     return True
+
+
+def _mark_failed_or_lease_lost(
+    backend: BackendInternalClient,
+    *,
+    job: IngestJobPayload,
+    error_code: str,
+    error_message_safe: str,
+) -> dict[str, Any] | None:
+    try:
+        backend.update_job(
+            job_id=job.job_id,
+            status="failed",
+            progress_pct=100,
+            error_code=error_code,
+            error_message_safe=error_message_safe,
+        )
+    except ServiceRequestError as exc:
+        if _is_lease_lost(exc):
+            return _lease_lost_result(job)
+        raise
+    return None
+
+
+def _is_lease_lost(exc: ServiceRequestError) -> bool:
+    return exc.status_code == 409 and "ingest_job_lease_lost" in exc.message
+
+
+def _lease_lost_result(job: IngestJobPayload) -> dict[str, Any]:
+    return {"job_id": job.job_id, "doc_id": job.doc_id, "status": "lease_lost"}
 
 
 def _cancelled_result(
@@ -336,7 +405,9 @@ def _job_heartbeat(
         while not stopped.wait(max(1, interval_seconds)):
             try:
                 backend.heartbeat(job_id=job_id)
-            except ServiceRequestError:
+            except ServiceRequestError as exc:
+                if _is_lease_lost(exc):
+                    return
                 continue
 
     thread = threading.Thread(target=send_heartbeats, name=f"ingest-heartbeat-{job_id}", daemon=True)

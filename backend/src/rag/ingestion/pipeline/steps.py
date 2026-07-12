@@ -303,17 +303,22 @@ def embed_chunks(state: IngestState, deps: IngestDependencies) -> IngestState:
 
 
 def upsert_qdrant(state: IngestState, deps: IngestDependencies) -> IngestState:
+    job_id = state["payload"].job_id
     deps.qdrant.ensure_collection(len(state["vectors"][0]))
-    _raise_if_job_cancelled(deps, state["payload"].job_id)
+    _raise_if_job_cancelled(deps, job_id)
     deps.backend.update_job(
-        job_id=state["payload"].job_id,
+        job_id=job_id,
         status="processing",
         progress_pct=82,
         stage_progress=_items_progress("vectors", 0, len(state["points"]), "Writing vectors to Qdrant"),
     )
-    state["upsert_count"] = deps.qdrant.replace_document(doc_id=state["payload"].doc_id, points=state["points"])
+    state["upsert_count"] = deps.qdrant.replace_document(
+        doc_id=state["payload"].doc_id,
+        points=state["points"],
+        guard=lambda: _raise_if_job_cancelled(deps, job_id),
+    )
     deps.backend.update_job(
-        job_id=state["payload"].job_id,
+        job_id=job_id,
         status="processing",
         progress_pct=92,
         stage_progress=_items_progress("vectors", state["upsert_count"], len(state["points"]), "Indexed vectors"),
@@ -323,7 +328,11 @@ def upsert_qdrant(state: IngestState, deps: IngestDependencies) -> IngestState:
 
 def commit_supersession(state: IngestState, deps: IngestDependencies) -> IngestState:
     if state["payload"].supersedes:
-        deps.qdrant.mark_documents_not_current(state["payload"].supersedes)
+        job_id = state["payload"].job_id
+        deps.qdrant.mark_documents_not_current(
+            state["payload"].supersedes,
+            guard=lambda: _raise_if_job_cancelled(deps, job_id),
+        )
         deps.backend.commit_supersession(new_doc_id=state["payload"].doc_id, supersedes=state["payload"].supersedes)
     return state
 
@@ -531,6 +540,9 @@ def _metadata_progress_reporter(
 
 
 def _raise_if_job_cancelled(deps: IngestDependencies, job_id: str) -> None:
+    ensure_lease = getattr(deps.backend, "ensure_lease", None)
+    if callable(ensure_lease):
+        ensure_lease(job_id)
     get_status = getattr(deps.backend, "get_job_status", None)
     if not callable(get_status):
         return

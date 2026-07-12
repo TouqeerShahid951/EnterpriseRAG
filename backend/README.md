@@ -44,3 +44,13 @@ From the repository root, validate deployment wiring with:
 docker compose config --quiet
 docker compose build ingestion-worker
 ```
+
+## Ingestion lease rollout
+
+Ingestion attempts use a per-run token to fence callbacks from stale workers.
+Deploy the backend before the ingestion workers: backend startup applies the
+nullable `ingest_jobs.run_token` migration and accepts both legacy tokenless
+leases and token-aware leases. Repository updates compare the exact stored
+lease value, including `NULL`, so an older worker cannot mutate a job after a
+token-aware worker has reclaimed it. After the backend is healthy, roll the
+ingestion workers so new attempts start using tokens.

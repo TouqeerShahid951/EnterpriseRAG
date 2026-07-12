@@ -312,21 +312,22 @@ async def cancel_ingest_job(
             message=f"Job is already {job.status}.",
         )
 
-    review_items_closed = repo.cancel_review_batch_for_job(job.id)
-    updated = repo.update_ingest_job(
+    cancellation = repo.cancel_ingest_job(
         job.id,
-        status="cancelled",
-        progress_pct=job.progress_pct,
-        stage_progress=None,
-        warnings=list(job.warnings),
-        error_code=None,
-        error_message_safe=None,
+        allowed_statuses=frozenset(CANCELLABLE_JOB_STATUSES),
     )
-    if updated is None:
+    if cancellation.job is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "job_not_found", "message": "Ingestion job was not found."},
         )
+    if not cancellation.changed:
+        return IngestJobCancelResponse(
+            job_id=cancellation.job.id,
+            status=cancellation.job.status,  # type: ignore[arg-type]
+            message=f"Job is already {cancellation.job.status}.",
+        )
+    updated = cancellation.job
 
     revoke_error = _revoke_queued_ingest_task(queue, job.id)
     vector_cleanup_error = _delete_document_vectors(document.id)
@@ -339,7 +340,7 @@ async def cancel_ingest_job(
             "doc_id": document.id,
             "status_before": job.status,
             "progress_pct": job.progress_pct,
-            "review_items_closed": review_items_closed,
+            "review_items_closed": cancellation.review_items_closed,
             "revoke_error": revoke_error,
             "vector_cleanup_error": vector_cleanup_error,
         },
