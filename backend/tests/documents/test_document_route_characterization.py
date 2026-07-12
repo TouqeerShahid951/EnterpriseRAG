@@ -10,6 +10,8 @@ from rag.api.routes import document_routes
 from rag.auth.identity_models import UserRecord
 from rag.core.config import settings
 from rag.documents.adapters.memory import InMemoryDocumentRepository
+from rag.documents.adapters.metadata_index import QdrantDocumentMetadataIndex
+from rag.documents.metadata_service import DocumentMetadataService
 from rag.documents.storage import StoredUploadContent
 from rag.graphrag.cleanup import GraphRAGCleanupResult
 from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
@@ -28,6 +30,7 @@ class FakeQdrant:
         self.fail_clearance = fail_clearance
         self.fail_topics = fail_topics
         self.fail_delete = fail_delete
+        self.collection = settings.qdrant_collection
         self.clearance_updates: list[tuple[str, str, int]] = []
         self.topic_updates: list[tuple[str, list[str], list[str]]] = []
         self.deleted_documents: list[str] = []
@@ -134,8 +137,7 @@ def test_clearance_update_persists_indexes_and_audits_success() -> None:
             DocumentClearanceUpdateRequest(clearance_level="NATO_CONFIDENTIAL"),
             _csrf_request("PATCH"),
             user=user,
-            repo=repo,
-            qdrant=qdrant,  # type: ignore[arg-type]
+            service=_metadata_service(repo, qdrant),
         )
     )
 
@@ -157,8 +159,7 @@ def test_same_clearance_is_idempotent_without_index_or_audit_side_effects() -> N
             DocumentClearanceUpdateRequest(clearance_level="NATO_RESTRICTED"),
             _csrf_request("PATCH"),
             user=user,
-            repo=repo,
-            qdrant=qdrant,  # type: ignore[arg-type]
+            service=_metadata_service(repo, qdrant),
         )
     )
 
@@ -180,8 +181,10 @@ def test_topic_index_failure_rolls_back_metadata_and_audits_failure() -> None:
                 DocumentTopicsUpdateRequest(topics=["New"], llm_topics=["LLM New"]),
                 _csrf_request("PATCH"),
                 user=user,
-                repo=repo,
-                qdrant=FakeQdrant(fail_topics=True),  # type: ignore[arg-type]
+                service=_metadata_service(
+                    repo,
+                    FakeQdrant(fail_topics=True),
+                ),
             )
         )
 
@@ -208,14 +211,23 @@ def test_metadata_update_rejects_non_writer_before_external_calls() -> None:
                 DocumentTopicsUpdateRequest(topics=["New"]),
                 _csrf_request("PATCH"),
                 user=member,
-                repo=repo,
-                qdrant=qdrant,  # type: ignore[arg-type]
+                service=_metadata_service(repo, qdrant),
             )
         )
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail["code"] == "document_forbidden"
     assert qdrant.topic_updates == []
+
+
+def _metadata_service(
+    repo: InMemoryDocumentRepository,
+    qdrant: FakeQdrant,
+) -> DocumentMetadataService:
+    return DocumentMetadataService(
+        document_repo=repo,
+        index=QdrantDocumentMetadataIndex(qdrant),  # type: ignore[arg-type]
+    )
 
 
 def test_reingest_queues_source_payload_and_audits_success() -> None:

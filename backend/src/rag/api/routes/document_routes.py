@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from pathlib import Path
 import re
-from typing import Literal, cast
+from typing import Literal, TypeVar, cast
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
@@ -20,6 +20,11 @@ from ...documents.access_scope_service import (
     DocumentAccessScopeService,
 )
 from ...documents.dependencies import get_upload_storage
+from ...documents.metadata_dependencies import get_document_metadata_service
+from ...documents.metadata_service import (
+    DocumentMetadataRejected,
+    DocumentMetadataService,
+)
 from ...documents.storage import UploadStorage
 from ...graphrag.cleanup import (
     GraphRAGCleanupError,
@@ -69,7 +74,6 @@ from ...services.graphrag_queue import (
     get_graphrag_maintenance_queue,
 )
 from ...services.document_image_asset_storage import DocumentImageAssetStorage, get_document_image_asset_storage
-from ...shared.contracts.clearance import clearance_rank, normalize_clearance_level
 from ...connectors.models import CONNECTOR_RECORD_CONTENT_TYPE
 
 router = APIRouter(prefix="/docs", tags=["documents"])
@@ -83,6 +87,16 @@ _ACCESS_SCOPE_STATUS_BY_CATEGORY = {
     "invalid": status.HTTP_422_UNPROCESSABLE_ENTITY,
     "upstream": status.HTTP_502_BAD_GATEWAY,
 }
+
+_METADATA_STATUS_BY_CATEGORY = {
+    "not_found": status.HTTP_404_NOT_FOUND,
+    "forbidden": status.HTTP_403_FORBIDDEN,
+    "invalid": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "bad_request": status.HTTP_400_BAD_REQUEST,
+    "upstream": status.HTTP_502_BAD_GATEWAY,
+}
+
+MetadataResult = TypeVar("MetadataResult")
 
 
 def get_document_qdrant_client() -> QdrantClient:
@@ -105,6 +119,18 @@ def _access_scope_result(
     except DocumentAccessScopeRejected as exc:
         raise HTTPException(
             status_code=_ACCESS_SCOPE_STATUS_BY_CATEGORY[exc.category],
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+
+
+def _metadata_result(
+    action: Callable[[], MetadataResult],
+) -> MetadataResult:
+    try:
+        return action()
+    except DocumentMetadataRejected as exc:
+        raise HTTPException(
+            status_code=_METADATA_STATUS_BY_CATEGORY[exc.category],
             detail={"code": exc.code, "message": exc.message},
         ) from exc
 
@@ -414,82 +440,15 @@ async def update_document_clearance(
     payload: DocumentClearanceUpdateRequest,
     request: Request,
     user: UserRecord = Depends(require_current_user),
-    repo: DocumentRepository = Depends(get_document_repository),
-    qdrant: QdrantClient = Depends(get_document_qdrant_client),
+    service: DocumentMetadataService = Depends(get_document_metadata_service),
 ) -> Document:
     require_csrf(request)
-    document = require_writable_document(user, repo.get_document(document_id))
-    try:
-        target_clearance = normalize_clearance_level(payload.clearance_level)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "invalid_clearance_level", "message": str(exc)},
-        ) from exc
-
-    if clearance_rank(target_clearance) > clearance_rank(user.clearance_level):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "clearance_forbidden",
-                "message": "User cannot assign a clearance level above their own.",
-            },
+    updated = _metadata_result(
+        lambda: service.update_clearance(
+            document_id,
+            clearance_level=payload.clearance_level,
+            actor=user,
         )
-    if target_clearance == document.clearance_level:
-        return document_to_schema(document)
-
-    current_rank = clearance_rank(document.clearance_level)
-    target_rank = clearance_rank(target_clearance)
-    indexed_first = target_rank > current_rank
-    updated: DocumentRecord | None = None
-
-    try:
-        if indexed_first:
-            _set_qdrant_document_clearance(qdrant, document.id, target_clearance)
-        updated = repo.update_document_clearance(document.id, target_clearance)
-        if updated is None:
-            if indexed_first:
-                _try_set_qdrant_document_clearance(qdrant, document.id, document.clearance_level)
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "document_not_found", "message": "Document was not found."},
-            )
-        if not indexed_first:
-            _set_qdrant_document_clearance(qdrant, document.id, target_clearance)
-    except ServiceRequestError as exc:
-        repo.append_audit_event(
-            event_type="documents.clearance_update",
-            actor_id=user.id,
-            target_type="document",
-            target_id=document.id,
-            payload={
-                "group_path": document.group_path,
-                "old_clearance_level": document.clearance_level,
-                "new_clearance_level": target_clearance,
-                "action_result": "failed",
-                "error_code": "document_clearance_index_update_failed",
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "code": "document_clearance_index_update_failed",
-                "message": f"Unable to update indexed document clearance: {exc}",
-            },
-        ) from exc
-
-    repo.append_audit_event(
-        event_type="documents.clearance_update",
-        actor_id=user.id,
-        target_type="document",
-        target_id=document.id,
-        payload={
-            "group_path": document.group_path,
-            "old_clearance_level": document.clearance_level,
-            "new_clearance_level": target_clearance,
-            "qdrant_collection": settings.qdrant_collection,
-            "action_result": "success",
-        },
     )
     return document_to_schema(updated)
 
@@ -511,60 +470,16 @@ async def update_document_topics(
     payload: DocumentTopicsUpdateRequest,
     request: Request,
     user: UserRecord = Depends(require_current_user),
-    repo: DocumentRepository = Depends(get_document_repository),
-    qdrant: QdrantClient = Depends(get_document_qdrant_client),
+    service: DocumentMetadataService = Depends(get_document_metadata_service),
 ) -> Document:
     require_csrf(request)
-    document = require_writable_document(user, repo.get_document(document_id))
-    topics = _normalize_topic_values(payload.topics)
-    llm_topics = _normalize_topic_values(payload.llm_topics)
-    if topics == list(document.topics) and llm_topics == list(document.llm_topics):
-        return document_to_schema(document)
-
-    updated = repo.update_document_topics(document.id, topics=topics, llm_topics=llm_topics)
-    if updated is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "document_not_found", "message": "Document was not found."})
-    try:
-        qdrant.set_document_topics(document.id, topics=topics, llm_topics=llm_topics)
-    except ServiceRequestError as exc:
-        repo.update_document_topics(document.id, topics=list(document.topics), llm_topics=list(document.llm_topics))
-        repo.append_audit_event(
-            event_type="documents.topics_update",
-            actor_id=user.id,
-            target_type="document",
-            target_id=document.id,
-            payload={
-                "group_path": document.group_path,
-                "old_topics": list(document.topics),
-                "old_llm_topics": list(document.llm_topics),
-                "new_topics": topics,
-                "new_llm_topics": llm_topics,
-                "action_result": "failed",
-                "error_code": "document_topics_index_update_failed",
-            },
+    updated = _metadata_result(
+        lambda: service.update_topics(
+            document_id,
+            topics=payload.topics,
+            llm_topics=payload.llm_topics,
+            actor=user,
         )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "code": "document_topics_index_update_failed",
-                "message": f"Unable to update indexed document topics: {exc}",
-            },
-        ) from exc
-
-    repo.append_audit_event(
-        event_type="documents.topics_update",
-        actor_id=user.id,
-        target_type="document",
-        target_id=document.id,
-        payload={
-            "group_path": document.group_path,
-            "old_topics": list(document.topics),
-            "old_llm_topics": list(document.llm_topics),
-            "new_topics": topics,
-            "new_llm_topics": llm_topics,
-            "qdrant_collection": settings.qdrant_collection,
-            "action_result": "success",
-        },
     )
     return document_to_schema(updated)
 
@@ -584,23 +499,16 @@ async def supersede_documents(
     payload: SupersedeRequest,
     request: Request,
     user: UserRecord = Depends(require_current_user),
-    repo: DocumentRepository = Depends(get_document_repository),
+    service: DocumentMetadataService = Depends(get_document_metadata_service),
 ) -> VersionChainResponse:
     require_csrf(request)
-    new_doc = require_writable_document(user, repo.get_document(document_id))
-    old_docs = [require_writable_document(user, repo.get_document(old_id)) for old_id in payload.supersedes]
-    try:
-        repo.mark_superseded(new_doc_id=new_doc.id, old_doc_ids=[doc.id for doc in old_docs])
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "invalid_supersession", "message": str(exc)}) from exc
-    repo.append_audit_event(
-        event_type="documents.supersede",
-        actor_id=user.id,
-        target_type="document",
-        target_id=new_doc.id,
-        payload={"supersedes": [doc.id for doc in old_docs]},
+    chain = _metadata_result(
+        lambda: service.supersede(
+            document_id,
+            superseded_document_ids=payload.supersedes,
+            actor=user,
+        )
     )
-    chain = repo.list_version_chain(document_id)
     return VersionChainResponse(document_id=document_id, chain=[version_node(node) for node in chain])
 
 
@@ -1006,21 +914,6 @@ def _enqueue_graphrag_partition_rebuild(
     return "queued"
 
 
-def _set_qdrant_document_clearance(qdrant: QdrantClient, document_id: str, clearance_level: str) -> None:
-    qdrant.set_document_clearance(
-        document_id,
-        clearance_level=clearance_level,
-        clearance_rank=clearance_rank(clearance_level),
-    )
-
-
-def _try_set_qdrant_document_clearance(qdrant: QdrantClient, document_id: str, clearance_level: str) -> None:
-    try:
-        _set_qdrant_document_clearance(qdrant, document_id, clearance_level)
-    except ServiceRequestError:
-        return
-
-
 def _queue_document_reingest(
     document: DocumentRecord,
     *,
@@ -1234,29 +1127,6 @@ def _metadata_version(flags: dict[str, object]) -> int | None:
 def _dict_metadata_field(flags: dict[str, object], key: str) -> dict[str, object]:
     value = flags.get(key)
     return dict(value) if isinstance(value, dict) else {}
-
-
-def _normalize_topic_values(values: list[str]) -> list[str]:
-    topics = _unique_text(values)
-    too_long = [topic for topic in topics if len(topic) > 80]
-    if too_long:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "invalid_topic", "message": "Topic labels must be 80 characters or fewer."},
-        )
-    return topics[:32]
-
-
-def _unique_text(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    normalized: list[str] = []
-    for value in values:
-        text = str(value).strip()
-        key = text.lower()
-        if text and key not in seen:
-            seen.add(key)
-            normalized.append(text)
-    return normalized
 
 
 def require_visible_document(user: UserRecord, document: DocumentRecord | None) -> DocumentRecord:

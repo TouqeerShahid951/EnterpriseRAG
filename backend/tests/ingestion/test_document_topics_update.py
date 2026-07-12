@@ -7,13 +7,16 @@ from fastapi import Request
 
 from rag.api.routes import document_routes
 from rag.core.config import settings
+from rag.documents.adapters.metadata_index import QdrantDocumentMetadataIndex
 from rag.documents.adapters.memory import InMemoryDocumentRepository
+from rag.documents.metadata_service import DocumentMetadataService
 from rag.auth.identity_models import UserRecord
 from rag.schemas.docs import DocumentTopicsUpdateRequest
 
 
 class FakeQdrant:
     def __init__(self) -> None:
+        self.collection = settings.qdrant_collection
         self.topic_updates: list[tuple[str, list[str], list[str]]] = []
 
     def set_document_topics(self, doc_id: str, *, topics: list[str], llm_topics: list[str]) -> None:
@@ -33,8 +36,10 @@ def test_update_document_topics_persists_curated_topics_and_syncs_qdrant() -> No
             DocumentTopicsUpdateRequest(topics=["OCR", "ocr", "Handwriting"], llm_topics=["LLM Topic"]),
             _csrf_request(),
             user=user,
-            repo=repo,
-            qdrant=qdrant,  # type: ignore[arg-type]
+            service=DocumentMetadataService(
+                document_repo=repo,
+                index=QdrantDocumentMetadataIndex(qdrant),  # type: ignore[arg-type]
+            ),
         )
     )
 
