@@ -19,7 +19,8 @@ from rag.auth.identity_models import UserRecord
 from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
 from rag.ingestion.configuration import IngestConfigRecord
 from rag.schemas.ingest_jobs import GraphRAGCancelRequest
-from rag.services.graphrag_queue import GraphRAGDocumentIndexMessage, InMemoryGraphRAGMaintenanceQueue
+from rag.graphrag.adapters.maintenance_queue import InMemoryGraphRAGMaintenanceQueue
+from rag.graphrag.maintenance_queue import GraphRAGDocumentIndexMessage
 from rag.ingestion.worker_control import WorkerActiveTask, WorkerCapacity, WorkerControlResult
 
 

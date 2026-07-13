@@ -15,6 +15,10 @@ BACKEND_PYTHON_ROOTS = (
     BACKEND_ROOT / "src",
     BACKEND_ROOT / "tests",
 )
+NON_RAG_PYTHON_ROOTS = (
+    BACKEND_ROOT / "apps",
+    BACKEND_ROOT / "tests",
+)
 HTTP_ROUTE_METHODS = frozenset(
     {"delete", "get", "head", "options", "patch", "post", "put", "trace"}
 )
@@ -27,6 +31,11 @@ LEGACY_FEATURE_ROUTE_MODULES = frozenset(
 LEGACY_FEATURE_ROUTE_FILES = (
     RAG_ROOT / "api" / "routes" / "document_routes.py",
     RAG_ROOT / "api" / "routes" / "ingest_job_routes.py",
+)
+LEGACY_GRAPHRAG_QUEUE_MODULE = "rag.services.graphrag_queue"
+LEGACY_GRAPHRAG_QUEUE_PATHS = (
+    RAG_ROOT / "services" / "graphrag_queue.py",
+    RAG_ROOT / "services" / "graphrag_queue",
 )
 EXPECTED_FEATURE_HTTP_HANDLER_OWNERS = {
     "list_documents": "rag.documents.routes",
@@ -106,6 +115,49 @@ def test_legacy_feature_route_modules_are_absent_and_not_imported() -> None:
     _assert_no_violations(violations)
 
 
+def test_legacy_graphrag_queue_module_is_absent_and_not_imported() -> None:
+    assert not any(path.exists() for path in LEGACY_GRAPHRAG_QUEUE_PATHS)
+
+    violations = _find_violations(
+        RAG_ROOT.rglob("*.py"),
+        _is_legacy_graphrag_queue_module,
+        resolve_relative_imports=True,
+    )
+    violations.extend(
+        _find_violations(
+            _python_files(NON_RAG_PYTHON_ROOTS),
+            _is_legacy_graphrag_queue_module,
+        )
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_relative_import_resolution_distinguishes_the_legacy_queue() -> None:
+    legacy_import = ast.parse(
+        "from ..services.graphrag_queue import GraphRAGMaintenanceQueue"
+    ).body[0]
+    unrelated_import = ast.parse(
+        "from .services.graphrag_queue import GraphRAGMaintenanceQueue"
+    ).body[0]
+    assert isinstance(legacy_import, ast.ImportFrom)
+    assert isinstance(unrelated_import, ast.ImportFrom)
+    source_paths = (
+        RAG_ROOT / "documents" / "dependencies.py",
+        RAG_ROOT / "documents" / "__init__.py",
+    )
+
+    for source_path in source_paths:
+        assert LEGACY_GRAPHRAG_QUEUE_MODULE in _resolved_rag_import_targets(
+            source_path,
+            legacy_import,
+        )
+        assert LEGACY_GRAPHRAG_QUEUE_MODULE not in _resolved_rag_import_targets(
+            source_path,
+            unrelated_import,
+        )
+
+
 def test_deployment_controller_uses_backend_composition_root() -> None:
     assert (
         BACKEND_ROOT / "apps" / "deployment_controller" / "main.py"
@@ -116,6 +168,8 @@ def test_deployment_controller_uses_backend_composition_root() -> None:
 def _find_violations(
     paths: Iterable[Path],
     is_forbidden: Callable[[str], bool],
+    *,
+    resolve_relative_imports: bool = False,
 ) -> list[str]:
     violations: list[str] = []
     for path in sorted(paths):
@@ -124,7 +178,12 @@ def _find_violations(
         for node in ast.walk(tree):
             if not isinstance(node, (ast.Import, ast.ImportFrom)):
                 continue
-            if any(is_forbidden(target) for target in _import_targets(node)):
+            targets = (
+                _resolved_rag_import_targets(path, node)
+                if resolve_relative_imports
+                else _import_targets(node)
+            )
+            if any(is_forbidden(target) for target in targets):
                 statement = ast.get_source_segment(source, node) or "<unknown import>"
                 statement = " ".join(statement.split())
                 relative_path = path.relative_to(BACKEND_ROOT)
@@ -168,6 +227,38 @@ def _import_targets(node: ast.Import | ast.ImportFrom) -> tuple[str, ...]:
         if alias.name != "*"
     )
     return tuple(targets)
+
+
+def _resolved_rag_import_targets(
+    path: Path,
+    node: ast.Import | ast.ImportFrom,
+) -> tuple[str, ...]:
+    if isinstance(node, ast.Import) or node.level == 0:
+        return _import_targets(node)
+
+    package_parts = _module_name(path).split(".")
+    package_parts.pop()
+    parent_count = node.level - 1
+    if parent_count > len(package_parts):
+        return _import_targets(node)
+    if parent_count:
+        package_parts = package_parts[:-parent_count]
+    if node.module:
+        package_parts.extend(node.module.split("."))
+    module = ".".join(package_parts)
+    targets = [module] if module else []
+    targets.extend(
+        f"{module}.{alias.name}" if module else alias.name
+        for alias in node.names
+        if alias.name != "*"
+    )
+    return tuple(targets)
+
+
+def _is_legacy_graphrag_queue_module(target: str) -> bool:
+    return target == LEGACY_GRAPHRAG_QUEUE_MODULE or target.startswith(
+        f"{LEGACY_GRAPHRAG_QUEUE_MODULE}."
+    )
 
 
 def _is_route_module(path: Path) -> bool:

@@ -33,10 +33,8 @@ from ..schemas.ingest_jobs import (
     GraphRAGStatusResponse,
     GraphRAGWorkerState,
 )
-from ..services.graphrag_queue import (
-    GraphRAGMaintenanceQueue,
-    get_graphrag_maintenance_queue,
-)
+from .maintenance_queue import GraphRAGMaintenanceQueue
+from .maintenance_queue_dependencies import get_graphrag_maintenance_queue
 from .monitoring import (
     GraphRAGQueueMonitor,
     active_task_record,

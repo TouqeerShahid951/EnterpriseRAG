@@ -32,7 +32,7 @@ from rag.graphrag.document_enrichment_service import (
 from rag.ingestion.contracts import IngestJobPayload
 from rag.query.http import ServiceRequestError
 from rag.schemas.docs import DocumentClearanceUpdateRequest, DocumentTopicsUpdateRequest
-from rag.services.graphrag_queue import (
+from rag.graphrag.maintenance_queue import (
     GraphRAGDocumentIndexMessage,
     GraphRAGPartitionRebuildMessage,
 )

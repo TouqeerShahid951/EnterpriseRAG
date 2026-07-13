@@ -7,7 +7,7 @@ from ...graphrag.cleanup import (
     GraphRAGDeletionService,
     partition_key_for_document,
 )
-from ...services.graphrag_queue import (
+from ...graphrag.maintenance_queue import (
     GraphRAGDocumentIndexMessage,
     GraphRAGMaintenanceQueue,
 )

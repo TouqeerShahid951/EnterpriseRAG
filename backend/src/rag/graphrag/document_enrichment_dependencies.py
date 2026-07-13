@@ -12,14 +12,12 @@ from ..ingestion.configuration_dependencies import (
 )
 from ..ingestion.job_dependencies import get_ingest_job_repository
 from ..ingestion.job_models import IngestJobRepository
-from ..services.graphrag_queue import (
-    GraphRAGMaintenanceQueue,
-    get_graphrag_maintenance_queue,
-)
 from .adapters.document_enrichment_queue import (
     GraphRAGDocumentEnrichmentQueue,
 )
 from .document_enrichment_service import DocumentGraphEnrichmentService
+from .maintenance_queue import GraphRAGMaintenanceQueue
+from .maintenance_queue_dependencies import get_graphrag_maintenance_queue
 
 
 def get_document_graph_enrichment_service(

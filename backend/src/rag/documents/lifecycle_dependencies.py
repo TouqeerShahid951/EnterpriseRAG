@@ -6,16 +6,16 @@ from fastapi import Depends
 
 from ..core.config import settings
 from ..graphrag.cleanup import deletion_service_from_settings
+from ..graphrag.maintenance_queue import GraphRAGMaintenanceQueue
+from ..graphrag.maintenance_queue_dependencies import (
+    get_graphrag_maintenance_queue,
+)
 from ..ingestion.job_dependencies import get_ingest_job_repository
 from ..ingestion.job_models import IngestJobRepository
 from ..ingestion.queue import IngestQueue, get_ingest_queue
 from ..query.qdrant import QdrantClient
 from ..services.document_image_asset_storage import (
     get_document_image_asset_storage,
-)
-from ..services.graphrag_queue import (
-    GraphRAGMaintenanceQueue,
-    get_graphrag_maintenance_queue,
 )
 from .adapters.access_scope_graph import GraphRAGDocumentStore
 from .adapters.lifecycle import (

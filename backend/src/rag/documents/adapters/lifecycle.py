@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from ...query.http import ServiceRequestError
-from ...query.qdrant import QdrantClient
-from ...services.graphrag_queue import (
+from ...graphrag.maintenance_queue import (
     GraphRAGMaintenanceQueue,
     GraphRAGPartitionRebuildMessage,
 )
+from ...query.http import ServiceRequestError
+from ...query.qdrant import QdrantClient
 from ..lifecycle_ports import DocumentVectorIndexError
 
 

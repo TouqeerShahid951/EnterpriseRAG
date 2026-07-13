@@ -1,6 +1,6 @@
 """GraphRAG maintenance-queue adapter for document enrichment."""
 
-from ...services.graphrag_queue import (
+from ..maintenance_queue import (
     GraphRAGDocumentIndexMessage,
     GraphRAGMaintenanceQueue,
 )

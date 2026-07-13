@@ -8,6 +8,10 @@ from ..auth.identity_models import IdentityRepository
 from ..auth.identity_repository import get_identity_repository
 from ..core.config import settings
 from ..graphrag.cleanup import deletion_service_from_settings
+from ..graphrag.maintenance_queue import GraphRAGMaintenanceQueue
+from ..graphrag.maintenance_queue_dependencies import (
+    get_graphrag_maintenance_queue,
+)
 from ..ingestion.configuration import IngestConfigRepository
 from ..ingestion.configuration_dependencies import (
     effective_ingest_config,
@@ -16,10 +20,6 @@ from ..ingestion.configuration_dependencies import (
 from ..ingestion.job_dependencies import get_ingest_job_repository
 from ..ingestion.job_models import IngestJobRepository
 from ..query.qdrant import QdrantClient
-from ..services.graphrag_queue import (
-    GraphRAGMaintenanceQueue,
-    get_graphrag_maintenance_queue,
-)
 from .access_scope_ports import (
     DocumentAccessScopeIndex,
     DocumentGraphIndexQueue,
