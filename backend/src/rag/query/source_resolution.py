@@ -1,97 +1,66 @@
-"""Query source discovery and routing decisions."""
+"""Query-source decision orchestration and compatibility exports."""
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-import re
 from typing import Literal
 
-from ..auth.context import UserContext
-from ..connectors.models import ConnectorSchemaCatalogRecord
-from ..connectors.repositories import ConnectorProfileRepository, get_connector_profile_repository
-from ..connectors.schema_catalog import column_allowed, schema_catalog_visible_group_path, table_allowed
-from ..documents.models import DocumentRecord, DocumentRepository
+from ..connectors.repositories import ConnectorProfileRepository
+from ..documents.models import DocumentRepository
 from ..ingestion.folders.models import FolderScheduleRepository
-from .schemas import QuerySource
-from ..shared.contracts.clearance import can_access_clearance, clearance_rank
+from .source_advisory import (
+    _advisory_llm_source_router as _advisory_llm_source_router,
+    _float as _float,
+    _source_router_prompt as _source_router_prompt,
+    _valid_router_catalog_id as _valid_router_catalog_id,
+)
+from .source_catalog import (
+    QuerySourceAccessError as QuerySourceAccessError,
+    QuerySourceTargetKind as QuerySourceTargetKind,
+    VisibleDocumentSource as VisibleDocumentSource,
+    VisibleQuerySource as VisibleQuerySource,
+    _SOURCE_PREFIXES as _SOURCE_PREFIXES,
+    _SUPPORTED_SQL_CONNECTOR_TYPES as _SUPPORTED_SQL_CONNECTOR_TYPES,
+    _catalog_match_text as _catalog_match_text,
+    _catalog_name as _catalog_name,
+    _catalog_visible as _catalog_visible,
+    _current_schema_catalogs as _current_schema_catalogs,
+    _document_match_text as _document_match_text,
+    _document_visible as _document_visible,
+    _optional_str as _optional_str,
+    _source_from_catalog as _source_from_catalog,
+    list_visible_document_sources as list_visible_document_sources,
+    list_visible_query_sources as list_visible_query_sources,
+    parse_query_source_id as parse_query_source_id,
+    public_query_source as public_query_source,
+    query_source_id_for_catalog as query_source_id_for_catalog,
+    validate_query_source_access as validate_query_source_access,
+)
+from .source_matching import (
+    PreferredSource as PreferredSource,
+    _CORPUS_DIRECTIVE_RE as _CORPUS_DIRECTIVE_RE,
+    _CORPUS_TERMS as _CORPUS_TERMS,
+    _DB_DIRECTIVE_RE as _DB_DIRECTIVE_RE,
+    _STRUCTURED_TERMS as _STRUCTURED_TERMS,
+    _SourcePreference as _SourcePreference,
+    _best_scored_source as _best_scored_source,
+    _compact_query as _compact_query,
+    _conversation_source_bias as _conversation_source_bias,
+    _deterministic_preference as _deterministic_preference,
+    _document_match_score as _document_match_score,
+    _inline_named_source as _inline_named_source,
+    _looks_like_followup as _looks_like_followup,
+    _normalize as _normalize,
+    _source_match_score as _source_match_score,
+    _strip_named_source as _strip_named_source,
+    _strip_source_directive as _strip_source_directive,
+    _structured_score as _structured_score,
+    _term_score as _term_score,
+    _tokens as _tokens,
+)
 from .state import QueryContext, scoped_user_context
 
-QuerySourceTargetKind = Literal["catalog"]
 ResolvedSourceMode = Literal["corpus_only", "db_only", "db_first", "corpus_first", "hybrid"]
-PreferredSource = Literal["database", "corpus", "balanced"]
-
-_SOURCE_PREFIXES = {
-    "catalog": "connector_catalog:",
-}
-_SUPPORTED_SQL_CONNECTOR_TYPES = {"postgres", "sql_server", "fake"}
-_DB_DIRECTIVE_RE = re.compile(
-    r"\b(?:in|from|using|use|query|search)\s+(?:the\s+)?(?:live\s+)?(?:db|database)\b",
-    flags=re.IGNORECASE,
-)
-_CORPUS_DIRECTIVE_RE = re.compile(
-    r"\b(?:in|from|using|use|search)\s+(?:the\s+)?(?:docs?|documents?|corpus|knowledge\s+space|uploaded\s+docs?)\b",
-    flags=re.IGNORECASE,
-)
-_STRUCTURED_TERMS = {
-    "average",
-    "count",
-    "counts",
-    "current",
-    "filter",
-    "group",
-    "latest",
-    "list",
-    "maximum",
-    "minimum",
-    "oldest",
-    "records",
-    "rows",
-    "show",
-    "sort",
-    "sum",
-    "total",
-    "totals",
-}
-_CORPUS_TERMS = {
-    "according",
-    "clause",
-    "contract",
-    "define",
-    "describe",
-    "document",
-    "documents",
-    "explain",
-    "manual",
-    "page",
-    "policy",
-    "procedure",
-    "summarize",
-    "summary",
-}
-
-
-@dataclass(frozen=True)
-class VisibleQuerySource:
-    id: str
-    target_kind: QuerySourceTargetKind
-    target_id: str
-    name: str
-    description: str | None
-    connector_type: str
-    scope: Literal["database_scope"]
-    group_path: str
-    clearance_level: str
-    match_text: str
-
-
-@dataclass(frozen=True)
-class VisibleDocumentSource:
-    id: str
-    title: str
-    group_path: str
-    clearance_level: str
-    match_text: str
 
 
 @dataclass(frozen=True)
@@ -115,116 +84,6 @@ class SourceDecision:
     routing_confidence: float = 0.0
     router_mode: str = "deterministic"
     signal_reason: str = ""
-
-
-@dataclass(frozen=True)
-class _SourcePreference:
-    preferred_source: PreferredSource
-    confidence: float
-    reason: str
-    preferred_catalog_id: str | None = None
-    router_mode: str = "deterministic"
-
-
-class QuerySourceAccessError(ValueError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-
-
-def query_source_id_for_catalog(catalog_id: str) -> str:
-    return f"{_SOURCE_PREFIXES['catalog']}{catalog_id}"
-
-
-def parse_query_source_id(source_id: str | None) -> tuple[QuerySourceTargetKind, str] | None:
-    if not source_id:
-        return None
-    for kind, prefix in _SOURCE_PREFIXES.items():
-        if source_id.startswith(prefix):
-            record_id = source_id.removeprefix(prefix).strip()
-            if record_id:
-                return kind, record_id  # type: ignore[return-value]
-    raise QuerySourceAccessError("invalid_query_source", "Query source identifier is invalid.")
-
-
-def list_visible_query_sources(
-    user: UserContext,
-    *,
-    schedule_repo: FolderScheduleRepository | None = None,
-    connector_profile_repo: ConnectorProfileRepository | None = None,
-) -> list[VisibleQuerySource]:
-    _ = schedule_repo
-    connector_profile_repo = connector_profile_repo or get_connector_profile_repository()
-    sources: list[VisibleQuerySource] = []
-    profile_cache = {profile.id: profile for profile in connector_profile_repo.list_profiles()}
-    for catalog in _current_schema_catalogs(connector_profile_repo.list_schema_catalogs()):
-        if not _catalog_visible(catalog, user):
-            continue
-        profile = profile_cache.get(catalog.profile_id)
-        profile_name = profile.name if profile is not None else ""
-        sources.append(_source_from_catalog(catalog, profile_name=profile_name, user=user))
-    return sorted(sources, key=lambda item: (item.scope, item.name.lower(), item.id))
-
-
-def list_visible_document_sources(
-    user: UserContext,
-    *,
-    document_repo: DocumentRepository | None = None,
-) -> list[VisibleDocumentSource]:
-    if document_repo is None:
-        return []
-    documents: list[VisibleDocumentSource] = []
-    for document in document_repo.list_documents(state="active"):
-        if not _document_visible(document, user):
-            continue
-        documents.append(
-            VisibleDocumentSource(
-                id=document.id,
-                title=document.title or document.source_id,
-                group_path=document.group_path,
-                clearance_level=document.clearance_level,
-                match_text=_document_match_text(document),
-            )
-        )
-    return documents
-
-
-def public_query_source(source: VisibleQuerySource) -> QuerySource:
-    return QuerySource(
-        id=source.id,
-        kind="connector_schema_catalog",
-        name=source.name,
-        description=source.description,
-        connector_type=source.connector_type,
-        scope=source.scope,
-        group_path=source.group_path,
-        clearance_level=source.clearance_level,  # type: ignore[arg-type]
-    )
-
-
-def validate_query_source_access(
-    *,
-    source_id: str | None,
-    user: UserContext,
-    schedule_repo: FolderScheduleRepository | None = None,
-    connector_profile_repo: ConnectorProfileRepository | None = None,
-) -> VisibleQuerySource | None:
-    parsed = parse_query_source_id(source_id)
-    if parsed is None:
-        return None
-    visible = {
-        (source.target_kind, source.target_id): source
-        for source in list_visible_query_sources(
-            user,
-            schedule_repo=schedule_repo,
-            connector_profile_repo=connector_profile_repo,
-        )
-    }
-    source = visible.get(parsed)
-    if source is None:
-        raise QuerySourceAccessError("query_source_forbidden", "Query source is not available to this user.")
-    return source
 
 
 def resolve_query_source(
@@ -493,373 +352,3 @@ def _decision(
         router_mode=router_mode,
         signal_reason=signal_reason,
     )
-
-
-def _catalog_visible(catalog: ConnectorSchemaCatalogRecord, user: UserContext) -> bool:
-    if catalog.status != "approved":
-        return False
-    if str(catalog.connector_type) not in _SUPPORTED_SQL_CONNECTOR_TYPES:
-        return False
-    if schema_catalog_visible_group_path(catalog.group_path, catalog.catalog_json, user.group_paths) is None:
-        return False
-    return clearance_rank(catalog.clearance_level) <= clearance_rank(user.clearance_level)
-
-
-def _document_visible(document: DocumentRecord, user: UserContext) -> bool:
-    if not document.is_current:
-        return False
-    if not can_access_clearance(user.clearance_level, document.clearance_level):
-        return False
-    visible_groups = set(user.group_paths)
-    return bool(visible_groups & set(document.access_group_paths))
-
-
-def _source_from_catalog(catalog: ConnectorSchemaCatalogRecord, *, profile_name: str, user: UserContext) -> VisibleQuerySource:
-    name = _catalog_name(catalog, profile_name=profile_name)
-    group_path = schema_catalog_visible_group_path(catalog.group_path, catalog.catalog_json, user.group_paths) or catalog.group_path
-    match_text = " ".join(
-        item
-        for item in (
-            name,
-            profile_name,
-            _catalog_match_text(catalog.catalog_json),
-        )
-        if item
-    )
-    return VisibleQuerySource(
-        id=query_source_id_for_catalog(catalog.id),
-        target_kind="catalog",
-        target_id=catalog.id,
-        name=name,
-        description=_optional_str(catalog.catalog_json.get("description")),
-        connector_type=str(catalog.connector_type),
-        scope="database_scope",
-        group_path=group_path,
-        clearance_level=catalog.clearance_level,
-        match_text=match_text,
-    )
-
-
-def _current_schema_catalogs(catalogs: list[ConnectorSchemaCatalogRecord]) -> list[ConnectorSchemaCatalogRecord]:
-    by_profile: dict[str, ConnectorSchemaCatalogRecord] = {}
-    for catalog in catalogs:
-        if catalog.profile_id not in by_profile:
-            by_profile[catalog.profile_id] = catalog
-    return list(by_profile.values())
-
-
-def _catalog_name(catalog: ConnectorSchemaCatalogRecord, *, profile_name: str) -> str:
-    name = catalog.catalog_json.get("name")
-    if isinstance(name, str) and name.strip():
-        return name.strip()
-    return f"{profile_name or catalog.connector_type} approved database scope"
-
-
-def _catalog_match_text(catalog_json: dict[str, object]) -> str:
-    parts: list[str] = []
-    for table in catalog_json.get("tables") or []:
-        if not isinstance(table, dict) or not table_allowed(table):
-            continue
-        parts.extend(str(table.get(field) or "") for field in ("key", "schema", "name", "description"))
-        parts.extend(str(item) for item in table.get("synonyms") or [])
-        for column in table.get("columns") or []:
-            if not isinstance(column, dict) or not column_allowed(column):
-                continue
-            parts.extend(str(column.get(field) or "") for field in ("name", "data_type", "description"))
-            parts.extend(str(item) for item in column.get("synonyms") or [])
-    return " ".join(part for part in parts if part)
-
-
-def _document_match_text(document: DocumentRecord) -> str:
-    parts: list[str] = [
-        document.title or "",
-        document.source_id,
-        document.doc_type or "",
-        document.auto_doc_type or "",
-        document.description or "",
-        document.summary or "",
-        document.language or "",
-    ]
-    parts.extend(document.topics)
-    parts.extend(document.llm_topics)
-    if document.effective_date is not None:
-        parts.append(document.effective_date.isoformat())
-    if document.expiry_date is not None:
-        parts.append(document.expiry_date.isoformat())
-    for value in document.extracted_dates.values():
-        parts.append(str(value))
-    return " ".join(part for part in parts if part)
-
-
-def _strip_source_directive(query: str) -> tuple[str, str | None]:
-    if _DB_DIRECTIVE_RE.search(query):
-        return _compact_query(_DB_DIRECTIVE_RE.sub(" ", query)), "db"
-    if _CORPUS_DIRECTIVE_RE.search(query):
-        return _compact_query(_CORPUS_DIRECTIVE_RE.sub(" ", query)), "corpus"
-    return query.strip(), None
-
-
-def _inline_named_source(query: str, sources: list[VisibleQuerySource]) -> VisibleQuerySource | None:
-    normalized = _normalize(query)
-    for source in sources:
-        name = _normalize(source.name)
-        if len(name) < 4:
-            continue
-        if f"use {name}" in normalized or f"using {name}" in normalized or f"from {name}" in normalized:
-            return source
-    return None
-
-
-def _strip_named_source(query: str, source: VisibleQuerySource) -> str:
-    name = re.escape(source.name)
-    stripped = re.sub(rf"\b(?:use|using|from)\s+{name}\b", " ", query, flags=re.IGNORECASE)
-    return _compact_query(stripped)
-
-
-def _term_score(query: str, terms: set[str]) -> int:
-    tokens = set(_tokens(query))
-    return len(tokens & terms)
-
-
-def _structured_score(query: str) -> int:
-    tokens = set(_tokens(query))
-    score = _term_score(query, _STRUCTURED_TERMS)
-    lowered = f" {query.lower()} "
-    if " by " in lowered and {"count", "sum", "total", "average"} & tokens:
-        score += 1
-    if re.search(r"\btop\s+\d+\b", query, flags=re.IGNORECASE):
-        score += 1
-    return score
-
-
-def _source_match_score(query: str, source: VisibleQuerySource) -> int:
-    query_tokens = set(_tokens(query))
-    source_tokens = set(_tokens(source.match_text))
-    return len(query_tokens & source_tokens)
-
-
-def _document_match_score(query: str, document: VisibleDocumentSource) -> int:
-    query_tokens = set(_tokens(query))
-    document_tokens = set(_tokens(document.match_text))
-    return len(query_tokens & document_tokens)
-
-
-def _best_scored_source(scored: list[tuple[VisibleQuerySource, int]]) -> VisibleQuerySource | None:
-    if not scored:
-        return None
-    source, score = max(scored, key=lambda item: item[1])
-    return source if score > 0 else None
-
-
-def _deterministic_preference(
-    *,
-    structured_score: int,
-    corpus_score: int,
-    source_match_score: int,
-    document_match_score: int,
-    db_bias: int,
-    corpus_bias: int,
-) -> _SourcePreference:
-    db_score = source_match_score + (structured_score * 2) + db_bias
-    doc_score = document_match_score + (corpus_score * 2) + corpus_bias
-    margin = db_score - doc_score
-    if margin >= 2:
-        preferred: PreferredSource = "database"
-    elif margin <= -2:
-        preferred = "corpus"
-    else:
-        preferred = "balanced"
-    total = max(1, db_score + doc_score)
-    confidence = 0.5 + min(0.45, abs(margin) / max(4, total))
-    reason = f"db_score={db_score},doc_score={doc_score},margin={margin}"
-    return _SourcePreference(preferred, confidence, reason)
-
-
-def _conversation_source_bias(turns: list[dict[str, object]]) -> tuple[int, int]:
-    db_bias = 0
-    corpus_bias = 0
-    for turn in turns[-3:]:
-        mode = str(turn.get("source_mode") or "")
-        preferred = str(turn.get("preferred_source") or "")
-        if mode in {"db_only", "db_first"} or preferred == "database":
-            db_bias += 2
-        elif mode == "corpus_only" or preferred == "corpus":
-            corpus_bias += 2
-        elif mode == "hybrid" or preferred == "balanced":
-            db_bias += 1
-            corpus_bias += 1
-        for source in turn.get("sources") or []:
-            if not isinstance(source, dict):
-                continue
-            doc_id = str(source.get("doc_id") or "")
-            if doc_id.startswith("connector-live-scope:"):
-                db_bias += 1
-            elif doc_id:
-                corpus_bias += 1
-    return db_bias, corpus_bias
-
-
-def _looks_like_followup(query: str) -> bool:
-    normalized = _normalize(query)
-    tokens = normalized.split()
-    if len(tokens) <= 4 and tokens:
-        return True
-    return any(
-        phrase in f" {normalized} "
-        for phrase in (
-            " what about ",
-            " and ",
-            " those ",
-            " them ",
-            " it ",
-            " same ",
-            " also ",
-        )
-    )
-
-
-def _advisory_llm_source_router(
-    *,
-    query: str,
-    user: UserContext,
-    sources: list[VisibleQuerySource],
-    documents: list[VisibleDocumentSource],
-    session_turns: list[dict[str, object]],
-    config: object | None,
-    llm: object | None,
-    routing_model: str | None,
-    deterministic: _SourcePreference,
-) -> _SourcePreference | None:
-    if not bool(getattr(config, "rag_source_router_llm_enabled", False)):
-        return None
-    if llm is None or not sources or not documents:
-        return None
-    if deterministic.preferred_source != "balanced" and deterministic.confidence >= 0.70:
-        return None
-    generator = getattr(llm, "generate_json", None)
-    if generator is None:
-        return None
-    try:
-        raw = generator(
-            prompt=_source_router_prompt(
-                query=query,
-                user=user,
-                sources=sources,
-                documents=documents,
-                session_turns=session_turns,
-                deterministic=deterministic,
-            ),
-            model=routing_model,
-            system="You choose source priority for a retrieval system without excluding available sources.",
-            max_tokens=512,
-        )
-        payload = json.loads(str(raw))
-    except Exception:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    confidence = _float(payload.get("confidence"))
-    threshold = float(getattr(config, "rag_source_router_llm_min_confidence", 0.60) or 0.60)
-    if confidence < threshold:
-        return None
-    preferred = str(payload.get("preferred_source") or "").strip().lower()
-    if preferred not in {"database", "corpus", "balanced"}:
-        return None
-    catalog_id = _valid_router_catalog_id(payload.get("preferred_catalog_id"), sources)
-    reason = _compact_query(str(payload.get("reason") or "llm_source_router"))[:240]
-    return _SourcePreference(
-        preferred,  # type: ignore[arg-type]
-        confidence,
-        reason,
-        preferred_catalog_id=catalog_id,
-        router_mode="llm",
-    )
-
-
-def _source_router_prompt(
-    *,
-    query: str,
-    user: UserContext,
-    sources: list[VisibleQuerySource],
-    documents: list[VisibleDocumentSource],
-    session_turns: list[dict[str, object]],
-    deterministic: _SourcePreference,
-) -> str:
-    payload = {
-        "query": query,
-        "workspace_group_paths": list(user.group_paths),
-        "deterministic_preference": {
-            "preferred_source": deterministic.preferred_source,
-            "confidence": deterministic.confidence,
-            "reason": deterministic.reason,
-        },
-        "visible_database_catalogs": [
-            {
-                "id": source.target_id,
-                "name": source.name,
-                "description": source.description,
-                "connector_type": source.connector_type,
-                "summary": _compact_query(source.match_text)[:900],
-            }
-            for source in sources[:6]
-        ],
-        "visible_documents": [
-            {
-                "id": document.id,
-                "title": document.title,
-                "summary": _compact_query(document.match_text)[:700],
-            }
-            for document in documents[:8]
-        ],
-        "recent_turns": [
-            {
-                "query": str(turn.get("query") or "")[:240],
-                "answer": str(turn.get("answer") or "")[:300],
-                "source_mode": turn.get("source_mode"),
-                "preferred_source": turn.get("preferred_source"),
-            }
-            for turn in session_turns[-3:]
-        ],
-    }
-    return (
-        "Choose which source should be prioritized for this Auto query. "
-        "Do not exclude sources; Auto will still search both database and documents. "
-        "Return only JSON with keys preferred_source, preferred_catalog_id, confidence, and reason. "
-        'preferred_source must be one of "database", "corpus", or "balanced". '
-        "preferred_catalog_id must be one of the visible database catalog ids or null.\n\n"
-        f"{json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)}"
-    )
-
-
-def _valid_router_catalog_id(value: object, sources: list[VisibleQuerySource]) -> str | None:
-    if value is None:
-        return None
-    candidate = str(value).strip()
-    valid_ids = {source.target_id for source in sources}
-    valid_source_ids = {source.id: source.target_id for source in sources}
-    if candidate in valid_ids:
-        return candidate
-    return valid_source_ids.get(candidate)
-
-
-def _float(value: object) -> float:
-    try:
-        return max(0.0, min(1.0, float(value)))
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _tokens(value: str) -> list[str]:
-    return [match.group(0).lower() for match in re.finditer(r"[A-Za-z0-9_]{3,}", value)]
-
-
-def _normalize(value: str) -> str:
-    return " ".join(_tokens(value))
-
-
-def _compact_query(value: str) -> str:
-    return " ".join(value.split()).strip()
-
-
-def _optional_str(value: object) -> str | None:
-    return value if isinstance(value, str) and value.strip() else None
