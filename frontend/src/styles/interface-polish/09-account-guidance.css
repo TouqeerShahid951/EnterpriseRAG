@@ -1,0 +1,17 @@
+.account-password-requirements {
+  border-left: 2px solid color-mix(in srgb, var(--color-primary) 60%, var(--color-surface-border));
+  padding: 0.15rem 0 0.15rem 0.85rem;
+  color: var(--color-secondary);
+  font-size: var(--font-size-ui-body);
+  line-height: 1.45;
+}
+
+.account-password-requirements p:first-child {
+  color: var(--color-on-surface);
+  font-weight: 700;
+}
+
+.account-password-requirements p + p {
+  margin-top: 0.2rem;
+}
+

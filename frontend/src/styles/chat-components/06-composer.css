@@ -1,0 +1,249 @@
+.rag-composer-shell {
+  border-top: 1px solid var(--color-surface-border);
+  background: color-mix(in srgb, var(--color-surface-card) 96%, transparent);
+  padding: 0.6rem 1rem 0.7rem;
+  box-shadow: 0 -1rem 2.5rem -2.35rem color-mix(in srgb, black 70%, transparent);
+}
+
+.rag-composer-inner {
+  width: min(100%, var(--rag-chat-canvas-width));
+  margin-inline: auto;
+}
+
+.rag-chat-body-with-evidence .rag-composer-inner {
+  margin-inline: auto;
+}
+
+@media (min-width: 2200px) {
+  .rag-composer-shell {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (min-width: 3200px) {
+  .rag-composer-shell {
+    padding-inline: 2rem;
+  }
+}
+
+@media (min-width: 5120px) {
+  .rag-composer-shell {
+    padding-inline: 2.5rem;
+  }
+
+  .rag-composer-input {
+    min-height: 46px;
+    font-size: 0.875rem;
+  }
+}
+
+.rag-composer-input {
+  min-height: 40px;
+  max-height: 8rem;
+  width: 100%;
+  resize: none;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  padding: 0.6rem 0.8rem;
+  color: var(--color-on-surface);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.rag-composer-input-with-upload {
+  padding-right: 6.4rem;
+}
+
+.rag-composer-input-with-send {
+  padding-right: 3.5rem;
+}
+
+.rag-composer-input:focus {
+  outline: none;
+}
+
+.rag-composer-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.45rem;
+}
+
+.rag-composer-source-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.rag-composer-source-segments {
+  display: inline-flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.rag-composer-source-segments button {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface-container-low) 88%, transparent);
+  padding: 0 0.65rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.rag-composer-source-segments button:hover,
+.rag-composer-source-segments button:focus-visible,
+.rag-composer-source-segments button.is-active {
+  border-color: color-mix(in srgb, var(--color-primary) 38%, transparent);
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+}
+
+.rag-composer-source-select select {
+  min-height: 2rem;
+  max-width: min(100%, 18rem);
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0 0.65rem;
+  color: var(--color-on-surface);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.rag-composer-scope-label {
+  color: var(--color-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.rag-composer-box {
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface-container-low) 88%, transparent);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.rag-composer-box:focus-within {
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-surface-container-high) 72%, transparent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.rag-scope-chip {
+  display: inline-flex;
+  min-height: 1.55rem;
+  max-width: min(100%, 22rem);
+  align-items: center;
+  gap: 0.375rem;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  border-radius: 999px;
+  background: var(--color-primary-container);
+  padding: 0 0.3rem 0 0.5rem;
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.rag-scope-chip > svg {
+  flex: 0 0 auto;
+}
+
+.rag-scope-chip button {
+  display: inline-flex;
+  width: 1.375rem;
+  height: 1.375rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--color-primary);
+  position: relative;
+}
+
+.rag-scope-chip button::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.rag-scope-chip button:hover {
+  background: var(--color-surface-tint);
+}
+
+.rag-composer-icon-action {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface-container-low) 90%, transparent);
+  color: var(--color-on-surface-variant);
+}
+
+.rag-composer-icon-action:hover,
+.rag-composer-icon-action:focus-visible {
+  border-color: color-mix(in srgb, var(--color-primary) 38%, transparent);
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+}
+
+.rag-composer-icon-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.rag-composer-send-action {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+}
+
+.rag-composer-stop-action {
+  background: var(--color-error-red);
+  color: var(--color-on-primary);
+}
+
+.rag-composer-stop-action:hover,
+.rag-composer-stop-action:focus-visible {
+  background: color-mix(in srgb, var(--color-error-red) 86%, black);
+}
+
+.rag-source-expansion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--color-warning-amber) 28%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-warning-amber) 10%, var(--color-surface-container-low));
+  padding: 0.7rem 0.85rem;
+  color: var(--color-on-surface);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.rag-source-expansion > svg {
+  flex: 0 0 auto;
+  color: var(--color-warning-amber);
+}
+

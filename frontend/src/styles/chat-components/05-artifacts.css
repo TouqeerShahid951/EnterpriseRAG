@@ -1,0 +1,188 @@
+.rag-artifact-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.rag-artifact-download {
+  display: inline-grid;
+  min-height: 3rem;
+  max-width: min(100%, 27rem);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.625rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface-container-low) 88%, transparent);
+  padding: 0.6rem 0.75rem;
+  color: var(--color-on-surface);
+  text-decoration: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.rag-artifact-download:hover,
+.rag-artifact-download:focus-visible {
+  border-color: color-mix(in srgb, var(--color-primary) 34%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-primary-container) 62%, var(--color-surface-container-low));
+  color: var(--color-on-primary-container);
+  box-shadow: 0 0.75rem 1.5rem -1.35rem color-mix(in srgb, black 50%, transparent);
+}
+
+.rag-artifact-download:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.rag-artifact-download > svg {
+  flex: 0 0 auto;
+  color: var(--color-primary);
+}
+
+.rag-artifact-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.125rem;
+}
+
+.rag-artifact-copy strong,
+.rag-artifact-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-artifact-copy strong {
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.rag-artifact-copy small {
+  color: var(--color-secondary);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.rag-artifact-job-panel {
+  display: grid;
+  gap: 0.7rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface-container-low) 88%, transparent);
+  padding: 0.9rem;
+}
+
+.rag-artifact-job-panel.is-success {
+  border-color: color-mix(in srgb, var(--color-success) 34%, var(--color-surface-border));
+}
+
+.rag-artifact-job-panel.is-warning {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.rag-artifact-job-panel.is-error {
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.rag-artifact-job-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.rag-artifact-job-header h3 {
+  margin: 0.125rem 0;
+  color: var(--color-on-surface);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.rag-artifact-job-header p {
+  margin: 0;
+  color: var(--color-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.rag-artifact-job-progress {
+  height: 0.45rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-surface-container-high);
+}
+
+.rag-artifact-job-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+  transition: width 0.25s ease;
+}
+
+.rag-artifact-job-panel.is-success .rag-artifact-job-progress span {
+  background: var(--color-success);
+}
+
+.rag-artifact-job-panel.is-warning .rag-artifact-job-progress span {
+  background: var(--color-warning-amber);
+}
+
+.rag-artifact-job-panel.is-error .rag-artifact-job-progress span {
+  background: var(--color-error-red);
+}
+
+.rag-artifact-job-message {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.rag-artifact-job-stage-progress {
+  margin: -0.35rem 0 0;
+  color: var(--color-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.rag-artifact-job-message.is-error {
+  color: var(--color-error-red);
+}
+
+.rag-artifact-clarifications {
+  display: grid;
+  gap: 0.625rem;
+}
+
+.rag-artifact-clarifications label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--color-on-surface);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.rag-artifact-clarifications textarea {
+  min-height: 4rem;
+  resize: vertical;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+  padding: 0.65rem 0.75rem;
+  color: var(--color-on-surface);
+  font: inherit;
+  font-weight: 600;
+}
+
+.rag-artifact-clarifications textarea:focus {
+  border-color: var(--color-primary);
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  outline-offset: 1px;
+}
+
+.rag-artifact-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+

@@ -1,0 +1,17 @@
+/* Chat uses a single live signal and faster message acknowledgement. */
+.rag-secondary-action,
+.rag-user-message {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.rag-user-message {
+  animation: message-slide-up var(--motion-standard) var(--ease-out-product);
+}
+
+.rag-live-badge svg,
+.rag-graph-node.is-active,
+.rag-graph-connector.is-active {
+  animation: none;
+}
+

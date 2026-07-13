@@ -1,0 +1,68 @@
+/* Explicit, quiet interaction feedback. */
+:is(
+  .sv-action-primary,
+  .sv-action-secondary,
+  .sv-action-danger,
+  .Prudentia-icon-button,
+  .user-row-action,
+  .knowledge-icon-action,
+  .knowledge-icon-button,
+  .knowledge-inspector-tab,
+  .knowledge-inspector-tab-active,
+  .rag-secondary-action,
+  .rag-source-chip,
+  .rag-artifact-download,
+  .rag-chat-history-item,
+  .rag-eval-tab,
+  .review-tabs button,
+  .source-viewer-original-link,
+  .source-viewer-icon-button
+),
+.workspace-overview-action {
+  transition:
+    background-color var(--motion-fast) var(--ease-out-product),
+    border-color var(--motion-fast) var(--ease-out-product),
+    color var(--motion-fast) var(--ease-out-product),
+    opacity var(--motion-fast) var(--ease-out-product),
+    box-shadow var(--motion-fast) var(--ease-out-product),
+    transform var(--motion-instant) var(--ease-out-product);
+}
+
+:is(
+  .sv-action-primary,
+  .sv-action-secondary,
+  .sv-action-danger,
+  .Prudentia-icon-button,
+  .user-row-action,
+  .knowledge-icon-action,
+  .knowledge-icon-button,
+  .rag-secondary-action,
+  .rag-eval-tab,
+  .review-tabs button,
+  .source-viewer-original-link,
+  .source-viewer-icon-button
+):active:not(:disabled) {
+  transform: translateY(1px) scale(0.985);
+}
+
+:is(button, input, select, textarea):disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.sv-action-primary:disabled {
+  background: color-mix(in srgb, var(--color-primary) 44%, var(--color-surface-container-high));
+  color: color-mix(in srgb, var(--color-on-primary) 66%, transparent);
+}
+
+.sv-action-primary:focus-visible,
+.sv-action-secondary:focus-visible,
+.sv-action-danger:focus-visible,
+.user-row-action:focus-visible,
+.rag-eval-tab:focus-visible,
+.review-tabs button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+

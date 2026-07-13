@@ -1,0 +1,209 @@
+/* Keep filters on one usable line at standard desktop widths. */
+@media (min-width: 1440px) {
+  .ingest-job-filters {
+    grid-template-columns: minmax(16rem, 1.35fr) repeat(5, minmax(8.5rem, 0.8fr));
+  }
+
+  .ingest-job-search {
+    grid-column: auto;
+  }
+
+  .user-row-actions {
+    gap: 0.4rem;
+  }
+
+  .user-row-action,
+  .audit-detail-list .Prudentia-icon-button {
+    width: var(--desktop-control-height);
+    min-width: var(--desktop-control-height);
+    height: var(--desktop-control-height);
+    min-height: var(--desktop-control-height);
+  }
+}
+
+@media (min-width: 1680px) {
+  .Prudentia-shell:not(.Prudentia-shell-sidebar-collapsed) .Prudentia-sidebar {
+    width: max(var(--sidebar-width), 16rem);
+    min-width: max(var(--sidebar-width), 16rem);
+    max-width: max(var(--sidebar-width), 16rem);
+  }
+
+  .Prudentia-shell:not(.Prudentia-shell-sidebar-collapsed) .Prudentia-main {
+    margin-left: max(var(--sidebar-width), 16rem);
+  }
+
+  .Prudentia-sidebar {
+    padding-inline: 1rem;
+  }
+
+  .Prudentia-sidenav-item,
+  .Prudentia-sidenav-item-active {
+    padding-inline: 0.8rem;
+  }
+
+  .sv-page-inner-form {
+    --sv-page-max-width: min(100%, 78rem);
+  }
+}
+
+@media (min-width: 2400px) {
+  .Prudentia-shell:not(.Prudentia-shell-sidebar-collapsed) .Prudentia-sidebar {
+    width: max(var(--sidebar-width), 18rem);
+    min-width: max(var(--sidebar-width), 18rem);
+    max-width: max(var(--sidebar-width), 18rem);
+  }
+
+  .Prudentia-shell:not(.Prudentia-shell-sidebar-collapsed) .Prudentia-main {
+    margin-left: max(var(--sidebar-width), 18rem);
+  }
+
+  .sv-page-inner-form {
+    --sv-page-max-width: min(100%, 88rem);
+  }
+
+  .Prudentia-sidebar {
+    padding-inline: 1.1rem;
+  }
+}
+
+@media (max-width: 1023px) {
+  .upload-guidance {
+    position: static;
+  }
+
+  :is(.connector-overview-grid, .ingestion-health-metrics) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :is(.connector-overview-metric, .ingestion-health-metric) {
+    border-bottom: 1px solid var(--color-surface-border);
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1279px) {
+  .workspace-overview-metrics .sv-metric + .sv-metric {
+    border-left: 0;
+  }
+
+  .workspace-overview-metrics .sv-metric:nth-child(even) {
+    border-left: 1px solid var(--color-surface-border);
+  }
+
+  .workspace-overview-metrics .sv-metric:nth-child(n + 3) {
+    border-top: 1px solid var(--color-surface-border);
+  }
+}
+
+@media (max-width: 767px) {
+  .workspace-overview-metrics .sv-metric + .sv-metric {
+    border-top: 1px solid var(--color-surface-border);
+    border-left: 0;
+  }
+
+  .workspace-overview-action-priority {
+    min-height: 17rem;
+  }
+}
+
+@media (max-width: 760px) {
+  .review-clear-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .review-clear-strip div + div {
+    border-top: 1px solid var(--color-surface-border);
+    border-left: 0;
+  }
+
+  .rag-eval-tabs {
+    scroll-padding-inline: 0.35rem;
+    scroll-snap-type: x proximity;
+  }
+
+  .rag-eval-tab {
+    flex-basis: 9.75rem;
+    scroll-snap-align: start;
+  }
+
+  :is(.connector-overview-grid, .ingestion-health-metrics) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :is(.connector-overview-metric, .ingestion-health-metric) +
+  :is(.connector-overview-metric, .ingestion-health-metric) {
+    border-top: 1px solid var(--color-surface-border);
+    border-left: 0;
+  }
+
+  /* Tables with data-label become readable task cards on phones. */
+  :is(.user-management-table, .ingest-job-table, .audit-table) {
+    display: block;
+    min-width: 0;
+  }
+
+  :is(.user-management-table, .ingest-job-table, .audit-table) thead {
+    display: none;
+  }
+
+  :is(.user-management-table, .ingest-job-table, .audit-table) tbody {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  :is(.user-management-table, .ingest-job-table, .audit-table) .sv-table-row {
+    display: grid;
+    overflow: hidden;
+    border: 1px solid var(--color-surface-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-card);
+  }
+
+  :is(.user-management-table, .ingest-job-table, .audit-table) .sv-table-row > td {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    grid-template-columns: minmax(6.75rem, 0.36fr) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+    border: 0;
+    border-bottom: 1px solid var(--color-surface-border);
+    padding: 0.75rem;
+  }
+
+  :is(.user-management-table, .ingest-job-table, .audit-table) .sv-table-row > td:last-child {
+    border-bottom: 0;
+  }
+
+  :is(.user-management-table, .ingest-job-table, .audit-table) .sv-table-row > td::before {
+    content: attr(data-label);
+    color: var(--color-secondary);
+    font-size: var(--font-size-ui-micro);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+    text-transform: uppercase;
+  }
+
+  .audit-detail-row {
+    display: block;
+    margin-top: -0.75rem;
+  }
+
+  .audit-detail-row > td {
+    display: block;
+    padding: 0 0.75rem 0.75rem;
+  }
+
+  .user-row-actions,
+  .knowledge-row-actions {
+    justify-content: flex-start;
+  }
+
+  .audit-event-button,
+  .knowledge-document-open {
+    max-width: none;
+  }
+}
+

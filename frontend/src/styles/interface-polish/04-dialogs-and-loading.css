@@ -1,0 +1,52 @@
+/* Modal and disclosure motion communicates state without page choreography. */
+.sv-dialog[open]::backdrop {
+  animation: Prudentia-backdrop-enter var(--motion-standard) var(--ease-out-product) both;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.sv-dialog[open] .sv-dialog-panel {
+  animation: Prudentia-dialog-enter var(--motion-panel) var(--ease-out-product) both;
+}
+
+.sv-dialog-header,
+.sv-dialog-body {
+  padding: clamp(0.875rem, 1.4vw, 1.125rem);
+}
+
+section[aria-labelledby^="config-step-"] > button svg,
+.knowledge-inspector-section-toggle svg,
+button[aria-expanded] > svg:last-child {
+  transition: transform var(--motion-fast) var(--ease-out-product);
+}
+
+[id^="config-step-"][id$="-content"],
+.audit-detail-row > td > div,
+.rag-eval-screen,
+.knowledge-inspector-body,
+.review-layout,
+.review-clear-state {
+  animation: Prudentia-content-enter var(--motion-standard) var(--ease-out-product) both;
+}
+
+/* Static skeleton base plus compositor-driven highlight. */
+.sv-skeleton {
+  background: var(--color-surface-container-high);
+  background-image: none;
+  animation: none;
+}
+
+.sv-skeleton::after,
+.source-viewer-document-skeleton span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 22%,
+    color-mix(in srgb, var(--color-on-surface) 11%, transparent) 48%,
+    transparent 74%
+  );
+  animation: Prudentia-shimmer 1.4s linear infinite;
+}
+

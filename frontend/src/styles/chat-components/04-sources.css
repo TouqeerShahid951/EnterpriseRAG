@@ -1,0 +1,82 @@
+.rag-source-chip {
+  display: inline-flex;
+  min-height: 2.55rem;
+  max-width: min(100%, 30rem);
+  align-items: flex-start;
+  gap: 0.5rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface-container-low) 82%, transparent);
+  padding: 0.45rem 0.55rem;
+  color: var(--color-on-surface);
+  text-align: left;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.rag-source-chip:hover,
+.rag-source-chip:focus-visible,
+.rag-source-chip.is-selected {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-primary-container) 58%, var(--color-surface-container-low));
+  color: var(--color-on-surface);
+  box-shadow: 0 0.75rem 1.5rem -1.35rem color-mix(in srgb, black 50%, transparent);
+}
+
+.rag-source-chip:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.rag-source-chip > svg {
+  margin-top: 0.125rem;
+  flex: 0 0 auto;
+  color: var(--color-primary);
+}
+
+.rag-source-chip:hover > svg,
+.rag-source-chip:focus-visible > svg,
+.rag-source-chip.is-selected > svg {
+  color: var(--color-on-primary-container);
+}
+
+.rag-source-chip-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.1875rem;
+}
+
+.rag-source-chip-title {
+  color: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.rag-source-chip-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.rag-source-chip-meta span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.rag-source-chip-label {
+  color: inherit;
+}
+
+.rag-source-chip:hover .rag-source-chip-meta,
+.rag-source-chip:focus-visible .rag-source-chip-meta,
+.rag-source-chip.is-selected .rag-source-chip-meta {
+  color: color-mix(in srgb, var(--color-on-primary-container) 78%, transparent);
+}
+

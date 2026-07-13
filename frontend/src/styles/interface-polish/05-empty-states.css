@@ -1,0 +1,56 @@
+/* Empty states are useful task states rather than decorative voids. */
+.rag-empty-state {
+  width: min(100%, 48rem);
+  align-self: center;
+  padding: clamp(1.1rem, 2.4vw, 1.75rem);
+}
+
+.rag-empty-copy {
+  max-width: 44rem;
+}
+
+.sv-empty-panel,
+.knowledge-empty-state,
+.source-viewer-state {
+  background: color-mix(in srgb, var(--color-surface-card) 78%, var(--color-surface-container-low));
+}
+
+.knowledge-empty-state {
+  min-height: clamp(13rem, 28dvh, 18rem);
+  align-content: center;
+  justify-items: center;
+  padding: clamp(1.5rem, 4vw, 2.75rem);
+  text-align: center;
+}
+
+.knowledge-empty-state p {
+  max-width: 52ch;
+}
+
+.review-clear-state {
+  min-height: clamp(20rem, 44dvh, 29rem);
+  background: var(--color-surface-card);
+  padding: clamp(1.5rem, 3vw, 2.25rem);
+}
+
+.review-clear-symbol {
+  width: 3.5rem;
+  height: 3.5rem;
+}
+
+.review-clear-strip {
+  gap: 0;
+  border-block: 1px solid var(--color-surface-border);
+}
+
+.review-clear-strip div {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.8rem 1rem;
+}
+
+.review-clear-strip div + div {
+  border-left: 1px solid var(--color-surface-border);
+}
+

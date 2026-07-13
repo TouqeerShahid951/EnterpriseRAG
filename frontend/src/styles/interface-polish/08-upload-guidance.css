@@ -1,0 +1,39 @@
+/* Upload guidance reads as one checklist, not three cards inside a card. */
+.upload-guidance {
+  align-self: start;
+  position: sticky;
+  top: var(--space-page);
+}
+
+.upload-guardrails-panel > div {
+  margin-top: 0.75rem;
+}
+
+.upload-guardrail {
+  padding-block: 0.85rem;
+}
+
+.upload-guardrail + .upload-guardrail {
+  border-top: 1px solid var(--color-surface-border);
+}
+
+.upload-guardrail > div {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--color-on-surface);
+  font-size: var(--font-size-ui-body);
+  font-weight: 700;
+}
+
+.upload-guardrail > div span {
+  color: var(--color-primary);
+}
+
+.upload-guardrail p {
+  margin-top: 0.35rem;
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-ui-body);
+  line-height: 1.5;
+}
+

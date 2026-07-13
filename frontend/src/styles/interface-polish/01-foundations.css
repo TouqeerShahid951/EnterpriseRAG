@@ -1,0 +1,46 @@
+/*
+ * Production interaction and visual hierarchy pass.
+ *
+ * This layer intentionally comes last. It aligns target sizes, motion, empty
+ * states, dense data surfaces, and route-specific hierarchy without changing
+ * the restrained Prudentia palette.
+ */
+
+:root:not(.light) {
+  --color-background: oklch(0.108 0.016 285);
+  --color-surface-card: oklch(0.15 0.014 285 / 0.98);
+  --color-surface-container-low: oklch(0.17 0.014 285 / 0.96);
+  --color-surface-container-high: oklch(0.205 0.014 285 / 0.98);
+  --color-surface-container-highest: oklch(0.25 0.013 285 / 0.98);
+  --color-on-surface-variant: oklch(0.88 0.012 285 / 0.82);
+  --color-secondary: oklch(0.86 0.012 285 / 0.74);
+}
+
+.sv-page-title,
+.source-viewer-heading h1 {
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.sv-page-subtitle,
+.review-clear-copy p,
+.knowledge-empty-state p,
+.source-viewer-state p {
+  text-wrap: pretty;
+}
+
+.sv-page-header {
+  align-items: flex-end;
+}
+
+.sv-card,
+.sv-panel,
+.sv-table-wrap {
+  border-color: color-mix(in srgb, var(--color-surface-border) 92%, transparent);
+}
+
+.sv-panel .sv-card,
+.sv-card .sv-panel {
+  box-shadow: none;
+}
+

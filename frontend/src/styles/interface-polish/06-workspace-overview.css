@@ -1,0 +1,64 @@
+/* Workspace summary prioritizes one next task and keeps the rest scannable. */
+.workspace-overview-metrics {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-surface-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-container-low);
+}
+
+.workspace-overview-metrics .sv-metric {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.workspace-overview-metrics .sv-metric + .sv-metric {
+  border-left: 1px solid var(--color-surface-border);
+}
+
+.workspace-overview-action-priority {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface-border));
+}
+
+.workspace-overview-action-priority::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  background: var(--color-primary);
+  transform: scaleX(0.22);
+  transform-origin: left;
+  transition: transform var(--motion-standard) var(--ease-out-product);
+}
+
+.workspace-overview-action-priority:hover::after,
+.workspace-overview-action-priority:focus-visible::after {
+  transform: scaleX(1);
+}
+
+.workspace-overview-action-supporting > svg:last-child,
+.workspace-overview-action-priority > span:last-child svg {
+  transition: transform var(--motion-fast) var(--ease-out-product);
+}
+
+.workspace-overview-action-supporting:hover > svg:last-child,
+.workspace-overview-action-supporting:focus-visible > svg:last-child,
+.workspace-overview-action-priority:hover > span:last-child svg,
+.workspace-overview-action-priority:focus-visible > span:last-child svg {
+  transform: translateX(3px);
+}
+
+.document-overview-empty-state {
+  min-height: clamp(25rem, 54dvh, 36rem);
+  align-content: center;
+  animation: Prudentia-content-enter var(--motion-standard) var(--ease-out-product) both;
+}
+
+.document-overview-empty-steps {
+  align-self: center;
+}
+

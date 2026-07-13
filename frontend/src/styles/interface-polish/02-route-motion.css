@@ -1,0 +1,53 @@
+/* Route changes move the task content, never the persistent navigation. */
+.app-route-stage {
+  animation: none;
+}
+
+.app-route-stage > .Prudentia-shell > .Prudentia-main,
+.app-route-stage > .source-viewer-shell {
+  animation: Prudentia-main-enter var(--motion-fast) var(--ease-out-product) both;
+}
+
+@keyframes Prudentia-main-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes Prudentia-content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes Prudentia-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes Prudentia-backdrop-enter {
+  from { background: rgb(0 0 0 / 0); }
+  to { background: rgb(0 0 0 / 0.62); }
+}
+
+@keyframes Prudentia-shimmer {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(110%); }
+}
+
