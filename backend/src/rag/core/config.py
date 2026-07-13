@@ -216,6 +216,7 @@ class Settings(BaseSettings):
     artifact_composer_timeout_seconds: float = Field(default=60.0, ge=5.0)
     evaluation_queue_backend: str = "celery"
     evaluation_queue_name: str = "evaluation:jobs"
+    # This is a compatibility identifier for queued messages, not an import path.
     evaluation_task_name: str = "rag.evaluations.tasks.run_evaluation"
     evaluation_retention_days: int = Field(default=30, ge=1, le=365)
     evaluation_worker_timeout_seconds: float = Field(default=3600.0, ge=30.0)

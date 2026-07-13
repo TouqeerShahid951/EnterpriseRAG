@@ -35,6 +35,7 @@ def score_case_result(
     diagnostic: dict[str, Any],
     error_message: str | None = None,
     answer_content_judge: AnswerContentJudge | None = None,
+    interrupt_error_types: tuple[type[Exception], ...] = (),
 ) -> dict[str, Any]:
     checks = _base_checks(case, diagnostic)
     failure_stages: list[EvaluationFailureStage] = []
@@ -66,6 +67,7 @@ def score_case_result(
         response,
         literal,
         answer_content_judge=answer_content_judge,
+        interrupt_error_types=interrupt_error_types,
     )
     answer_content_passed = literal.passed or _llm_answer_content_passed(llm_verifier)
     final_source_passed, final_source_titles = _source_doc_pass(
@@ -164,6 +166,7 @@ def _llm_answer_content_verdict(
     literal: LiteralCheckResult,
     *,
     answer_content_judge: AnswerContentJudge | None,
+    interrupt_error_types: tuple[type[Exception], ...],
 ) -> dict[str, object] | None:
     if (
         answer_content_judge is None
@@ -175,6 +178,8 @@ def _llm_answer_content_verdict(
     try:
         return answer_content_judge(case, response, literal)
     except Exception as exc:  # noqa: BLE001 - scoring should record judge errors, not fail the run
+        if isinstance(exc, interrupt_error_types):
+            raise
         return {
             "used": True,
             "status": "error",

@@ -1,3 +1,6 @@
+from billiard.exceptions import SoftTimeLimitExceeded
+import pytest
+
 from rag.evaluations.answer_verifier import verify_answer_content_with_llm
 from rag.schemas.evaluations import EvaluationCase
 from rag.query.schemas import RAGResponse
@@ -77,3 +80,27 @@ def test_answer_verifier_bad_json_fails_closed() -> None:
 
     assert result["passed"] is False
     assert result["status"] == "error"
+
+
+def test_answer_verifier_propagates_worker_interrupts() -> None:
+    case = EvaluationCase(id="case", question="Q?", must_include=["alpha"])
+    rag_response = response("beta")
+    literal = evaluate_literal_checks(
+        rag_response.answer,
+        case.must_include,
+        case.must_not_include,
+    )
+
+    class InterruptedLlm:
+        def generate_json(self, **_kwargs: object) -> str:
+            raise SoftTimeLimitExceeded()
+
+    with pytest.raises(SoftTimeLimitExceeded):
+        verify_answer_content_with_llm(
+            InterruptedLlm(),
+            case=case,
+            response=rag_response,
+            literal=literal,
+            model=None,
+            interrupt_error_types=(SoftTimeLimitExceeded,),
+        )

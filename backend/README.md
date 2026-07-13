@@ -67,6 +67,11 @@ feature dependency providers. Artifact Celery registration is owned by
 `rag.artifact_jobs.task_execution`. Its registered task name intentionally stays
 `rag.artifact_jobs.tasks.generate_artifact_job` as an opaque compatibility
 identifier for queued messages, even though that Python module no longer exists.
+Evaluation follows the same boundary: `apps.workers.evaluation.tasks` owns
+Celery registration, while cancellation and retry policy remain in
+`rag.evaluations.task_execution`. The historic
+`rag.evaluations.tasks.run_evaluation` task identifier remains compatible even
+though its former feature module has been removed.
 Public query transport is owned by `rag.query`:
 its aggregate router composes separate session-history, source-discovery, and
 query-execution routes, while query request and response contracts live in the
@@ -118,9 +123,9 @@ advisory lock, and sleep. Process startup and loop wiring belong in `apps`; the
 cleanup, scheduling, and recovery behavior belongs to its owning feature under
 `src/rag`.
 
-Evaluation and document-pipeline task decorators still live under `src/rag`
-while their process boundaries are migrated. That is known transitional
-placement, not a precedent for feature code to depend on deployment wiring.
+Document-pipeline task decorators still live under `src/rag` while that process
+boundary is migrated. This is known transitional placement, not a precedent for
+feature code to depend on deployment wiring.
 
 ## Configuration ownership
 

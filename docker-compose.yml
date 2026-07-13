@@ -751,7 +751,7 @@ services:
   evaluation-worker:
     image: agenticrag-api
     restart: unless-stopped
-    command: ["celery", "-A", "apps.workers.evaluation.celery_app", "worker", "--loglevel=INFO", "--queues=evaluation:jobs"]
+    command: ["celery", "-A", "apps.workers.evaluation.celery_app", "worker", "--loglevel=INFO", "--queues=${EVALUATION_QUEUE_NAME:-evaluation:jobs}"]
     healthcheck:
       disable: true
     environment:

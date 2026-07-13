@@ -54,9 +54,17 @@ def test_artifact_task_is_not_registered_on_other_worker_apps() -> None:
 
 
 def test_evaluation_worker_preserves_registered_task_name() -> None:
-    assert "rag.evaluations.tasks.run_evaluation" in _registered_task_names(
-        evaluation_app
-    )
+    task_names = _registered_task_names(evaluation_app)
+
+    assert "rag.evaluations.tasks.run_evaluation" in task_names
+    assert "apps.workers.evaluation.tasks.run_evaluation" not in task_names
+
+
+def test_evaluation_task_is_not_registered_on_other_worker_apps() -> None:
+    task_name = "rag.evaluations.tasks.run_evaluation"
+
+    assert task_name not in _registered_task_names(artifact_app)
+    assert task_name not in _registered_task_names(document_pipeline_app)
 
 
 def test_document_pipeline_routes_graphrag_tasks_to_graphrag_queue() -> None:

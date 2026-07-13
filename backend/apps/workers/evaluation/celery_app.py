@@ -8,7 +8,7 @@ from rag.core.config import settings
 celery_app = Celery(
     "rag-evaluation-worker",
     broker=settings.celery_broker_url or settings.redis_url,
-    include=["rag.evaluations.tasks"],
+    include=["apps.workers.evaluation.tasks"],
 )
 celery_app.conf.update(
     task_default_queue=settings.evaluation_queue_name,

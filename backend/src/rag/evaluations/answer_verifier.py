@@ -19,6 +19,7 @@ def verify_answer_content_with_llm(
     response: RAGResponse,
     literal: LiteralCheckResult,
     model: str | None,
+    interrupt_error_types: tuple[type[Exception], ...] = (),
 ) -> dict[str, object]:
     generator = getattr(llm, "generate_json", None)
     if generator is None:
@@ -32,6 +33,8 @@ def verify_answer_content_with_llm(
         )
         payload = _load_json_object(str(raw))
     except Exception as exc:  # noqa: BLE001 - eval judge must fail closed per case
+        if isinstance(exc, interrupt_error_types):
+            raise
         return {
             "used": True,
             "version": ANSWER_VERIFIER_VERSION,

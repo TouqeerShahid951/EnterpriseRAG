@@ -1,3 +1,6 @@
+from billiard.exceptions import SoftTimeLimitExceeded
+import pytest
+
 from rag.evaluations.scoring import score_case_result
 from rag.schemas.evaluations import EvaluationCase
 from rag.query.schemas import RAGResponse
@@ -89,3 +92,21 @@ def test_score_case_result_rejects_contradictory_llm_pass() -> None:
 
     assert scored["passed"] is False
     assert scored["checks"]["answer_content"]["passed"] is False
+
+
+def test_score_case_result_propagates_worker_interrupts_from_the_judge() -> None:
+    def interrupt(*_args: object) -> dict[str, object]:
+        raise SoftTimeLimitExceeded()
+
+    with pytest.raises(SoftTimeLimitExceeded):
+        score_case_result(
+            EvaluationCase(
+                id="case",
+                question="Who owns finance?",
+                must_include=["chief financial officer"],
+            ),
+            response=response("The CFO owns finance."),
+            diagnostic={},
+            answer_content_judge=interrupt,
+            interrupt_error_types=(SoftTimeLimitExceeded,),
+        )

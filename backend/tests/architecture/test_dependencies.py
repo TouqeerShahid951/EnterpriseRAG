@@ -122,6 +122,14 @@ REMOVED_ARTIFACT_TASK_PATHS = (
     RAG_ROOT / "artifact_jobs" / "tasks.py",
     RAG_ROOT / "artifact_jobs" / "tasks",
 )
+EVALUATION_WORKER_TASK_FILE = (
+    BACKEND_ROOT / "apps" / "workers" / "evaluation" / "tasks.py"
+)
+REMOVED_EVALUATION_TASK_MODULE = "rag.evaluations.tasks"
+REMOVED_EVALUATION_TASK_PATHS = (
+    RAG_ROOT / "evaluations" / "tasks.py",
+    RAG_ROOT / "evaluations" / "tasks",
+)
 LEGACY_QUERY_MODULES = frozenset(
     {
         "rag.api.routes.query_routes",
@@ -387,6 +395,59 @@ def test_artifact_worker_task_adapter_has_only_composition_dependencies() -> Non
     )
     violations = _find_violations(
         (ARTIFACT_WORKER_TASK_FILE,),
+        lambda target: target not in allowed_imports,
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_evaluation_celery_adapter_is_owned_by_worker_app() -> None:
+    assert EVALUATION_WORKER_TASK_FILE.is_file()
+    assert not any(path.exists() for path in REMOVED_EVALUATION_TASK_PATHS)
+
+    violations = _find_violations(
+        _python_files(BACKEND_PYTHON_ROOTS),
+        lambda target: target == REMOVED_EVALUATION_TASK_MODULE
+        or target.startswith(f"{REMOVED_EVALUATION_TASK_MODULE}."),
+        resolve_relative_imports=True,
+    )
+    violations.extend(
+        _find_violations(
+            (RAG_ROOT / "evaluations").rglob("*.py"),
+            lambda target: target == "celery.shared_task",
+            resolve_relative_imports=True,
+        )
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_evaluation_worker_task_adapter_has_only_composition_dependencies() -> None:
+    allowed_imports = frozenset(
+        {
+            "__future__",
+            "__future__.annotations",
+            "apps.workers.evaluation.celery_app",
+            "apps.workers.evaluation.celery_app.celery_app",
+            "billiard.exceptions",
+            "billiard.exceptions.SoftTimeLimitExceeded",
+            "rag.core.config",
+            "rag.core.config.settings",
+            "rag.evaluations.execution",
+            "rag.evaluations.execution.EvaluationRunExecutor",
+            "rag.evaluations.execution.default_evaluation_run_executor",
+            "rag.evaluations.repository",
+            "rag.evaluations.repository.get_evaluation_repository",
+            "rag.evaluations.task_execution",
+            "rag.evaluations.task_execution.EvaluationDeliveryRetry",
+            "rag.evaluations.task_execution.run_evaluation_run",
+            "typing",
+            "typing.Any",
+        }
+    )
+    violations = _find_violations(
+        (EVALUATION_WORKER_TASK_FILE,),
         lambda target: target not in allowed_imports,
         resolve_relative_imports=True,
     )

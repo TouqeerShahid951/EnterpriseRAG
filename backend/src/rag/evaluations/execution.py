@@ -37,11 +37,13 @@ class EvaluationRunExecutor:
         document_repo_factory: Callable[[], DocumentRepository],
         rag_service_factory: Callable[[], LocalRagService],
         config: Settings = settings,
+        interrupt_error_types: tuple[type[Exception], ...] = (),
     ) -> None:
         self.repo_factory = repo_factory
         self.document_repo_factory = document_repo_factory
         self.rag_service_factory = rag_service_factory
         self.config = config
+        self.interrupt_error_types = interrupt_error_types
 
     def execute(self, run_id: str) -> EvaluationRunRecord:
         repo = self.repo_factory()
@@ -77,6 +79,8 @@ class EvaluationRunExecutor:
                     user,
                 )
             except Exception as exc:  # noqa: BLE001 - evaluation records per-case runtime failures
+                if isinstance(exc, self.interrupt_error_types):
+                    raise
                 error_message = f"{type(exc).__name__}: {exc}"
             scored = score_case_result(
                 case,
@@ -84,6 +88,7 @@ class EvaluationRunExecutor:
                 diagnostic=diagnostic,
                 error_message=error_message,
                 answer_content_judge=answer_content_judge,
+                interrupt_error_types=self.interrupt_error_types,
             )
             latency_ms = response.latency_ms if response else 0
             status = "error" if error_message else "ok"
@@ -208,6 +213,8 @@ class EvaluationRunExecutor:
                 }
             )
         except Exception as exc:  # noqa: BLE001 - diagnostic errors should not hide generation results
+            if isinstance(exc, self.interrupt_error_types):
+                raise
             diagnostic.update(
                 {
                     "status": "error",
@@ -248,6 +255,7 @@ class EvaluationRunExecutor:
                 response=response,
                 literal=literal,
                 model=model,
+                interrupt_error_types=self.interrupt_error_types,
             )
 
         return judge
@@ -395,7 +403,11 @@ def _optional_str_list(value: object) -> list[str] | None:
     return [str(item) for item in value if str(item).strip()]
 
 
-def default_evaluation_run_executor(config: Settings | None = None) -> EvaluationRunExecutor:
+def default_evaluation_run_executor(
+    config: Settings | None = None,
+    *,
+    interrupt_error_types: tuple[type[Exception], ...] = (),
+) -> EvaluationRunExecutor:
     from .repository import get_evaluation_repository
 
     return EvaluationRunExecutor(
@@ -403,4 +415,5 @@ def default_evaluation_run_executor(config: Settings | None = None) -> Evaluatio
         document_repo_factory=get_document_repository,
         rag_service_factory=LocalRagService,
         config=config or settings,
+        interrupt_error_types=interrupt_error_types,
     )
