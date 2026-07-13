@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from datetime import UTC, datetime
 import logging
 from time import perf_counter
 from uuid import uuid4
 
-from billiard.exceptions import SoftTimeLimitExceeded
-
-from ..auth.document_access import can_read_document
 from ..core.config import Settings
 from ..documents.models import DocumentRepository
-from ..auth.identity_models import IdentityRepository, UserRecord
+from ..auth.identity_models import IdentityRepository
 from ..retrieval.contracts import AuthorizedCorpusRetriever
 from .composer import (
     COMPOSER_PROMPT_VERSION,
@@ -26,12 +22,20 @@ from .composer import (
 )
 from .llm_json import LlmContractError
 from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
+from .execution_errors import (
+    ArtifactEvidenceUnavailable,
+    ArtifactJobCancelled as ArtifactJobCancelled,
+    ArtifactJobLeaseLost as ArtifactJobLeaseLost,
+    ArtifactPermissionChanged as ArtifactPermissionChanged,
+)
+from .execution_progress import ArtifactExecutionProgress, _progress
+from .execution_rendering import ArtifactFormatExecution
+from .execution_state import ArtifactExecutionState
 from .generated_models import GeneratedArtifactRepository
 from .generation import ArtifactJsonGenerator
 from .job_models import ArtifactJobRecord, ArtifactJobRepository
 from .planner import PLANNER_PROMPT_VERSION, plan_document
 from .publisher import ArtifactPublisher
-from .renderer import render_document
 from .retrieval import retrieve_document_evidence
 from .storage import GeneratedArtifactStorage
 from .validation import validate_document_bundle
@@ -40,25 +44,11 @@ from .validation import validate_document_bundle
 logger = logging.getLogger("rag.artifact_jobs")
 
 
-class ArtifactPermissionChanged(RuntimeError):
-    pass
-
-
-class ArtifactJobCancelled(RuntimeError):
-    pass
-
-
-class ArtifactJobLeaseLost(RuntimeError):
-    pass
-
-
-class ArtifactEvidenceUnavailable(RuntimeError):
-    safe_message = (
-        "No authorized evidence was found for this document generation request."
-    )
-
-
-class ArtifactJobExecutor:
+class ArtifactJobExecutor(
+    ArtifactExecutionState,
+    ArtifactExecutionProgress,
+    ArtifactFormatExecution,
+):
     def __init__(
         self,
         *,
@@ -408,303 +398,6 @@ class ArtifactJobExecutor:
             },
         )
 
-    def _render_formats(
-        self,
-        job: ArtifactJobRecord,
-        evidence: EvidenceManifest,
-        bundle: ArtifactContentBundle,
-    ) -> list[str]:
-        source_doc_ids = list(
-            dict.fromkeys(record.doc_id for record in evidence.records)
-        )
-        return self._render_deterministic_formats(
-            job, bundle, source_doc_ids, list(job.requested_formats)
-        )
-
-    def _render_deterministic_formats(
-        self,
-        job: ArtifactJobRecord,
-        bundle: ArtifactContentBundle,
-        source_doc_ids: list[str],
-        requested_formats: list[str],
-    ) -> list[str]:
-        failures: list[str] = []
-        total_formats = max(len(requested_formats), 1)
-        for index, artifact_format in enumerate(requested_formats, start=1):
-            try:
-                self._check_cancelled(job.id)
-                self._authorize(job)
-                self._record_render_format_progress(
-                    job.id, artifact_format, index, total_formats
-                )
-                rendered = render_document(
-                    artifact_format=artifact_format,  # type: ignore[arg-type]
-                    bundle=bundle,
-                    generated_at=datetime.now(UTC),
-                    require_libreoffice=self.config.artifact_libreoffice_required,
-                    progress_callback=(
-                        lambda current, total, label, fmt=artifact_format, fmt_index=index, fmt_total=total_formats: (
-                            self._record_slide_progress(
-                                job.id, fmt, fmt_index, fmt_total, current, total, label
-                            )
-                        )
-                    )
-                    if artifact_format == "pptx"
-                    else None,
-                )
-                self._store_rendered_file(
-                    job=job,
-                    filename=rendered.filename,
-                    artifact_format=rendered.format,
-                    content_type=rendered.content_type,
-                    content=rendered.content,
-                    source_doc_ids=source_doc_ids,
-                    warnings=list(rendered.smoke_warnings),
-                    progress_pct=_format_complete_progress(index, total_formats),
-                )
-            except (
-                ArtifactJobCancelled,
-                ArtifactJobLeaseLost,
-                ArtifactPermissionChanged,
-                SoftTimeLimitExceeded,
-            ):
-                raise
-            except Exception as exc:
-                failures.append(artifact_format)
-                self._record_format_error(job.id, artifact_format, exc)
-        return failures
-
-    def _store_rendered_file(
-        self,
-        *,
-        job: ArtifactJobRecord,
-        filename: str,
-        artifact_format: str,
-        content_type: str,
-        content: bytes,
-        source_doc_ids: list[str],
-        warnings: list[str],
-        progress_pct: int,
-    ) -> None:
-        with self._stage_timer(job.id, "storing", accumulate=True):
-            self._update(
-                job.id,
-                {
-                    "status": "rendering",
-                    "stage": "storing",
-                    "progress_pct": progress_pct,
-                    "stage_progress": _progress(
-                        "files", 0, 1, f"Saving {artifact_format.upper()} file"
-                    ),
-                },
-            )
-            self._check_cancelled(job.id)
-            published = self.publisher.publish(
-                job=job,
-                filename=filename,
-                artifact_format=artifact_format,
-                content=content,
-                content_type=content_type,
-                source_doc_ids=source_doc_ids,
-                smoke_warnings=warnings,
-                expected_run_token=self._run_token,
-                lease_guard=lambda: self._guard_publication(job, source_doc_ids),
-            )
-            publication_warnings = [
-                item for item in published.warnings if item not in warnings
-            ]
-            if publication_warnings:
-                self._record_error(
-                    job.id,
-                    stage="storing",
-                    code="artifact_publish_warning",
-                    message="; ".join(publication_warnings),
-                    context={"format": artifact_format},
-                )
-            self._check_cancelled(job.id)
-
-    def _record_format_error(
-        self, job_id: str, artifact_format: str, exc: Exception
-    ) -> None:
-        detail = str(exc)[:2000]
-        self._record_error(
-            job_id,
-            stage="rendering",
-            code="artifact_format_failed",
-            message=f"{artifact_format}: {type(exc).__name__}: {detail}",
-            context={"format": artifact_format},
-        )
-        logger.warning(
-            "artifact format failed job_id=%s format=%s error_type=%s error=%s",
-            job_id,
-            artifact_format,
-            type(exc).__name__,
-            detail,
-        )
-
-    def _authorize(
-        self,
-        job: ArtifactJobRecord,
-        additional_document_ids: list[str] | tuple[str, ...] = (),
-    ) -> UserRecord:
-        user = self.identity_repo_factory().get_user_by_id(job.user_id)
-        if (
-            user is None
-            or not user.is_active
-            or user.permission_version != job.permission_version
-        ):
-            raise ArtifactPermissionChanged(
-                "artifact job authorization is no longer valid"
-            )
-        document_repo = self.document_repo_factory()
-        document_ids = dict.fromkeys((*job.document_ids, *additional_document_ids))
-        for document_id in document_ids:
-            document = document_repo.get_document(document_id)
-            if document is None or not can_read_document(user, document):
-                raise ArtifactPermissionChanged(
-                    "artifact job document access is no longer valid"
-                )
-        return user
-
-    def _guard_publication(
-        self,
-        job: ArtifactJobRecord,
-        source_doc_ids: list[str],
-    ) -> None:
-        self._check_cancelled(job.id)
-        self._authorize(job, source_doc_ids)
-
-    def _check_cancelled(self, job_id: str) -> None:
-        current = self.repo_factory().get_job(job_id)
-        if current is None:
-            raise RuntimeError("artifact job was not found")
-        if current.cancellation_requested or current.status == "cancelled":
-            raise ArtifactJobCancelled("artifact job was cancelled")
-        if current.expires_at is not None and current.expires_at <= datetime.now(UTC):
-            raise ArtifactJobCancelled("artifact job expired")
-        run_token = getattr(self, "_run_token", None)
-        if run_token is not None and current.run_token != run_token:
-            raise ArtifactJobLeaseLost("artifact job execution lease was reclaimed")
-
-    def _update(self, job_id: str, changes: dict[str, object]) -> ArtifactJobRecord:
-        repo = self.repo_factory()
-        run_token = getattr(self, "_run_token", None)
-        updated = (
-            repo.transition_job(job_id, run_token=run_token, changes=changes)
-            if run_token is not None
-            else repo.update_job(job_id, changes)
-        )
-        if updated is None:
-            current = repo.get_job(job_id)
-            if current is None:
-                raise RuntimeError("artifact job was not found")
-            if current.cancellation_requested or current.status == "cancelled":
-                raise ArtifactJobCancelled("artifact job was cancelled")
-            raise ArtifactJobLeaseLost("artifact job execution lease was reclaimed")
-        return updated
-
-    def _record_composition_progress(
-        self, job_id: str, *, current: int, total: int, phase: str
-    ) -> None:
-        bounded_total = max(total, 1)
-        bounded_current = min(max(current, 0), bounded_total)
-        if phase == "formatting":
-            changes = {
-                "status": "composing",
-                "stage": "formatting_outputs",
-                "progress_pct": 70,
-                "stage_progress": _progress(
-                    "slides", 0, 1, "Choosing title, sections, and slide layout"
-                ),
-            }
-        else:
-            if phase == "batch_complete":
-                progress = 56 + int((bounded_current / bounded_total) * 14)
-            else:
-                progress = 56 + int(
-                    ((max(bounded_current, 1) - 1) / bounded_total) * 14
-                )
-            changes = {
-                "status": "composing",
-                "stage": f"composing_{max(bounded_current, 1)}_of_{bounded_total}_batch",
-                "progress_pct": min(70, max(56, progress)),
-                "stage_progress": _progress(
-                    "batches",
-                    bounded_current,
-                    bounded_total,
-                    f"Composing content batch {bounded_current} of {bounded_total}",
-                ),
-            }
-        try:
-            self._update(job_id, changes)
-        except (
-            ArtifactJobCancelled,
-            ArtifactJobLeaseLost,
-            ArtifactPermissionChanged,
-            SoftTimeLimitExceeded,
-        ):
-            raise
-        except Exception:
-            logger.warning(
-                "failed to record artifact composition progress job_id=%s phase=%s current=%s total=%s",
-                job_id,
-                phase,
-                current,
-                total,
-                exc_info=True,
-            )
-
-    def _record_render_format_progress(
-        self, job_id: str, artifact_format: str, current: int, total: int
-    ) -> None:
-        pct = 80 + int((max(current - 1, 0) / max(total, 1)) * 15)
-        self._update(
-            job_id,
-            {
-                "status": "rendering",
-                "stage": f"rendering_{artifact_format}",
-                "progress_pct": min(95, max(80, pct)),
-                "stage_progress": _progress(
-                    "formats",
-                    current,
-                    max(total, 1),
-                    f"Rendering {artifact_format.upper()} ({current} of {max(total, 1)})",
-                ),
-            },
-        )
-
-    def _record_slide_progress(
-        self,
-        job_id: str,
-        artifact_format: str,
-        format_current: int,
-        format_total: int,
-        slide_current: int,
-        slide_total: int,
-        label: str,
-    ) -> None:
-        format_span = 15 / max(format_total, 1)
-        format_start = 80 + ((max(format_current, 1) - 1) * format_span)
-        pct = int(
-            format_start
-            + (min(max(slide_current, 0), max(slide_total, 1)) / max(slide_total, 1))
-            * format_span
-        )
-        self._update(
-            job_id,
-            {
-                "status": "rendering",
-                "stage": f"rendering_{artifact_format}_slide",
-                "progress_pct": min(95, max(82, pct)),
-                "stage_progress": _progress(
-                    "slides",
-                    slide_current,
-                    max(slide_total, 1),
-                    f"Building slide {slide_current} of {max(slide_total, 1)}: {label}",
-                ),
-            },
-        )
-
     def _repair_or_fallback_bundle(
         self,
         job_id: str,
@@ -744,101 +437,3 @@ class ArtifactJobExecutor:
             )
             return fallback
         return normalize_bundle_evidence_ids(repaired, evidence)
-
-    @contextmanager
-    def _stage_timer(
-        self, job_id: str, stage: str, *, accumulate: bool = False
-    ) -> Iterator[None]:
-        started_at = datetime.now(UTC)
-        started_perf = perf_counter()
-        try:
-            yield
-        finally:
-            try:
-                self._record_stage_timing(
-                    job_id,
-                    stage,
-                    started_at=started_at,
-                    completed_at=datetime.now(UTC),
-                    duration_ms=int((perf_counter() - started_perf) * 1000),
-                    accumulate=accumulate,
-                )
-            except Exception:
-                logger.warning(
-                    "failed to record artifact stage timing job_id=%s stage=%s",
-                    job_id,
-                    stage,
-                    exc_info=True,
-                )
-
-    def _record_stage_timing(
-        self,
-        job_id: str,
-        stage: str,
-        *,
-        started_at: datetime,
-        completed_at: datetime,
-        duration_ms: int,
-        accumulate: bool,
-    ) -> None:
-        repo = self.repo_factory()
-        current = repo.get_job(job_id)
-        if current is None:
-            return
-        timings = dict(current.stage_timings_json)
-        timing: dict[str, object] = {
-            "started_at": started_at.isoformat(),
-            "completed_at": completed_at.isoformat(),
-            "duration_ms": max(0, duration_ms),
-        }
-        existing = timings.get(stage)
-        if accumulate and isinstance(existing, dict):
-            timing["started_at"] = str(
-                existing.get("started_at") or timing["started_at"]
-            )
-            try:
-                timing["duration_ms"] = int(existing.get("duration_ms") or 0) + int(
-                    timing["duration_ms"]
-                )
-            except (TypeError, ValueError):
-                pass
-        timings[stage] = timing
-        self._update(job_id, {"stage_timings_json": timings})
-
-    def _record_error(
-        self,
-        job_id: str,
-        *,
-        stage: str,
-        code: str,
-        message: str,
-        context: dict[str, object] | None = None,
-    ) -> None:
-        repo = self.repo_factory()
-        current = repo.get_job(job_id)
-        if current is None:
-            return
-        errors = list(current.errors_json)
-        errors.append(
-            {
-                "stage": stage,
-                "code": code,
-                "message": message[:2000],
-                "context": context or {},
-                "recorded_at": datetime.now(UTC).isoformat(),
-            }
-        )
-        self._update(job_id, {"errors_json": errors[-50:]})
-
-
-def _progress(unit: str, current: int, total: int, label: str) -> dict[str, object]:
-    return {
-        "unit": unit,
-        "current": max(0, current),
-        "total": max(0, total),
-        "label": label,
-    }
-
-
-def _format_complete_progress(current: int, total: int) -> int:
-    return min(96, max(84, 80 + int((max(current, 1) / max(total, 1)) * 15)))
