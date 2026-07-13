@@ -4,6 +4,10 @@ from datetime import UTC, datetime
 
 import pytest
 
+import rag.connectors.registry as connector_registry
+from rag.connectors.adapters.fake import FakeConnector as FakeConnectorAdapter
+from rag.connectors.adapters.postgres import PostgresConnector as PostgresConnectorAdapter
+from rag.connectors.adapters.sql_server import SqlServerConnector as SqlServerConnectorAdapter
 from rag.connectors.crypto import decrypt_secret, encrypt_secret, keyring_from_settings, redact_secrets
 from rag.connectors.models import CONNECTOR_RECORD_CONTENT_TYPE
 from rag.connectors.registry import (
@@ -206,6 +210,12 @@ def test_connector_registry_exposes_sql_server_and_postgres() -> None:
     assert isinstance(registry.get("sql_server"), SqlServerConnector)
     assert isinstance(registry.get("postgres"), PostgresConnector)
     assert isinstance(registry.get("mysql"), UnsupportedConnector)
+
+
+def test_connector_registry_preserves_adapter_compatibility_imports() -> None:
+    assert connector_registry.FakeConnector is FakeConnectorAdapter
+    assert connector_registry.PostgresConnector is PostgresConnectorAdapter
+    assert connector_registry.SqlServerConnector is SqlServerConnectorAdapter
 
 
 def test_postgres_connection_kwargs_use_public_config_and_encrypted_secrets() -> None:
