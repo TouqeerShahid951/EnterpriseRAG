@@ -11,7 +11,7 @@ from ..auth.context import UserContext
 from ..auth.document_access import can_read_document
 from ..core.config import Settings
 from ..query.qdrant import QdrantClient, SearchHit
-from ..query.state import initial_state
+from ..query.state import initial_retrieval_state
 from ..query.query_retrieval import (
     add_document_scope,
     add_expiry_scope,
@@ -23,7 +23,6 @@ from ..query.sources import dedupe_hits
 from ..query.temporal import add_effective_date_scope, target_date_for_query
 from ..documents.models import DocumentRecord, DocumentRepository
 from ..query.rag_config_models import RagConfigRecord
-from ..query.schemas import QueryRequest
 from .contracts import (
     DocumentPlan,
     DocumentPlanSection,
@@ -309,18 +308,13 @@ def _retrieve_query(
     config: Settings,
     rag_config: RagConfigRecord,
 ) -> list[SearchHit]:
-    request = QueryRequest(
-        query=query,
-        session_id=job.session_id,
-        group_path=job.group_path,
-        document_ids=list(job.document_ids),
-    )
-    ctx = initial_state(
+    ctx = initial_retrieval_state(
         trace_id=job.trace_id,
         session_id=job.session_id,
-        request=request,
+        query=query,
+        group_path=job.group_path,
+        document_ids=job.document_ids,
         user=user,
-        started=0.0,
         token_budget=rag_config.retrieval_token_budget,
     )
     route_plan, _signals = route_query(

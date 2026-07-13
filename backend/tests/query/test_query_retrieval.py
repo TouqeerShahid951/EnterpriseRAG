@@ -2,7 +2,7 @@ from rag.auth.context import UserContext
 from rag.query.qdrant import SearchHit
 from rag.query.query_retrieval import retrieve_candidates
 from rag.query.routing_models import RoutePlan
-from rag.query.state import initial_state
+from rag.query.state import initial_retrieval_state, initial_state
 from rag.query.schemas import QueryRequest
 
 
@@ -10,6 +10,36 @@ class FakeConfig:
     rag_top_k = 10
     rag_sparse_model = ""
     rag_sparse_cache_dir = ""
+
+
+def test_initial_retrieval_state_preserves_artifact_job_query_scope() -> None:
+    user = UserContext(
+        user_id="user",
+        email="user@example.com",
+        group_paths=("/admin",),
+    )
+
+    ctx = initial_retrieval_state(
+        trace_id="trace-1",
+        session_id="session-1",
+        query="quarterly risk",
+        group_path="/finance",
+        document_ids=("doc-2", "doc-1"),
+        user=user,
+        token_budget=4321,
+    )
+
+    assert ctx["trace_id"] == "trace-1"
+    assert ctx["session_id"] == "session-1"
+    assert ctx["request"] == QueryRequest(
+        query="quarterly risk",
+        session_id="session-1",
+        group_path="/finance",
+        document_ids=["doc-2", "doc-1"],
+    )
+    assert ctx["user"] is user
+    assert ctx["token_budget"] == 4321
+    assert ctx["wall_time_start"] == 0.0
 
 
 class FakeEmbedder:

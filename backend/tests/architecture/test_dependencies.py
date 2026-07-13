@@ -132,6 +132,7 @@ ARTIFACT_APPLICATION_FILES = (
     RAG_ROOT / "artifact_jobs" / "storage.py",
     RAG_ROOT / "artifact_jobs" / "task_execution.py",
 )
+ARTIFACT_SUBMISSION_FILE = RAG_ROOT / "artifact_jobs" / "submission.py"
 EXPECTED_FEATURE_HTTP_HANDLER_OWNERS = {
     "list_documents": "rag.documents.routes",
     "get_document": "rag.documents.routes",
@@ -310,6 +311,38 @@ def test_query_schemas_are_transport_and_runtime_independent() -> None:
                 "rag.query.source_routes",
                 "rag.query.service",
             }
+        ),
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_artifact_jobs_do_not_import_query_schemas() -> None:
+    violations = _find_violations(
+        (RAG_ROOT / "artifact_jobs").rglob("*.py"),
+        lambda target: target == "rag.query.schemas"
+        or target.startswith("rag.query.schemas."),
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_artifact_submission_contract_is_dependency_light() -> None:
+    violations = _find_violations(
+        (ARTIFACT_SUBMISSION_FILE,),
+        lambda target: (
+            target == "fastapi"
+            or target.startswith("fastapi.")
+            or target == "celery"
+            or target.startswith("celery.")
+            or target == "rag.core.config"
+            or target.startswith("rag.artifact_jobs.adapters.")
+            or target == "rag.query"
+            or target.startswith("rag.query.")
+            or target == "rag.documents"
+            or target.startswith("rag.documents.")
         ),
         resolve_relative_imports=True,
     )

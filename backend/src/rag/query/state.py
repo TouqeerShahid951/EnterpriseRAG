@@ -117,6 +117,31 @@ def initial_state(
     return ctx
 
 
+def initial_retrieval_state(
+    *,
+    trace_id: str,
+    session_id: str,
+    query: str,
+    group_path: str | None,
+    document_ids: tuple[str, ...],
+    user: UserContext,
+    token_budget: int,
+) -> QueryContext:
+    return initial_state(
+        trace_id=trace_id,
+        session_id=session_id,
+        request=QueryRequest(
+            query=query,
+            session_id=session_id,
+            group_path=group_path,
+            document_ids=list(document_ids),
+        ),
+        user=user,
+        started=0.0,
+        token_budget=token_budget,
+    )
+
+
 def scoped_user_context(ctx: QueryContext) -> UserContext:
     group_path = ctx["request"].group_path
     if not group_path:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from rag.auth.context import UserContext
 from rag.core.config import Settings
 from rag.artifact_jobs.schemas import ArtifactJobSummary
+from rag.artifact_jobs.submission import ArtifactJobSubmission
 from rag.query.schemas import QueryRequest
 from rag.query.service import LocalRagService
 
@@ -19,14 +20,26 @@ def test_streamed_artifact_request_enqueues_full_job_without_seeded_answer() -> 
     )
 
     events = list(service.stream_query(
-        QueryRequest(query="Create a detailed presentation of all crimes in the FIRs"),
+        QueryRequest(
+            query="Create a detailed presentation of all crimes in the FIRs",
+            client_request_id="client-request-1",
+            group_path="/investigations",
+            document_ids=["fir-2", "fir-1"],
+        ),
         _user(),
     ))
 
     assert [event.event for event in events] == ["trace", "artifact_job", "token", "done"]
     assert artifact_jobs.calls[0]["formats"] == ("pptx",)
     assert "seeded_bundle" not in artifact_jobs.calls[0]
-    assert artifact_jobs.calls[0]["request"].query == "Create a detailed presentation of all crimes in the FIRs"
+    submission = artifact_jobs.calls[0]["submission"]
+    assert isinstance(submission, ArtifactJobSubmission)
+    assert submission == ArtifactJobSubmission(
+        original_request="Create a detailed presentation of all crimes in the FIRs",
+        client_request_id="client-request-1",
+        group_path="/investigations",
+        document_ids=("fir-2", "fir-1"),
+    )
 
 
 def test_non_stream_artifact_request_records_query_lifecycle(monkeypatch) -> None:

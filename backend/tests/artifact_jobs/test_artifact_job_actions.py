@@ -10,8 +10,8 @@ from rag.artifact_jobs.adapters.generated_memory import (
 from rag.artifact_jobs.contracts import DocumentPlan
 from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
 from rag.artifact_jobs.service import ArtifactJobActionError, ArtifactJobService
+from rag.artifact_jobs.submission import ArtifactJobSubmission
 from rag.auth.context import UserContext
-from rag.query.schemas import QueryRequest
 
 
 class _Queue:
@@ -26,13 +26,15 @@ def test_duplicate_queued_submission_is_redispatched() -> None:
     jobs = InMemoryArtifactJobRepository()
     queue = _Queue()
     service = _service(jobs, queue)
-    request = QueryRequest(
-        query="Create a PDF report about quarterly risk",
+    submission = ArtifactJobSubmission(
+        original_request="  Create a PDF report about quarterly risk  ",
         client_request_id="request-1",
+        group_path="/finance",
+        document_ids=("doc-2", "doc-1", "doc-2"),
     )
 
     first = service.submit(
-        request=request,
+        submission=submission,
         user=_user(),
         trace_id="trace-1",
         session_id="session-1",
@@ -40,7 +42,7 @@ def test_duplicate_queued_submission_is_redispatched() -> None:
         conversation_context=[],
     )
     second = service.submit(
-        request=request,
+        submission=submission,
         user=_user(),
         trace_id="trace-2",
         session_id="session-1",
@@ -50,6 +52,30 @@ def test_duplicate_queued_submission_is_redispatched() -> None:
 
     assert first.id == second.id
     assert queue.job_ids == [first.id, first.id]
+    job = jobs.get_job(first.id)
+    assert job is not None
+    assert job.client_request_id == "request-1"
+    assert job.original_request == "  Create a PDF report about quarterly risk  "
+    assert job.group_path == "/finance"
+    assert job.document_ids == ("doc-2", "doc-1", "doc-2")
+
+
+def test_submission_without_client_request_id_uses_trace_id() -> None:
+    jobs = InMemoryArtifactJobRepository()
+    service = _service(jobs, _Queue())
+
+    summary = service.submit(
+        submission=ArtifactJobSubmission(original_request="Create a report"),
+        user=_user(),
+        trace_id="trace-fallback",
+        session_id="session-1",
+        formats=("pdf",),
+        conversation_context=[],
+    )
+
+    job = jobs.get_job(summary.id)
+    assert job is not None
+    assert job.client_request_id == "trace-fallback"
 
 
 def test_clarification_answers_must_match_requested_questions() -> None:
@@ -192,8 +218,8 @@ def test_expired_idempotency_record_is_not_redispatched_or_returned() -> None:
 
     with pytest.raises(ArtifactJobActionError) as raised:
         service.submit(
-            request=QueryRequest(
-                query="Create a PDF report.",
+            submission=ArtifactJobSubmission(
+                original_request="Create a PDF report.",
                 client_request_id="request-helper",
             ),
             user=_user(),

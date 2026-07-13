@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from ..artifact_jobs.dependencies import get_artifact_job_service
 from ..artifact_jobs.service import ArtifactJobService
+from ..artifact_jobs.submission import ArtifactJobSubmission
 from ..auth.context import UserContext
 from ..core.config import Settings, settings
 from ..documents.claim_dependencies import claim_repository_from_settings
@@ -187,7 +188,12 @@ class LocalRagService:
     ) -> RAGResponse:
         turns = self.nodes.session_store.load(user=user, session_id=session_id)
         job = self.artifact_job_service.submit(
-            request=request,
+            submission=ArtifactJobSubmission(
+                original_request=request.query,
+                client_request_id=request.client_request_id,
+                group_path=request.group_path,
+                document_ids=tuple(request.document_ids),
+            ),
             user=user,
             trace_id=trace_id,
             session_id=session_id,

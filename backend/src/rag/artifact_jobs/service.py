@@ -6,7 +6,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from ..auth.context import UserContext
-from ..query.schemas import QueryRequest
 from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
 from .generated_models import GeneratedArtifactRepository
 from .job_models import ArtifactJobRecord, ArtifactJobRepository
@@ -17,6 +16,7 @@ from .schemas import (
     ArtifactJobSummary,
     GeneratedArtifact,
 )
+from .submission import ArtifactJobSubmission
 from .types import ArtifactFormat
 
 
@@ -57,7 +57,7 @@ class ArtifactJobService:
     def submit(
         self,
         *,
-        request: QueryRequest,
+        submission: ArtifactJobSubmission,
         user: UserContext,
         trace_id: str,
         session_id: str,
@@ -68,7 +68,7 @@ class ArtifactJobService:
         seeded_bundle: ArtifactContentBundle | None = None,
     ) -> ArtifactJobSummary:
         repo = self.repo_factory()
-        client_request_id = request.client_request_id or trace_id
+        client_request_id = submission.client_request_id or trace_id
         existing = repo.get_job_by_client_request(
             user_id=user.user_id,
             permission_version=user.permission_version,
@@ -95,10 +95,10 @@ class ArtifactJobService:
             clearance_level=user.clearance_level,
             session_id=session_id,
             trace_id=trace_id,
-            original_request=request.query,
+            original_request=submission.original_request,
             requested_formats=list(formats),
-            group_path=request.group_path,
-            document_ids=request.document_ids,
+            group_path=submission.group_path,
+            document_ids=list(submission.document_ids),
             conversation_context=conversation_context,
             retention_days=self.retention_days,
         )
