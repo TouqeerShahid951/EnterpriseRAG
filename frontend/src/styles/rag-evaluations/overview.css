@@ -1,0 +1,312 @@
+.sv-page-inner.rag-eval-page-inner {
+  --sv-page-max-width: var(--sv-canvas-workbench);
+}
+
+.rag-eval-header {
+  gap: 0.75rem;
+}
+
+.rag-eval-header-actions,
+.rag-eval-panel-header,
+.rag-eval-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.rag-eval-header-actions {
+  flex-wrap: wrap;
+}
+
+.rag-eval-tabs {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  margin-bottom: 0.75rem;
+  padding: 0.35rem;
+}
+
+.rag-eval-tab {
+  display: inline-flex;
+  min-height: 2.3rem;
+  flex: 1 0 7.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--color-on-surface-variant);
+  padding: 0 0.75rem;
+  text-align: left;
+}
+
+.rag-eval-tab:hover {
+  background: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+}
+
+.rag-eval-tab.active {
+  border-color: color-mix(in srgb, var(--color-primary) 36%, transparent);
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+}
+
+.rag-eval-tab span {
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rag-eval-tab small {
+  overflow: hidden;
+  color: var(--color-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-eval-screen {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.rag-eval-overview-grid,
+.rag-eval-datasets-grid,
+.rag-eval-new-run-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.82fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.rag-eval-workflow-panel,
+.rag-eval-run-summary-panel,
+.rag-eval-dataset-library {
+  overflow: hidden;
+}
+
+.rag-eval-workflow-steps,
+.rag-eval-guidance-list {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem;
+}
+
+.rag-eval-workflow-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.2rem 0.75rem;
+  align-items: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.7rem;
+  color: inherit;
+  text-align: left;
+}
+
+.rag-eval-workflow-step:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 32%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+}
+
+.rag-eval-workflow-step > span {
+  display: inline-flex;
+  width: 1.8rem;
+  height: 1.8rem;
+  grid-row: span 2;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 42%, transparent);
+  border-radius: 999px;
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.rag-eval-workflow-step strong,
+.rag-eval-dataset-row strong {
+  color: var(--color-on-surface);
+}
+
+.rag-eval-workflow-step small,
+.rag-eval-dataset-row small,
+.rag-eval-dataset-row p,
+.rag-eval-guidance-list span {
+  color: var(--color-on-surface-variant);
+}
+
+.rag-eval-run-summary-body {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.8rem;
+}
+
+.rag-eval-run-summary-body .rag-eval-breakdown {
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+}
+
+.rag-eval-progress {
+  overflow: hidden;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--color-surface-container-high);
+}
+
+.rag-eval-progress span {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+}
+
+.rag-eval-dataset-list {
+  display: grid;
+}
+
+.rag-eval-dataset-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.8rem;
+}
+
+.rag-eval-dataset-row:last-child {
+  border-bottom: 0;
+}
+
+.rag-eval-dataset-row small,
+.rag-eval-dataset-row p {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.rag-eval-guidance-list {
+  padding: 1rem 0 0;
+}
+
+.rag-eval-guidance-list p {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.7rem;
+}
+
+.rag-eval-guidance-list strong {
+  color: var(--color-on-surface);
+}
+
+.rag-eval-panel-header > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  color: var(--color-on-surface);
+}
+
+.rag-eval-panel-header small,
+.rag-eval-section-header p {
+  color: var(--color-on-surface-variant);
+}
+
+.rag-eval-format-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.rag-eval-format-help {
+  position: relative;
+  display: inline-flex;
+}
+
+.rag-eval-tooltip-trigger {
+  display: inline-flex;
+  width: 1.55rem;
+  height: 1.55rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 999px;
+  background: var(--color-surface-container-low);
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.rag-eval-tooltip-trigger:hover,
+.rag-eval-tooltip-trigger:focus-visible {
+  border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-surface-border));
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+}
+
+.rag-eval-format-tooltip {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  width: min(25rem, calc(100vw - 2rem));
+  gap: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, var(--color-surface-border));
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-high);
+  box-shadow: 0 1rem 2.25rem color-mix(in srgb, black 34%, transparent);
+  color: var(--color-on-surface);
+  opacity: 0;
+  padding: 0.75rem;
+  pointer-events: none;
+  transform: translateY(-0.25rem);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+  visibility: hidden;
+}
+
+.rag-eval-format-help:hover .rag-eval-format-tooltip,
+.rag-eval-format-help:focus-within .rag-eval-format-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.rag-eval-format-tooltip strong {
+  color: var(--color-on-surface);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.rag-eval-format-tooltip p,
+.rag-eval-format-tooltip small {
+  margin: 0;
+  color: var(--color-on-surface-variant);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.rag-eval-format-tooltip code {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.4rem;
+  background: var(--color-surface);
+  padding: 0.55rem;
+  color: var(--color-on-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}

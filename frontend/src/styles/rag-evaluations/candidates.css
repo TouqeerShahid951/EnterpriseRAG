@@ -1,0 +1,126 @@
+
+.rag-eval-candidate-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.rag-eval-candidate-panel {
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: var(--color-surface-container-low);
+}
+
+.rag-eval-candidate-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.75rem;
+}
+
+.rag-eval-candidate-header h4 {
+  margin: 0;
+  color: var(--color-on-surface);
+  font-size: 0.9rem;
+}
+
+.rag-eval-candidate-header p,
+.rag-eval-empty-candidates {
+  margin: 0.18rem 0 0;
+  color: var(--color-on-surface-variant);
+  font-size: 0.78rem;
+}
+
+.rag-eval-empty-candidates {
+  padding: 0.8rem;
+}
+
+.rag-eval-candidate-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.rag-eval-candidate-table {
+  width: 100%;
+  min-width: min(38rem, 100%);
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.rag-eval-candidate-table th,
+.rag-eval-candidate-table td {
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.rag-eval-candidate-table th {
+  color: var(--color-on-surface-variant);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.rag-eval-candidate-table td {
+  color: var(--color-on-surface);
+}
+
+.rag-eval-candidate-table strong,
+.rag-eval-candidate-table small,
+.rag-eval-candidate-table span {
+  display: block;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rag-eval-candidate-table small {
+  margin-top: 0.15rem;
+  color: var(--color-on-surface-variant);
+}
+
+.rag-eval-rerank-status {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 999px;
+  padding: 0.12rem 0.42rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.rag-eval-rerank-status[data-status="scored"] {
+  border-color: color-mix(in srgb, var(--color-success) 30%, var(--color-surface-border));
+  color: var(--color-success);
+}
+
+.rag-eval-rerank-status[data-status="fallback"] {
+  border-color: color-mix(in srgb, var(--color-warning-amber) 40%, var(--color-surface-border));
+  color: var(--color-warning-amber);
+}
+
+.rag-eval-raw-details {
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+}
+
+.rag-eval-raw-details summary {
+  min-height: 2.35rem;
+  padding: 0.65rem 0.75rem;
+  color: var(--color-on-surface);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.rag-eval-raw-details .rag-eval-json {
+  border: 0;
+  border-top: 1px solid var(--color-surface-border);
+  border-radius: 0;
+  background: transparent;
+}

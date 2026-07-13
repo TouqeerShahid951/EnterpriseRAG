@@ -1,0 +1,240 @@
+
+@media (min-width: 2200px) {
+  .sv-page-inner.rag-eval-page-inner {
+    --sv-page-max-width: min(100%, 164rem);
+  }
+
+  .rag-eval-header,
+  .rag-eval-screen,
+  .rag-eval-main-grid,
+  .rag-eval-tracker-screen {
+    gap: 1rem;
+  }
+
+  .rag-eval-tabs {
+    margin-bottom: 1rem;
+    padding: 0.45rem;
+  }
+
+  .rag-eval-tab {
+    min-height: 2.55rem;
+    font-size: 0.8rem;
+  }
+
+  .rag-eval-metrics {
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: 0.85rem;
+    margin-bottom: 1rem;
+  }
+
+  .rag-eval-metric {
+    min-height: 6.25rem;
+    padding: 1rem;
+  }
+
+  .rag-eval-metric strong {
+    font-size: 1.55rem;
+  }
+
+  .rag-eval-overview-grid,
+  .rag-eval-datasets-grid,
+  .rag-eval-new-run-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(24rem, 0.75fr);
+    gap: 1rem;
+  }
+
+  .rag-eval-form-grid {
+    gap: 1rem;
+  }
+
+  .rag-eval-main-grid {
+    grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
+  }
+
+  .rag-eval-main-grid > .rag-eval-history .rag-eval-run-list {
+    grid-template-columns: minmax(0, 1fr);
+    max-height: calc(100dvh - 16rem);
+    overflow: auto;
+  }
+
+  .rag-eval-detail-grid {
+    grid-template-columns: minmax(19rem, 24rem) minmax(0, 1fr);
+    min-height: 30rem;
+  }
+
+  .rag-eval-case-table {
+    max-height: calc(100dvh - 18rem);
+  }
+
+  .rag-eval-case-detail {
+    gap: 1rem;
+    padding: 1rem;
+  }
+
+  .rag-eval-facts {
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.75rem;
+  }
+
+  .rag-eval-candidate-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem;
+  }
+
+  .rag-eval-tracker-console,
+  .rag-eval-tracker-timeline-panel,
+  .rag-eval-tracker-answer-panel,
+  .rag-eval-tracker-sources-panel,
+  .rag-eval-tracker-timings-panel {
+    padding: 1rem;
+  }
+
+  .rag-eval-tracker-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.7fr);
+    gap: 0.8rem;
+  }
+
+  .rag-eval-tracker-status {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .rag-eval-tracker-grid {
+    grid-template-columns: minmax(24rem, 0.36fr) minmax(0, 1fr);
+    gap: 1rem;
+  }
+
+  .rag-eval-tracker-detail-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(24rem, 0.36fr);
+    gap: 1rem;
+  }
+
+  .rag-eval-tracker-timeline {
+    max-height: calc(100dvh - 27rem);
+  }
+}
+
+@media (min-width: 3200px) {
+  .sv-page-inner.rag-eval-page-inner {
+    --sv-page-max-width: min(100%, 240rem);
+  }
+
+  .rag-eval-metrics {
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 1rem;
+  }
+
+  .rag-eval-metric {
+    min-height: 7rem;
+    padding: 1.15rem;
+  }
+
+  .rag-eval-metric strong {
+    font-size: 1.85rem;
+  }
+
+  .rag-eval-overview-grid,
+  .rag-eval-datasets-grid,
+  .rag-eval-new-run-grid {
+    grid-template-columns: minmax(0, 1.4fr) minmax(32rem, 0.6fr);
+  }
+
+  .rag-eval-main-grid {
+    grid-template-columns: minmax(24rem, 32rem) minmax(0, 1fr);
+    gap: 1.2rem;
+  }
+
+  .rag-eval-detail-grid {
+    grid-template-columns: minmax(24rem, 32rem) minmax(0, 1fr);
+  }
+
+  .rag-eval-candidate-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .rag-eval-tracker-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(22rem, 0.55fr) minmax(18rem, 0.45fr);
+  }
+
+  .rag-eval-tracker-grid {
+    grid-template-columns: minmax(28rem, 0.32fr) minmax(0, 1fr);
+  }
+
+  .rag-eval-tracker-detail-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(30rem, 0.32fr);
+  }
+}
+
+@media (min-width: 5120px) {
+  .sv-page-inner.rag-eval-page-inner {
+    --sv-page-max-width: min(100%, calc(100vw - 4rem));
+  }
+
+  .rag-eval-main-grid {
+    grid-template-columns: minmax(30rem, 42rem) minmax(0, 1fr);
+  }
+
+  .rag-eval-detail-grid {
+    grid-template-columns: minmax(30rem, 42rem) minmax(0, 1fr);
+  }
+
+  .rag-eval-tracker-grid {
+    grid-template-columns: minmax(34rem, 0.28fr) minmax(0, 1fr);
+  }
+
+  .rag-eval-tracker-detail-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(38rem, 0.28fr);
+  }
+}
+
+@media (max-width: 1100px) {
+  .rag-eval-overview-grid,
+.rag-eval-datasets-grid,
+.rag-eval-new-run-grid,
+.rag-eval-main-grid,
+.rag-eval-detail-grid,
+.rag-eval-tracker-grid,
+.rag-eval-tracker-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rag-eval-case-table {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-surface-border);
+    max-height: 24rem;
+  }
+}
+
+@media (max-width: 680px) {
+  .rag-eval-metrics,
+  .rag-eval-form-grid,
+  .rag-eval-facts,
+  .rag-eval-tracker-controls,
+  .rag-eval-tracker-status {
+    grid-template-columns: 1fr;
+  }
+
+  .rag-eval-run-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rag-eval-run-state {
+    justify-items: start;
+  }
+
+  .rag-eval-dataset-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rag-eval-tracker-source-segments {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rag-eval-tracker-fact {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-surface-border);
+  }
+
+  .rag-eval-tracker-fact:last-child {
+    border-bottom: 0;
+  }
+}

@@ -1,0 +1,164 @@
+
+.review-correction-panel {
+  padding-bottom: 0.75rem;
+}
+
+.review-active-context {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.38rem;
+  align-items: center;
+  margin: 0.7rem 0.8rem 0;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 26%, var(--color-surface-border));
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--color-primary-container) 64%, transparent);
+  padding: 0.5rem 0.6rem;
+  color: var(--color-on-surface);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.review-active-context span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  padding: 0.8rem;
+}
+
+.review-facts dt {
+  color: var(--color-secondary);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1rem;
+  text-transform: uppercase;
+}
+
+.review-facts dd {
+  margin-top: 0.15rem;
+  overflow-wrap: anywhere;
+  color: var(--color-on-surface);
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.review-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0 0.8rem 0.75rem;
+}
+
+.review-original-text,
+.review-correction-field,
+.review-actions,
+.review-helper-text,
+.review-correction-panel > .review-placeholder,
+.review-correction-panel > .rounded-lg,
+.review-correction-panel > .Prudentia-error-banner,
+.review-correction-panel > .Prudentia-success-banner,
+.review-correction-panel > .Prudentia-planned-banner {
+  margin-inline: 0.8rem;
+}
+
+.review-original-text {
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+}
+
+.review-subsection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.42rem;
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.55rem 0.7rem;
+}
+
+.review-subsection-header h3 {
+  color: var(--color-on-surface);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.review-subsection-header span {
+  color: var(--color-secondary);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.review-original-text pre {
+  max-height: 10.5rem;
+  overflow: auto;
+  padding: 0.7rem;
+  color: var(--color-on-surface-variant);
+  font-family: var(--font-jetbrains);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.review-correction-field {
+  margin-top: 0.75rem;
+}
+
+.review-field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.review-field-header small {
+  color: var(--color-secondary);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.review-correction-field .sv-textarea {
+  min-height: 9rem;
+  font-family: var(--font-jetbrains);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.review-actions {
+  display: grid;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.42rem;
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--color-surface-border);
+  background: var(--color-surface-card);
+  padding-block: 0.7rem 0.1rem;
+}
+
+.review-actions .sv-action-primary,
+.review-actions .sv-action-secondary,
+.review-actions .sv-action-danger {
+  min-height: 2.35rem;
+}
+
+.review-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.review-helper-text {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+  color: var(--color-warning-amber);
+}

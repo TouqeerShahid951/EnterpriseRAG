@@ -1,0 +1,279 @@
+
+.rag-eval-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.75rem, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.rag-eval-metric {
+  padding: 0.8rem;
+  min-height: 5.6rem;
+}
+
+.rag-eval-metric p {
+  color: var(--color-on-surface-variant);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.rag-eval-metric strong {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--color-on-surface);
+  font-size: 1.35rem;
+  line-height: 1.1;
+}
+
+.rag-eval-metric small {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--color-on-surface-variant);
+}
+
+.rag-eval-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.rag-eval-textarea {
+  min-height: 7.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+}
+
+.rag-eval-main-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.rag-eval-history,
+.rag-eval-inspection {
+  overflow: hidden;
+}
+
+.rag-eval-inspection {
+  container-type: inline-size;
+}
+
+.rag-eval-section-header {
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.8rem;
+}
+
+.rag-eval-run-list {
+  display: grid;
+}
+
+.rag-eval-main-grid > .rag-eval-history .rag-eval-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.rag-eval-main-grid > .rag-eval-history .rag-eval-run-list {
+  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+}
+
+.rag-eval-run-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid var(--color-surface-border);
+  background: transparent;
+  padding: 0.75rem 0.8rem;
+  color: inherit;
+  text-align: left;
+}
+
+.rag-eval-main-grid > .rag-eval-history .rag-eval-run-row {
+  align-content: space-between;
+  min-height: 5.25rem;
+  border-right: 1px solid var(--color-surface-border);
+}
+
+.rag-eval-main-grid > .rag-eval-history .rag-eval-run-row:last-child {
+  border-right: 0;
+}
+
+.rag-eval-run-row:hover,
+.rag-eval-run-row[aria-current="true"],
+.rag-eval-case-row:hover,
+.rag-eval-case-row[aria-current="true"] {
+  background: var(--color-surface-container-high);
+}
+
+.rag-eval-case-row[aria-current="true"] {
+  outline: 1px solid color-mix(in srgb, var(--color-primary) 34%, transparent);
+  outline-offset: -1px;
+}
+
+.rag-eval-run-row strong,
+.rag-eval-case-row strong {
+  display: block;
+  color: var(--color-on-surface);
+}
+
+.rag-eval-run-row small,
+.rag-eval-case-row small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-on-surface-variant);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.rag-eval-run-state {
+  display: grid;
+  gap: 0.35rem;
+  justify-items: end;
+}
+
+.rag-eval-status,
+.rag-eval-stage-badge,
+.rag-eval-pass-pill,
+.rag-eval-fail-pill,
+.rag-eval-failure-chip,
+.rag-eval-no-failures {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 5%, transparent), transparent 46%),
+    color-mix(in srgb, var(--color-surface-container-low) 90%, transparent);
+  padding: 0.22rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.rag-eval-status::before,
+.rag-eval-pass-pill::before,
+.rag-eval-fail-pill::before {
+  content: "";
+  width: 0.42rem;
+  height: 0.42rem;
+  flex: none;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 0.18rem color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.rag-eval-status[data-status="complete"],
+.rag-eval-pass-pill,
+.rag-eval-no-failures {
+  border-color: color-mix(in srgb, var(--color-success) 45%, transparent);
+  background: color-mix(in srgb, var(--color-success) 10%, var(--color-surface-container-low));
+  color: var(--color-success);
+}
+
+.rag-eval-status[data-status="running"],
+.rag-eval-status[data-status="queued"] {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface-container-low));
+  color: var(--color-primary);
+}
+
+.rag-eval-status[data-status="failed"],
+.rag-eval-status[data-status="cancelled"],
+.rag-eval-fail-pill {
+  border-color: color-mix(in srgb, var(--color-error) 45%, transparent);
+  background: color-mix(in srgb, var(--color-error) 10%, var(--color-surface-container-low));
+  color: var(--color-error);
+}
+
+.rag-eval-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.8rem;
+}
+
+.rag-eval-breakdown > div {
+  min-width: 10rem;
+  margin-right: auto;
+}
+
+.rag-eval-breakdown h3,
+.rag-eval-case-detail h3,
+.rag-eval-case-detail h4 {
+  margin: 0;
+  color: var(--color-on-surface);
+  font-weight: 700;
+}
+
+.rag-eval-breakdown p,
+.rag-eval-case-detail p {
+  margin: 0.2rem 0 0;
+  color: var(--color-on-surface-variant);
+}
+
+.rag-eval-failure-chip strong {
+  color: var(--color-on-surface);
+}
+
+.rag-eval-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(15.5rem, 19rem) minmax(0, 1fr);
+  min-height: 22rem;
+}
+
+.rag-eval-case-table {
+  border-right: 1px solid var(--color-surface-border);
+  max-height: 48rem;
+  overflow: auto;
+}
+
+.rag-eval-case-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.65rem;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--color-surface-border);
+  background: transparent;
+  padding: 0.7rem 0.8rem;
+  color: inherit;
+  text-align: left;
+}
+
+.rag-eval-result-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.15rem;
+}
+
+.rag-eval-result-icon.passed {
+  color: var(--color-success);
+}
+
+.rag-eval-result-icon.failed {
+  color: var(--color-error);
+}
+
+.rag-eval-stage-stack {
+  grid-column: 2;
+}
+
+.rag-eval-stage-badge {
+  border-color: color-mix(in srgb, var(--color-warning-amber) 50%, transparent);
+  color: var(--color-warning-amber);
+}
+
+.rag-eval-stage-badge.secondary {
+  opacity: 0.78;
+}
