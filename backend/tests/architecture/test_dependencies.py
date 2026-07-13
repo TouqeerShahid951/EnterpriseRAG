@@ -83,6 +83,17 @@ EXPECTED_FEATURE_HTTP_HANDLER_OWNERS = {
     "get_vllm_deployment_config": "rag.deployment.routes",
     "update_vllm_deployment_config": "rag.deployment.routes",
     "apply_vllm_deployment_config": "rag.deployment.routes",
+    "list_connector_profiles": "rag.connectors.profile_routes",
+    "create_connector_profile": "rag.connectors.profile_routes",
+    "update_connector_profile": "rag.connectors.profile_routes",
+    "delete_connector_profile": "rag.connectors.profile_routes",
+    "test_connector_profile": "rag.connectors.profile_routes",
+    "introspect_connector_profile": "rag.connectors.profile_routes",
+    "list_connector_schema_catalogs": "rag.connectors.catalog_routes",
+    "create_connector_schema_catalog": "rag.connectors.catalog_routes",
+    "create_ai_schema_catalog_draft": "rag.connectors.enrichment_routes",
+    "enrich_connector_schema_catalog_table": "rag.connectors.enrichment_routes",
+    "update_connector_schema_catalog": "rag.connectors.catalog_routes",
 }
 
 
@@ -107,7 +118,7 @@ def test_routes_do_not_import_concrete_adapters() -> None:
 
 
 def test_feature_http_handlers_have_exactly_one_owner() -> None:
-    assert len(EXPECTED_FEATURE_HTTP_HANDLER_OWNERS) == 58
+    assert len(EXPECTED_FEATURE_HTTP_HANDLER_OWNERS) == 69
 
     actual_owners: dict[str, list[str]] = {
         name: [] for name in EXPECTED_FEATURE_HTTP_HANDLER_OWNERS
