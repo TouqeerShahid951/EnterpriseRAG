@@ -24,8 +24,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { documentsApi, ingestJobsApi, reviewApi } from "../../api/contracts";
-import { PrudentiaBrandMark } from "../brand/PrudentiaBrand";
+import { documentsApi, ingestJobsApi, reviewApi } from "@/lib/api/contracts";
+import { PrudentiaBrandMark } from "@/components/brand/PrudentiaBrand";
 import {
   canAccessRoute,
   navigationGroupForRoute,
@@ -34,8 +34,8 @@ import {
   type NavigationIcon,
   type RouteId,
   type WorkspaceNavigationItem,
-} from "../../routes";
-import type { User as AuthUser } from "../../types/api";
+} from "@/routes/routes";
+import type { User as AuthUser } from "@/types/api";
 
 export const Prudentia_SIDEBAR_MIN_WIDTH = 216;
 export const Prudentia_SIDEBAR_MAX_WIDTH = 336;

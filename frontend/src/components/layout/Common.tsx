@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Info, XCircle, type LucideIcon } from "lucide-react";
 
-import { PrudentiaWordmark } from "../brand/PrudentiaBrand";
+import { PrudentiaWordmark } from "@/components/brand/PrudentiaBrand";
 
 export function Fact({ label, value }: { label: string; value: string }) {
   return (

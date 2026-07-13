@@ -13,10 +13,10 @@ import {
   Prudentia_SIDEBAR_MIN_WIDTH,
   PrudentiaSidebar,
   getPrudentiaSidebarDefaultWidth,
-} from "../navigation/PrudentiaSidebar";
-import type { RouteId } from "../../routes";
-import { readStoredBoolean, readStoredNumber, writeStoredBoolean, writeStoredNumber } from "../../state/uiPreferences";
-import type { User as AuthUser } from "../../types/api";
+} from "@/components/navigation/PrudentiaSidebar";
+import type { RouteId } from "@/routes/routes";
+import { readStoredBoolean, readStoredNumber, writeStoredBoolean, writeStoredNumber } from "@/lib/utils/uiPreferences";
+import type { User as AuthUser } from "@/types/api";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "Prudentia-sidebar-collapsed";
 const SIDEBAR_WIDTH_STORAGE_KEY = "Prudentia-sidebar-width-comfortable-v4";
