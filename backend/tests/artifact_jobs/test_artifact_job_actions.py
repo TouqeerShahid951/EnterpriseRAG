@@ -22,6 +22,11 @@ class _Queue:
         self.job_ids.append(job_id)
 
 
+class _NoDocumentRepository:
+    def get_document(self, _document_id: str):
+        return None
+
+
 def test_duplicate_queued_submission_is_redispatched() -> None:
     jobs = InMemoryArtifactJobRepository()
     queue = _Queue()
@@ -262,6 +267,7 @@ def _service(jobs: InMemoryArtifactJobRepository, queue: _Queue) -> ArtifactJobS
     return ArtifactJobService(
         repo_factory=lambda: jobs,
         artifact_repo_factory=lambda: artifacts,
+        document_repo_factory=_NoDocumentRepository,
         queue_factory=lambda: queue,
         retention_days=30,
     )

@@ -50,7 +50,7 @@ from ..routing_models import RoutePlan
 from ..sources import build_evidence_hits, sources_from_hits
 from ..source_resolution import resolve_query_source
 from ..synthesis import build_rag_response, synthesize_response
-from ...retrieval import RetrievalService
+from ...retrieval.service import RetrievalService
 
 _FAITHFULNESS_ALWAYS = {"always", "all", "on", "true", "1"}
 _FAITHFULNESS_NEVER = {"never", "off", "false", "0", "disabled"}

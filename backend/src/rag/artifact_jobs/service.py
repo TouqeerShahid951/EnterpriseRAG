@@ -6,6 +6,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from ..auth.context import UserContext
+from ..auth.document_access import can_read_document
+from ..documents.models import DocumentRepository
 from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
 from .generated_models import GeneratedArtifactRepository
 from .job_models import ArtifactJobRecord, ArtifactJobRepository
@@ -46,11 +48,13 @@ class ArtifactJobService:
         *,
         repo_factory: Callable[[], ArtifactJobRepository],
         artifact_repo_factory: Callable[[], GeneratedArtifactRepository],
+        document_repo_factory: Callable[[], DocumentRepository],
         queue_factory: Callable[[], ArtifactJobQueue],
         retention_days: int,
     ) -> None:
         self.repo_factory = repo_factory
         self.artifact_repo_factory = artifact_repo_factory
+        self.document_repo_factory = document_repo_factory
         self.queue_factory = queue_factory
         self.retention_days = retention_days
 
@@ -122,6 +126,7 @@ class ArtifactJobService:
 
     def get_for_user(self, job_id: str, user: UserContext) -> ArtifactJobDetail:
         job = self._owned_job(job_id, user)
+        self._require_source_access(job, user)
         summary = self.summary(job)
         plan = DocumentPlan.model_validate(job.plan_json) if job.plan_json else None
         return ArtifactJobDetail(
@@ -291,6 +296,32 @@ class ArtifactJobService:
                 "artifact_job_not_found", "Artifact job was not found."
             )
         return job
+
+    def _require_source_access(
+        self,
+        job: ArtifactJobRecord,
+        user: UserContext,
+    ) -> None:
+        evidence = (
+            EvidenceManifest.model_validate(job.evidence_manifest_json)
+            if job.evidence_manifest_json
+            else None
+        )
+        evidence_records = evidence.records if evidence is not None else ()
+        document_ids = dict.fromkeys(
+            (*job.document_ids, *(record.doc_id for record in evidence_records))
+        )
+        if not document_ids:
+            return
+        repo = self.document_repo_factory()
+        if any(
+            (document := repo.get_document(document_id)) is None
+            or not can_read_document(user, document)  # type: ignore[arg-type]
+            for document_id in document_ids
+        ):
+            raise ArtifactJobActionError(
+                "artifact_job_not_found", "Artifact job was not found."
+            )
 
     def _enqueue_or_fail(self, repo: ArtifactJobRepository, job_id: str) -> None:
         try:

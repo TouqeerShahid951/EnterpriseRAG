@@ -237,6 +237,14 @@ class QdrantClient:
             return []
         scoped_filter = dict(qdrant_filter)
         must = list(scoped_filter.get("must", []))
+        must.append(
+            {
+                "should": [
+                    {"key": "doc_id", "match": {"value": document_id}}
+                    for document_id in scoped_ids
+                ]
+            }
+        )
         if structured_only:
             must.append({
                 "should": [

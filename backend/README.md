@@ -72,6 +72,12 @@ depend on query transport DTOs. Citation, attribution, and conflict models used
 by multiple capabilities are canonically owned by `rag.shared.contracts.evidence`;
 `rag.query.schemas` explicitly re-exports them to preserve the public Python and
 OpenAPI contracts while internal code imports the shared owner directly.
+Authorized corpus access is exposed through the transport-neutral
+`rag.retrieval.contracts` port. Artifact generation owns its planning, coverage,
+retry, and manifest rules, while the query-runtime adapter encapsulates routing,
+ABAC and lifecycle filters, Qdrant access, and reranking. Artifact application
+code never receives raw query state, Qdrant hits, or caller-built storage
+filters.
 
 ## Runtime processes
 

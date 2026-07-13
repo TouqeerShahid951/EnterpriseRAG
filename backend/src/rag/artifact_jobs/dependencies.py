@@ -8,8 +8,8 @@ from ..auth.identity_repository import get_identity_repository
 from ..core.config import Settings, settings
 from ..documents.repository import get_document_repository
 from ..query.inference import build_inference_client
-from ..query.qdrant import QdrantClient
 from ..query.rag_config_repository import effective_rag_config
+from ..retrieval.dependencies import build_authorized_corpus_retriever
 from .adapters.generated_memory import InMemoryGeneratedArtifactRepository
 from .adapters.generated_postgres import PostgresGeneratedArtifactRepository
 from .adapters.internal_context_http import HttpArtifactContextValidator
@@ -118,6 +118,7 @@ def get_artifact_job_service() -> ArtifactJobService:
     return ArtifactJobService(
         repo_factory=get_artifact_job_repository,
         artifact_repo_factory=get_generated_artifact_repository,
+        document_repo_factory=get_document_repository,
         queue_factory=get_artifact_job_queue,
         retention_days=settings.artifact_retention_days,
     )
@@ -135,13 +136,12 @@ def get_artifact_job_executor(config: Settings | None = None) -> ArtifactJobExec
         identity_repo_factory=get_identity_repository,
         document_repo_factory=get_document_repository,
         inference=inference,
-        qdrant=QdrantClient(
-            base_url=selected.qdrant_url,
-            collection=selected.qdrant_collection,
-            timeout_seconds=selected.rag_http_timeout_seconds,
+        retriever=build_authorized_corpus_retriever(
+            config=selected,
+            rag_config=rag_config,
+            inference=inference,
         ),
         model_name=rag_config.effective_reasoning_model or rag_config.chat_model,
-        rag_config=rag_config,
     )
 
 

@@ -128,11 +128,27 @@ ARTIFACT_APPLICATION_FILES = (
     RAG_ROOT / "artifact_jobs" / "cleanup.py",
     RAG_ROOT / "artifact_jobs" / "publisher.py",
     RAG_ROOT / "artifact_jobs" / "queue.py",
+    RAG_ROOT / "artifact_jobs" / "retrieval.py",
     RAG_ROOT / "artifact_jobs" / "service.py",
     RAG_ROOT / "artifact_jobs" / "storage.py",
     RAG_ROOT / "artifact_jobs" / "task_execution.py",
 )
 ARTIFACT_SUBMISSION_FILE = RAG_ROOT / "artifact_jobs" / "submission.py"
+ARTIFACT_RETRIEVAL_FILE = RAG_ROOT / "artifact_jobs" / "retrieval.py"
+ARTIFACT_EXECUTION_FILE = RAG_ROOT / "artifact_jobs" / "execution.py"
+AUTHORIZED_CORPUS_CONTRACT_FILE = RAG_ROOT / "retrieval" / "contracts.py"
+QUERY_RETRIEVAL_IMPLEMENTATION_MODULES = frozenset(
+    {
+        "rag.query.intent_router",
+        "rag.query.qdrant",
+        "rag.query.query_retrieval",
+        "rag.query.rag_config_models",
+        "rag.query.reranker",
+        "rag.query.sources",
+        "rag.query.state",
+        "rag.query.temporal",
+    }
+)
 SHARED_EVIDENCE_CONTRACT_FILE = RAG_ROOT / "shared" / "contracts" / "evidence.py"
 EVIDENCE_CONTRACT_NAMES = frozenset(
     {
@@ -405,6 +421,66 @@ def test_artifact_submission_contract_is_dependency_light() -> None:
             or target.startswith("rag.query.")
             or target == "rag.documents"
             or target.startswith("rag.documents.")
+        ),
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_authorized_corpus_contract_is_dependency_light() -> None:
+    allowed_imports = frozenset(
+        {
+            "__future__",
+            "dataclasses",
+            "hashlib",
+            "rag.auth.context",
+            "typing",
+        }
+    )
+    violations = _find_violations(
+        (AUTHORIZED_CORPUS_CONTRACT_FILE,),
+        lambda target: not any(
+            target == allowed or target.startswith(f"{allowed}.")
+            for allowed in allowed_imports
+        ),
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_artifact_retrieval_application_does_not_import_query_implementation() -> None:
+    violations = _find_violations(
+        (ARTIFACT_RETRIEVAL_FILE,),
+        lambda target: target == "rag.query"
+        or target.startswith("rag.query.")
+        or target == "rag.core.config",
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_artifact_feature_does_not_import_query_retrieval_implementation() -> None:
+    violations = _find_violations(
+        (RAG_ROOT / "artifact_jobs").rglob("*.py"),
+        lambda target: any(
+            target == module or target.startswith(f"{module}.")
+            for module in QUERY_RETRIEVAL_IMPLEMENTATION_MODULES
+        ),
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_artifact_executor_does_not_receive_query_retrieval_runtime_types() -> None:
+    violations = _find_violations(
+        (ARTIFACT_EXECUTION_FILE,),
+        lambda target: any(
+            target == module or target.startswith(f"{module}.")
+            for module in QUERY_RETRIEVAL_IMPLEMENTATION_MODULES
         ),
         resolve_relative_imports=True,
     )

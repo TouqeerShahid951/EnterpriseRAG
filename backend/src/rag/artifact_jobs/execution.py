@@ -14,10 +14,9 @@ from billiard.exceptions import SoftTimeLimitExceeded
 from ..auth.document_access import can_read_document
 from ..core.config import Settings
 from ..query.inference import InferenceClient
-from ..query.qdrant import QdrantClient
 from ..documents.models import DocumentRepository
 from ..auth.identity_models import IdentityRepository, UserRecord
-from ..query.rag_config_models import RagConfigRecord
+from ..retrieval.contracts import AuthorizedCorpusRetriever
 from .composer import (
     COMPOSER_PROMPT_VERSION,
     FORMATTER_PROMPT_VERSION,
@@ -70,9 +69,8 @@ class ArtifactJobExecutor:
         identity_repo_factory: Callable[[], IdentityRepository],
         document_repo_factory: Callable[[], DocumentRepository],
         inference: InferenceClient,
-        qdrant: QdrantClient,
+        retriever: AuthorizedCorpusRetriever,
         model_name: str,
-        rag_config: RagConfigRecord,
     ) -> None:
         self.config = config
         self.repo_factory = repo_factory
@@ -86,9 +84,8 @@ class ArtifactJobExecutor:
             audit_repo_factory=document_repo_factory,
         )
         self.inference = inference
-        self.qdrant = qdrant
+        self.retriever = retriever
         self.model_name = model_name
-        self.rag_config = rag_config
         self._run_token: str | None = None
 
     def execute(
@@ -156,12 +153,13 @@ class ArtifactJobExecutor:
             evidence = retrieve_document_evidence(
                 job,
                 plan,
-                inference=self.inference,
-                qdrant=self.qdrant,
-                config=self.config,
-                rag_config=self.rag_config,
+                retriever=self.retriever,
                 document_repo=self.document_repo_factory(),
             )
+            source_doc_ids = list(
+                dict.fromkeys(record.doc_id for record in evidence.records)
+            )
+            self._authorize(job, source_doc_ids)
             logger.info(
                 "artifact retrieval completed job_id=%s sections=%d records=%d duration_ms=%d",
                 job.id,

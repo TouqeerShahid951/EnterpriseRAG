@@ -6,23 +6,17 @@ from dataclasses import replace
 from hashlib import sha256
 import re
 
-from ..auth.abac import build_abac_filter
 from ..auth.context import UserContext
-from ..auth.document_access import can_read_document
-from ..core.config import Settings
-from ..query.qdrant import QdrantClient, SearchHit
-from ..query.state import initial_retrieval_state
-from ..query.query_retrieval import (
-    add_document_scope,
-    add_expiry_scope,
-    retrieve_candidates,
+from ..auth.document_access import (
+    can_read_any_group_path,
+    can_read_document,
 )
-from ..query.reranker import rerank_hits
-from ..query.intent_router import route_query
-from ..query.sources import dedupe_hits
-from ..query.temporal import add_effective_date_scope, target_date_for_query
 from ..documents.models import DocumentRecord, DocumentRepository
-from ..query.rag_config_models import RagConfigRecord
+from ..retrieval.contracts import (
+    AuthorizedCorpusRequest,
+    AuthorizedCorpusRetriever,
+    RetrievedChunk,
+)
 from .contracts import (
     DocumentPlan,
     DocumentPlanSection,
@@ -76,10 +70,7 @@ def retrieve_document_evidence(
     job: ArtifactJobRecord,
     plan: DocumentPlan,
     *,
-    inference: object,
-    qdrant: QdrantClient,
-    config: Settings,
-    rag_config: RagConfigRecord,
+    retriever: AuthorizedCorpusRetriever,
     document_repo: DocumentRepository | None = None,
 ) -> EvidenceManifest:
     user = UserContext(
@@ -90,16 +81,15 @@ def retrieve_document_evidence(
         clearance_level=job.clearance_level,
         permission_version=job.permission_version,
     )
-    scoped_job = _with_inferred_document_scope(job, plan, user=user, document_repo=document_repo)
+    scoped_job = _with_inferred_document_scope(
+        job, plan, user=user, document_repo=document_repo
+    )
     sections = [
         _retrieve_section(
             scoped_job,
             section,
             user=user,
-            inference=inference,
-            qdrant=qdrant,
-            config=config,
-            rag_config=rag_config,
+            retriever=retriever,
         )
         for section in plan.sections
     ]
@@ -110,10 +100,7 @@ def retrieve_document_evidence(
                 plan_section,
                 current,
                 user=user,
-                inference=inference,
-                qdrant=qdrant,
-                config=config,
-                rag_config=rag_config,
+                retriever=retriever,
             )
             if current.coverage_status in {"none", "partial"}
             else current
@@ -130,44 +117,37 @@ def _retrieve_section(
     section: DocumentPlanSection,
     *,
     user: UserContext,
-    inference: object,
-    qdrant: QdrantClient,
-    config: Settings,
-    rag_config: RagConfigRecord,
+    retriever: AuthorizedCorpusRetriever,
 ) -> EvidenceSection:
-    hits: list[SearchHit] = []
-    scan_hits: list[SearchHit] = []
-    top_k_hits: list[SearchHit] = []
+    hits: list[RetrievedChunk] = []
+    scan_hits: list[RetrievedChunk] = []
+    top_k_hits: list[RetrievedChunk] = []
     scanned = False
     scan_limit = 0
-    if section.retrieval_mode in {"document_scan", "structured_rows"} and job.document_ids:
-        qdrant_filter = _authorized_filter(job, user, query=" ".join(section.retrieval_queries))
+    if (
+        section.retrieval_mode in {"document_scan", "structured_rows"}
+        and job.document_ids
+    ):
         scan_limit = SELECTED_DOCUMENT_SCAN_LIMIT
-        scan_hits = qdrant.retrieve_document_chunks(
-            document_ids=list(job.document_ids),
-            qdrant_filter=qdrant_filter,
-            structured_only=section.retrieval_mode == "structured_rows",
-            limit=scan_limit,
+        scan_hits = list(
+            retriever.scan_documents(
+                _retrieval_request(
+                    job,
+                    user,
+                    query=" ".join(section.retrieval_queries),
+                ),
+                structured_only=section.retrieval_mode == "structured_rows",
+                limit=scan_limit,
+            )
         )
         scanned = True
         hits.extend(scan_hits)
     for query in section.retrieval_queries:
-        query_hits = _retrieve_query(
-            job,
-            query,
-            user=user,
-            inference=inference,
-            qdrant=qdrant,
-            config=config,
-            rag_config=rag_config,
-        )
+        query_hits = list(retriever.search(_retrieval_request(job, user, query=query)))
         top_k_hits.extend(query_hits)
         hits.extend(query_hits)
-    deduped = dedupe_hits(hits)
-    scanned_doc_ids = {
-        str(hit.payload.get("doc_id") or hit.point_id)
-        for hit in scan_hits
-    }
+    deduped = _dedupe_chunks(hits)
+    scanned_doc_ids = {hit.doc_id for hit in scan_hits}
     return _evidence_section(
         section,
         deduped,
@@ -175,9 +155,11 @@ def _retrieve_section(
         searched_query_count=len(section.retrieval_queries),
         scanned_document_count=len(scanned_doc_ids),
         scanned_chunk_count=len(scan_hits),
-        top_k_record_count=len(dedupe_hits(top_k_hits)),
+        top_k_record_count=len(_dedupe_chunks(top_k_hits)),
         scan_limit_reached=bool(scan_limit and len(scan_hits) >= scan_limit),
-        scope_scan_without_selected_docs=section.retrieval_mode == "structured_rows" and scanned and not job.document_ids,
+        scope_scan_without_selected_docs=section.retrieval_mode == "structured_rows"
+        and scanned
+        and not job.document_ids,
     )
 
 
@@ -190,7 +172,9 @@ def _with_inferred_document_scope(
 ) -> ArtifactJobRecord:
     if job.document_ids or document_repo is None:
         return job
-    document_ids = _infer_document_scope(job, plan, user=user, document_repo=document_repo)
+    document_ids = _infer_document_scope(
+        job, plan, user=user, document_repo=document_repo
+    )
     if not document_ids:
         return job
     return replace(job, document_ids=tuple(document_ids))
@@ -210,7 +194,9 @@ def _infer_document_scope(
     for document in document_repo.list_documents():
         if document.ingest_status != "complete" or not document.is_current:
             continue
-        if job.group_path and document.group_path != job.group_path:
+        if job.group_path and not can_read_any_group_path(
+            (job.group_path,), document.access_group_paths
+        ):
             continue
         if not can_read_document(user, document):  # type: ignore[arg-type]
             continue
@@ -219,17 +205,27 @@ def _infer_document_scope(
     return [document.id for document in matches[:INFERRED_DOCUMENT_SCOPE_LIMIT]]
 
 
-def _requested_document_scope_terms(job: ArtifactJobRecord, plan: DocumentPlan) -> list[str]:
-    text = " ".join([
-        job.original_request,
-        plan.title,
-        plan.purpose,
-        *[query for section in plan.sections for query in section.retrieval_queries],
-    ])
+def _requested_document_scope_terms(
+    job: ArtifactJobRecord, plan: DocumentPlan
+) -> list[str]:
+    text = " ".join(
+        [
+            job.original_request,
+            plan.title,
+            plan.purpose,
+            *[
+                query
+                for section in plan.sections
+                for query in section.retrieval_queries
+            ],
+        ]
+    )
     return sorted(_scope_tokens(text))
 
 
-def _document_matches_scope_terms(document: DocumentRecord, scope_terms: list[str]) -> bool:
+def _document_matches_scope_terms(
+    document: DocumentRecord, scope_terms: list[str]
+) -> bool:
     return bool(set(scope_terms) & _document_scope_tokens(document))
 
 
@@ -268,93 +264,46 @@ def _retry_section(
     current: EvidenceSection,
     *,
     user: UserContext,
-    inference: object,
-    qdrant: QdrantClient,
-    config: Settings,
-    rag_config: RagConfigRecord,
+    retriever: AuthorizedCorpusRetriever,
 ) -> EvidenceSection:
     query = f"{section.objective}. Original request: {job.original_request}"
-    retry_hits = _retrieve_query(
-        job,
-        query,
-        user=user,
-        inference=inference,
-        qdrant=qdrant,
-        config=config,
-        rag_config=rag_config,
-    )
-    existing = [_record_as_hit(record) for record in current.records]
+    retry_hits = list(retriever.search(_retrieval_request(job, user, query=query)))
+    existing = [_record_as_chunk(record) for record in current.records]
     updated = _evidence_section(
         section,
-        dedupe_hits([*existing, *retry_hits]),
+        _dedupe_chunks([*existing, *retry_hits]),
         scanned=current.coverage_status == "complete_scan",
         searched_query_count=current.searched_query_count + 1,
         scanned_document_count=current.scanned_document_count,
         scanned_chunk_count=current.scanned_chunk_count,
-        top_k_record_count=current.top_k_record_count + len(dedupe_hits(retry_hits)),
+        top_k_record_count=current.top_k_record_count + len(_dedupe_chunks(retry_hits)),
         scan_limit_reached=False,
         scope_scan_without_selected_docs=False,
     )
-    return updated.model_copy(update={"warnings": list(dict.fromkeys([*current.warnings, *updated.warnings]))})
+    return updated.model_copy(
+        update={"warnings": list(dict.fromkeys([*current.warnings, *updated.warnings]))}
+    )
 
 
-def _retrieve_query(
+def _retrieval_request(
     job: ArtifactJobRecord,
-    query: str,
-    *,
     user: UserContext,
-    inference: object,
-    qdrant: QdrantClient,
-    config: Settings,
-    rag_config: RagConfigRecord,
-) -> list[SearchHit]:
-    ctx = initial_retrieval_state(
+    *,
+    query: str,
+) -> AuthorizedCorpusRequest:
+    return AuthorizedCorpusRequest(
         trace_id=job.trace_id,
         session_id=job.session_id,
         query=query,
+        user=user,
         group_path=job.group_path,
         document_ids=job.document_ids,
-        user=user,
-        token_budget=rag_config.retrieval_token_budget,
     )
-    route_plan, _signals = route_query(
-        query,
-        turns=[],
-        base_top_k=max(config.rag_top_k, 8),
-        llm_verifier=None,
-        verifier_model=None,
-        verifier_enabled=False,
-    )
-    ctx["route_plan"] = route_plan
-    ctx["intent"] = route_plan.public_intent
-    ctx["sub_queries"] = [query]
-    ctx["is_current_only"] = target_date_for_query(query) is None
-    hits = retrieve_candidates(ctx, config=config, ollama=inference, qdrant=qdrant)  # type: ignore[arg-type]
-    max_candidates = min(config.rag_reranker_max_candidates, config.artifact_reranker_max_candidates)
-    return rerank_hits(
-        query,
-        hits,
-        top_k=min(max(route_plan.top_k, 8), max_candidates),
-        max_candidates=max_candidates,
-        model_name=rag_config.reranker_model,
-        cache_dir=config.rag_reranker_cache_dir,
-    )
-
-
-def _authorized_filter(job: ArtifactJobRecord, user: UserContext, *, query: str) -> dict[str, object]:
-    current_only = target_date_for_query(query) is None
-    qdrant_filter = build_abac_filter(user, is_current_only=current_only)
-    qdrant_filter = add_effective_date_scope(
-        qdrant_filter,
-        target_date_for_query(query) if not current_only else None,
-    )
-    qdrant_filter = add_expiry_scope(qdrant_filter)
-    return add_document_scope(qdrant_filter, list(job.document_ids))
 
 
 def _evidence_section(
     section: DocumentPlanSection,
-    hits: list[SearchHit],
+    hits: list[RetrievedChunk],
     *,
     scanned: bool,
     searched_query_count: int,
@@ -365,21 +314,31 @@ def _evidence_section(
     scope_scan_without_selected_docs: bool,
 ) -> EvidenceSection:
     records = [
-        _record_from_hit(hit, section_title=section.title, query=" | ".join(section.retrieval_queries))
+        _record_from_chunk(
+            hit,
+            section_title=section.title,
+            query=" | ".join(section.retrieval_queries),
+        )
         for hit in hits
-        if str(hit.payload.get("text") or "").strip() or hit.payload.get("structured_fields")
+        if hit.text.strip() or hit.structured_fields
     ]
     warnings: list[str] = []
     if scanned and not scan_limit_reached:
         status = "complete_scan"
         if scope_scan_without_selected_docs:
-            warnings.append("Structured rows were scanned across the authorized Knowledge Space scope.")
+            warnings.append(
+                "Structured rows were scanned across the authorized Knowledge Space scope."
+            )
     elif scanned and scan_limit_reached:
         status = "partial" if records else "none"
-        warnings.append("Authorized scan reached the safety limit; coverage must not be described as exhaustive.")
+        warnings.append(
+            "Authorized scan reached the safety limit; coverage must not be described as exhaustive."
+        )
     elif records and section.retrieval_mode in {"document_scan", "structured_rows"}:
         status = "partial"
-        warnings.append("Exhaustive coverage was requested but no selected-document scan was available.")
+        warnings.append(
+            "Exhaustive coverage was requested but no selected-document scan was available."
+        )
     elif records:
         status = "sufficient"
         warnings.append("Coverage is based on top-k retrieval, not an exhaustive scan.")
@@ -388,7 +347,9 @@ def _evidence_section(
         warnings.append("No authorized evidence was found for this section.")
     if section.coverage_requirement.startswith("complete") and not scanned:
         status = "partial" if records else "none"
-        warnings.append("Coverage is retrieval-based and must not be described as exhaustive.")
+        warnings.append(
+            "Coverage is retrieval-based and must not be described as exhaustive."
+        )
     return EvidenceSection(
         title=section.title,
         objective=section.objective,
@@ -404,57 +365,56 @@ def _evidence_section(
     )
 
 
-def _record_from_hit(hit: SearchHit, *, section_title: str, query: str) -> EvidenceRecord:
-    payload = hit.payload
-    doc_id = str(payload.get("doc_id") or hit.point_id)
-    chunk_id = str(payload.get("chunk_id") or hit.point_id)
-    raw_fields = payload.get("structured_fields")
-    fields = {
-        str(item.get("label")): str(item.get("value"))
-        for item in raw_fields
-        if isinstance(item, dict) and item.get("label") and item.get("value")
-    } if isinstance(raw_fields, list) else {}
+def _record_from_chunk(
+    chunk: RetrievedChunk,
+    *,
+    section_title: str,
+    query: str,
+) -> EvidenceRecord:
     return EvidenceRecord(
-        evidence_id=_evidence_id(doc_id, chunk_id),
+        evidence_id=_evidence_id(chunk.doc_id, chunk.chunk_id),
         section_title=section_title,
         query=query,
-        doc_id=doc_id,
-        doc_title=str(payload.get("doc_title") or "Untitled"),
-        chunk_id=chunk_id,
-        page_start=_int(payload.get("page_start")) or _int(payload.get("page")),
-        page_end=_int(payload.get("page_end")) or _int(payload.get("page_start")) or _int(payload.get("page")),
-        content_type=str(payload.get("chunk_type") or payload.get("structured_kind") or "text"),
-        text=str(payload.get("text") or ""),
-        structured_fields=fields,
-        retrieval_score=float(hit.score),
-        rerank_score=float(payload["_rerank_score"]) if isinstance(payload.get("_rerank_score"), int | float) else None,
+        doc_id=chunk.doc_id,
+        doc_title=chunk.doc_title,
+        chunk_id=chunk.chunk_id,
+        page_start=chunk.page_start,
+        page_end=chunk.page_end,
+        content_type=chunk.content_type,
+        text=chunk.text,
+        structured_fields=dict(chunk.structured_fields),
+        retrieval_score=chunk.retrieval_score,
+        rerank_score=chunk.rerank_score,
     )
 
 
-def _record_as_hit(record: EvidenceRecord) -> SearchHit:
-    return SearchHit(
+def _record_as_chunk(record: EvidenceRecord) -> RetrievedChunk:
+    return RetrievedChunk(
         point_id=record.chunk_id,
-        score=record.retrieval_score,
-        payload={
-            "doc_id": record.doc_id,
-            "doc_title": record.doc_title,
-            "chunk_id": record.chunk_id,
-            "page_start": record.page_start,
-            "page_end": record.page_end,
-            "chunk_type": record.content_type,
-            "text": record.text,
-            "structured_fields": [
-                {"label": label, "value": value}
-                for label, value in record.structured_fields.items()
-            ],
-            "_rerank_score": record.rerank_score,
-        },
+        doc_id=record.doc_id,
+        doc_title=record.doc_title,
+        chunk_id=record.chunk_id,
+        page_start=record.page_start,
+        page_end=record.page_end,
+        content_type=record.content_type,
+        text=record.text,
+        structured_fields=tuple(record.structured_fields.items()),
+        retrieval_score=record.retrieval_score,
+        rerank_score=record.rerank_score,
+        identity_keys=frozenset(),
     )
+
+
+def _dedupe_chunks(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
+    seen: set[str] = set()
+    unique: list[RetrievedChunk] = []
+    for chunk in chunks:
+        if seen & chunk.identity_keys:
+            continue
+        seen.update(chunk.identity_keys)
+        unique.append(chunk)
+    return unique
 
 
 def _evidence_id(doc_id: str, chunk_id: str) -> str:
     return "ev_" + sha256(f"{doc_id}:{chunk_id}".encode("utf-8")).hexdigest()[:20]
-
-
-def _int(value: object) -> int | None:
-    return int(value) if isinstance(value, int | float) else None

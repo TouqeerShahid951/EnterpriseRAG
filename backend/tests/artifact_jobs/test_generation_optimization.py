@@ -42,10 +42,9 @@ from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
 from rag.artifact_jobs.service import ArtifactJobService, _public_stage_timings
 from rag.auth.context import UserContext
 from rag.core.config import Settings
-from rag.query.qdrant import SearchHit
 from rag.documents.models import DocumentRecord
 from rag.auth.identity_models import UserRecord
-from rag.query.rag_config_models import RagConfigRecord
+from rag.retrieval.contracts import AuthorizedCorpusRequest, RetrievedChunk
 from rag.artifact_jobs.adapters.storage import LocalGeneratedArtifactStorage
 
 
@@ -68,6 +67,7 @@ def test_artifact_job_summary_exposes_user_facing_progress() -> None:
     service = ArtifactJobService(
         repo_factory=lambda: job_repo,
         artifact_repo_factory=InMemoryGeneratedArtifactRepository,
+        document_repo_factory=_DocumentRepo,
         queue_factory=lambda: _Queue(),
         retention_days=1,
     )
@@ -102,6 +102,7 @@ def test_retry_resets_artifact_job_attempt_timestamps() -> None:
     service = ArtifactJobService(
         repo_factory=lambda: job_repo,
         artifact_repo_factory=InMemoryGeneratedArtifactRepository,
+        document_repo_factory=_DocumentRepo,
         queue_factory=lambda: queue,
         retention_days=1,
     )
@@ -374,17 +375,13 @@ def test_planner_falls_back_when_complex_llm_plan_fails() -> None:
     assert [section.title for section in plan.sections] == ["Summary", "Details", "Timeline"]
 
 
-def test_retrieval_infers_document_family_scope(monkeypatch) -> None:
-    monkeypatch.setattr("rag.artifact_jobs.retrieval._retrieve_query", lambda *_args, **_kwargs: [])
-    qdrant = _ScopedQdrant()
+def test_retrieval_infers_document_family_scope() -> None:
+    retriever = _ScopedRetriever()
 
     evidence = retrieve_document_evidence(
         _job(original_request="Create a presentation of all crimes in FIRs"),
         _structured_rows_plan(),
-        inference=object(),
-        qdrant=qdrant,  # type: ignore[arg-type]
-        config=Settings(document_repository="memory"),
-        rag_config=_rag_config(),
+        retriever=retriever,
         document_repo=_CatalogDocumentRepo([
             _document("fir-1", "FIR_02_kidnapping.pdf"),
             _document("image-1", "preview16.jpg", summary="The image shows a tank firing."),
@@ -392,14 +389,12 @@ def test_retrieval_infers_document_family_scope(monkeypatch) -> None:
         ]),
     )
 
-    assert qdrant.document_scans == [["fir-1"]]
-    assert not qdrant.authorized_scope_scanned
+    assert retriever.document_scans == [["fir-1"]]
     assert [record.doc_title for record in evidence.records] == ["FIR_02_kidnapping.pdf"]
 
 
-def test_retrieval_infers_policy_scope_from_doc_type(monkeypatch) -> None:
-    monkeypatch.setattr("rag.artifact_jobs.retrieval._retrieve_query", lambda *_args, **_kwargs: [])
-    qdrant = _ScopedQdrant({
+def test_retrieval_infers_policy_scope_from_doc_type() -> None:
+    retriever = _ScopedRetriever({
         "policy-1": "Access-Control-Policy.pdf",
         "policy-2": "Vendor-Risk-Policy.pdf",
         "manual-1": "Dell PowerEdge R630 Technical Manual.pdf",
@@ -408,10 +403,7 @@ def test_retrieval_infers_policy_scope_from_doc_type(monkeypatch) -> None:
     evidence = retrieve_document_evidence(
         _job(original_request="Create a presentation of all risks in policies"),
         _structured_rows_plan(title="Policy Risks", query="all risks in policies"),
-        inference=object(),
-        qdrant=qdrant,  # type: ignore[arg-type]
-        config=Settings(document_repository="memory"),
-        rag_config=_rag_config(),
+        retriever=retriever,
         document_repo=_CatalogDocumentRepo([
             _document("policy-1", "Access-Control-Policy.pdf", doc_type="policy"),
             _document("policy-2", "Vendor-Risk-Policy.pdf", doc_type="policy"),
@@ -419,31 +411,26 @@ def test_retrieval_infers_policy_scope_from_doc_type(monkeypatch) -> None:
         ]),
     )
 
-    assert qdrant.document_scans == [["policy-1", "policy-2"]]
+    assert retriever.document_scans == [["policy-1", "policy-2"]]
     assert [record.doc_title for record in evidence.records] == [
         "Access-Control-Policy.pdf",
         "Vendor-Risk-Policy.pdf",
     ]
 
 
-def test_retrieval_does_not_scan_every_structured_row_without_scope(monkeypatch) -> None:
-    monkeypatch.setattr("rag.artifact_jobs.retrieval._retrieve_query", lambda *_args, **_kwargs: [])
-    qdrant = _ScopedQdrant()
+def test_retrieval_does_not_scan_every_structured_row_without_scope() -> None:
+    retriever = _ScopedRetriever()
 
     evidence = retrieve_document_evidence(
         _job(original_request="Create a presentation of all standards"),
         _structured_rows_plan(title="Standards", query="all standards"),
-        inference=object(),
-        qdrant=qdrant,  # type: ignore[arg-type]
-        config=Settings(document_repository="memory"),
-        rag_config=_rag_config(),
+        retriever=retriever,
         document_repo=_CatalogDocumentRepo([
             _document("manual-1", "Dell PowerEdge R630 Technical Manual.pdf"),
         ]),
     )
 
-    assert qdrant.document_scans == []
-    assert not qdrant.authorized_scope_scanned
+    assert retriever.document_scans == []
     assert evidence.records == []
 
 
@@ -470,16 +457,8 @@ def test_seeded_response_job_renders_without_artifact_composition(tmp_path) -> N
         identity_repo_factory=lambda: _IdentityRepo(job.user_id, job.permission_version),
         document_repo_factory=_DocumentRepo,
         inference=_FailingInference(),
-        qdrant=object(),
+        retriever=object(),  # type: ignore[arg-type]
         model_name="test-model",
-        rag_config=RagConfigRecord(
-            base_url="http://example.test",
-            chat_model="test-chat",
-            embed_model="test-embed",
-            faithfulness_model=None,
-            chat_timeout_seconds=1,
-            embed_timeout_seconds=1,
-        ),
     )
 
     completed = executor.execute(job.id)
@@ -521,9 +500,8 @@ def test_seeded_response_job_normalizes_recoverable_evidence_ids(tmp_path) -> No
         identity_repo_factory=lambda: _IdentityRepo(job.user_id, job.permission_version),
         document_repo_factory=_DocumentRepo,
         inference=_FailingInference(),
-        qdrant=object(),
+        retriever=object(),  # type: ignore[arg-type]
         model_name="test-model",
-        rag_config=_rag_config(),
     )
 
     completed = executor.execute(job.id)
@@ -582,9 +560,8 @@ def test_seeded_response_job_falls_back_when_repair_json_is_malformed(tmp_path, 
         identity_repo_factory=lambda: _IdentityRepo(job.user_id, job.permission_version),
         document_repo_factory=_DocumentRepo,
         inference=_FailingInference(),
-        qdrant=object(),
+        retriever=object(),  # type: ignore[arg-type]
         model_name="test-model",
-        rag_config=_rag_config(),
     )
 
     completed = executor.execute(job.id)
@@ -644,9 +621,8 @@ def test_seeded_response_job_uses_deterministic_repair_before_llm(tmp_path, monk
         identity_repo_factory=lambda: _IdentityRepo(job.user_id, job.permission_version),
         document_repo_factory=_DocumentRepo,
         inference=_FailingInference(),
-        qdrant=object(),
+        retriever=object(),  # type: ignore[arg-type]
         model_name="test-model",
-        rag_config=_rag_config(),
     )
 
     completed = executor.execute(job.id)
@@ -756,16 +732,8 @@ def test_artifact_job_renderer_uses_shared_renderer_for_all_formats(tmp_path) ->
         identity_repo_factory=lambda: _IdentityRepo(job.user_id, job.permission_version),
         document_repo_factory=_DocumentRepo,
         inference=object(),
-        qdrant=object(),
+        retriever=object(),  # type: ignore[arg-type]
         model_name="test-model",
-        rag_config=RagConfigRecord(
-            base_url="http://example.test",
-            chat_model="test-chat",
-            embed_model="test-embed",
-            faithfulness_model=None,
-            chat_timeout_seconds=1,
-            embed_timeout_seconds=1,
-        ),
     )
 
     failures = executor._render_formats(job, _evidence_manifest([_evidence_record()]), _bundle())
@@ -1308,17 +1276,6 @@ def _large_list_bundle(*, item_count: int) -> ArtifactContentBundle:
     )
 
 
-def _rag_config() -> RagConfigRecord:
-    return RagConfigRecord(
-        base_url="http://example.test",
-        chat_model="test-chat",
-        embed_model="test-embed",
-        faithfulness_model=None,
-        chat_timeout_seconds=1,
-        embed_timeout_seconds=1,
-    )
-
-
 def _document(
     document_id: str,
     title: str,
@@ -1528,31 +1485,36 @@ class _CatalogDocumentRepo:
         return self.documents
 
 
-class _ScopedQdrant:
+class _ScopedRetriever:
     def __init__(self, titles: dict[str, str] | None = None) -> None:
         self.document_scans: list[list[str]] = []
-        self.authorized_scope_scanned = False
         self.titles = titles or {"fir-1": "FIR_02_kidnapping.pdf"}
 
-    def retrieve_document_chunks(
+    def search(
         self,
+        _request: AuthorizedCorpusRequest,
+    ) -> tuple[RetrievedChunk, ...]:
+        return ()
+
+    def scan_documents(
+        self,
+        request: AuthorizedCorpusRequest,
         *,
-        document_ids: list[str],
-        qdrant_filter: dict[str, object],
         structured_only: bool,
         limit: int,
-    ) -> list[SearchHit]:
-        _ = qdrant_filter, structured_only, limit
+    ) -> tuple[RetrievedChunk, ...]:
+        _ = structured_only, limit
+        document_ids = list(request.document_ids)
         self.document_scans.append(list(document_ids))
-        return [
-            _search_hit(doc_id, self.titles[doc_id], f"Evidence for {self.titles[doc_id]}.")
+        return tuple(
+            _retrieved_chunk(
+                doc_id,
+                self.titles[doc_id],
+                f"Evidence for {self.titles[doc_id]}.",
+            )
             for doc_id in document_ids
             if doc_id in self.titles
-        ]
-
-    def retrieve_authorized_chunks(self, **_kwargs) -> list[SearchHit]:
-        self.authorized_scope_scanned = True
-        return [_search_hit("manual-1", "Dell PowerEdge R630 Technical Manual.pdf", "Standard: Ethernet.")]
+        )
 
 
 class _Queue:
@@ -1563,20 +1525,20 @@ class _Queue:
         self.job_ids.append(job_id)
 
 
-def _search_hit(doc_id: str, title: str, text: str) -> SearchHit:
-    return SearchHit(
+def _retrieved_chunk(doc_id: str, title: str, text: str) -> RetrievedChunk:
+    return RetrievedChunk(
         point_id=f"{doc_id}:1",
-        score=1.0,
-        payload={
-            "doc_id": doc_id,
-            "doc_title": title,
-            "chunk_id": f"{doc_id}:1",
-            "page_start": 1,
-            "page_end": 1,
-            "chunk_type": "table_row",
-            "text": text,
-            "structured_fields": [{"label": "Crime", "value": text}],
-        },
+        doc_id=doc_id,
+        doc_title=title,
+        chunk_id=f"{doc_id}:1",
+        page_start=1,
+        page_end=1,
+        content_type="table_row",
+        text=text,
+        structured_fields=(("Crime", text),),
+        retrieval_score=1.0,
+        rerank_score=None,
+        identity_keys=frozenset(),
     )
 
 
