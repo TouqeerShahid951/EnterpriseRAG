@@ -1,0 +1,154 @@
+
+@keyframes source-viewer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (min-width: 2200px) {
+  .source-viewer-header {
+    min-height: 5rem;
+    padding-inline: 1.25rem;
+  }
+
+  .source-viewer-heading h1 {
+    max-width: 72ch;
+    font-size: 1.35rem;
+  }
+
+  .source-viewer-stage {
+    padding: 1.25rem;
+  }
+
+  .source-viewer-document {
+    gap: 1rem;
+  }
+
+  .source-viewer-toolbar,
+  .source-viewer-notice,
+  .source-viewer-asset-strip {
+    width: min(100%, 96rem);
+  }
+
+  .source-viewer-pdf-scroll,
+  .source-viewer-image-scroll,
+  .source-viewer-json-scroll {
+    padding: 1rem;
+  }
+}
+
+@media (min-width: 3200px) {
+  .source-viewer-header {
+    padding-inline: 1.5rem;
+  }
+
+  .source-viewer-toolbar,
+  .source-viewer-notice,
+  .source-viewer-asset-strip {
+    width: min(100%, 144rem);
+  }
+
+  .source-viewer-stage {
+    padding: 1.5rem;
+  }
+
+  .source-viewer-asset-item {
+    max-width: 22rem;
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+  }
+
+  .source-viewer-asset-frame {
+    width: 7.5rem;
+  }
+}
+
+@media (min-width: 5120px) {
+  .source-viewer-toolbar,
+  .source-viewer-notice,
+  .source-viewer-asset-strip {
+    width: min(100%, 220rem);
+  }
+
+  .source-viewer-stage {
+    padding: 1.75rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .source-viewer-header {
+    position: static;
+    min-height: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 1rem;
+  }
+
+  .source-viewer-original-link {
+    width: 100%;
+  }
+
+  .source-viewer-stage {
+    min-height: 0;
+    padding: 1rem;
+  }
+
+  .source-viewer-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .source-viewer-toolbar-main,
+  .source-viewer-toolbar-end,
+  .source-viewer-page-controls,
+  .source-viewer-zoom-controls {
+    width: 100%;
+  }
+
+  .source-viewer-toolbar-end {
+    justify-content: stretch;
+  }
+
+  .source-viewer-page-controls {
+    justify-content: space-between;
+  }
+
+  .source-viewer-page-controls button,
+  .source-viewer-mode-button {
+    padding: 0 0.5rem;
+  }
+
+  .source-viewer-control-text {
+    display: none;
+  }
+
+  .source-viewer-page-input-label,
+  .source-viewer-file-label {
+    flex: 1 1 auto;
+  }
+
+  .source-viewer-zoom-readout {
+    flex: 1 1 4.25rem;
+  }
+
+  .source-viewer-mode-button {
+    flex: 1 1 calc(50% - 0.4rem);
+  }
+
+  .source-viewer-jump {
+    width: 100%;
+  }
+
+  .source-viewer-asset-strip {
+    width: 100%;
+  }
+
+  .source-viewer-asset-item {
+    min-width: min(15rem, 88vw);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .source-viewer-spinner {
+    animation: none;
+  }
+}

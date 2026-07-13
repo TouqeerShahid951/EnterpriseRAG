@@ -1,0 +1,95 @@
+
+.source-viewer-image-scroll {
+  padding: 0.75rem;
+}
+
+.source-viewer-image-stage {
+  position: relative;
+  margin-inline: auto;
+  background: var(--source-viewer-paper);
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 24%);
+}
+
+.source-viewer-image {
+  display: block;
+  background: var(--source-viewer-paper);
+}
+
+.source-viewer-image-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.source-viewer-image-highlight {
+  position: absolute;
+  border: 2px solid color-mix(in srgb, var(--color-primary) 78%, var(--source-viewer-paper));
+  background: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 18%);
+}
+
+.source-viewer-asset-strip {
+  display: flex;
+  width: min(100%, 62rem);
+  gap: 0.55rem;
+  margin-inline: auto;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.source-viewer-asset-item {
+  display: grid;
+  min-width: min(15rem, 82vw);
+  max-width: 18rem;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-card);
+  padding: 0.625rem;
+}
+
+.source-viewer-asset-frame {
+  display: grid;
+  width: 6.5rem;
+  aspect-ratio: 4 / 3;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.375rem;
+  background: var(--color-surface-container-low);
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.source-viewer-asset-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--source-viewer-paper);
+}
+
+.source-viewer-asset-item figcaption {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+}
+
+.source-viewer-asset-item strong {
+  color: var(--color-on-surface);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.source-viewer-asset-item span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}

@@ -1,0 +1,30 @@
+
+.source-viewer-docx-scroll {
+  padding: 0 0.75rem 1.5rem;
+}
+
+.source-viewer-docx-scale-frame {
+  margin-inline: auto;
+}
+
+.source-viewer-docx-document {
+  min-width: min(38rem, 100%);
+  transform-origin: top left;
+}
+
+.source-viewer-docx-document .docx-wrapper {
+  background: transparent;
+  padding: 0;
+}
+
+.source-viewer-docx-document .docx-wrapper > section.docx {
+  margin: 0 auto 1rem;
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 24%);
+}
+
+.source-viewer-docx-highlight {
+  background: color-mix(in srgb, var(--color-primary) 52%, var(--source-viewer-paper));
+  color: inherit;
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 72%, transparent);
+  scroll-margin-block: 8rem;
+}

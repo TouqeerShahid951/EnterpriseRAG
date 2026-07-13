@@ -1,0 +1,303 @@
+.source-viewer-shell {
+  --source-viewer-paper: oklch(0.99 0.005 95);
+  display: flex;
+  height: 100dvh;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-background);
+  color: var(--color-on-surface);
+}
+
+.source-viewer-header {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  display: flex;
+  min-height: 4.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--color-surface-border);
+  background: color-mix(in srgb, var(--color-surface-container-low) 94%, transparent);
+  padding: 0.75rem 1rem;
+  backdrop-filter: blur(12px);
+  flex: 0 0 auto;
+}
+
+.source-viewer-heading {
+  min-width: 0;
+}
+
+.source-viewer-heading h1 {
+  max-width: 46rem;
+  margin-top: 0.25rem;
+  color: var(--color-on-surface);
+  font-size: 1.24rem;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.source-viewer-heading > p:last-child {
+  margin-top: 0.375rem;
+  color: var(--color-secondary);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.source-viewer-back,
+.source-viewer-original-link,
+.source-viewer-page-controls button,
+.source-viewer-jump,
+.source-viewer-icon-button,
+.source-viewer-mode-button {
+  display: inline-flex;
+  min-height: 2.35rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.source-viewer-back {
+  min-height: auto;
+  justify-content: flex-start;
+  border: 0;
+  color: var(--color-secondary);
+}
+
+.source-viewer-back:hover,
+.source-viewer-back:focus-visible {
+  color: var(--color-on-surface);
+}
+
+.source-viewer-original-link {
+  flex: 0 0 auto;
+  background: var(--color-primary);
+  padding: 0 0.875rem;
+  color: var(--color-on-primary);
+}
+
+.source-viewer-stage {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding: 1rem;
+}
+
+.source-viewer-state {
+  display: grid;
+  width: min(100%, 30rem);
+  min-height: 11rem;
+  place-items: center;
+  align-content: center;
+  gap: 0.75rem;
+  margin: 3rem auto 0;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-card);
+  padding: 1.25rem;
+  color: var(--color-secondary);
+  text-align: center;
+}
+
+.source-viewer-state h2 {
+  color: var(--color-on-surface);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.source-viewer-state p {
+  max-width: 28rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.source-viewer-state-error svg {
+  color: var(--color-error, #ef4444);
+}
+
+.source-viewer-spinner {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid var(--color-surface-border);
+  border-top-color: var(--color-primary);
+  border-radius: 999px;
+  animation: source-viewer-spin 0.8s linear infinite;
+}
+
+.source-viewer-document {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.source-viewer-toolbar {
+  display: flex;
+  width: min(100%, 68rem);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-inline: auto;
+}
+
+.source-viewer-toolbar-main {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.source-viewer-page-controls,
+.source-viewer-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.source-viewer-page-controls button,
+.source-viewer-jump,
+.source-viewer-icon-button,
+.source-viewer-mode-button {
+  background: var(--color-surface-card);
+  padding: 0 0.75rem;
+  color: var(--color-on-surface);
+}
+
+.source-viewer-icon-button {
+  width: 2.35rem;
+  padding: 0;
+}
+
+.source-viewer-mode-button {
+  white-space: nowrap;
+}
+
+.source-viewer-mode-button-active {
+  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-surface-border));
+  background: var(--color-primary-container);
+  color: var(--color-on-surface);
+}
+
+.source-viewer-page-controls button:disabled,
+.source-viewer-icon-button:disabled,
+.source-viewer-mode-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.source-viewer-page-input-label,
+.source-viewer-file-label,
+.source-viewer-zoom-readout {
+  display: inline-flex;
+  min-height: 2.35rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  color: var(--color-on-surface);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.source-viewer-page-input-label {
+  gap: 0.45rem;
+  padding: 0 0.625rem;
+}
+
+.source-viewer-page-input-label > span:first-child,
+.source-viewer-page-input-label > span:last-child {
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.source-viewer-page-input-label input {
+  width: 3.75rem;
+  height: 2rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.375rem;
+  background: var(--color-surface-card);
+  color: var(--color-on-surface);
+  font: inherit;
+  text-align: center;
+}
+
+.source-viewer-file-label {
+  padding: 0 0.85rem;
+}
+
+.source-viewer-zoom-readout {
+  min-width: 4.25rem;
+  padding: 0 0.625rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.source-viewer-toolbar-end {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.source-viewer-toolbar-end:empty {
+  display: none;
+}
+
+.source-viewer-toolbar button:hover:not(:disabled),
+.source-viewer-toolbar button:focus-visible,
+.source-viewer-page-input-label:focus-within {
+  border-color: color-mix(in srgb, var(--color-primary) 65%, var(--color-surface-border));
+}
+
+.source-viewer-page-controls > span {
+  color: var(--color-on-surface);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.source-viewer-notice {
+  display: flex;
+  width: min(100%, 62rem);
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-inline: auto;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 35%, var(--color-surface-border));
+  border-radius: 0.5rem;
+  background: var(--color-primary-container);
+  padding: 0.75rem;
+  color: var(--color-on-surface);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.source-viewer-notice svg {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+  color: var(--color-primary);
+}
+
+.source-viewer-pdf-scroll,
+.source-viewer-docx-scroll,
+.source-viewer-image-scroll,
+.source-viewer-json-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  scrollbar-gutter: stable both-edges;
+}
