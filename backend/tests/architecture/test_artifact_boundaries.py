@@ -22,8 +22,13 @@ ARTIFACT_QUERY_GENERATION_ADAPTER_FILE = (
     RAG_ROOT / "artifact_jobs" / "adapters" / "query_generation.py"
 )
 ARTIFACT_GENERATION_APPLICATION_FILES = (
+    RAG_ROOT / "artifact_jobs" / "bundle_repair.py",
     RAG_ROOT / "artifact_jobs" / "composer.py",
+    RAG_ROOT / "artifact_jobs" / "composition.py",
+    RAG_ROOT / "artifact_jobs" / "composition_deadline.py",
     RAG_ROOT / "artifact_jobs" / "execution.py",
+    RAG_ROOT / "artifact_jobs" / "fallback_composition.py",
+    RAG_ROOT / "artifact_jobs" / "format_adaptation.py",
     RAG_ROOT / "artifact_jobs" / "llm_json.py",
     RAG_ROOT / "artifact_jobs" / "planner.py",
 )
