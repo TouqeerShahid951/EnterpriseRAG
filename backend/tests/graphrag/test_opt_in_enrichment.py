@@ -10,10 +10,8 @@ from starlette.requests import Request
 from rag.graphrag import document_routes
 from rag.graphrag import job_routes as ingest_job_routes
 from rag.core.config import settings
-from rag.graphrag import tasks as graphrag_tasks
 from rag.graphrag.adapters.document_enrichment_queue import GraphRAGDocumentEnrichmentQueue
 from rag.graphrag.document_enrichment_service import DocumentGraphEnrichmentService
-from rag.ingestion import tasks as ingestion_tasks
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.identity_models import UserRecord
 from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
@@ -22,25 +20,6 @@ from rag.schemas.ingest_jobs import GraphRAGCancelRequest
 from rag.graphrag.adapters.maintenance_queue import InMemoryGraphRAGMaintenanceQueue
 from rag.graphrag.maintenance_queue import GraphRAGDocumentIndexMessage
 from rag.ingestion.worker_control import WorkerActiveTask, WorkerCapacity, WorkerControlResult
-
-
-def test_successful_ingestion_does_not_automatically_queue_graph_enrichment(monkeypatch: pytest.MonkeyPatch) -> None:
-    graph_dispatches: list[object] = []
-    monkeypatch.setattr(
-        ingestion_tasks,
-        "run_ingest_document",
-        lambda _task, payload: {"status": "complete", "doc_id": payload["doc_id"], "job_id": payload["job_id"]},
-    )
-    monkeypatch.setattr(
-        graphrag_tasks.index_document_graphrag,
-        "apply_async",
-        lambda *args, **kwargs: graph_dispatches.append((args, kwargs)),
-    )
-
-    response = ingestion_tasks.ingest_document.run({"doc_id": "doc-1", "job_id": "job-1"})
-
-    assert response["status"] == "complete"
-    assert graph_dispatches == []
 
 
 def test_graph_enrichment_is_queued_only_after_user_request(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -16,6 +16,7 @@ from rag.evaluations.task_execution import (
     EvaluationDeliveryRetry,
     run_evaluation_run,
 )
+from rag.shared.contracts.task_names import DEFAULT_EVALUATION_TASK_NAME
 
 from .celery_app import celery_app
 
@@ -26,14 +27,7 @@ def _evaluation_run_executor() -> EvaluationRunExecutor:
     )
 
 
-@celery_app.task(
-    bind=True,
-    name=settings.evaluation_task_name,
-    max_retries=3,
-    shared=False,
-    lazy=False,
-)
-def run_evaluation(self: Any, run_id: str) -> dict[str, object]:
+def _run_evaluation(self: Any, run_id: str) -> dict[str, object]:
     try:
         return run_evaluation_run(
             run_id,
@@ -47,3 +41,18 @@ def run_evaluation(self: Any, run_id: str) -> dict[str, object]:
             countdown=retry.countdown,
             max_retries=None,
         )
+
+
+def _register_evaluation_task(name: str) -> Any:
+    return celery_app.task(
+        bind=True,
+        name=name,
+        max_retries=3,
+        shared=False,
+        lazy=False,
+    )(_run_evaluation)
+
+
+run_evaluation = _register_evaluation_task(settings.evaluation_task_name)
+if settings.evaluation_task_name != DEFAULT_EVALUATION_TASK_NAME:
+    _register_evaluation_task(DEFAULT_EVALUATION_TASK_NAME)

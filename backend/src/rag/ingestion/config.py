@@ -17,6 +17,13 @@ from rag.shared.contracts.rag_defaults import (
     DEFAULT_VLLM_VISION_MODEL_ID,
     SUPPORTED_WORKER_MODEL_PROVIDERS,
 )
+from rag.shared.contracts.task_names import (
+    DEFAULT_GRAPHRAG_INDEX_TASK_NAME,
+    DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME,
+    DEFAULT_INGEST_TASK_NAME,
+    normalize_task_name,
+    validate_document_pipeline_task_names,
+)
 
 from .quality import (
     DEFAULT_INGESTION_QUALITY_PRESET,
@@ -137,6 +144,11 @@ class WorkerConfig:
     qdrant: QdrantConfig
     vision: VisionConfig
     ingestion_quality_preset: str = DEFAULT_INGESTION_QUALITY_PRESET
+    ingest_task_name: str = DEFAULT_INGEST_TASK_NAME
+    graphrag_index_task_name: str = DEFAULT_GRAPHRAG_INDEX_TASK_NAME
+    graphrag_partition_rebuild_task_name: str = (
+        DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME
+    )
 
     @classmethod
     def from_env(cls) -> "WorkerConfig":
@@ -146,6 +158,30 @@ class WorkerConfig:
         if provider not in SUPPORTED_MODEL_PROVIDERS:
             allowed = ", ".join(sorted(SUPPORTED_MODEL_PROVIDERS))
             raise ValueError(f"RAG_MODEL_PROVIDER must be one of {allowed}")
+
+        ingest_task_name = normalize_task_name(
+            "INGEST_TASK_NAME",
+            os.getenv("INGEST_TASK_NAME", DEFAULT_INGEST_TASK_NAME),
+        )
+        graphrag_index_task_name = normalize_task_name(
+            "GRAPHRAG_INDEX_TASK_NAME",
+            os.getenv(
+                "GRAPHRAG_INDEX_TASK_NAME",
+                DEFAULT_GRAPHRAG_INDEX_TASK_NAME,
+            ),
+        )
+        graphrag_partition_rebuild_task_name = normalize_task_name(
+            "GRAPHRAG_PARTITION_REBUILD_TASK_NAME",
+            os.getenv(
+                "GRAPHRAG_PARTITION_REBUILD_TASK_NAME",
+                DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME,
+            ),
+        )
+        validate_document_pipeline_task_names(
+            ingest=ingest_task_name,
+            graphrag_index=graphrag_index_task_name,
+            graphrag_partition_rebuild=graphrag_partition_rebuild_task_name,
+        )
 
         global_enabled = parse_bool(os.getenv("ENABLE_MOCK_MODELS"), provider == "mock")
         http_timeout = _bounded_float(
@@ -160,6 +196,11 @@ class WorkerConfig:
             ),
             ingest_queue_name=os.getenv("INGEST_QUEUE_NAME", "ingest:jobs"),
             graphrag_queue_name=os.getenv("GRAPHRAG_QUEUE_NAME", "graphrag:jobs"),
+            ingest_task_name=ingest_task_name,
+            graphrag_index_task_name=graphrag_index_task_name,
+            graphrag_partition_rebuild_task_name=(
+                graphrag_partition_rebuild_task_name
+            ),
             graphrag_enabled=parse_bool(
                 os.getenv("GRAPHRAG_ENABLED"), DEFAULT_GRAPHRAG_ENABLED
             ),

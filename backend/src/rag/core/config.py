@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from rag.shared.contracts.rag_defaults import (
@@ -44,6 +44,15 @@ from rag.shared.contracts.rag_defaults import (
     DEFAULT_VLLM_VISION_MODEL_ID,
     EmbeddingProvider,
     InferenceProvider,
+)
+from rag.shared.contracts.task_names import (
+    DEFAULT_ARTIFACT_TASK_NAME,
+    DEFAULT_EVALUATION_TASK_NAME,
+    DEFAULT_GRAPHRAG_INDEX_TASK_NAME,
+    DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME,
+    DEFAULT_INGEST_TASK_NAME,
+    normalize_task_name,
+    validate_document_pipeline_task_names,
 )
 
 
@@ -207,7 +216,7 @@ class Settings(BaseSettings):
     artifact_queue_backend: str = "celery"
     artifact_queue_name: str = "artifact:jobs"
     # This is a compatibility identifier for queued messages, not an import path.
-    artifact_task_name: str = "rag.artifact_jobs.tasks.generate_artifact_job"
+    artifact_task_name: str = DEFAULT_ARTIFACT_TASK_NAME
     artifact_retention_days: int = Field(default=30, ge=1, le=365)
     artifact_maintenance_interval_seconds: int = Field(default=300, ge=30)
     artifact_worker_timeout_seconds: float = Field(default=1800.0, ge=30.0)
@@ -217,7 +226,7 @@ class Settings(BaseSettings):
     evaluation_queue_backend: str = "celery"
     evaluation_queue_name: str = "evaluation:jobs"
     # This is a compatibility identifier for queued messages, not an import path.
-    evaluation_task_name: str = "rag.evaluations.tasks.run_evaluation"
+    evaluation_task_name: str = DEFAULT_EVALUATION_TASK_NAME
     evaluation_retention_days: int = Field(default=30, ge=1, le=365)
     evaluation_worker_timeout_seconds: float = Field(default=3600.0, ge=30.0)
     evaluation_diagnostic_top_k: int = Field(default=10, ge=1, le=100)
@@ -236,11 +245,12 @@ class Settings(BaseSettings):
     folder_sources_root: str = "/folder-sources"
     ingest_queue_backend: str = "celery"
     ingest_queue_name: str = "ingest:jobs"
-    ingest_task_name: str = "apps.ingestion.tasks.ingest_document"
+    # These are compatibility identifiers for queued messages, not import paths.
+    ingest_task_name: str = DEFAULT_INGEST_TASK_NAME
     graphrag_queue_name: str = "graphrag:jobs"
-    graphrag_index_task_name: str = "apps.ingestion.tasks.index_document_graphrag"
+    graphrag_index_task_name: str = DEFAULT_GRAPHRAG_INDEX_TASK_NAME
     graphrag_partition_rebuild_task_name: str = (
-        "apps.ingestion.tasks.rebuild_graphrag_partition"
+        DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME
     )
     ingest_worker_boot_concurrency: int = Field(default=1, ge=1, le=10)
     ingestion_quality_preset: str = "fast"
@@ -286,6 +296,33 @@ class Settings(BaseSettings):
             return value
         normalized = value.strip().lower()
         return normalized or None
+
+    @field_validator(
+        "artifact_task_name",
+        "evaluation_task_name",
+        "ingest_task_name",
+        "graphrag_index_task_name",
+        "graphrag_partition_rebuild_task_name",
+        mode="before",
+    )
+    @classmethod
+    def normalize_celery_task_name(
+        cls,
+        value: object,
+        info: ValidationInfo,
+    ) -> object:
+        if not isinstance(value, str):
+            return value
+        return normalize_task_name(info.field_name.upper(), value)
+
+    @model_validator(mode="after")
+    def validate_document_pipeline_task_name_ownership(self) -> "Settings":
+        validate_document_pipeline_task_names(
+            ingest=self.ingest_task_name,
+            graphrag_index=self.graphrag_index_task_name,
+            graphrag_partition_rebuild=self.graphrag_partition_rebuild_task_name,
+        )
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

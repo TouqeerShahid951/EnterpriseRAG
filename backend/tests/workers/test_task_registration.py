@@ -36,7 +36,19 @@ def _registered_task_names(app: object) -> set[str]:
 
 
 def test_document_pipeline_preserves_registered_task_names() -> None:
-    assert DOCUMENT_PIPELINE_TASKS <= _registered_task_names(document_pipeline_app)
+    task_names = _registered_task_names(document_pipeline_app)
+
+    assert DOCUMENT_PIPELINE_TASKS <= task_names
+    assert not {
+        name
+        for name in task_names
+        if name.startswith("apps.workers.document_pipeline.tasks.")
+    }
+
+
+def test_document_pipeline_tasks_are_not_registered_on_other_worker_apps() -> None:
+    assert DOCUMENT_PIPELINE_TASKS.isdisjoint(_registered_task_names(artifact_app))
+    assert DOCUMENT_PIPELINE_TASKS.isdisjoint(_registered_task_names(evaluation_app))
 
 
 def test_artifact_worker_preserves_registered_task_name() -> None:

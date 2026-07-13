@@ -74,6 +74,45 @@ assert task_name not in other_app.tasks
     )
 
 
+def test_artifact_task_keeps_the_historic_alias_when_configured() -> None:
+    code = """
+from apps.workers.artifact.celery_app import celery_app
+from apps.workers.artifact import tasks
+
+assert tasks.generate_artifact_job.name == "custom.artifact.generate"
+assert "custom.artifact.generate" in celery_app.tasks
+assert "rag.artifact_jobs.tasks.generate_artifact_job" in celery_app.tasks
+"""
+    env = os.environ.copy()
+    env["ARTIFACT_TASK_NAME"] = "custom.artifact.generate"
+
+    subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        cwd=BACKEND_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_artifact_worker_rejects_the_reserved_celery_task_namespace() -> None:
+    env = os.environ.copy()
+    env["ARTIFACT_TASK_NAME"] = "celery.chain"
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from apps.workers.artifact import tasks"],
+        check=False,
+        cwd=BACKEND_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "reserved task namespace" in result.stderr
+
+
 def test_artifact_task_delegates_without_changing_execution_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

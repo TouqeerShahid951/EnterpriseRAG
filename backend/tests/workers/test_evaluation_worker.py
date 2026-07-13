@@ -81,7 +81,7 @@ from apps.workers.evaluation import tasks
 
 assert tasks.run_evaluation.name == "custom.evaluation.run"
 assert "custom.evaluation.run" in celery_app.tasks
-assert "rag.evaluations.tasks.run_evaluation" not in celery_app.tasks
+assert "rag.evaluations.tasks.run_evaluation" in celery_app.tasks
 """
     env = os.environ.copy()
     env["EVALUATION_TASK_NAME"] = "custom.evaluation.run"
@@ -94,6 +94,23 @@ assert "rag.evaluations.tasks.run_evaluation" not in celery_app.tasks
         capture_output=True,
         text=True,
     )
+
+
+def test_evaluation_worker_rejects_the_reserved_celery_task_namespace() -> None:
+    env = os.environ.copy()
+    env["EVALUATION_TASK_NAME"] = "celery.chain"
+
+    result = subprocess.run(
+        [sys.executable, "-c", "from apps.workers.evaluation import tasks"],
+        check=False,
+        cwd=BACKEND_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "reserved task namespace" in result.stderr
 
 
 def test_evaluation_task_delegates_without_changing_execution_policy(

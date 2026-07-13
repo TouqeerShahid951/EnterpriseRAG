@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
+import logging
 from typing import Any, Iterator
 from uuid import uuid4
-
-from billiard.exceptions import SoftTimeLimitExceeded
 
 from .adapters.backend import BackendInternalClient, IngestAttempt
 from .adapters.http import ServiceRequestError
@@ -24,12 +23,35 @@ from .pipeline import IngestDependencies, run_ingest_graph
 from .quality import parser_tuning_for_quality_preset
 
 
-def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
+logger = logging.getLogger("rag.ingestion.execution")
+
+
+class IngestDeliveryRetry(RuntimeError):
+    """Request that the queue transport redeliver an ingestion after a delay."""
+
+    def __init__(
+        self,
+        cause: Exception,
+        *,
+        countdown: int,
+        max_retries: int | None,
+    ) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.countdown = countdown
+        self.max_retries = max_retries
+
+
+def run_ingest_document(
+    payload: dict[str, Any],
+    *,
+    timeout_error_types: tuple[type[Exception], ...] = (),
+) -> dict[str, Any]:
     job = IngestJobPayload.from_dict(payload)
     config = WorkerConfig.from_env()
     backend = build_backend_client(config)
     run_token = str(uuid4())
-    attempt = _start_attempt(task, backend, job.job_id, run_token)
+    attempt = _start_attempt(backend, job.job_id, run_token)
     if not attempt.accepted:
         resume_attempt = _resume_exhausted_review_attempt(backend, job, attempt, run_token)
         if resume_attempt is None:
@@ -52,7 +74,6 @@ def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
         return _cancelled_result(config, backend=backend, job=job, deps=deps)
     except EmbeddingUnavailable as exc:
         return _retry_or_fail(
-            task,
             config=config,
             backend=backend,
             job=job,
@@ -60,9 +81,8 @@ def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
             exc=exc,
             error_code="embedding_unavailable",
         )
-    except SoftTimeLimitExceeded as exc:
+    except timeout_error_types as exc:
         return _retry_or_fail(
-            task,
             config=config,
             backend=backend,
             job=job,
@@ -87,7 +107,6 @@ def run_ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
             return _lease_lost_result(job)
         if is_transient_service_error(exc):
             return _retry_or_fail(
-                task,
                 config=config,
                 backend=backend,
                 job=job,
@@ -195,7 +214,6 @@ def _resume_exhausted_review_attempt(
 
 
 def _start_attempt(
-    task: Any,
     backend: BackendInternalClient,
     job_id: str,
     run_token: str,
@@ -204,12 +222,15 @@ def _start_attempt(
         return backend.start_attempt(job_id=job_id, run_token=run_token)
     except ServiceRequestError as exc:
         if is_transient_service_error(exc):
-            raise task.retry(exc=exc, countdown=30, max_retries=12)
+            raise IngestDeliveryRetry(
+                exc,
+                countdown=30,
+                max_retries=12,
+            ) from exc
         raise
 
 
 def _retry_or_fail(
-    task: Any,
     *,
     config: WorkerConfig,
     backend: BackendInternalClient,
@@ -269,7 +290,11 @@ def _retry_or_fail(
             "status_requeued": requeued,
         },
     )
-    raise task.retry(exc=exc, countdown=retry_countdown, max_retries=None)
+    raise IngestDeliveryRetry(
+        exc,
+        countdown=retry_countdown,
+        max_retries=None,
+    ) from exc
 
 
 def _retry_countdown(config: WorkerConfig, base_countdown: int, *, requeued: bool) -> int:
@@ -305,6 +330,13 @@ def _update_job_best_effort(
     except ServiceRequestError as exc:
         if _is_lease_lost(exc):
             raise
+        logger.warning(
+            "ingestion job update failed job_id=%s status=%s service=%s",
+            job_id,
+            status,
+            exc.service,
+            exc_info=True,
+        )
         return False
     return True
 
@@ -353,7 +385,13 @@ def _cancelled_result(
 def _job_is_cancelled(backend: BackendInternalClient, job_id: str) -> bool:
     try:
         return backend.get_job_status(job_id=job_id).status == "cancelled"
-    except ServiceRequestError:
+    except ServiceRequestError as exc:
+        logger.warning(
+            "ingestion cancellation probe failed job_id=%s service=%s",
+            job_id,
+            exc.service,
+            exc_info=True,
+        )
         return False
 
 
@@ -384,8 +422,14 @@ def _cleanup_cancelled_vectors(
 def _record_event(backend: BackendInternalClient, job_id: str, event_type: str, payload: dict[str, object]) -> None:
     try:
         backend.record_event(job_id=job_id, event_type=event_type, payload=payload)
-    except ServiceRequestError:
-        pass
+    except ServiceRequestError as exc:
+        logger.warning(
+            "ingestion event recording failed job_id=%s event_type=%s service=%s",
+            job_id,
+            event_type,
+            exc.service,
+            exc_info=True,
+        )
 
 
 @contextmanager
@@ -402,7 +446,17 @@ def _job_heartbeat(
                 backend.heartbeat(job_id=job_id)
             except ServiceRequestError as exc:
                 if _is_lease_lost(exc):
+                    logger.warning(
+                        "ingestion heartbeat stopped after lease loss job_id=%s",
+                        job_id,
+                    )
                     return
+                logger.warning(
+                    "ingestion heartbeat failed job_id=%s service=%s",
+                    job_id,
+                    exc.service,
+                    exc_info=True,
+                )
                 continue
 
     thread = threading.Thread(target=send_heartbeats, name=f"ingest-heartbeat-{job_id}", daemon=True)

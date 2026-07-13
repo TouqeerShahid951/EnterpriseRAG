@@ -13,18 +13,12 @@ from rag.artifact_jobs.dependencies import (
 )
 from rag.artifact_jobs.task_execution import ArtifactDeliveryRetry, run_artifact_job
 from rag.core.config import settings
+from rag.shared.contracts.task_names import DEFAULT_ARTIFACT_TASK_NAME
 
 from .celery_app import celery_app
 
 
-@celery_app.task(
-    bind=True,
-    name=settings.artifact_task_name,
-    max_retries=None,
-    shared=False,
-    lazy=False,
-)
-def generate_artifact_job(self: Any, job_id: str) -> dict[str, object]:
+def _generate_artifact_job(self: Any, job_id: str) -> dict[str, object]:
     try:
         return run_artifact_job(
             job_id,
@@ -39,3 +33,18 @@ def generate_artifact_job(self: Any, job_id: str) -> dict[str, object]:
             countdown=retry.countdown,
             max_retries=None,
         )
+
+
+def _register_artifact_task(name: str) -> Any:
+    return celery_app.task(
+        bind=True,
+        name=name,
+        max_retries=None,
+        shared=False,
+        lazy=False,
+    )(_generate_artifact_job)
+
+
+generate_artifact_job = _register_artifact_task(settings.artifact_task_name)
+if settings.artifact_task_name != DEFAULT_ARTIFACT_TASK_NAME:
+    _register_artifact_task(DEFAULT_ARTIFACT_TASK_NAME)
