@@ -11,7 +11,6 @@ from rag.api.routes import (
     auth_routes,
     connector_routes,
     evaluation_routes,
-    review_routes,
 )
 from rag.artifact_jobs import routes as artifact_routes
 from rag.bootstrap.schema import ensure_postgres_schema
@@ -25,6 +24,7 @@ from rag.graphrag import (
 from rag.ingestion import (
     document_routes as ingestion_document_routes,
     job_routes as ingestion_job_routes,
+    review_routes,
 )
 from rag.ingestion.folders import routes as folder_schedule_routes
 from rag.query import routes as query_routes
