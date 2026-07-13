@@ -1,0 +1,60 @@
+@media (min-width: 1440px) {
+
+  /* Documents, settings, audit, and other data workbenches. */
+  .knowledge-document-workspace-with-inspector,
+  .knowledge-explorer-shell-with-inspector {
+    grid-template-columns: minmax(0, 1fr) minmax(24rem, 28rem);
+    gap: var(--desktop-panel-gap);
+  }
+
+  .knowledge-row-actions {
+    gap: 0.45rem;
+  }
+
+  .knowledge-toolbar-meta,
+.knowledge-doc-effective,
+.audit-source,
+.audit-payload,
+.ingest-parser-provenance {
+    font-size: var(--font-size-ui-meta);
+    line-height: 1.4;
+  }
+
+  .knowledge-doc-list-body,
+.audit-event-button,
+.ingest-job-table {
+    font-size: var(--font-size-ui-body);
+  }
+
+  /* Dedicated document viewer */
+  .source-viewer-header {
+    min-height: calc(var(--desktop-control-height) + 28px);
+    padding: 0.875rem var(--desktop-page-gutter);
+  }
+
+  .source-viewer-heading h1 {
+    max-width: 64rem;
+    font-size: calc(var(--font-size-ui-section) + 5px);
+  }
+
+  .source-viewer-heading > p:last-child,
+  .source-viewer-page-input-label,
+  .source-viewer-file-label,
+  .source-viewer-zoom-readout {
+    font-size: var(--font-size-ui-meta);
+  }
+
+  .source-viewer-page-input-label input {
+    height: calc(var(--desktop-control-height) - 8px);
+    font-size: var(--font-size-ui-control);
+  }
+
+  .source-viewer-stage {
+    padding: var(--desktop-page-gutter);
+  }
+
+  .source-viewer-toolbar {
+    width: min(100%, var(--desktop-canvas-standard));
+    gap: 1rem;
+  }
+}

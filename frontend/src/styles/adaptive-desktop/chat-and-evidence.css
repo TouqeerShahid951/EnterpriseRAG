@@ -1,0 +1,91 @@
+@media (min-width: 1440px) {
+
+  /* Chat and evidence workspace */
+  .rag-chat-page {
+    --rag-history-width: var(--desktop-chat-history-width);
+    --rag-answer-line-width: var(--desktop-answer-measure);
+    --rag-chat-canvas-width: var(--desktop-chat-canvas-width);
+    --rag-user-message-width: 44rem;
+  }
+
+  .rag-chat-header {
+    min-height: calc(var(--desktop-control-height) + 16px);
+    gap: 1rem;
+    padding-inline: var(--desktop-page-gutter);
+  }
+
+  .rag-chat-header .sv-page-title {
+    font-size: calc(var(--font-size-ui-section) + 4px);
+  }
+
+  .rag-chat-header .text-body-md,
+  .rag-user-message,
+  .rag-markdown,
+  .rag-markdown :is(p, li),
+  .rag-empty-copy p:not(.rag-empty-eyebrow),
+  .rag-evidence-excerpt {
+    font-size: var(--font-size-ui-body);
+    line-height: 1.55;
+  }
+
+  .rag-assistant-prose {
+    width: min(100%, 72ch);
+    max-width: 72ch;
+  }
+
+  .rag-corpus-rail {
+    gap: 0.8rem;
+    padding: 1rem 0.875rem;
+  }
+
+  .rag-corpus-header .text-headline-sm {
+    font-size: var(--font-size-ui-section);
+    line-height: 1.3;
+  }
+
+  .rag-chat-scroll,
+  .rag-composer-shell {
+    padding-inline: var(--desktop-page-gutter);
+  }
+
+  .rag-composer-input {
+    min-height: var(--desktop-control-height);
+  }
+
+  .rag-evidence-panel {
+    width: min(var(--desktop-evidence-width), calc(100vw - 2rem));
+  }
+
+  .rag-evidence-panel-header,
+  .rag-evidence-source-header,
+  .rag-evidence-window,
+  .rag-evidence-context,
+  .rag-evidence-legacy {
+    padding: var(--desktop-panel-padding);
+  }
+
+  .rag-evidence-source-title,
+.rag-evidence-claim p,
+.rag-evidence-table dd {
+    font-size: var(--font-size-ui-body);
+  }
+
+  .rag-evidence-source-meta,
+  .rag-evidence-window-status,
+  .rag-evidence-section-heading,
+  .rag-evidence-table dt,
+  .rag-evidence-context-note {
+    font-size: var(--font-size-ui-meta);
+  }
+
+  .rag-empty-state {
+    width: min(100%, 64rem);
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--desktop-panel-padding);
+  }
+
+  .rag-empty-capabilities {
+    display: flex;
+    flex-wrap: wrap;
+  }
+}

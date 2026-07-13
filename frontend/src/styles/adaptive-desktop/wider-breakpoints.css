@@ -1,0 +1,34 @@
+
+@media (min-width: 1680px) {
+  .rag-chat-page {
+    --rag-user-message-width: 48rem;
+  }
+
+  .review-layout {
+    grid-template-columns: minmax(20rem, 22rem) minmax(32rem, 1fr) minmax(22rem, 26rem);
+  }
+
+  .knowledge-document-workspace-with-inspector,
+  .knowledge-explorer-shell-with-inspector {
+    grid-template-columns: minmax(0, 1fr) minmax(28rem, 32rem);
+  }
+}
+
+@media (min-width: 2400px) {
+  .rag-chat-page {
+    --rag-user-message-width: 52rem;
+  }
+
+  .review-header-tools {
+    min-width: min(100%, 34rem);
+  }
+
+  .review-layout {
+    grid-template-columns: minmax(22rem, 26rem) minmax(40rem, 1fr) minmax(26rem, 32rem);
+  }
+
+  .knowledge-document-workspace-with-inspector,
+  .knowledge-explorer-shell-with-inspector {
+    grid-template-columns: minmax(0, 1fr) minmax(30rem, 34rem);
+  }
+}
