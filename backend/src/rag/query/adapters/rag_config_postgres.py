@@ -112,6 +112,13 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
         )
         return record_from_row(row)
 
+    def delete_active(self) -> None:
+        self._ensure_table()
+        self._execute_optional(
+            "DELETE FROM workspace_rag_config WHERE config_key = %s RETURNING config_key",
+            (ACTIVE_CONFIG_KEY,),
+        )
+
     def _ensure_table(self) -> None:
         with self._connect() as conn:
             conn.execute(

@@ -446,12 +446,12 @@ def _build_dependencies(
             timeout_seconds=config.http_timeout_seconds,
             retry_base_seconds=config.ollama_retry_base_seconds,
             embedding_batch_size=config.embedding_batch_size,
-            dense_cache_dir=config.model_provider.dense_cache_dir,
+            dense_cache_dir=config.local_embeddings.dense_cache_dir,
             num_ctx=config.ollama_num_ctx,
         ),
         sparse_embedder=SparseEmbedder(
-            model_name=config.model_provider.sparse_model,
-            cache_dir=config.model_provider.sparse_cache_dir,
+            model_name=config.local_embeddings.sparse_model,
+            cache_dir=config.local_embeddings.sparse_cache_dir,
         ),
         qdrant=QdrantClient(
             base_url=config.qdrant.url,

@@ -11,6 +11,8 @@ import {
   pdfImageReviewThresholdLabel,
   requestFromVllmForm,
   requestFromForm,
+  ragConfigActionsLocked,
+  ragConfigSourceLabel,
   rerankerOptionsFromCatalog,
   stackTemplateFromForm,
   thresholdFromPercent,
@@ -59,6 +61,30 @@ const ollamaForm: RagConfigFormState = {
 };
 
 describe("inference settings helpers", () => {
+  it("normalizes the RAG configuration source for the runtime UI", () => {
+    expect(ragConfigSourceLabel("workspace")).toBe("workspace");
+    expect(ragConfigSourceLabel("env")).toBe("environment");
+    expect(ragConfigSourceLabel("environment")).toBe("environment");
+  });
+
+  it.each([
+    ["confirmation dialog", { dialogOpen: true, resetPending: false, savePending: false, testPending: false }],
+    ["reset request", { dialogOpen: false, resetPending: true, savePending: false, testPending: false }],
+    ["save request", { dialogOpen: false, resetPending: false, savePending: true, testPending: false }],
+    ["test request", { dialogOpen: false, resetPending: false, savePending: false, testPending: true }],
+  ])("locks model routing actions during the %s", (_label, state) => {
+    expect(ragConfigActionsLocked(state)).toBe(true);
+  });
+
+  it("allows model routing actions when no mutation or reset dialog is active", () => {
+    expect(ragConfigActionsLocked({
+      dialogOpen: false,
+      resetPending: false,
+      savePending: false,
+      testPending: false,
+    })).toBe(false);
+  });
+
   it("uses the same endpoint for Ollama chat and embeddings", () => {
     const endpoints = endpointsFromForm(ollamaForm);
     expect(endpoints.chat).toEqual({ host: "host.docker.internal", port: 11434 });

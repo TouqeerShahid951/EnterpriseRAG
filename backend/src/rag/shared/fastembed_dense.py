@@ -6,27 +6,43 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from .contracts.rag_defaults import (
+    DEFAULT_FASTEMBED_CACHE_DIR,
+    DEFAULT_FASTEMBED_DENSE_MODEL,
+)
 from .runtime_offline import apply_runtime_offline_defaults
 
-DEFAULT_FASTEMBED_DENSE_MODEL = "nomic-ai/nomic-embed-text-v1.5-Q"
-DEFAULT_FASTEMBED_CACHE_DIR = "/models/fastembed"
+__all__ = (
+    "DEFAULT_FASTEMBED_CACHE_DIR",
+    "DEFAULT_FASTEMBED_DENSE_MODEL",
+    "FastEmbedDenseError",
+    "embed_dense_texts",
+    "has_fastembed_model_cache",
+    "list_supported_dense_models",
+)
 
 
 class FastEmbedDenseError(RuntimeError):
     """Raised when local dense FastEmbed vectors cannot be generated."""
 
 
-def list_supported_dense_models(*, cache_dir: str | None = None, cached_only: bool = False) -> list[str]:
+def list_supported_dense_models(
+    *, cache_dir: str | None = None, cached_only: bool = False
+) -> list[str]:
     try:
         from fastembed import TextEmbedding
     except ImportError as exc:
-        raise FastEmbedDenseError("`fastembed` is required for local dense embeddings") from exc
+        raise FastEmbedDenseError(
+            "`fastembed` is required for local dense embeddings"
+        ) from exc
     models = _supported_model_sources(TextEmbedding.list_supported_models())
     if cached_only:
         models = {
             model: source
             for model, source in models.items()
-            if has_fastembed_model_cache(cache_dir or DEFAULT_FASTEMBED_CACHE_DIR, source)
+            if has_fastembed_model_cache(
+                cache_dir or DEFAULT_FASTEMBED_CACHE_DIR, source
+            )
         }
     return sorted(models)
 
@@ -35,7 +51,10 @@ def has_fastembed_model_cache(cache_dir: str | None, model_name: str) -> bool:
     if not cache_dir or not model_name.strip():
         return False
     root = Path(cache_dir)
-    return any(_has_snapshot(root / cache_name) for cache_name in _huggingface_cache_dir_names(model_name))
+    return any(
+        _has_snapshot(root / cache_name)
+        for cache_name in _huggingface_cache_dir_names(model_name)
+    )
 
 
 def _supported_model_sources(models: list[dict[str, Any]]) -> dict[str, str]:
@@ -80,7 +99,10 @@ def embed_dense_texts(
         return []
     model = _load_dense_model(model_name, cache_dir)
     try:
-        vectors = [_coerce_dense_vector(item) for item in model.embed(texts, batch_size=max(1, batch_size))]
+        vectors = [
+            _coerce_dense_vector(item)
+            for item in model.embed(texts, batch_size=max(1, batch_size))
+        ]
     except Exception as exc:
         raise FastEmbedDenseError(f"local dense embedding failed: {exc}") from exc
     if len(vectors) != len(texts):
@@ -94,11 +116,15 @@ def _load_dense_model(model_name: str, cache_dir: str | None) -> Any:
     try:
         from fastembed import TextEmbedding
     except ImportError as exc:
-        raise FastEmbedDenseError("`fastembed` is required for local dense embeddings") from exc
+        raise FastEmbedDenseError(
+            "`fastembed` is required for local dense embeddings"
+        ) from exc
     try:
         return TextEmbedding(model_name=model_name, cache_dir=cache_dir)
     except Exception as exc:
-        raise FastEmbedDenseError(f"could not load FastEmbed model {model_name!r}: {exc}") from exc
+        raise FastEmbedDenseError(
+            f"could not load FastEmbed model {model_name!r}: {exc}"
+        ) from exc
 
 
 def _coerce_dense_vector(value: Any) -> list[float]:
@@ -109,4 +135,6 @@ def _coerce_dense_vector(value: Any) -> list[float]:
     try:
         return [float(item) for item in value]
     except (TypeError, ValueError) as exc:
-        raise FastEmbedDenseError("local dense vector contained non-numeric values") from exc
+        raise FastEmbedDenseError(
+            "local dense vector contained non-numeric values"
+        ) from exc

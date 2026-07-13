@@ -1,11 +1,50 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from rag.shared.fastembed_dense import DEFAULT_FASTEMBED_CACHE_DIR, DEFAULT_FASTEMBED_DENSE_MODEL
-from rag.shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL
+from rag.shared.contracts.rag_defaults import (
+    DEFAULT_DEFER_FAITHFULNESS,
+    DEFAULT_EMBEDDING_MODEL_ID,
+    DEFAULT_EMBEDDING_PROVIDER,
+    DEFAULT_EMBEDDINGS_BASE_URL,
+    DEFAULT_FAITHFULNESS_MODEL,
+    DEFAULT_FAITHFULNESS_POLICY,
+    DEFAULT_FAITHFULNESS_THRESHOLD,
+    DEFAULT_FASTEMBED_CACHE_DIR,
+    DEFAULT_FASTEMBED_DENSE_MODEL,
+    DEFAULT_GRAPHRAG_ENABLED,
+    DEFAULT_HYBRID_DISAGREEMENT_DETECTOR_ENABLED,
+    DEFAULT_INTENT_ROUTER_VERSION,
+    DEFAULT_JSON_NUM_PREDICT,
+    DEFAULT_MODEL_PROVIDER,
+    DEFAULT_OLLAMA_BASE_URL,
+    DEFAULT_OLLAMA_CHAT_MODEL,
+    DEFAULT_OLLAMA_CHAT_TIMEOUT_SECONDS,
+    DEFAULT_OLLAMA_EMBED_MODEL,
+    DEFAULT_OLLAMA_EMBED_TIMEOUT_SECONDS,
+    DEFAULT_OLLAMA_NUM_CTX,
+    DEFAULT_QUERY_PLANNER_ENABLED,
+    DEFAULT_QUERY_REWRITE_LLM_ENABLED,
+    DEFAULT_RAG_HTTP_TIMEOUT_SECONDS,
+    DEFAULT_RERANKER_MAX_CANDIDATES,
+    DEFAULT_RERANKER_MODEL,
+    DEFAULT_REASONING_MODEL,
+    DEFAULT_RETRIEVAL_MAX_RETRIES,
+    DEFAULT_RETRIEVAL_TOKEN_BUDGET,
+    DEFAULT_ROUTE_LLM_VERIFIER_ENABLED,
+    DEFAULT_ROUTE_LLM_VERIFIER_MODEL,
+    DEFAULT_SOURCE_ROUTER_LLM_ENABLED,
+    DEFAULT_SOURCE_ROUTER_LLM_MIN_CONFIDENCE,
+    DEFAULT_SPARSE_MODEL,
+    DEFAULT_TOP_K,
+    DEFAULT_VLLM_BASE_URL,
+    DEFAULT_VLLM_CHAT_MODEL,
+    DEFAULT_VLLM_VISION_MODEL_ID,
+    EmbeddingProvider,
+    InferenceProvider,
+)
 
 
 class Settings(BaseSettings):
@@ -33,9 +72,7 @@ class Settings(BaseSettings):
     service_token_header: str = "X-Service-Token"
     service_token: str = "replace-with-local-service-token"
     deployment_controller_url: str = "http://deployment-controller:8080"
-    deployment_controller_token: str = (
-        "replace-with-local-deployment-controller-token"
-    )
+    deployment_controller_token: str = "replace-with-local-deployment-controller-token"
     deployment_controller_timeout_seconds: float = Field(
         default=930.0,
         gt=0,
@@ -57,7 +94,9 @@ class Settings(BaseSettings):
     document_repository: str = "postgres"
     refresh_session_store: str = "redis"
     refresh_session_prefix: str = "auth:refresh"
-    database_url: str = "postgresql://agenticrag:agenticrag-local-password@postgres:5432/agenticrag"
+    database_url: str = (
+        "postgresql://agenticrag:agenticrag-local-password@postgres:5432/agenticrag"
+    )
     redis_url: str = "redis://:agenticrag-local-redis-password@redis:6379/0"
     celery_broker_url: str | None = None
     qdrant_url: str = "http://qdrant:6333"
@@ -66,16 +105,16 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "agenticrag-local-neo4j-password"
     neo4j_database: str = "neo4j"
-    graphrag_enabled: bool = False
+    graphrag_enabled: bool = DEFAULT_GRAPHRAG_ENABLED
     graphrag_community_collection: str = "graphrag_community_summaries"
-    rag_model_provider: str = "ollama"
-    rag_embedding_provider: str = "fastembed"
-    rag_chat_provider: str | None = None
-    rag_reasoning_provider: str | None = None
-    rag_routing_provider: str | None = None
-    rag_faithfulness_provider: str | None = None
-    rag_ingestion_provider: str | None = None
-    rag_vision_provider: str | None = None
+    rag_model_provider: InferenceProvider = DEFAULT_MODEL_PROVIDER
+    rag_embedding_provider: EmbeddingProvider = DEFAULT_EMBEDDING_PROVIDER
+    rag_chat_provider: InferenceProvider | None = None
+    rag_reasoning_provider: InferenceProvider | None = None
+    rag_routing_provider: InferenceProvider | None = None
+    rag_faithfulness_provider: InferenceProvider | None = None
+    rag_ingestion_provider: InferenceProvider | None = None
+    rag_vision_provider: InferenceProvider | None = None
     rag_chat_base_url: str | None = None
     rag_reasoning_base_url: str | None = None
     rag_routing_base_url: str | None = None
@@ -84,25 +123,35 @@ class Settings(BaseSettings):
     rag_vision_base_url: str | None = None
     rag_chat_model: str | None = None
     rag_vision_model: str | None = None
-    ollama_base_url: str = "http://host.docker.internal:11434"
-    ollama_chat_model: str = "llama3.1:8b"
-    ollama_embed_model: str = "nomic-embed-text:latest"
+    ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
+    ollama_chat_model: str = DEFAULT_OLLAMA_CHAT_MODEL
+    ollama_embed_model: str = DEFAULT_OLLAMA_EMBED_MODEL
     ollama_vision_model: str | None = None
     ollama_thinking_enabled: bool = False
-    ollama_num_ctx: int = Field(default=16384, ge=1024, le=262144)
-    rag_http_timeout_seconds: float = 45.0
-    rag_ollama_chat_timeout_seconds: float = 180.0
-    rag_ollama_embed_timeout_seconds: float = 45.0
-    rag_json_num_predict: int = Field(default=4096, ge=256, le=32768)
-    rag_retrieval_token_budget: int = Field(default=12000, ge=1000, le=200000)
-    vllm_base_url: str = "http://host.docker.internal:8000"
+    ollama_num_ctx: int = Field(default=DEFAULT_OLLAMA_NUM_CTX, ge=1024, le=262144)
+    rag_http_timeout_seconds: float = Field(
+        default=DEFAULT_RAG_HTTP_TIMEOUT_SECONDS, gt=0
+    )
+    rag_ollama_chat_timeout_seconds: float = Field(
+        default=DEFAULT_OLLAMA_CHAT_TIMEOUT_SECONDS, gt=0
+    )
+    rag_ollama_embed_timeout_seconds: float = Field(
+        default=DEFAULT_OLLAMA_EMBED_TIMEOUT_SECONDS, gt=0
+    )
+    rag_json_num_predict: int = Field(
+        default=DEFAULT_JSON_NUM_PREDICT, ge=256, le=32768
+    )
+    rag_retrieval_token_budget: int = Field(
+        default=DEFAULT_RETRIEVAL_TOKEN_BUDGET, ge=1000, le=200000
+    )
+    vllm_base_url: str = DEFAULT_VLLM_BASE_URL
     vllm_reasoning_base_url: str | None = None
     vllm_routing_base_url: str | None = None
     vllm_faithfulness_base_url: str | None = None
     vllm_ingestion_base_url: str | None = None
     vllm_vision_base_url: str | None = None
-    vllm_chat_model: str = "default"
-    vllm_vision_model_id: str = "vision"
+    vllm_chat_model: str = DEFAULT_VLLM_CHAT_MODEL
+    vllm_vision_model_id: str = DEFAULT_VLLM_VISION_MODEL_ID
     vllm_text_max_model_len: int = Field(default=4096, ge=256, le=262144)
     vllm_text_gpu_memory_utilization: float = Field(default=0.12, gt=0.0, le=1.0)
     vllm_text_kv_cache_memory_bytes: str = "2G"
@@ -117,30 +166,42 @@ class Settings(BaseSettings):
     vllm_vision_kv_cache_memory_bytes: str = "2G"
     vllm_vision_max_num_seqs: int = Field(default=1, ge=1, le=1024)
     vllm_vision_max_num_batched_tokens: int = Field(default=2048, ge=256, le=262144)
-    embeddings_base_url: str = "http://host.docker.internal:8001"
-    embedding_model_id: str = "default"
+    embeddings_base_url: str = DEFAULT_EMBEDDINGS_BASE_URL
+    embedding_model_id: str = DEFAULT_EMBEDDING_MODEL_ID
     rag_fastembed_model: str = DEFAULT_FASTEMBED_DENSE_MODEL
     rag_dense_cache_dir: str | None = DEFAULT_FASTEMBED_CACHE_DIR
-    rag_top_k: int = 10
-    rag_sparse_model: str = "Qdrant/bm25"
-    rag_sparse_cache_dir: str | None = "/models/fastembed"
+    rag_top_k: int = Field(default=DEFAULT_TOP_K, ge=1)
+    rag_sparse_model: str = DEFAULT_SPARSE_MODEL
+    rag_sparse_cache_dir: str | None = DEFAULT_FASTEMBED_CACHE_DIR
     rag_reranker_model: str = DEFAULT_RERANKER_MODEL
-    rag_reranker_cache_dir: str | None = "/models/fastembed"
-    rag_reranker_max_candidates: int = Field(default=40, ge=1, le=512)
-    rag_retrieval_max_retries: int = Field(default=1, ge=0, le=3)
-    rag_query_planner_enabled: bool = True
-    rag_query_rewrite_llm_enabled: bool = False
-    rag_faithfulness_model: str | None = None
-    rag_faithfulness_policy: str = "high_risk"
-    rag_defer_faithfulness: bool = True
-    rag_faithfulness_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
-    rag_source_router_llm_enabled: bool = True
-    rag_source_router_llm_min_confidence: float = Field(default=0.60, ge=0.0, le=1.0)
-    rag_hybrid_disagreement_detector_enabled: bool = True
-    rag_intent_router_version: str = "v1"
-    rag_route_llm_verifier_enabled: bool = True
-    rag_route_llm_verifier_model: str | None = None
-    rag_reasoning_model: str | None = None
+    rag_reranker_cache_dir: str | None = DEFAULT_FASTEMBED_CACHE_DIR
+    rag_reranker_max_candidates: int = Field(
+        default=DEFAULT_RERANKER_MAX_CANDIDATES, ge=1, le=512
+    )
+    rag_retrieval_max_retries: int = Field(
+        default=DEFAULT_RETRIEVAL_MAX_RETRIES, ge=0, le=3
+    )
+    rag_query_planner_enabled: bool = DEFAULT_QUERY_PLANNER_ENABLED
+    rag_query_rewrite_llm_enabled: bool = DEFAULT_QUERY_REWRITE_LLM_ENABLED
+    rag_faithfulness_model: str | None = DEFAULT_FAITHFULNESS_MODEL
+    rag_faithfulness_policy: str = DEFAULT_FAITHFULNESS_POLICY
+    rag_defer_faithfulness: bool = DEFAULT_DEFER_FAITHFULNESS
+    rag_faithfulness_threshold: float = Field(
+        default=DEFAULT_FAITHFULNESS_THRESHOLD, ge=0.0, le=1.0
+    )
+    rag_source_router_llm_enabled: bool = DEFAULT_SOURCE_ROUTER_LLM_ENABLED
+    rag_source_router_llm_min_confidence: float = Field(
+        default=DEFAULT_SOURCE_ROUTER_LLM_MIN_CONFIDENCE,
+        ge=0.0,
+        le=1.0,
+    )
+    rag_hybrid_disagreement_detector_enabled: bool = (
+        DEFAULT_HYBRID_DISAGREEMENT_DETECTOR_ENABLED
+    )
+    rag_intent_router_version: str = DEFAULT_INTENT_ROUTER_VERSION
+    rag_route_llm_verifier_enabled: bool = DEFAULT_ROUTE_LLM_VERIFIER_ENABLED
+    rag_route_llm_verifier_model: str | None = DEFAULT_ROUTE_LLM_VERIFIER_MODEL
+    rag_reasoning_model: str | None = DEFAULT_REASONING_MODEL
     rag_ingestion_model: str | None = None
     artifact_pipeline_version: Literal["v1", "v2"] = "v2"
     artifact_queue_backend: str = "celery"
@@ -176,7 +237,9 @@ class Settings(BaseSettings):
     ingest_task_name: str = "apps.ingestion.tasks.ingest_document"
     graphrag_queue_name: str = "graphrag:jobs"
     graphrag_index_task_name: str = "apps.ingestion.tasks.index_document_graphrag"
-    graphrag_partition_rebuild_task_name: str = "apps.ingestion.tasks.rebuild_graphrag_partition"
+    graphrag_partition_rebuild_task_name: str = (
+        "apps.ingestion.tasks.rebuild_graphrag_partition"
+    )
     ingest_worker_boot_concurrency: int = Field(default=1, ge=1, le=10)
     ingestion_quality_preset: str = "fast"
     ocr_review_confidence_threshold: float = Field(default=0.9, ge=0.0, le=1.0)
@@ -203,6 +266,24 @@ class Settings(BaseSettings):
     clamav_host: str = "clamav"
     clamav_port: int = 3310
     clamav_timeout_seconds: float = 30.0
+
+    @field_validator(
+        "rag_model_provider",
+        "rag_embedding_provider",
+        "rag_chat_provider",
+        "rag_reasoning_provider",
+        "rag_routing_provider",
+        "rag_faithfulness_provider",
+        "rag_ingestion_provider",
+        "rag_vision_provider",
+        mode="before",
+    )
+    @classmethod
+    def normalize_provider(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().lower()
+        return normalized or None
 
     @property
     def cors_origin_list(self) -> list[str]:

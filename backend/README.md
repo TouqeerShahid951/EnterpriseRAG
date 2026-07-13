@@ -85,6 +85,31 @@ Some worker composition and background command modules still live under
 `src/rag` while the architecture is migrated. That is known transitional
 placement, not a precedent for feature code to depend on deployment wiring.
 
+## Configuration ownership
+
+Configuration is layered by lifecycle rather than stored in one physical file:
+
+```text
+saved workspace configuration -> environment bootstrap -> Python defaults
+```
+
+- `rag.query` owns live model routing and query behavior. A validated workspace
+  record in PostgreSQL is authoritative; environment values are its bootstrap
+  fallback.
+- `rag.ingestion` owns worker boot and parser settings. Workers obtain the live
+  RAG runtime record from the internal API when a task executes.
+- `rag.deployment` owns desired vLLM launch limits and applies them through the
+  deployment controller.
+- `core.config.Settings` is the typed compatibility facade for process
+  environment values. It does not decide workspace-over-environment precedence.
+- Docker Compose owns container topology and explicitly distributes only the
+  environment values needed by backend processes. Dockerfiles do not own
+  mutable RAG behavior.
+
+Changing `.env` does not replace an existing workspace RAG record. A Platform
+Admin must use **Restore deployment defaults** to remove the saved record before
+the environment fallback becomes effective.
+
 The ingestion package has a more detailed ownership map in
 [`src/rag/ingestion/README.md`](src/rag/ingestion/README.md).
 Deployment control has its ownership and privilege boundary documented in

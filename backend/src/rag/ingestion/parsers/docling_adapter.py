@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from io import BytesIO
 import os
+from math import isfinite
 import signal
 import threading
 import time
@@ -14,6 +15,7 @@ from typing import Any, Iterable, Iterator
 
 from rag.shared.runtime_offline import apply_runtime_offline_defaults, runtime_offline_enabled
 
+from ..config import DEFAULT_DOCLING_CONVERT_TIMEOUT_SECONDS
 from .docling_models import (
     build_rapidocr_options,
     configured_docling_artifacts_path,
@@ -25,7 +27,6 @@ from .models import BBox, ParsedPdfItem
 from .tables import _markdown_table
 
 DOCLING_SOURCE_FLAG = "source:docling_layout"
-DEFAULT_DOCLING_CONVERT_TIMEOUT_SECONDS = 180.0
 DoclingProgressCallback = Callable[[dict[str, object]], None]
 
 
@@ -246,8 +247,22 @@ def _group_page_count(pages: set[int] | None, fallback_total: int) -> int:
 
 
 def _docling_convert_timeout_seconds() -> float:
-    value = os.getenv("DOCLING_CONVERT_TIMEOUT_SECONDS", str(DEFAULT_DOCLING_CONVERT_TIMEOUT_SECONDS)).strip()
-    return max(0.0, float(value or DEFAULT_DOCLING_CONVERT_TIMEOUT_SECONDS))
+    raw_value = os.getenv(
+        "DOCLING_CONVERT_TIMEOUT_SECONDS",
+        str(DEFAULT_DOCLING_CONVERT_TIMEOUT_SECONDS),
+    ).strip()
+    try:
+        value = float(raw_value or DEFAULT_DOCLING_CONVERT_TIMEOUT_SECONDS)
+    except ValueError as exc:
+        raise ValueError(
+            f"DOCLING_CONVERT_TIMEOUT_SECONDS must be numeric, got {raw_value!r}"
+        ) from exc
+    if not isfinite(value) or value < 0:
+        raise ValueError(
+            "DOCLING_CONVERT_TIMEOUT_SECONDS must be finite and at least 0, "
+            f"got {raw_value!r}"
+        )
+    return value
 
 
 @contextmanager

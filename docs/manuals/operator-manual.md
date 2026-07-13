@@ -85,10 +85,10 @@ CLAMAV_SCAN_ENABLED=true
 Set the Ollama model names to exactly match `ollama list` on the Windows host.
 Leave `VITE_API_BASE_URL` blank for the default same-origin setup.
 
-Important provider warning: the general `.env.example` in the repository may
-default to `RAG_MODEL_PROVIDER=vllm`, but the Windows Ollama-only runbook uses
-`RAG_MODEL_PROVIDER=ollama`. Use the airgap environment file for the offline
-Windows deployment.
+The general `.env.example` and the Windows air-gap example both bootstrap with
+`RAG_MODEL_PROVIDER=ollama`. If an administrator has already saved a workspace
+RAG configuration, that saved record remains active until **Restore deployment
+defaults** is used in Runtime Settings.
 
 ## 5. First Installation On Offline Windows
 

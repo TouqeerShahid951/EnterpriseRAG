@@ -223,6 +223,20 @@ describe("adminApi", () => {
     expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
     expect(init.body).toBe(JSON.stringify({ temporary_password: "NewPass123!" }));
   });
+
+  it("restores the environment-backed RAG config through a CSRF-protected delete", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ source: "env", provider: "ollama" }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    const response = await adminApi.resetRagConfig();
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/admin/rag-config");
+    expect(init.method).toBe("DELETE");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(response.source).toBe("env");
+  });
 });
 
 describe("uploadApi", () => {

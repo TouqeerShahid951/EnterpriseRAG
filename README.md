@@ -23,6 +23,11 @@ Docker Compose deployment.
 installs, and runtime backups are not source code and are intentionally ignored.
 Do not commit `.env`; start from [`.env.example`](.env.example).
 
+Runtime RAG configuration follows explicit precedence: a saved workspace record
+wins over environment bootstrap values, which win over typed Python defaults.
+Docker Compose owns container topology and environment distribution, not
+application-policy defaults. See the backend architecture guide for details.
+
 ## Documentation
 
 - [System architecture](design.md)

@@ -888,6 +888,7 @@ export const adminApi = {
     apiClient.postJson<RagConfigTestResult>("/api/v1/admin/rag-config/test", request),
   updateRagConfig: (request: RagConfigRequest) =>
     apiClient.putJson<RagConfig>("/api/v1/admin/rag-config", request),
+  resetRagConfig: () => apiClient.delete<RagConfig>("/api/v1/admin/rag-config"),
   getVllmDeploymentConfig: () => apiClient.get<VllmDeploymentConfig>("/api/v1/admin/vllm-deployment-config"),
   updateVllmDeploymentConfig: (request: VllmDeploymentConfigRequest) =>
     apiClient.putJson<VllmDeploymentConfig>("/api/v1/admin/vllm-deployment-config", request),

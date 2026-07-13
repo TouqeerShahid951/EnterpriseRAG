@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
 from ..core.config import Settings, settings
+from ..shared.contracts.rag_defaults import DEFAULT_MODEL_PROVIDER
 from .rag_config_models import (
     DEFAULT_OLLAMA_PORT,
     DEFAULT_VLLM_PORT,
@@ -51,7 +52,10 @@ def normalize_inference_base_url(host: str, port: int, *, provider: str) -> str:
 
 
 def env_rag_config(config: Settings = settings) -> RagConfigRecord:
-    provider = _env_provider(config.rag_chat_provider or config.rag_model_provider, default="ollama")
+    provider = _env_provider(
+        config.rag_chat_provider or config.rag_model_provider,
+        default=DEFAULT_MODEL_PROVIDER,
+    )
     reasoning_provider = _env_provider(config.rag_reasoning_provider, default=provider)
     routing_provider = _env_provider(config.rag_routing_provider, default=reasoning_provider)
     faithfulness_provider = _env_provider(config.rag_faithfulness_provider, default=provider)
@@ -59,7 +63,10 @@ def env_rag_config(config: Settings = settings) -> RagConfigRecord:
     vision_provider = _env_provider(config.rag_vision_provider, default=ingestion_provider)
     embedding_provider = config.rag_embedding_provider.strip().lower()
     if embedding_provider not in SUPPORTED_EMBEDDING_PROVIDERS:
-        embedding_provider = "fastembed"
+        allowed = ", ".join(sorted(SUPPORTED_EMBEDDING_PROVIDERS))
+        raise ValueError(
+            f"RAG_EMBEDDING_PROVIDER must be one of {allowed}; got {embedding_provider!r}"
+        )
     base_url = _role_env_base_url(config.rag_chat_base_url, provider=provider, role="chat", config=config)
     embedding_base_url = _embedding_env_base_url(embedding_provider, fallback=base_url, config=config)
     reasoning_base_url = _role_env_base_url(
@@ -232,7 +239,12 @@ def _normalize_env_base_url(value: str, default_port: int, *, provider: str) -> 
 
 def _env_provider(value: str | None, *, default: str) -> str:
     provider = (value or default).strip().lower()
-    return provider if provider in SUPPORTED_INFERENCE_PROVIDERS else default
+    if provider not in SUPPORTED_INFERENCE_PROVIDERS:
+        allowed = ", ".join(sorted(SUPPORTED_INFERENCE_PROVIDERS))
+        raise ValueError(
+            f"RAG inference provider must be one of {allowed}; got {provider!r}"
+        )
+    return provider
 
 
 def _role_env_base_url(

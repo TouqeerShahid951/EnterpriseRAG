@@ -7,13 +7,20 @@ from datetime import datetime
 from typing import Protocol
 from urllib.parse import urlsplit
 
+from rag.shared.contracts.rag_defaults import (
+    DEFAULT_JSON_NUM_PREDICT,
+    DEFAULT_QUERY_PLANNER_ENABLED,
+    DEFAULT_RETRIEVAL_TOKEN_BUDGET,
+    SUPPORTED_EMBEDDING_PROVIDERS as SHARED_EMBEDDING_PROVIDERS,
+    SUPPORTED_INFERENCE_PROVIDERS as SHARED_INFERENCE_PROVIDERS,
+)
 from rag.shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL, normalize_reranker_model
 
 ACTIVE_CONFIG_KEY = "active"
 DEFAULT_OLLAMA_PORT = 11434
 DEFAULT_VLLM_PORT = 8000
-SUPPORTED_INFERENCE_PROVIDERS = {"ollama", "vllm"}
-SUPPORTED_EMBEDDING_PROVIDERS = {"ollama", "openai_compatible", "fastembed"}
+SUPPORTED_INFERENCE_PROVIDERS = frozenset(SHARED_INFERENCE_PROVIDERS)
+SUPPORTED_EMBEDDING_PROVIDERS = frozenset(SHARED_EMBEDDING_PROVIDERS)
 
 
 @dataclass(frozen=True)
@@ -41,9 +48,9 @@ class RagConfigRecord:
     routing_model: str | None = None
     ingestion_model: str | None = None
     vision_model: str | None = None
-    json_num_predict: int = 4096
-    retrieval_token_budget: int = 12000
-    query_planner_enabled: bool = True
+    json_num_predict: int = DEFAULT_JSON_NUM_PREDICT
+    retrieval_token_budget: int = DEFAULT_RETRIEVAL_TOKEN_BUDGET
+    query_planner_enabled: bool = DEFAULT_QUERY_PLANNER_ENABLED
     reranker_model: str = DEFAULT_RERANKER_MODEL
     health_status: str = "unknown"
     health_message: str = "Not checked."
@@ -183,6 +190,7 @@ class RagConfigRecord:
 class RagConfigRepository(Protocol):
     def get_active(self) -> RagConfigRecord | None: ...
     def save_active(self, config: RagConfigRecord) -> RagConfigRecord: ...
+    def delete_active(self) -> None: ...
 
 
 def _default_port_for_provider(provider: str) -> int:

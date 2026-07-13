@@ -8,14 +8,7 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app:/app/src \
-    RAG_EMBEDDING_PROVIDER=fastembed \
-    RAG_FASTEMBED_MODEL=nomic-ai/nomic-embed-text-v1.5-Q \
-    RAG_DENSE_CACHE_DIR=/models/fastembed \
-    RAG_SPARSE_MODEL=Qdrant/bm25 \
-    RAG_SPARSE_CACHE_DIR=/models/fastembed \
-    RAG_RERANKER_MODEL=jinaai/jina-reranker-v1-turbo-en \
-    RAG_RERANKER_CACHE_DIR=/models/fastembed
+    PYTHONPATH=/app:/app/src
 
 WORKDIR /app
 

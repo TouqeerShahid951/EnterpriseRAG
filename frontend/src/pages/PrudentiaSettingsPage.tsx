@@ -6,6 +6,7 @@ import { adminApi, type IngestConfigRequest, type RagConfigRequest, type VllmDep
 import { isPlatformAdmin } from "../authz";
 import { useToast } from "../components/feedback/ToastProvider";
 import { Fact, InlineMessage } from "../components/layout/Common";
+import { Modal } from "../components/layout/Modal";
 import { PrudentiaBasicPage } from "../components/layout/PrudentiaWorkspace";
 import type { RouteId } from "../routes";
 import type {
@@ -27,6 +28,7 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
   const isAdmin = isPlatformAdmin(currentUser);
   const [activeConfigPanel, setActiveConfigPanel] = useState<ConfigPanel>("models");
   const [ragDraft, setRagDraft] = useState<RagConfigFormState>(DEFAULT_RAG_FORM);
+  const [ragResetDialogOpen, setRagResetDialogOpen] = useState(false);
   const [ragModelLookup, setRagModelLookup] = useState<RagModelLookupTarget | null>(null);
   const [vllmDraft, setVllmDraft] = useState<VllmDeploymentFormState>(DEFAULT_VLLM_DEPLOYMENT_FORM);
   const [vllmRestartConfirmed, setVllmRestartConfirmed] = useState<VllmRestartConfirmations>(DEFAULT_VLLM_RESTART_CONFIRMATIONS);
@@ -117,6 +119,24 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
     onError: (error) => notify({
       title: "Model routing save failed",
       description: errorMessage(error, "Model routing save failed."),
+      tone: "error",
+    }),
+  });
+  const resetRagConfigMutation = useMutation<RagConfig, Error, void>({
+    mutationFn: adminApi.resetRagConfig,
+    onSuccess: (config) => {
+      setRagDraft(formFromConfig(config));
+      queryClient.setQueryData(["admin", "rag-config"], config);
+      setRagResetDialogOpen(false);
+      notify({
+        title: "Deployment defaults restored",
+        description: "Queries and ingestion now use the environment-backed model routing configuration.",
+        tone: "success",
+      });
+    },
+    onError: (error) => notify({
+      title: "Deployment defaults could not be restored",
+      description: errorMessage(error, "Unable to remove the workspace model routing override."),
       tone: "error",
     }),
   });
@@ -297,9 +317,19 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
             rerankerModelOptions={rerankerModelOptions}
             rerankerPlaceholder={rerankerModelsQuery.isPending ? "Loading rerankers" : "Choose reranker"}
             rerankerSelectDisabled={rerankerModelsQuery.isPending}
+            actionsDisabled={ragConfigActionsLocked({
+              dialogOpen: ragResetDialogOpen,
+              resetPending: resetRagConfigMutation.isPending,
+              savePending: saveRagConfigMutation.isPending,
+              testPending: testRagConfigMutation.isPending,
+            })}
             savePending={saveRagConfigMutation.isPending}
             testPending={testRagConfigMutation.isPending}
             onChange={setRagDraft}
+            onReset={() => {
+              resetRagConfigMutation.reset();
+              setRagResetDialogOpen(true);
+            }}
             onSave={() => saveRagConfigMutation.mutate(ragRequest)}
             onTest={() => testRagConfigMutation.mutate(ragRequest)}
           />
@@ -467,6 +497,52 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
           </section>
         ) : null}
       </div>
+      <Modal
+        description="Remove the saved workspace model routing override and immediately return queries and ingestion to the deployment's environment-backed configuration."
+        icon={<AlertTriangle size={18} />}
+        onClose={() => {
+          if (!resetRagConfigMutation.isPending) {
+            setRagResetDialogOpen(false);
+            resetRagConfigMutation.reset();
+          }
+        }}
+        open={ragResetDialogOpen}
+        size="sm"
+        title="Restore deployment defaults"
+      >
+        <div className="space-y-4">
+          <InlineMessage tone="warning">
+            This discards the workspace override{ragDraftIsDirty ? " and your unsaved draft" : ""}. The deployment configuration will become active as soon as the reset completes.
+          </InlineMessage>
+          {resetRagConfigMutation.isError ? (
+            <InlineMessage tone="error">
+              {errorMessage(resetRagConfigMutation.error, "Unable to remove the workspace model routing override.")}
+            </InlineMessage>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2 border-t border-surface-border pt-4">
+            <button
+              type="button"
+              className="sv-action-secondary"
+              disabled={resetRagConfigMutation.isPending}
+              onClick={() => {
+                setRagResetDialogOpen(false);
+                resetRagConfigMutation.reset();
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="sv-action-danger disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={resetRagConfigMutation.isPending}
+              onClick={() => resetRagConfigMutation.mutate()}
+            >
+              <RefreshCw size={16} />
+              {resetRagConfigMutation.isPending ? "Restoring" : "Restore defaults"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </PrudentiaBasicPage>
   );
 }
@@ -546,8 +622,9 @@ function RuntimeStatusStrip({
   const discoveryState = discoveryHealthLabel(discoveryResult, discoveryLoading, discoveryError);
   return (
     <section className="rounded border border-surface-border bg-surface-container-low p-3" aria-label="Runtime Settings status">
-      <dl className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <dl className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
         <Fact label="Active stack" value={config ? activeStackLabel(config) : "Loading"} />
+        <Fact label="Configuration source" value={config ? ragConfigSourceLabel(config.source) : "Loading"} />
         <Fact label="Draft state" value={draftIsDirty ? "Unsaved changes" : "Matches active routing"} />
         <Fact label="Model discovery" value={discoveryState} />
         <Fact
@@ -570,6 +647,7 @@ type RuntimeStatusStripProps = {
 };
 
 function ModelsAndRolesPanel({
+  actionsDisabled,
   canFetchModels,
   config,
   configError,
@@ -590,6 +668,7 @@ function ModelsAndRolesPanel({
   savePending,
   testPending,
   onChange,
+  onReset,
   onSave,
   onTest,
 }: ModelsAndRolesPanelProps) {
@@ -682,7 +761,7 @@ function ModelsAndRolesPanel({
           <div className="flex flex-wrap gap-3">
             <button
               type="button"
-              disabled={!canSubmit || testPending}
+              disabled={!canSubmit || actionsDisabled}
               onClick={onTest}
               className="sv-action-secondary"
             >
@@ -691,7 +770,7 @@ function ModelsAndRolesPanel({
             </button>
             <button
               type="button"
-              disabled={!canSubmit || savePending}
+              disabled={!canSubmit || actionsDisabled}
               onClick={onSave}
               className="sv-action-primary"
             >
@@ -708,12 +787,13 @@ function ModelsAndRolesPanel({
       {configFailed ? <InlineMessage tone="error">{errorMessage(configError, "Unable to load model routing.")}</InlineMessage> : null}
       {discoveryFailed ? <InlineMessage tone="error">{errorMessage(discoveryError, "Unable to fetch inference models.")}</InlineMessage> : null}
       {rerankerFailed ? <InlineMessage tone="error">{errorMessage(rerankerError, "Unable to load reranker models.")}</InlineMessage> : null}
-      {config ? <CurrentRagStatus config={config} /> : null}
+      {config ? <CurrentRagStatus actionsDisabled={actionsDisabled} config={config} onReset={onReset} /> : null}
     </section>
   );
 }
 
 type ModelsAndRolesPanelProps = {
+  actionsDisabled: boolean;
   canFetchModels: boolean;
   config?: RagConfig;
   configError: Error | null;
@@ -734,6 +814,7 @@ type ModelsAndRolesPanelProps = {
   savePending: boolean;
   testPending: boolean;
   onChange: (value: RagConfigFormState) => void;
+  onReset: () => void;
   onSave: () => void;
   onTest: () => void;
 };
@@ -1760,13 +1841,31 @@ type ModelSelectProps = {
   onChange: (value: string) => void;
 };
 
-function CurrentRagStatus({ config }: { config: RagConfig }) {
+function CurrentRagStatus({ actionsDisabled, config, onReset }: CurrentRagStatusProps) {
   const vision = activeVisionStatus(config);
+  const workspaceOverrideActive = ragConfigSourceLabel(config.source) === "workspace";
   return (
     <section className="mt-4 border-t border-surface-border pt-4" aria-labelledby="active-rag-config-title">
-      <div>
-        <h3 id="active-rag-config-title" className="text-title-md">Active model routing</h3>
-        <p className="mt-1 text-body-md text-secondary">This is the saved runtime currently used by queries and ingestion.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 id="active-rag-config-title" className="text-title-md">Active model routing</h3>
+            <StatusBadge tone={workspaceOverrideActive ? "warning" : "neutral"}>
+              Source: {ragConfigSourceLabel(config.source)}
+            </StatusBadge>
+          </div>
+          <p className="mt-1 text-body-md text-secondary">This is the effective runtime currently used by queries and ingestion.</p>
+        </div>
+        <button
+          type="button"
+          className="sv-action-secondary disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={!workspaceOverrideActive || actionsDisabled}
+          onClick={onReset}
+          title={workspaceOverrideActive ? "Remove the workspace override" : "Deployment defaults are already active"}
+        >
+          <RefreshCw size={16} />
+          Restore deployment defaults
+        </button>
       </div>
       <dl className="mt-3 grid gap-2 md:grid-cols-4">
         <Fact label="Synthesis" value={`${providerName(config.provider)}: ${config.chat_model}`} />
@@ -1796,6 +1895,12 @@ function CurrentRagStatus({ config }: { config: RagConfig }) {
     </section>
   );
 }
+
+type CurrentRagStatusProps = {
+  actionsDisabled: boolean;
+  config: RagConfig;
+  onReset: () => void;
+};
 
 
 type VllmDeploymentSectionProps = {
@@ -2500,6 +2605,27 @@ export function activeStackLabel(config: RagConfig) {
     ? `${providerName(config.vision_provider ?? config.ingestion_provider ?? config.provider)} vision`
     : "vision not configured";
   return `${provider} text, ${embedding} embeddings, ${vision}`;
+}
+
+export function ragConfigSourceLabel(source: RagConfig["source"]): string {
+  const normalizedSource = source.trim().toLowerCase();
+  if (normalizedSource === "workspace") return "workspace";
+  if (normalizedSource === "env" || normalizedSource === "environment") return "environment";
+  return normalizedSource || "environment";
+}
+
+export function ragConfigActionsLocked({
+  dialogOpen,
+  resetPending,
+  savePending,
+  testPending,
+}: {
+  dialogOpen: boolean;
+  resetPending: boolean;
+  savePending: boolean;
+  testPending: boolean;
+}): boolean {
+  return dialogOpen || resetPending || savePending || testPending;
 }
 
 export function activeVisionStatus(config: RagConfig): { endpoint: string | null; model: string } {

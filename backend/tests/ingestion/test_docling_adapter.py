@@ -152,6 +152,17 @@ def test_docling_convert_timeout_uses_env(monkeypatch: pytest.MonkeyPatch) -> No
     assert _docling_convert_timeout_seconds() == 12.5
 
 
+@pytest.mark.parametrize("value", ["-1", "nan", "not-a-number"])
+def test_docling_convert_timeout_rejects_invalid_values(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("DOCLING_CONVERT_TIMEOUT_SECONDS", value)
+
+    with pytest.raises(ValueError, match="DOCLING_CONVERT_TIMEOUT_SECONDS"):
+        _docling_convert_timeout_seconds()
+
+
 class FakeDocumentStream:
     def __init__(self, *args, **kwargs) -> None:
         self.args = args

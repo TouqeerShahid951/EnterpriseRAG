@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DEFAULT_RERANKER_MODEL = "jinaai/jina-reranker-v1-turbo-en"
+from .rag_defaults import DEFAULT_RERANKER_MODEL
 
 SUPPORTED_RERANKER_MODELS = (
     "jinaai/jina-reranker-v1-turbo-en",

@@ -16,6 +16,7 @@ from ...query.rag_config_repository import (
     RagConfigRecord,
     RagConfigRepository,
     effective_rag_config,
+    env_rag_config,
     get_rag_config_repository,
     normalize_inference_base_url,
     normalize_ollama_base_url,
@@ -61,6 +62,21 @@ def get_workspace_rag_config(
 ) -> RagConfigResponse:
     _ = user
     return rag_config_response(effective_rag_config(repo=repo))
+
+
+@router.delete(
+    "/rag-config",
+    response_model=RagConfigResponse,
+    summary="Restore the deployment environment RAG runtime config",
+)
+def reset_workspace_rag_config(
+    user: UserRecord = Depends(require_platform_admin_user),
+    repo: RagConfigRepository = Depends(get_rag_config_repository),
+) -> RagConfigResponse:
+    _ = user
+    fallback = rag_config_response(env_rag_config(settings))
+    repo.delete_active()
+    return fallback
 
 
 @router.get(

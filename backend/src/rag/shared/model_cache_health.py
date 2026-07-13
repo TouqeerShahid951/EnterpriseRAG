@@ -6,17 +6,26 @@ import argparse
 import os
 from pathlib import Path
 
-DEFAULT_FASTEMBED_CACHE_DIR = Path("/models/fastembed")
+from .contracts.rag_defaults import (
+    DEFAULT_FASTEMBED_CACHE_DIR,
+    DEFAULT_FASTEMBED_DENSE_MODEL,
+    DEFAULT_RERANKER_MODEL,
+    DEFAULT_SPARSE_MODEL,
+)
+
+DEFAULT_FASTEMBED_CACHE_PATH = Path(DEFAULT_FASTEMBED_CACHE_DIR)
 DEFAULT_DOCLING_CACHE_DIR = Path("/models/docling")
-DEFAULT_DENSE_MODEL = "nomic-ai/nomic-embed-text-v1.5-Q"
-DEFAULT_SPARSE_MODEL = "Qdrant/bm25"
-DEFAULT_RERANKER_MODEL = "jinaai/jina-reranker-v1-turbo-en"
 
 
-def verify_fastembed_cache(cache_dir: Path, *, dense_model: str, sparse_model: str, reranker_model: str) -> None:
+def verify_fastembed_cache(
+    cache_dir: Path, *, dense_model: str, sparse_model: str, reranker_model: str
+) -> None:
     missing: list[Path] = []
     for model_name in (dense_model, sparse_model, reranker_model):
-        model_dirs = [cache_dir / cache_name for cache_name in _huggingface_cache_dir_names(model_name)]
+        model_dirs = [
+            cache_dir / cache_name
+            for cache_name in _huggingface_cache_dir_names(model_name)
+        ]
         if not any(_has_snapshot(model_dir) for model_dir in model_dirs):
             missing.append(model_dirs[0])
     if missing:
@@ -41,16 +50,28 @@ def main() -> None:
     parser.add_argument(
         "--fastembed-cache-dir",
         type=Path,
-        default=Path(os.getenv("RAG_RERANKER_CACHE_DIR") or os.getenv("RAG_SPARSE_CACHE_DIR") or DEFAULT_FASTEMBED_CACHE_DIR),
+        default=Path(
+            os.getenv("RAG_RERANKER_CACHE_DIR")
+            or os.getenv("RAG_SPARSE_CACHE_DIR")
+            or DEFAULT_FASTEMBED_CACHE_PATH
+        ),
     )
     parser.add_argument(
         "--docling-cache-dir",
         type=Path,
         default=Path(os.getenv("DOCLING_ARTIFACTS_PATH", DEFAULT_DOCLING_CACHE_DIR)),
     )
-    parser.add_argument("--sparse-model", default=_env_value("RAG_SPARSE_MODEL", DEFAULT_SPARSE_MODEL))
-    parser.add_argument("--dense-model", default=_env_value("RAG_FASTEMBED_MODEL", DEFAULT_DENSE_MODEL))
-    parser.add_argument("--reranker-model", default=_env_value("RAG_RERANKER_MODEL", DEFAULT_RERANKER_MODEL))
+    parser.add_argument(
+        "--sparse-model", default=_env_value("RAG_SPARSE_MODEL", DEFAULT_SPARSE_MODEL)
+    )
+    parser.add_argument(
+        "--dense-model",
+        default=_env_value("RAG_FASTEMBED_MODEL", DEFAULT_FASTEMBED_DENSE_MODEL),
+    )
+    parser.add_argument(
+        "--reranker-model",
+        default=_env_value("RAG_RERANKER_MODEL", DEFAULT_RERANKER_MODEL),
+    )
     args = parser.parse_args()
     if not args.fastembed and not args.docling:
         parser.error("choose at least one of --fastembed or --docling")

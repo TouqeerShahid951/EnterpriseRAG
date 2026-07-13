@@ -17,3 +17,6 @@ class InMemoryRagConfigRepository:
         saved = with_updated_at(config)
         self.active = saved
         return saved
+
+    def delete_active(self) -> None:
+        self.active = None

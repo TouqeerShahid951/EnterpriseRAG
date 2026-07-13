@@ -768,6 +768,12 @@ Runtime behavior includes:
 Testing validates the draft without activating it. Saving validates again and
 makes the assignments active without restarting containers.
 
+The panel identifies the active source as **Workspace** or **Environment**.
+Workspace settings take precedence over deployment environment values. Use
+**Restore deployment defaults** only when you intend to delete the saved
+workspace configuration and return immediately to the environment-backed
+bootstrap values.
+
 ### Inference Services and vLLM Limits
 
 Use **Inference Services** to check provider availability and manage launch
