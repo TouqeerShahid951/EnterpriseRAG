@@ -14,11 +14,21 @@ def require_visible_pending_review_item(
     review_repo: HumanReviewRepository,
     item_id: str,
 ) -> ReviewItemRecord:
-    item = next((item for item in review_repo.list_review_items(status="pending") if item.id == item_id), None)
+    item = next(
+        (
+            item
+            for item in review_repo.list_review_items(status="pending")
+            if item.id == item_id
+        ),
+        None,
+    )
     if item is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "review_item_not_found", "message": "Review item was not found."},
+            detail={
+                "code": "review_item_not_found",
+                "message": "Review item was not found.",
+            },
         )
     require_review_document_scope(user, document_repo, item.doc_id)
     return item
@@ -44,11 +54,16 @@ def require_visible_approvable_review_item(
             return item
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
-        detail={"code": "review_item_not_found", "message": "Review item was not found."},
+        detail={
+            "code": "review_item_not_found",
+            "message": "Review item was not found.",
+        },
     )
 
 
-def require_review_document_scope(user: UserRecord, document_repo: DocumentRepository, doc_id: str) -> None:
+def require_review_document_scope(
+    user: UserRecord, document_repo: DocumentRepository, doc_id: str
+) -> None:
     if not can_review_document(user, document_repo, doc_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -59,6 +74,8 @@ def require_review_document_scope(user: UserRecord, document_repo: DocumentRepos
         )
 
 
-def can_review_document(user: UserRecord, document_repo: DocumentRepository, doc_id: str) -> bool:
+def can_review_document(
+    user: UserRecord, document_repo: DocumentRepository, doc_id: str
+) -> bool:
     document = document_repo.get_document(doc_id)
     return document is not None and can_write_document(user, document)

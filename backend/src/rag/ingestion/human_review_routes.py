@@ -5,7 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from ..auth.dependencies import require_review_user
 from ..auth.identity_models import UserRecord
 from ..documents.repository import DocumentRepository, get_document_repository
-from ..schemas.review import ReviewApproveRequest, ReviewDecisionResponse, ReviewQueueResponse
+from ..schemas.review import (
+    ReviewApproveRequest,
+    ReviewDecisionResponse,
+    ReviewQueueResponse,
+)
 from .contracts import IngestJobPayload
 from .job_dependencies import get_ingest_job_repository
 from .job_models import IngestJobRepository
@@ -58,11 +62,16 @@ async def approve_review_item(
         review_repo,
         item_id,
     )
-    decision = review_repo.approve_review_item(item_id, corrected_text=payload.corrected_text, reviewer_id=user.id)
+    decision = review_repo.approve_review_item(
+        item_id, corrected_text=payload.corrected_text, reviewer_id=user.id
+    )
     if decision is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "review_item_not_found", "message": "Review item was not found."},
+            detail={
+                "code": "review_item_not_found",
+                "message": "Review item was not found.",
+            },
         )
     resume_claimed = False
     if decision.batch_complete:
@@ -115,7 +124,10 @@ async def approve_review_item(
                 )
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={"code": "queue_unavailable", "message": "Upload queue is unavailable."},
+                    detail={
+                        "code": "queue_unavailable",
+                        "message": "Upload queue is unavailable.",
+                    },
                 ) from exc
     if review_item.status == "pending" or resume_claimed:
         document_repo.append_audit_event(
@@ -157,7 +169,10 @@ async def reject_review_item(
     if decision is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "review_item_not_found", "message": "Review item was not found."},
+            detail={
+                "code": "review_item_not_found",
+                "message": "Review item was not found.",
+            },
         )
     job_repo.update_ingest_job(
         decision.batch.job_id,

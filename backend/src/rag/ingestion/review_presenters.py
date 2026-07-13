@@ -7,7 +7,11 @@ from ..schemas.review import (
     ImageReviewDecisionResponse,
     ReviewItem,
 )
-from .review_models import ImageReviewBatchRecord, ImageReviewCandidateRecord, ReviewItemRecord
+from .review_models import (
+    ImageReviewBatchRecord,
+    ImageReviewCandidateRecord,
+    ReviewItemRecord,
+)
 
 
 def review_item_response(item: ReviewItemRecord) -> ReviewItem:
@@ -37,7 +41,9 @@ def image_review_batch_response(
     candidates: list[ImageReviewCandidateRecord],
 ) -> ImageReviewBatch:
     pending_count = sum(1 for candidate in candidates if candidate.status == "pending")
-    approved_count = sum(1 for candidate in candidates if candidate.status == "approved")
+    approved_count = sum(
+        1 for candidate in candidates if candidate.status == "approved"
+    )
     skipped_count = sum(1 for candidate in candidates if candidate.status == "skipped")
     return ImageReviewBatch(
         id=batch.id,
@@ -50,13 +56,17 @@ def image_review_batch_response(
         pending_count=pending_count,
         approved_count=approved_count,
         skipped_count=skipped_count,
-        candidates=[image_review_candidate_response(candidate) for candidate in candidates],
+        candidates=[
+            image_review_candidate_response(candidate) for candidate in candidates
+        ],
         created_at=batch.created_at,
         updated_at=batch.updated_at,
     )
 
 
-def image_review_candidate_response(candidate: ImageReviewCandidateRecord) -> ImageReviewCandidate:
+def image_review_candidate_response(
+    candidate: ImageReviewCandidateRecord,
+) -> ImageReviewCandidate:
     return ImageReviewCandidate(
         id=candidate.id,
         batch_id=candidate.batch_id,
@@ -93,7 +103,13 @@ def image_review_decision_response(
         batch_id=batch_id,
         batch_status=batch_status,  # type: ignore[arg-type]
         batch_complete=batch_complete,
-        approved_count=sum(1 for candidate in candidates if candidate.status == "approved"),
-        skipped_count=sum(1 for candidate in candidates if candidate.status == "skipped"),
-        pending_count=sum(1 for candidate in candidates if candidate.status == "pending"),
+        approved_count=sum(
+            1 for candidate in candidates if candidate.status == "approved"
+        ),
+        skipped_count=sum(
+            1 for candidate in candidates if candidate.status == "skipped"
+        ),
+        pending_count=sum(
+            1 for candidate in candidates if candidate.status == "pending"
+        ),
     )

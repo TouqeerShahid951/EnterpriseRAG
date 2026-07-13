@@ -16,8 +16,12 @@ from .image_review_routes import (
 )
 
 router = APIRouter()
-router.include_router(human_review_router, prefix="/review-queue", tags=["review-queue"])
-router.include_router(image_review_router, prefix="/review-queue", tags=["review-queue"])
+router.include_router(
+    human_review_router, prefix="/review-queue", tags=["review-queue"]
+)
+router.include_router(
+    image_review_router, prefix="/review-queue", tags=["review-queue"]
+)
 
 __all__ = [
     "approve_review_item",

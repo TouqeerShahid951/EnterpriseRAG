@@ -46,7 +46,9 @@ from rag.services.bootstrap_admin import ensure_initial_platform_admin
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ensure_postgres_schema(settings)
-    repository_provider = app.dependency_overrides.get(get_identity_repository, get_identity_repository)
+    repository_provider = app.dependency_overrides.get(
+        get_identity_repository, get_identity_repository
+    )
     ensure_initial_platform_admin(
         repository_provider(),
         email=settings.bootstrap_admin_email,
@@ -72,15 +74,27 @@ def create_app() -> FastAPI:
     )
 
     @app.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    async def http_exception_handler(
+        request: Request, exc: HTTPException
+    ) -> JSONResponse:
         _ = request
         detail = exc.detail if isinstance(exc.detail, dict) else {}
-        code = detail.get("code") if isinstance(detail.get("code"), str) else "request_failed"
-        message = detail.get("message") if isinstance(detail.get("message"), str) else str(exc.detail)
+        code = (
+            detail.get("code")
+            if isinstance(detail.get("code"), str)
+            else "request_failed"
+        )
+        message = (
+            detail.get("message")
+            if isinstance(detail.get("message"), str)
+            else str(exc.detail)
+        )
         return JSONResponse(
             status_code=exc.status_code,
             headers=exc.headers,
-            content=ErrorResponse(error=ErrorDetail(code=code, message=message)).model_dump(),
+            content=ErrorResponse(
+                error=ErrorDetail(code=code, message=message)
+            ).model_dump(),
         )
 
     @app.get("/health/live", response_model=HealthResponse, tags=["health"])

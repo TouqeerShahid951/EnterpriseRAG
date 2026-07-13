@@ -21,12 +21,19 @@ from .queue import IngestQueue, get_ingest_queue
 from .review_access import can_review_document, require_review_document_scope
 from .review_dependencies import get_image_review_repository
 from .review_models import ImageReviewBatchClosedError, ImageReviewRepository
-from .review_presenters import image_review_batch_response, image_review_decision_response
+from .review_presenters import (
+    image_review_batch_response,
+    image_review_decision_response,
+)
 
 router = APIRouter()
 
 
-@router.get("/image-batches", response_model=ImageReviewQueueResponse, summary="List PDF image review batches")
+@router.get(
+    "/image-batches",
+    response_model=ImageReviewQueueResponse,
+    summary="List PDF image review batches",
+)
 async def list_image_review_batches(
     user: UserRecord = Depends(require_review_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
@@ -40,16 +47,23 @@ async def list_image_review_batches(
         candidates = image_review_repo.list_image_review_candidates_for_batch(batch.id)
         candidate_total += len(candidates)
         batches.append(image_review_batch_response(batch, candidates))
-    return ImageReviewQueueResponse(batches=batches, total=len(batches), candidate_total=candidate_total)
+    return ImageReviewQueueResponse(
+        batches=batches, total=len(batches), candidate_total=candidate_total
+    )
 
 
-@router.get("/image-candidates/{candidate_id}/content", summary="Read PDF image review candidate content")
+@router.get(
+    "/image-candidates/{candidate_id}/content",
+    summary="Read PDF image review candidate content",
+)
 async def get_image_review_candidate_content(
     candidate_id: str,
     user: UserRecord = Depends(require_review_user),
     document_repo: DocumentRepository = Depends(get_document_repository),
     image_review_repo: ImageReviewRepository = Depends(get_image_review_repository),
-    image_storage: DocumentImageAssetStorage = Depends(get_document_image_asset_storage),
+    image_storage: DocumentImageAssetStorage = Depends(
+        get_document_image_asset_storage
+    ),
 ) -> Response:
     candidate = image_review_repo.get_image_review_candidate(candidate_id)
     if candidate is None:
@@ -72,7 +86,9 @@ async def get_image_review_candidate_content(
             },
         ) from exc
     headers = {"Content-Disposition": f'inline; filename="{content.filename}"'}
-    return Response(content=content.content, media_type=content.content_type, headers=headers)
+    return Response(
+        content=content.content, media_type=content.content_type, headers=headers
+    )
 
 
 @router.post(
@@ -106,7 +122,10 @@ async def decide_image_review_batch(
     if batch is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "image_review_batch_not_found", "message": "Image review batch was not found."},
+            detail={
+                "code": "image_review_batch_not_found",
+                "message": "Image review batch was not found.",
+            },
         )
     require_review_document_scope(user, document_repo, batch.doc_id)
     try:
@@ -121,12 +140,18 @@ async def decide_image_review_batch(
     except ImageReviewBatchClosedError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "image_review_batch_closed", "message": "Image review batch is already closed."},
+            detail={
+                "code": "image_review_batch_closed",
+                "message": "Image review batch is already closed.",
+            },
         ) from exc
     if decision is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "image_review_batch_not_found", "message": "Image review batch was not found."},
+            detail={
+                "code": "image_review_batch_not_found",
+                "message": "Image review batch was not found.",
+            },
         )
     resumed = False
     if decision.batch_complete:
@@ -146,7 +171,10 @@ async def decide_image_review_batch(
                     actor_id=user.id,
                     target_type="image_review_batch",
                     target_id=decision.batch.id,
-                    payload={"doc_id": decision.batch.doc_id, "reason": "ingest_cancelled"},
+                    payload={
+                        "doc_id": decision.batch.doc_id,
+                        "reason": "ingest_cancelled",
+                    },
                 )
         elif job.status == "human_review":
             resume_payload = dict(decision.batch.resume_payload)
@@ -170,7 +198,10 @@ async def decide_image_review_batch(
                     )
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail={"code": "queue_unavailable", "message": "Upload queue is unavailable."},
+                        detail={
+                            "code": "queue_unavailable",
+                            "message": "Upload queue is unavailable.",
+                        },
                     ) from exc
     if decision.candidates or resumed:
         document_repo.append_audit_event(
@@ -184,7 +215,9 @@ async def decide_image_review_batch(
                 "changed_count": len(decision.candidates),
             },
         )
-    candidates = image_review_repo.list_image_review_candidates_for_batch(decision.batch.id)
+    candidates = image_review_repo.list_image_review_candidates_for_batch(
+        decision.batch.id
+    )
     return image_review_decision_response(
         decision.batch.id,
         decision.batch.status,
