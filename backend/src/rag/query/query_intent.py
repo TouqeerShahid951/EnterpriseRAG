@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from ..schemas.query import QueryIntent
+from .schemas import QueryIntent
 from .routing_models import RouteIntent, public_intent_for
 from .routing_rules import score_route_rules
 from .routing_signals import extract_query_signals

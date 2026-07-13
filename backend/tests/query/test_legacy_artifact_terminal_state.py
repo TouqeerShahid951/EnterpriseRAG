@@ -13,7 +13,7 @@ from rag.query.artifact_models import (
 from rag.query.artifact_service import ArtifactGenerationResult
 from rag.query.nodes import QueryNodes
 from rag.query.state import initial_state
-from rag.schemas.query import QueryRequest, RAGResponse
+from rag.query.schemas import QueryRequest, RAGResponse
 
 
 class _FailingArtifactService:

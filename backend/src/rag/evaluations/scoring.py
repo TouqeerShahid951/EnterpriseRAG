@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..schemas.evaluations import EvaluationCase, EvaluationFailureStage
-from ..schemas.query import RAGResponse
+from ..query.schemas import RAGResponse
 from ..shared.evaluation.answer_checks import LiteralCheckResult, evaluate_literal_checks
 
 

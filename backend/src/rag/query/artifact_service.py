@@ -28,7 +28,7 @@ from ..documents.adapters.memory import InMemoryDocumentRepository
 from ..documents.models import DocumentRepository
 from ..documents.adapters.postgres import PostgresDocumentRepository
 from ..documents.repository import get_document_repository
-from ..schemas.query import RAGResponse
+from .schemas import RAGResponse
 from .artifact_intent import ArtifactRequest
 from .artifact_models import ArtifactContent
 from .artifact_renderer import render_artifact

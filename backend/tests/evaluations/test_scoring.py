@@ -1,6 +1,6 @@
 from rag.evaluations.scoring import score_case_result
 from rag.schemas.evaluations import EvaluationCase
-from rag.schemas.query import RAGResponse
+from rag.query.schemas import RAGResponse
 
 
 def response(answer: str) -> RAGResponse:

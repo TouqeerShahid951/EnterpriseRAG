@@ -1,6 +1,6 @@
 from rag.evaluations.answer_verifier import verify_answer_content_with_llm
 from rag.schemas.evaluations import EvaluationCase
-from rag.schemas.query import RAGResponse
+from rag.query.schemas import RAGResponse
 from rag.shared.evaluation.answer_checks import evaluate_literal_checks
 
 

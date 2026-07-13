@@ -9,7 +9,7 @@ from uuid import UUID
 
 from ...shared.persistence import PostgresConnectionMixin
 from ...schemas.internal import ClaimRecord
-from ...schemas.query import ConflictPair, SourceAnchor
+from ...query.schemas import ConflictPair, SourceAnchor
 from ..claim_models import IngestClaimsResult
 
 CONFLICT_LOOKUP_QUERY = """

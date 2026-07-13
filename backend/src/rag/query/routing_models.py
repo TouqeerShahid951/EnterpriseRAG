@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from ..schemas.query import QueryIntent
+from .schemas import QueryIntent
 
 RouteIntent = Literal[
     "factual_simple",

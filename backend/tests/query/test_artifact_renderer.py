@@ -6,7 +6,7 @@ import zipfile
 
 from pptx import Presentation
 
-from rag.schemas.query import RAGResponse, SourceAnchor
+from rag.query.schemas import RAGResponse, SourceAnchor
 from rag.query.artifact_models import (
     ArtifactCitation,
     ArtifactContent,

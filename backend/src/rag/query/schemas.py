@@ -2,18 +2,9 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
-from ..artifact_jobs.schemas import (
-    ArtifactJobStageProgress as ArtifactJobStageProgress,
-    ArtifactJobSummary as ArtifactJobSummary,
-    GeneratedArtifact as GeneratedArtifact,
-)
-from ..artifact_jobs.types import (
-    ArtifactFormat as ArtifactFormat,
-    ArtifactJobProgressUnit as ArtifactJobProgressUnit,
-    ArtifactJobStatus as ArtifactJobStatus,
-)
+from ..artifact_jobs.schemas import ArtifactJobSummary, GeneratedArtifact
+from ..schemas.common import ContractModel
 from ..shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
-from .common import ContractModel
 
 QueryIntent = Literal[
     "factual_simple",

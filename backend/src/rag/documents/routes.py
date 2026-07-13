@@ -60,7 +60,7 @@ from ..schemas.docs import (
     VersionNode,
     VersionChainResponse,
 )
-from ..schemas.query import SourceAnchor
+from ..query.schemas import SourceAnchor
 from ..services.document_image_asset_storage import DocumentImageAssetStorage, get_document_image_asset_storage
 from ..connectors.models import CONNECTOR_RECORD_CONTENT_TYPE
 

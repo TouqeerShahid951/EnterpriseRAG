@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from ..auth.context import UserContext
-from ..schemas.query import QueryRequest
+from ..query.schemas import QueryRequest
 from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
 from .generated_models import GeneratedArtifactRepository
 from .job_models import ArtifactJobRecord, ArtifactJobRepository

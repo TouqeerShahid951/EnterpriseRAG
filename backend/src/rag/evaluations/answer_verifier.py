@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from ..schemas.evaluations import EvaluationCase
-from ..schemas.query import RAGResponse
+from ..query.schemas import RAGResponse
 from ..shared.evaluation.answer_checks import LiteralCheckResult
 
 

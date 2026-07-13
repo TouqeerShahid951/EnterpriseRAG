@@ -5,7 +5,7 @@ from rag.query.conflicts import apply_hybrid_disagreement_detection
 from rag.query.qdrant import SearchHit
 from rag.query.source_resolution import SourceDecision
 from rag.query.state import initial_state
-from rag.schemas.query import QueryRequest
+from rag.query.schemas import QueryRequest
 
 
 def test_hybrid_disagreement_detection_flags_db_document_status_conflict() -> None:

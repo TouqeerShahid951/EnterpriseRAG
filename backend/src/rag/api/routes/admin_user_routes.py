@@ -19,7 +19,7 @@ from ...auth.identity_models import IdentityRepository, UserRecord
 from ...auth.identity_repository import get_identity_repository
 from ...schemas.admin import UserAdmin, UserCreateRequest, UserGroupRequest, UserListResponse, UserPasswordResetRequest, UserUpdateRequest
 from ...schemas.common import ErrorResponse
-from ...schemas.query import ChatSession, ChatSessionListResponse, ChatSessionSummary
+from ...query.schemas import ChatSession, ChatSessionListResponse, ChatSessionSummary
 from .admin_common import (
     require_admin_if_users_exist,
     require_can_assign_user,

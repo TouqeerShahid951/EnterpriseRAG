@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import NotRequired, TypedDict
 
 from ..auth.context import UserContext
-from ..schemas.query import ConflictPair, QueryIntent, QueryNodeTiming, QueryRequest, RAGResponse
+from .schemas import ConflictPair, QueryIntent, QueryNodeTiming, QueryRequest, RAGResponse
 from .artifact_intent import ArtifactRequest, parse_artifact_request, requires_document_scope
 from .artifact_models import ArtifactContent, ArtifactPlan, ArtifactValidation, CoverageReport, EvidenceUnit
 from .cancellation import QueryCancellationToken

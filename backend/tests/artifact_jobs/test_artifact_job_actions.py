@@ -11,7 +11,7 @@ from rag.artifact_jobs.contracts import DocumentPlan
 from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
 from rag.artifact_jobs.service import ArtifactJobActionError, ArtifactJobService
 from rag.auth.context import UserContext
-from rag.schemas.query import QueryRequest
+from rag.query.schemas import QueryRequest
 
 
 class _Queue:

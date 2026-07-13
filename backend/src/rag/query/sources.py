@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 
-from ..schemas.query import EvidenceField, HighlightRange, SourceAnchor, SourceRegion
+from .schemas import EvidenceField, HighlightRange, SourceAnchor, SourceRegion
 from ..shared.contracts.clearance import normalize_clearance_level
 from .qdrant import SearchHit
 

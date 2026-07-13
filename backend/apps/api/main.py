@@ -11,7 +11,6 @@ from rag.api.routes import (
     auth_routes,
     connector_routes,
     evaluation_routes,
-    query_routes,
     review_routes,
 )
 from rag.artifact_jobs import routes as artifact_routes
@@ -28,6 +27,7 @@ from rag.ingestion import (
     job_routes as ingestion_job_routes,
 )
 from rag.ingestion.folders import routes as folder_schedule_routes
+from rag.query import routes as query_routes
 from rag.internal import (
     abac_filter_routes,
     artifact_job_routes as internal_artifact_job_routes,

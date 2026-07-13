@@ -5,7 +5,7 @@ from rag.query.nodes import QueryNodes
 from rag.query.qdrant import SearchHit
 from rag.query.routing_models import RoutePlan
 from rag.query.state import initial_state
-from rag.schemas.query import QueryRequest
+from rag.query.schemas import QueryRequest
 
 
 def hit(point_id: str, *, doc_id: str, doc_title: str, text: str, **payload: object) -> SearchHit:

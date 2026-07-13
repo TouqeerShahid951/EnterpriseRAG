@@ -9,7 +9,7 @@ from rag.auth.context import UserContext
 from rag.query.artifact_intent import ArtifactRequest
 from rag.query.artifact_renderer import RenderedArtifact
 from rag.query.artifact_service import GeneratedArtifactService
-from rag.schemas.query import RAGResponse
+from rag.query.schemas import RAGResponse
 from rag.artifact_jobs.adapters.storage import LocalGeneratedArtifactStorage
 
 

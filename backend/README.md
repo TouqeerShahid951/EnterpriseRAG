@@ -62,7 +62,10 @@ Generated-artifact lifecycle behavior is likewise owned by `rag.artifact_jobs`:
 HTTP contracts, job actions, storage contracts, cleanup, delivery orchestration,
 and concrete adapters live together, while API composition, Celery task
 registration, and maintenance process modules remain thin entrypoints around
-feature dependency providers.
+feature dependency providers. Public query transport is owned by `rag.query`:
+its aggregate router composes separate session-history, source-discovery, and
+query-execution routes, while query request and response contracts live in the
+same feature. `apps/api` only includes that aggregate router.
 
 ## Runtime processes
 

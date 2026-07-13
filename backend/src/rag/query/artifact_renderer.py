@@ -22,7 +22,7 @@ from ..artifact_jobs.contracts import (
 )
 from ..artifact_jobs.renderer import render_document
 from ..artifact_jobs.types import ArtifactFormat
-from ..schemas.query import RAGResponse
+from .schemas import RAGResponse
 from .artifact_models import (
     ArtifactCitation,
     ArtifactContent,

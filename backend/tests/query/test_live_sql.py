@@ -15,7 +15,7 @@ from rag.query.state import initial_state
 from rag.connectors.repositories import InMemoryConnectorProfileRepository
 from rag.ingestion.folders.adapters.memory import InMemoryFolderScheduleRepository
 from rag.retrieval.service import RetrievalService
-from rag.schemas.query import QueryRequest
+from rag.query.schemas import QueryRequest
 
 
 @dataclass

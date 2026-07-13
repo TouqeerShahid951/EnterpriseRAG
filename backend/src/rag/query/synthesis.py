@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from time import perf_counter
 
-from ..schemas.query import ConflictPair, RAGResponse, SourceAnchor
+from .schemas import ConflictPair, RAGResponse, SourceAnchor
 from .cancellation import QueryCancellationToken, call_with_optional_cancellation
 from .inference import InferenceClient
 from .ollama import SYNTHESIS_PROMPT_HEADROOM_TOKENS, answer_num_predict_for_profile, estimate_answer_prompt_tokens

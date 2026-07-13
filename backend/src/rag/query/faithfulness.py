@@ -7,7 +7,7 @@ import math
 import re
 from dataclasses import dataclass, field
 
-from ..schemas.query import EvidenceField, EvidenceWindow, HighlightRange, RAGResponse, SourceAnchor
+from .schemas import EvidenceField, EvidenceWindow, HighlightRange, RAGResponse, SourceAnchor
 from .cancellation import QueryCancellationToken, QueryCancelled, call_with_optional_cancellation
 from .http import ServiceRequestError
 from .inference import InferenceClient

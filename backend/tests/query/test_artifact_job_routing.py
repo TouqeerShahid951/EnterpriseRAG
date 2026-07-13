@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from rag.auth.context import UserContext
 from rag.core.config import Settings
+from rag.artifact_jobs.schemas import ArtifactJobSummary
+from rag.query.schemas import QueryRequest
 from rag.query.service import LocalRagService
-from rag.schemas.query import ArtifactJobSummary, QueryRequest
 
 
 def test_streamed_artifact_request_enqueues_full_job_without_seeded_answer() -> None:

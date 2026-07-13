@@ -8,7 +8,7 @@ from rag.query.faithfulness import build_faithfulness_prompt, parse_faithfulness
 from rag.query.ollama import LONG_ANSWER_NUM_PREDICT, OllamaClient
 from rag.query.openai_compatible import OpenAICompatibleClient
 from rag.query.query_stream import _faithfulness_warnings
-from rag.schemas.query import RAGResponse, SourceAnchor
+from rag.query.schemas import RAGResponse, SourceAnchor
 
 
 def response_with_faithfulness(status: str, score: float) -> RAGResponse:

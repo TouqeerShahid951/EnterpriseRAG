@@ -7,7 +7,7 @@ from rag.graphrag.qdrant import CommunitySearchHit
 from rag.query.qdrant import SearchHit
 from rag.query.routing_models import RoutePlan
 from rag.query.state import initial_state
-from rag.schemas.query import QueryRequest
+from rag.query.schemas import QueryRequest
 
 
 class UncitedAnswerModel:

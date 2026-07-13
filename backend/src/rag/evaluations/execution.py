@@ -18,7 +18,7 @@ from ..query.sparse import embed_sparse_text
 from ..documents.repository import get_document_repository
 from ..documents.models import DocumentRepository
 from ..schemas.evaluations import EvaluationCase
-from ..schemas.query import QueryRequest, RAGResponse
+from ..query.schemas import QueryRequest, RAGResponse
 from ..shared.evaluation.answer_checks import LiteralCheckResult
 from .answer_verifier import verify_answer_content_with_llm
 from .models import EvaluationRepository, EvaluationRunRecord

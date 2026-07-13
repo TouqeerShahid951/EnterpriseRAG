@@ -14,7 +14,7 @@ from rag.query.routing_models import RoutePlan
 from rag.query.sources import sources_from_hits
 from rag.query.state import initial_state
 from rag.query.synthesis import ensure_answer_has_citation, is_global_abstention, prepare_synthesis_input, synthesize_response
-from rag.schemas.query import QueryRequest
+from rag.query.schemas import QueryRequest
 
 
 def hit(point_id: str, *, doc_id: str, doc_title: str, text: str) -> SearchHit:

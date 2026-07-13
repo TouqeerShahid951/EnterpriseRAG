@@ -6,7 +6,7 @@ import json
 from collections.abc import Generator, Iterator
 from time import perf_counter
 
-from ..schemas.query import QueryStreamEvent, RAGResponse
+from .schemas import QueryStreamEvent, RAGResponse
 from .cancellation import call_with_optional_cancellation, cancellation_token_from_context
 from .state import QueryContext, finalize_response_node_timings, record_node_timing
 from .graph import route_intent, route_output, route_verifier

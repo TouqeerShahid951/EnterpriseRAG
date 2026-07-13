@@ -22,6 +22,11 @@ NON_RAG_PYTHON_ROOTS = (
 HTTP_ROUTE_METHODS = frozenset(
     {"delete", "get", "head", "options", "patch", "post", "put", "trace"}
 )
+HTTP_BOUNDARY_SUPPORT_FILES = frozenset(
+    {
+        RAG_ROOT / "query" / "route_access.py",
+    }
+)
 LEGACY_FEATURE_ROUTE_MODULES = frozenset(
     {
         "rag.api.routes.document_routes",
@@ -109,6 +114,16 @@ LEGACY_ARTIFACT_PATHS = (
     RAG_ROOT / "artifact_jobs" / "generated_repository.py",
     RAG_ROOT / "artifact_jobs" / "repository.py",
 )
+LEGACY_QUERY_MODULES = frozenset(
+    {
+        "rag.api.routes.query_routes",
+        "rag.schemas.query",
+    }
+)
+LEGACY_QUERY_PATHS = (
+    RAG_ROOT / "api" / "routes" / "query_routes.py",
+    RAG_ROOT / "schemas" / "query.py",
+)
 ARTIFACT_APPLICATION_FILES = (
     RAG_ROOT / "artifact_jobs" / "cleanup.py",
     RAG_ROOT / "artifact_jobs" / "publisher.py",
@@ -161,6 +176,12 @@ EXPECTED_FEATURE_HTTP_HANDLER_OWNERS = {
     "clarify_artifact_job": "rag.artifact_jobs.routes",
     "cancel_artifact_job": "rag.artifact_jobs.routes",
     "retry_artifact_job": "rag.artifact_jobs.routes",
+    "list_chat_sessions": "rag.query.history_routes",
+    "get_chat_session": "rag.query.history_routes",
+    "delete_chat_session": "rag.query.history_routes",
+    "list_query_sources": "rag.query.source_routes",
+    "run_query": "rag.query.execution_routes",
+    "stream_query": "rag.query.execution_routes",
 }
 
 
@@ -174,14 +195,18 @@ def test_rag_package_does_not_import_process_entrypoints() -> None:
 
 
 def test_routes_do_not_import_concrete_adapters() -> None:
-    route_modules = (path for path in RAG_ROOT.rglob("*.py") if _is_route_module(path))
+    route_modules = (
+        path
+        for path in RAG_ROOT.rglob("*.py")
+        if _is_route_module(path) or path in HTTP_BOUNDARY_SUPPORT_FILES
+    )
     violations = _find_violations(route_modules, _is_concrete_adapter_module)
 
     _assert_no_violations(violations)
 
 
 def test_feature_http_handlers_have_exactly_one_owner() -> None:
-    assert len(EXPECTED_FEATURE_HTTP_HANDLER_OWNERS) == 43
+    assert len(EXPECTED_FEATURE_HTTP_HANDLER_OWNERS) == 49
 
     actual_owners: dict[str, list[str]] = {
         name: [] for name in EXPECTED_FEATURE_HTTP_HANDLER_OWNERS
@@ -252,6 +277,40 @@ def test_legacy_artifact_modules_are_absent_and_not_imported() -> None:
     violations = _find_violations(
         _python_files(BACKEND_PYTHON_ROOTS),
         lambda target: target in LEGACY_ARTIFACT_MODULES,
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_legacy_query_modules_are_absent_and_not_imported() -> None:
+    assert not any(path.exists() for path in LEGACY_QUERY_PATHS)
+
+    violations = _find_violations(
+        _python_files(BACKEND_PYTHON_ROOTS),
+        lambda target: target in LEGACY_QUERY_MODULES,
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_query_schemas_are_transport_and_runtime_independent() -> None:
+    violations = _find_violations(
+        (RAG_ROOT / "query" / "schemas.py",),
+        lambda target: (
+            target == "fastapi"
+            or target.startswith("fastapi.")
+            or target == "rag.core.config"
+            or target.startswith("rag.query.adapters.")
+            or target in {
+                "rag.query.routes",
+                "rag.query.execution_routes",
+                "rag.query.history_routes",
+                "rag.query.source_routes",
+                "rag.query.service",
+            }
+        ),
         resolve_relative_imports=True,
     )
 

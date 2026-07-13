@@ -13,7 +13,7 @@ from ..documents.claim_dependencies import claim_repository_from_settings
 from ..documents.adapters.memory import InMemoryDocumentRepository
 from ..documents.models import DocumentRepository
 from ..documents.adapters.postgres import PostgresDocumentRepository
-from ..schemas.query import QueryRequest, QueryStreamEvent, RAGResponse
+from .schemas import QueryRequest, QueryStreamEvent, RAGResponse
 from .artifact_service import GeneratedArtifactService
 from .artifact_intent import parse_artifact_request
 from .cancellation import QueryCancellationToken

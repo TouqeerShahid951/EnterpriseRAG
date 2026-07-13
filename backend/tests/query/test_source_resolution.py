@@ -6,7 +6,6 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from rag.api.routes.query_routes import list_query_sources
 from rag.auth.context import UserContext
 from rag.connectors.models import ConnectorSchemaCatalogRecord
 from rag.connectors.repositories import InMemoryConnectorProfileRepository
@@ -20,10 +19,11 @@ from rag.query.source_resolution import (
     selected_source_target,
     validate_query_source_access,
 )
+from rag.query.source_routes import list_query_sources
 from rag.query.state import initial_state
 from rag.ingestion.folders.adapters.memory import InMemoryFolderScheduleRepository
 from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
-from rag.schemas.query import QueryRequest
+from rag.query.schemas import QueryRequest
 
 
 def test_query_request_rejects_contradictory_source_scopes() -> None:
