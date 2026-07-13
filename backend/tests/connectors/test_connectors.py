@@ -31,13 +31,25 @@ from rag.connectors.sql_safety import (
     validate_read_only_sql,
 )
 from rag.documents.adapters.memory import InMemoryDocumentRepository
-from rag.ingestion.adapters.folder_schedule_memory import InMemoryFolderScheduleRepository
+from rag.ingestion.folders.adapters.memory import InMemoryFolderScheduleRepository
+from rag.ingestion.folders.adapters.sources import LocalFileSystemSource
 from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
-from rag.services.folder_ingestion import create_local_folder_schedule, dispatch_due_schedules
-from rag.services.folder_sources import LocalFolderSource, list_local_folder_directories
+from rag.ingestion.folders.config import FolderIngestionConfig
+from rag.ingestion.folders.dispatch import dispatch_due_schedules
+from rag.ingestion.folders.service import create_local_folder_schedule
+from rag.ingestion.folders.sources import list_local_folder_directories
 from rag.ingestion.queue import InMemoryIngestQueue
 from rag.documents.storage import StoredUpload
 from rag.ingestion.parsers.document import parse_document
+
+
+FOLDER_CONFIG = FolderIngestionConfig(
+    default_timezone="Asia/Karachi",
+    sources_root="/folder-sources",
+    snapshot_max_files=100,
+    snapshot_max_bytes=5 * 1024 * 1024 * 1024,
+    upload_max_bytes=50 * 1024 * 1024,
+)
 
 
 class FakeMinioSource:
@@ -447,6 +459,7 @@ def test_dispatch_cancels_legacy_connector_schedules_without_syncing() -> None:
         job_repo=document_repo,
         queue=queue,
         minio_source=FakeMinioSource(),
+        config=FOLDER_CONFIG,
         now=now,
     )
 
@@ -468,6 +481,7 @@ def test_local_folder_watcher_syncs_new_and_changed_files(tmp_path) -> None:
     schedule_repo = InMemoryFolderScheduleRepository()
     queue = InMemoryIngestQueue()
     storage = MemoryStorage()
+    local_source = LocalFileSystemSource()
     schedule = create_local_folder_schedule(
         name="Case folder watcher",
         path=str(watch_root),
@@ -485,6 +499,8 @@ def test_local_folder_watcher_syncs_new_and_changed_files(tmp_path) -> None:
         identity_repo=identity_repo,
         document_repo=document_repo,
         schedule_repo=schedule_repo,
+        local_folder_source=local_source,
+        config=FOLDER_CONFIG,
     )
 
     now = datetime.now(UTC)
@@ -494,8 +510,9 @@ def test_local_folder_watcher_syncs_new_and_changed_files(tmp_path) -> None:
         job_repo=document_repo,
         queue=queue,
         minio_source=FakeMinioSource(),
-        local_folder_source=LocalFolderSource(),
+        local_folder_source=local_source,
         storage=storage,
+        config=FOLDER_CONFIG,
         now=now,
     )
 
@@ -511,8 +528,9 @@ def test_local_folder_watcher_syncs_new_and_changed_files(tmp_path) -> None:
         job_repo=document_repo,
         queue=queue,
         minio_source=FakeMinioSource(),
-        local_folder_source=LocalFolderSource(),
+        local_folder_source=local_source,
         storage=storage,
+        config=FOLDER_CONFIG,
         now=now,
     )
 
@@ -527,8 +545,9 @@ def test_local_folder_watcher_syncs_new_and_changed_files(tmp_path) -> None:
         job_repo=document_repo,
         queue=queue,
         minio_source=FakeMinioSource(),
-        local_folder_source=LocalFolderSource(),
+        local_folder_source=local_source,
         storage=storage,
+        config=FOLDER_CONFIG,
         now=now,
     )
 
@@ -546,21 +565,33 @@ def test_local_folder_browser_lists_directories_under_root(tmp_path) -> None:
     empty.mkdir(parents=True)
     (root / "case.json").write_text("{}", encoding="utf-8")
 
-    browse_root, current, parent, items = list_local_folder_directories(root_path=str(root))
+    source = LocalFileSystemSource()
+    browse_root, current, parent, items = list_local_folder_directories(
+        source=source,
+        root_path=str(root),
+    )
 
     assert browse_root == root.resolve()
     assert current == root.resolve()
     assert parent is None
     assert [(item.name, item.has_children) for item in items] == [("cases", True), ("empty", False)]
 
-    _, current, parent, items = list_local_folder_directories(root_path=str(root), current_path=str(cases))
+    _, current, parent, items = list_local_folder_directories(
+        source=source,
+        root_path=str(root),
+        current_path=str(cases),
+    )
 
     assert current == cases.resolve()
     assert parent == root.resolve()
     assert [item.name for item in items] == ["incoming"]
 
     with pytest.raises(RuntimeError):
-        list_local_folder_directories(root_path=str(root), current_path=str(tmp_path))
+        list_local_folder_directories(
+            source=source,
+            root_path=str(root),
+            current_path=str(tmp_path),
+        )
 
 
 def _identity():

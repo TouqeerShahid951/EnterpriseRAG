@@ -55,7 +55,9 @@ The former global `rag.repositories` package has been removed. Feature packages
 own their repository contracts and adapters; only shared PostgreSQL connection
 mechanics live in `rag.shared.persistence`. The global `rag.services` and
 `rag.schemas` packages remain transitional and should move only with a tested
-feature migration.
+feature migration. Folder scheduling is now owned end to end by `rag.ingestion`:
+its route and schemas sit beside transport-neutral scheduling and dispatch
+services, while the API and folder-scheduler process only supply dependencies.
 
 ## Runtime processes
 
@@ -98,6 +100,9 @@ saved workspace configuration -> environment bootstrap -> Python defaults
   fallback.
 - `rag.ingestion` owns worker boot and parser settings. Workers obtain the live
   RAG runtime record from the internal API when a task executes.
+- Folder scheduling receives a small immutable `FolderIngestionConfig` from its
+  API or background composition root; scheduling and dispatch code do not read
+  the global `Settings` object at import or execution time.
 - `rag.deployment` owns desired vLLM launch limits and applies them through the
   deployment controller.
 - `core.config.Settings` is the typed compatibility facade for process

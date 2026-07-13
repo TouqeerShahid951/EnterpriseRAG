@@ -25,12 +25,66 @@ HTTP_ROUTE_METHODS = frozenset(
 LEGACY_FEATURE_ROUTE_MODULES = frozenset(
     {
         "rag.api.routes.document_routes",
+        "rag.api.routes.folder_ingest_routes",
         "rag.api.routes.ingest_job_routes",
     }
 )
 LEGACY_FEATURE_ROUTE_FILES = (
     RAG_ROOT / "api" / "routes" / "document_routes.py",
+    RAG_ROOT / "api" / "routes" / "folder_ingest_routes.py",
     RAG_ROOT / "api" / "routes" / "ingest_job_routes.py",
+)
+LEGACY_FOLDER_INGESTION_MODULES = frozenset(
+    {
+        "rag.api.routes.folder_ingest_routes",
+        "rag.schemas.folder_ingest",
+        "rag.services.folder_ingestion",
+        "rag.services.folder_schedule_time",
+        "rag.services.folder_sources",
+        "rag.services.document_uploads",
+        "rag.ingestion.folder_config",
+        "rag.ingestion.folder_dependencies",
+        "rag.ingestion.folder_dispatch",
+        "rag.ingestion.folder_errors",
+        "rag.ingestion.folder_schedule_dependencies",
+        "rag.ingestion.folder_schedule_models",
+        "rag.ingestion.folder_schedule_routes",
+        "rag.ingestion.folder_schedule_schemas",
+        "rag.ingestion.folder_schedule_service",
+        "rag.ingestion.folder_schedule_time",
+        "rag.ingestion.folder_sources",
+        "rag.ingestion.adapters.folder_schedule_memory",
+        "rag.ingestion.adapters.folder_schedule_postgres",
+        "rag.ingestion.adapters.folder_sources",
+    }
+)
+LEGACY_FOLDER_INGESTION_PATHS = (
+    RAG_ROOT / "api" / "routes" / "folder_ingest_routes.py",
+    RAG_ROOT / "schemas" / "folder_ingest.py",
+    RAG_ROOT / "services" / "folder_ingestion.py",
+    RAG_ROOT / "services" / "folder_schedule_time.py",
+    RAG_ROOT / "services" / "folder_sources.py",
+    RAG_ROOT / "services" / "document_uploads.py",
+    RAG_ROOT / "ingestion" / "folder_config.py",
+    RAG_ROOT / "ingestion" / "folder_dependencies.py",
+    RAG_ROOT / "ingestion" / "folder_dispatch.py",
+    RAG_ROOT / "ingestion" / "folder_errors.py",
+    RAG_ROOT / "ingestion" / "folder_schedule_dependencies.py",
+    RAG_ROOT / "ingestion" / "folder_schedule_models.py",
+    RAG_ROOT / "ingestion" / "folder_schedule_routes.py",
+    RAG_ROOT / "ingestion" / "folder_schedule_schemas.py",
+    RAG_ROOT / "ingestion" / "folder_schedule_service.py",
+    RAG_ROOT / "ingestion" / "folder_schedule_time.py",
+    RAG_ROOT / "ingestion" / "folder_sources.py",
+    RAG_ROOT / "ingestion" / "adapters" / "folder_schedule_memory.py",
+    RAG_ROOT / "ingestion" / "adapters" / "folder_schedule_postgres.py",
+    RAG_ROOT / "ingestion" / "adapters" / "folder_sources.py",
+)
+FOLDER_APPLICATION_FILES = (
+    RAG_ROOT / "ingestion" / "folders" / "dispatch.py",
+    RAG_ROOT / "ingestion" / "folders" / "service.py",
+    RAG_ROOT / "ingestion" / "folders" / "scheduling.py",
+    RAG_ROOT / "ingestion" / "folders" / "sources.py",
 )
 LEGACY_GRAPHRAG_QUEUE_MODULE = "rag.services.graphrag_queue"
 LEGACY_GRAPHRAG_QUEUE_PATHS = (
@@ -63,6 +117,19 @@ EXPECTED_FEATURE_HTTP_HANDLER_OWNERS = {
     "requeue_stale_job": "rag.ingestion.job_routes",
     "get_graphrag_status": "rag.graphrag.job_routes",
     "cancel_graph_enrichment": "rag.graphrag.job_routes",
+    "list_local_folders": "rag.ingestion.folders.routes",
+    "list_folder_schedules": "rag.ingestion.folders.routes",
+    "get_folder_schedule": "rag.ingestion.folders.routes",
+    "create_snapshot_folder_schedule": "rag.ingestion.folders.routes",
+    "create_minio_folder_schedule": "rag.ingestion.folders.routes",
+    "create_local_folder_schedule_route": "rag.ingestion.folders.routes",
+    "create_connector_folder_schedule": "rag.ingestion.folders.routes",
+    "reschedule_folder_schedule": "rag.ingestion.folders.routes",
+    "pause_folder_schedule": "rag.ingestion.folders.routes",
+    "resume_folder_schedule": "rag.ingestion.folders.routes",
+    "cancel_folder_schedule": "rag.ingestion.folders.routes",
+    "list_folder_runs": "rag.ingestion.folders.routes",
+    "list_folder_run_items": "rag.ingestion.folders.routes",
 }
 
 
@@ -83,7 +150,7 @@ def test_routes_do_not_import_concrete_adapters() -> None:
 
 
 def test_feature_http_handlers_have_exactly_one_owner() -> None:
-    assert len(EXPECTED_FEATURE_HTTP_HANDLER_OWNERS) == 25
+    assert len(EXPECTED_FEATURE_HTTP_HANDLER_OWNERS) == 38
 
     actual_owners: dict[str, list[str]] = {
         name: [] for name in EXPECTED_FEATURE_HTTP_HANDLER_OWNERS
@@ -96,11 +163,8 @@ def test_feature_http_handlers_have_exactly_one_owner() -> None:
             if name in actual_owners:
                 actual_owners[name].append(module)
 
-    assert {
-        name: tuple(sorted(owners)) for name, owners in actual_owners.items()
-    } == {
-        name: (owner,)
-        for name, owner in EXPECTED_FEATURE_HTTP_HANDLER_OWNERS.items()
+    assert {name: tuple(sorted(owners)) for name, owners in actual_owners.items()} == {
+        name: (owner,) for name, owner in EXPECTED_FEATURE_HTTP_HANDLER_OWNERS.items()
     }
 
 
@@ -133,6 +197,38 @@ def test_legacy_graphrag_queue_module_is_absent_and_not_imported() -> None:
     _assert_no_violations(violations)
 
 
+def test_legacy_folder_ingestion_modules_are_absent_and_not_imported() -> None:
+    assert not any(path.exists() for path in LEGACY_FOLDER_INGESTION_PATHS)
+
+    violations = _find_violations(
+        RAG_ROOT.rglob("*.py"),
+        _is_legacy_folder_ingestion_module,
+        resolve_relative_imports=True,
+    )
+    violations.extend(
+        _find_violations(
+            _python_files(NON_RAG_PYTHON_ROOTS),
+            _is_legacy_folder_ingestion_module,
+        )
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_folder_application_code_is_transport_and_settings_independent() -> None:
+    violations = _find_violations(
+        FOLDER_APPLICATION_FILES,
+        lambda target: (
+            target == "fastapi"
+            or target.startswith("fastapi.")
+            or target == "rag.core.config"
+        ),
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
 def test_relative_import_resolution_distinguishes_the_legacy_queue() -> None:
     legacy_import = ast.parse(
         "from ..services.graphrag_queue import GraphRAGMaintenanceQueue"
@@ -159,9 +255,7 @@ def test_relative_import_resolution_distinguishes_the_legacy_queue() -> None:
 
 
 def test_deployment_controller_uses_backend_composition_root() -> None:
-    assert (
-        BACKEND_ROOT / "apps" / "deployment_controller" / "main.py"
-    ).is_file()
+    assert (BACKEND_ROOT / "apps" / "deployment_controller" / "main.py").is_file()
     assert not (REPOSITORY_ROOT / "deployment-controller").exists()
 
 
@@ -261,11 +355,19 @@ def _is_legacy_graphrag_queue_module(target: str) -> bool:
     )
 
 
+def _is_legacy_folder_ingestion_module(target: str) -> bool:
+    return any(
+        target == module or target.startswith(f"{module}.")
+        for module in LEGACY_FOLDER_INGESTION_MODULES
+    )
+
+
 def _is_route_module(path: Path) -> bool:
     relative_parts = path.relative_to(RAG_ROOT).parts
-    return (
-        path.name != "__init__.py"
-        and ("routes" in relative_parts or path.name == "routes.py" or path.stem.endswith("_routes"))
+    return path.name != "__init__.py" and (
+        "routes" in relative_parts
+        or path.name == "routes.py"
+        or path.stem.endswith("_routes")
     )
 
 

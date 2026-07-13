@@ -12,7 +12,6 @@ from rag.api.routes import (
     auth_routes,
     connector_routes,
     evaluation_routes,
-    folder_ingest_routes,
     query_routes,
     review_routes,
 )
@@ -28,6 +27,7 @@ from rag.ingestion import (
     document_routes as ingestion_document_routes,
     job_routes as ingestion_job_routes,
 )
+from rag.ingestion.folders import routes as folder_schedule_routes
 from rag.internal import (
     abac_filter_routes,
     artifact_job_routes as internal_artifact_job_routes,
@@ -99,7 +99,7 @@ def create_app() -> FastAPI:
         auth_routes.router,
         upload_routes.router,
         connector_routes.router,
-        folder_ingest_routes.router,
+        folder_schedule_routes.router,
         ingestion_job_routes.router,
         graphrag_job_routes.router,
         document_routes.router,

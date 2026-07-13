@@ -17,7 +17,7 @@ from ..connectors.registry import ConnectorRegistry, default_connector_registry
 from ..connectors.schema_catalog import approved_schema_prompt, schema_catalog_access_group_paths, schema_catalog_visible_group_path
 from ..connectors.sql_safety import SqlValidationError, validate_live_sql_for_approved_catalog
 from ..core.config import Settings
-from ..ingestion.folder_schedule_models import FolderScheduleRepository
+from ..ingestion.folders.models import FolderScheduleRepository
 from ..shared.contracts.clearance import clearance_rank
 from .cancellation import QueryCancelled, cancellation_token_from_context
 from .qdrant import SearchHit

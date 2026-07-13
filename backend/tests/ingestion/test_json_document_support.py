@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
 
 from rag.query.qdrant import SearchHit
 from rag.query.query_retrieval import _promote_structured_matches
-from rag.services.document_uploads import JSON_CONTENT_TYPE, validated_document_type
+from rag.documents.upload_validation import (
+    JSON_CONTENT_TYPE,
+    UploadRejected,
+    validated_document_type,
+)
 from rag.ingestion.chunking import chunk_items
 from rag.ingestion.errors import WorkerStepError
 from rag.ingestion.parsers.document import parse_document
@@ -20,10 +23,10 @@ def test_valid_json_upload_is_accepted_by_filename_and_content_type() -> None:
 
 
 def test_invalid_json_upload_is_rejected_cleanly() -> None:
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(UploadRejected) as exc_info:
         validated_document_type(b'{"case_id":', "records.json", "application/json")
 
-    assert exc_info.value.detail["code"] == "invalid_json"
+    assert exc_info.value.code == "invalid_json"
 
 
 def test_json_parser_emits_stable_paths_for_nested_values() -> None:

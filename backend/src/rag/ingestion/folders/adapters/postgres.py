@@ -6,10 +6,10 @@ import json
 from datetime import datetime
 from typing import Any
 
-from ...auth.abac import normalize_group_path
-from ...shared.persistence import PostgresConnectionMixin
-from ...shared.contracts.clearance import normalize_clearance_level
-from ..folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord
+from ....auth.abac import normalize_group_path
+from ....shared.persistence import PostgresConnectionMixin
+from ....shared.contracts.clearance import normalize_clearance_level
+from ..models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord
 
 
 class PostgresFolderScheduleRepository(PostgresConnectionMixin):
@@ -49,10 +49,14 @@ class PostgresFolderScheduleRepository(PostgresConnectionMixin):
         return schedule_from_row(row)
 
     def list_schedules(self) -> list[FolderScheduleRecord]:
-        rows = self._execute_all("SELECT * FROM folder_ingest_schedules ORDER BY created_at DESC")
+        rows = self._execute_all(
+            "SELECT * FROM folder_ingest_schedules ORDER BY created_at DESC"
+        )
         return [schedule_from_row(row) for row in rows]
 
-    def list_due_schedules(self, now: datetime, *, limit: int = 20) -> list[FolderScheduleRecord]:
+    def list_due_schedules(
+        self, now: datetime, *, limit: int = 20
+    ) -> list[FolderScheduleRecord]:
         rows = self._execute_all(
             """
             SELECT * FROM folder_ingest_schedules
@@ -67,21 +71,30 @@ class PostgresFolderScheduleRepository(PostgresConnectionMixin):
         return [schedule_from_row(row) for row in rows]
 
     def get_schedule(self, schedule_id: str) -> FolderScheduleRecord | None:
-        row = self._execute_optional("SELECT * FROM folder_ingest_schedules WHERE id = %s", (schedule_id,))
+        row = self._execute_optional(
+            "SELECT * FROM folder_ingest_schedules WHERE id = %s", (schedule_id,)
+        )
         return schedule_from_row(row) if row else None
 
     def delete_schedule(self, schedule_id: str) -> FolderScheduleRecord | None:
-        row = self._execute_optional("DELETE FROM folder_ingest_schedules WHERE id = %s RETURNING *", (schedule_id,))
+        row = self._execute_optional(
+            "DELETE FROM folder_ingest_schedules WHERE id = %s RETURNING *",
+            (schedule_id,),
+        )
         return schedule_from_row(row) if row else None
 
-    def update_schedule_status(self, schedule_id: str, *, status: str) -> FolderScheduleRecord | None:
+    def update_schedule_status(
+        self, schedule_id: str, *, status: str
+    ) -> FolderScheduleRecord | None:
         row = self._execute_optional(
             "UPDATE folder_ingest_schedules SET status = %s, updated_at = NOW() WHERE id = %s RETURNING *",
             (status, schedule_id),
         )
         return schedule_from_row(row) if row else None
 
-    def update_schedule_next_run(self, schedule_id: str, **kwargs: Any) -> FolderScheduleRecord | None:
+    def update_schedule_next_run(
+        self, schedule_id: str, **kwargs: Any
+    ) -> FolderScheduleRecord | None:
         row = self._execute_optional(
             """
             UPDATE folder_ingest_schedules
@@ -90,11 +103,18 @@ class PostgresFolderScheduleRepository(PostgresConnectionMixin):
             WHERE id = %s
             RETURNING *
             """,
-            (kwargs.get("status"), kwargs.get("last_run_at"), kwargs.get("next_run_at"), schedule_id),
+            (
+                kwargs.get("status"),
+                kwargs.get("last_run_at"),
+                kwargs.get("next_run_at"),
+                schedule_id,
+            ),
         )
         return schedule_from_row(row) if row else None
 
-    def reschedule(self, schedule_id: str, **kwargs: Any) -> FolderScheduleRecord | None:
+    def reschedule(
+        self, schedule_id: str, **kwargs: Any
+    ) -> FolderScheduleRecord | None:
         row = self._execute_optional(
             """
             UPDATE folder_ingest_schedules
@@ -115,7 +135,14 @@ class PostgresFolderScheduleRepository(PostgresConnectionMixin):
         )
         return schedule_from_row(row) if row else None
 
-    def create_run(self, *, schedule_id: str, status: str, due_at: datetime, started_at: datetime | None = None) -> FolderRunRecord:
+    def create_run(
+        self,
+        *,
+        schedule_id: str,
+        status: str,
+        due_at: datetime,
+        started_at: datetime | None = None,
+    ) -> FolderRunRecord:
         row = self._execute_one(
             """
             INSERT INTO folder_ingest_runs (schedule_id, status, due_at, started_at)
@@ -158,7 +185,9 @@ class PostgresFolderScheduleRepository(PostgresConnectionMixin):
         return [run_from_row(row) for row in rows]
 
     def get_run(self, run_id: str) -> FolderRunRecord | None:
-        row = self._execute_optional("SELECT * FROM folder_ingest_runs WHERE id = %s", (run_id,))
+        row = self._execute_optional(
+            "SELECT * FROM folder_ingest_runs WHERE id = %s", (run_id,)
+        )
         return run_from_row(row) if row else None
 
     def create_run_item(self, **kwargs: Any) -> FolderRunItemRecord:
@@ -189,7 +218,9 @@ class PostgresFolderScheduleRepository(PostgresConnectionMixin):
         )
         return item_from_row(row)
 
-    def update_run_item_status(self, item_id: str, **kwargs: Any) -> FolderRunItemRecord | None:
+    def update_run_item_status(
+        self, item_id: str, **kwargs: Any
+    ) -> FolderRunItemRecord | None:
         row = self._execute_optional(
             """
             UPDATE folder_ingest_run_items
@@ -198,7 +229,14 @@ class PostgresFolderScheduleRepository(PostgresConnectionMixin):
             WHERE id = %s
             RETURNING *
             """,
-            (kwargs["status"], kwargs.get("document_id"), kwargs.get("job_id"), kwargs.get("skip_code"), kwargs.get("skip_message"), item_id),
+            (
+                kwargs["status"],
+                kwargs.get("document_id"),
+                kwargs.get("job_id"),
+                kwargs.get("skip_code"),
+                kwargs.get("skip_message"),
+                item_id,
+            ),
         )
         return item_from_row(row) if row else None
 
@@ -209,7 +247,9 @@ class PostgresFolderScheduleRepository(PostgresConnectionMixin):
         )
         return [item_from_row(row) for row in rows]
 
-    def list_pending_items_for_schedule(self, schedule_id: str) -> list[FolderRunItemRecord]:
+    def list_pending_items_for_schedule(
+        self, schedule_id: str
+    ) -> list[FolderRunItemRecord]:
         rows = self._execute_all(
             """
             SELECT * FROM folder_ingest_run_items
@@ -220,7 +260,9 @@ class PostgresFolderScheduleRepository(PostgresConnectionMixin):
         )
         return [item_from_row(row) for row in rows]
 
-    def latest_document_for_source(self, schedule_id: str, source_path: str) -> tuple[str, str | None] | None:
+    def latest_document_for_source(
+        self, schedule_id: str, source_path: str
+    ) -> tuple[str, str | None] | None:
         row = self._execute_optional(
             """
             SELECT item.document_id::text, item.content_hash
@@ -238,7 +280,9 @@ class PostgresFolderScheduleRepository(PostgresConnectionMixin):
         )
         return (str(row["document_id"]), row.get("content_hash")) if row else None
 
-    def has_source_content(self, schedule_id: str, source_path: str, content_hash: str) -> bool:
+    def has_source_content(
+        self, schedule_id: str, source_path: str, content_hash: str
+    ) -> bool:
         row = self._execute_optional(
             """
             SELECT 1 FROM folder_ingest_run_items item
@@ -307,7 +351,9 @@ def item_from_row(row: dict[str, Any]) -> FolderRunItemRecord:
         filename=str(row["filename"]),
         object_path=row.get("object_path"),
         content_hash=row.get("content_hash"),
-        size_bytes=int(row["size_bytes"]) if row.get("size_bytes") is not None else None,
+        size_bytes=int(row["size_bytes"])
+        if row.get("size_bytes") is not None
+        else None,
         content_type=row.get("content_type"),
         status=str(row["status"]),
         skip_code=row.get("skip_code"),

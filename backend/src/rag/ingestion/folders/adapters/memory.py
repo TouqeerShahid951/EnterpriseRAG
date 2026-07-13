@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from ...auth.abac import normalize_group_path
-from ...shared.contracts.clearance import normalize_clearance_level
-from ..folder_schedule_models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord
+from ....auth.abac import normalize_group_path
+from ....shared.contracts.clearance import normalize_clearance_level
+from ..models import FolderRunItemRecord, FolderRunRecord, FolderScheduleRecord
 
 
 class InMemoryFolderScheduleRepository:
@@ -46,14 +46,30 @@ class InMemoryFolderScheduleRepository:
         return record
 
     def list_schedules(self) -> list[FolderScheduleRecord]:
-        return sorted(self._schedules.values(), key=lambda schedule: schedule.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
+        return sorted(
+            self._schedules.values(),
+            key=lambda schedule: (
+                schedule.created_at or datetime.min.replace(tzinfo=UTC)
+            ),
+            reverse=True,
+        )
 
-    def list_due_schedules(self, now: datetime, *, limit: int = 20) -> list[FolderScheduleRecord]:
+    def list_due_schedules(
+        self, now: datetime, *, limit: int = 20
+    ) -> list[FolderScheduleRecord]:
         eligible = [
-            schedule for schedule in self._schedules.values()
-            if schedule.status in {"scheduled", "active"} and schedule.next_run_at and schedule.next_run_at <= now
+            schedule
+            for schedule in self._schedules.values()
+            if schedule.status in {"scheduled", "active"}
+            and schedule.next_run_at
+            and schedule.next_run_at <= now
         ]
-        return sorted(eligible, key=lambda schedule: schedule.next_run_at or datetime.max.replace(tzinfo=UTC))[:limit]
+        return sorted(
+            eligible,
+            key=lambda schedule: (
+                schedule.next_run_at or datetime.max.replace(tzinfo=UTC)
+            ),
+        )[:limit]
 
     def get_schedule(self, schedule_id: str) -> FolderScheduleRecord | None:
         return self._schedules.get(schedule_id)
@@ -62,8 +78,14 @@ class InMemoryFolderScheduleRepository:
         schedule = self._schedules.pop(schedule_id, None)
         if schedule is None:
             return None
-        run_ids = {run.id for run in self._runs.values() if run.schedule_id == schedule_id}
-        self._runs = {run_id: run for run_id, run in self._runs.items() if run.schedule_id != schedule_id}
+        run_ids = {
+            run.id for run in self._runs.values() if run.schedule_id == schedule_id
+        }
+        self._runs = {
+            run_id: run
+            for run_id, run in self._runs.items()
+            if run.schedule_id != schedule_id
+        }
         self._items = {
             item_id: item
             for item_id, item in self._items.items()
@@ -71,7 +93,9 @@ class InMemoryFolderScheduleRepository:
         }
         return schedule
 
-    def update_schedule_status(self, schedule_id: str, *, status: str) -> FolderScheduleRecord | None:
+    def update_schedule_status(
+        self, schedule_id: str, *, status: str
+    ) -> FolderScheduleRecord | None:
         schedule = self._schedules.get(schedule_id)
         if schedule is None:
             return None
@@ -93,7 +117,9 @@ class InMemoryFolderScheduleRepository:
         updated = replace(
             schedule,
             status=status or schedule.status,
-            last_run_at=last_run_at if last_run_at is not None else schedule.last_run_at,
+            last_run_at=last_run_at
+            if last_run_at is not None
+            else schedule.last_run_at,
             next_run_at=next_run_at,
             updated_at=datetime.now(UTC),
         )
@@ -126,7 +152,14 @@ class InMemoryFolderScheduleRepository:
         self._schedules[schedule_id] = updated
         return updated
 
-    def create_run(self, *, schedule_id: str, status: str, due_at: datetime, started_at: datetime | None = None) -> FolderRunRecord:
+    def create_run(
+        self,
+        *,
+        schedule_id: str,
+        status: str,
+        due_at: datetime,
+        started_at: datetime | None = None,
+    ) -> FolderRunRecord:
         now = datetime.now(UTC)
         run = FolderRunRecord(
             id=str(uuid4()),
@@ -153,7 +186,11 @@ class InMemoryFolderScheduleRepository:
 
     def list_runs(self, schedule_id: str) -> list[FolderRunRecord]:
         runs = [run for run in self._runs.values() if run.schedule_id == schedule_id]
-        return sorted(runs, key=lambda run: run.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
+        return sorted(
+            runs,
+            key=lambda run: run.created_at or datetime.min.replace(tzinfo=UTC),
+            reverse=True,
+        )
 
     def get_run(self, run_id: str) -> FolderRunRecord | None:
         return self._runs.get(run_id)
@@ -181,7 +218,9 @@ class InMemoryFolderScheduleRepository:
         self._items[item.id] = item
         return item
 
-    def update_run_item_status(self, item_id: str, **kwargs: Any) -> FolderRunItemRecord | None:
+    def update_run_item_status(
+        self, item_id: str, **kwargs: Any
+    ) -> FolderRunItemRecord | None:
         item = self._items.get(item_id)
         if item is None:
             return None
@@ -191,27 +230,56 @@ class InMemoryFolderScheduleRepository:
 
     def list_run_items(self, run_id: str) -> list[FolderRunItemRecord]:
         items = [item for item in self._items.values() if item.run_id == run_id]
-        return sorted(items, key=lambda item: item.created_at or datetime.min.replace(tzinfo=UTC))
+        return sorted(
+            items, key=lambda item: item.created_at or datetime.min.replace(tzinfo=UTC)
+        )
 
-    def list_pending_items_for_schedule(self, schedule_id: str) -> list[FolderRunItemRecord]:
-        items = [item for item in self._items.values() if item.schedule_id == schedule_id and item.status == "scheduled"]
-        return sorted(items, key=lambda item: item.created_at or datetime.min.replace(tzinfo=UTC))
+    def list_pending_items_for_schedule(
+        self, schedule_id: str
+    ) -> list[FolderRunItemRecord]:
+        items = [
+            item
+            for item in self._items.values()
+            if item.schedule_id == schedule_id and item.status == "scheduled"
+        ]
+        return sorted(
+            items, key=lambda item: item.created_at or datetime.min.replace(tzinfo=UTC)
+        )
 
-    def latest_document_for_source(self, schedule_id: str, source_path: str) -> tuple[str, str | None] | None:
+    def latest_document_for_source(
+        self, schedule_id: str, source_path: str
+    ) -> tuple[str, str | None] | None:
         candidates = [
-            item for item in self._items.values()
-            if item.schedule_id == schedule_id and item.source_path == source_path and item.document_id and item.status in {"queued", "scheduled"}
+            item
+            for item in self._items.values()
+            if item.schedule_id == schedule_id
+            and item.source_path == source_path
+            and item.document_id
+            and item.status in {"queued", "scheduled"}
         ]
         if not candidates:
             return None
-        latest = sorted(candidates, key=lambda item: item.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)[0]
+        latest = sorted(
+            candidates,
+            key=lambda item: item.created_at or datetime.min.replace(tzinfo=UTC),
+            reverse=True,
+        )[0]
         return latest.document_id or "", latest.content_hash
 
-    def has_source_content(self, schedule_id: str, source_path: str, content_hash: str) -> bool:
+    def has_source_content(
+        self, schedule_id: str, source_path: str, content_hash: str
+    ) -> bool:
         return any(
-            item.schedule_id == schedule_id and item.source_path == source_path and item.content_hash == content_hash and item.document_id
+            item.schedule_id == schedule_id
+            and item.source_path == source_path
+            and item.content_hash == content_hash
+            and item.document_id
             for item in self._items.values()
         )
 
     def known_source_paths(self, schedule_id: str) -> set[str]:
-        return {item.source_path for item in self._items.values() if item.schedule_id == schedule_id and item.document_id}
+        return {
+            item.source_path
+            for item in self._items.values()
+            if item.schedule_id == schedule_id and item.document_id
+        }

@@ -31,8 +31,8 @@ from ...query.chat_history_repository import (
 )
 from ...query.chat_history_models import ChatSessionRecord
 from ...documents.repository import DocumentRepository, get_document_repository
-from ...ingestion.folder_schedule_dependencies import get_folder_schedule_repository
-from ...ingestion.folder_schedule_models import FolderScheduleRepository
+from ...ingestion.folders.dependencies import get_folder_schedule_repository
+from ...ingestion.folders.models import FolderScheduleRepository
 from ...connectors.repositories import (
     ConnectorProfileRepository,
     get_connector_profile_repository,

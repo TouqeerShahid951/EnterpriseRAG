@@ -13,7 +13,7 @@ from rag.query.source_resolution import SourceDecision
 from rag.query.sources import sources_from_hits
 from rag.query.state import initial_state
 from rag.connectors.repositories import InMemoryConnectorProfileRepository
-from rag.ingestion.adapters.folder_schedule_memory import InMemoryFolderScheduleRepository
+from rag.ingestion.folders.adapters.memory import InMemoryFolderScheduleRepository
 from rag.retrieval.service import RetrievalService
 from rag.schemas.query import QueryRequest
 

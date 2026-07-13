@@ -6,12 +6,16 @@ import argparse
 import time
 
 from rag.core.config import settings
-from rag.ingestion.folder_schedule_dependencies import get_folder_schedule_repository
+from rag.ingestion.folders.dependencies import (
+    get_folder_ingestion_config,
+    get_folder_schedule_repository,
+    get_local_folder_source,
+    get_minio_prefix_source,
+)
+from rag.ingestion.folders.dispatch import dispatch_due_schedules
 from rag.ingestion.job_dependencies import ingest_job_repository_for
 from rag.documents.repository import get_document_repository
 from rag.shared.persistence import PostgresConnectionMixin
-from rag.services.folder_ingestion import dispatch_due_schedules
-from rag.services.folder_sources import get_local_folder_source, get_minio_prefix_source
 from rag.ingestion.queue import get_ingest_queue
 from rag.documents.dependencies import get_upload_storage
 
@@ -65,6 +69,7 @@ def _dispatch() -> list[str]:
         minio_source=get_minio_prefix_source(),
         local_folder_source=get_local_folder_source(),
         storage=get_upload_storage(),
+        config=get_folder_ingestion_config(),
     )
 
 

@@ -3,9 +3,8 @@ from typing import Literal
 
 from pydantic import Field
 
-from ..shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
-from .common import ContractModel
-from ..documents.upload_schemas import DocType
+from ...schemas.common import ContractModel
+from ...shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
 
 
 FolderSourceType = Literal[
@@ -26,15 +25,24 @@ FolderSourceType = Literal[
     "fake",
 ]
 FolderScheduleType = Literal["one_time", "recurring"]
-FolderScheduleStatus = Literal["scheduled", "active", "paused", "cancelled", "complete", "failed"]
+FolderScheduleStatus = Literal[
+    "scheduled", "active", "paused", "cancelled", "complete", "failed"
+]
 FolderRunStatus = Literal["scheduled", "running", "complete", "failed", "cancelled"]
 FolderRunItemStatus = Literal["scheduled", "queued", "skipped", "failed"]
 ConnectorIngestionMode = Literal["json_snapshot", "direct_chunks"]
-ConnectorDeletionPolicy = Literal["keep_deleted_documents", "mark_as_stale", "archive_from_retrieval", "delete_from_index_after_review"]
+ConnectorDeletionPolicy = Literal[
+    "keep_deleted_documents",
+    "mark_as_stale",
+    "archive_from_retrieval",
+    "delete_from_index_after_review",
+]
 
 
 class RecurrenceWindow(ContractModel):
-    days_of_week: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6], min_length=1, max_length=7)
+    days_of_week: list[int] = Field(
+        default_factory=lambda: [0, 1, 2, 3, 4, 5, 6], min_length=1, max_length=7
+    )
     start_time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
     end_time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
 
@@ -45,7 +53,7 @@ class FolderScheduleBase(ContractModel):
     clearance_level: ClearanceLevel = DEFAULT_CLEARANCE_LEVEL
     effective_date: date | None = None
     expiry_date: date | None = None
-    doc_type: DocType | None = Field(default=None, max_length=80)
+    doc_type: str | None = Field(default=None, max_length=80)
     description: str | None = Field(default=None, max_length=2000)
     schedule_type: FolderScheduleType
     timezone: str = "Asia/Karachi"
@@ -140,7 +148,7 @@ class FolderSchedule(ContractModel):
     status: FolderScheduleStatus
     group_path: str
     clearance_level: ClearanceLevel = DEFAULT_CLEARANCE_LEVEL
-    doc_type: DocType | None = None
+    doc_type: str | None = None
     effective_date: date | None = None
     expiry_date: date | None = None
     description: str | None = None
