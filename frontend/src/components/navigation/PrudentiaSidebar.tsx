@@ -1,70 +1,39 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent, PointerEvent, ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import {
-  Activity,
-  ChevronDown,
-  ChevronRight,
-  Database,
-  FileSearch,
-  FolderKanban,
   GripVertical,
-  LayoutDashboard,
   LogOut,
   Menu,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  Search,
-  Settings,
-  ShieldCheck,
   Sun,
-  Users,
   X,
-  type LucideIcon,
 } from "lucide-react";
 
-import { documentsApi, ingestJobsApi, reviewApi } from "@/lib/api/contracts";
 import { PrudentiaBrandMark } from "@/components/brand/PrudentiaBrand";
 import {
-  canAccessRoute,
   navigationGroupForRoute,
   visibleNavigation,
-  type NavigationBadge,
-  type NavigationIcon,
   type RouteId,
-  type WorkspaceNavigationItem,
 } from "@/routes/routes";
 import type { User as AuthUser } from "@/types/api";
+import { SidebarMenu } from "./prudentia-sidebar/SidebarMenu";
+import { useSidebarBadges } from "./prudentia-sidebar/useSidebarBadges";
+import { useSidebarDrawer } from "./prudentia-sidebar/useSidebarDrawer";
+import {
+  Prudentia_SIDEBAR_MAX_WIDTH,
+  Prudentia_SIDEBAR_MIN_WIDTH,
+  useSidebarResize,
+} from "./prudentia-sidebar/useSidebarResize";
 
-export const Prudentia_SIDEBAR_MIN_WIDTH = 216;
-export const Prudentia_SIDEBAR_MAX_WIDTH = 336;
-const Prudentia_SIDEBAR_DEFAULT_WIDTH = 224;
-export const Prudentia_SIDEBAR_COLLAPSED_WIDTH = 64;
-
-export function getPrudentiaSidebarDefaultWidth(viewportWidth: number): number {
-  if (viewportWidth >= 2400) return 272;
-  if (viewportWidth >= 1680) return 256;
-  if (viewportWidth >= 1440) return 240;
-  return Prudentia_SIDEBAR_DEFAULT_WIDTH;
-}
-
-export function reviewQueueBadgeCount(ocrTotal: number | null | undefined, imageCandidateTotal: number | null | undefined): number | null {
-  if (ocrTotal == null && imageCandidateTotal == null) return null;
-  return (ocrTotal ?? 0) + (imageCandidateTotal ?? 0);
-}
-
-const iconByKey: Record<NavigationIcon, LucideIcon> = {
-  audit: FolderKanban,
-  documents: FileSearch,
-  evaluations: Activity,
-  overview: LayoutDashboard,
-  query: Search,
-  review: ShieldCheck,
-  settings: Settings,
-  spaces: Database,
-  users: Users,
-};
+export {
+  Prudentia_SIDEBAR_COLLAPSED_WIDTH,
+  Prudentia_SIDEBAR_MAX_WIDTH,
+  Prudentia_SIDEBAR_MIN_WIDTH,
+  getPrudentiaSidebarDefaultWidth,
+} from "./prudentia-sidebar/useSidebarResize";
+export { reviewQueueBadgeCount } from "./prudentia-sidebar/useSidebarBadges";
 
 export function PrudentiaSidebar({
   activeRoute,
@@ -84,139 +53,24 @@ export function PrudentiaSidebar({
   const primarySpace = formatKnowledgeSpace(userGroupPaths);
   const items = useMemo(() => visibleNavigation(user), [user]);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(() => navigationGroupForRoute(activeRoute));
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const drawerRef = useRef<HTMLElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const jobsSummaryQuery = useQuery({
-    queryKey: ["ingest-jobs", "summary"],
-    queryFn: () => ingestJobsApi.summary(),
-    enabled: canAccessRoute(user, "ingestion-jobs"),
-    refetchInterval: 5000,
-    staleTime: 4000,
-    retry: false,
-  });
-  const trashQuery = useQuery({
-    queryKey: ["documents", "list", "deleted"],
-    queryFn: () => documentsApi.list({ state: "deleted" }),
-    enabled: canAccessRoute(user, "document-trash"),
-    staleTime: 15000,
-    retry: false,
-  });
-  const reviewQuery = useQuery({
-    queryKey: ["review-queue"],
-    queryFn: reviewApi.list,
-    enabled: canAccessRoute(user, "review"),
-    refetchInterval: 5000,
-    staleTime: 4000,
-    retry: false,
-  });
-  const imageReviewQuery = useQuery({
-    queryKey: ["review-queue", "image-batches"],
-    queryFn: reviewApi.listImageBatches,
-    enabled: canAccessRoute(user, "review"),
-    refetchInterval: 5000,
-    staleTime: 4000,
-    retry: false,
-  });
+  const badgeValue = useSidebarBadges(user);
 
   useEffect(() => {
     setExpandedGroup(navigationGroupForRoute(activeRoute));
-    setMobileOpen(false);
   }, [activeRoute]);
 
-  useEffect(() => {
-    document.body.classList.toggle("Prudentia-mobile-nav-open", mobileOpen);
-    if (mobileOpen) {
-      requestAnimationFrame(() => drawerRef.current?.querySelector<HTMLElement>("[data-sidebar-first='true']")?.focus());
-    }
-    return () => document.body.classList.remove("Prudentia-mobile-nav-open");
-  }, [mobileOpen]);
-
-  function badgeValue(badge: NavigationBadge | undefined): number | null {
-    if (badge === "trash") return trashQuery.data?.total ?? null;
-    if (badge === "jobs") {
-      const summary = jobsSummaryQuery.data;
-      return summary ? summary.needs_attention : null;
-    }
-    if (badge === "review") return reviewQueueBadgeCount(reviewQuery.data?.total, imageReviewQuery.data?.candidate_total);
-    return null;
-  }
+  const drawer = useSidebarDrawer(activeRoute);
+  const resize = useSidebarResize({ onSidebarWidthChange, sidebarCollapsed, sidebarWidth });
 
   function navigate(route: RouteId) {
     onNavigate(route);
-    setMobileOpen(false);
-  }
-
-  function closeMobileDrawer() {
-    setMobileOpen(false);
-    triggerRef.current?.focus();
-  }
-
-  function handleDrawerKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeMobileDrawer();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const focusable = Array.from(
-      drawerRef.current?.querySelectorAll<HTMLElement>(
-        "button:not([disabled]), a[href], select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])",
-      ) ?? [],
-    ).filter((element) => element.offsetParent !== null);
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
-
-  function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
-    if (sidebarCollapsed) return;
-    if (event.button !== 0) return;
-    event.preventDefault();
-
-    const startX = event.clientX;
-    const startWidth = sidebarWidth;
-    const resizeHandle = event.currentTarget;
-    resizeHandle.setPointerCapture(event.pointerId);
-    document.body.classList.add("is-resizing-sidebar");
-
-    const handlePointerMove = (moveEvent: globalThis.PointerEvent) => {
-      onSidebarWidthChange(clampSidebarWidth(startWidth + moveEvent.clientX - startX));
-    };
-
-    const handlePointerUp = () => {
-      document.body.classList.remove("is-resizing-sidebar");
-      resizeHandle.removeEventListener("pointermove", handlePointerMove);
-      resizeHandle.removeEventListener("pointerup", handlePointerUp);
-      resizeHandle.removeEventListener("pointercancel", handlePointerUp);
-    };
-
-    resizeHandle.addEventListener("pointermove", handlePointerMove);
-    resizeHandle.addEventListener("pointerup", handlePointerUp);
-    resizeHandle.addEventListener("pointercancel", handlePointerUp);
-  }
-
-  function handleResizeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (sidebarCollapsed) return;
-    if (event.key === "ArrowLeft") onSidebarWidthChange(clampSidebarWidth(sidebarWidth - 8));
-    else if (event.key === "ArrowRight") onSidebarWidthChange(clampSidebarWidth(sidebarWidth + 8));
-    else if (event.key === "Home") onSidebarWidthChange(Prudentia_SIDEBAR_MIN_WIDTH);
-    else if (event.key === "End") onSidebarWidthChange(Prudentia_SIDEBAR_MAX_WIDTH);
-    else return;
-    event.preventDefault();
+    drawer.dismiss();
   }
 
   const sidebarClassName = [
     "Prudentia-sidebar",
     sidebarCollapsed ? "Prudentia-sidebar-collapsed" : "",
-    mobileOpen ? "Prudentia-sidebar-mobile-open" : "",
+    drawer.mobileOpen ? "Prudentia-sidebar-mobile-open" : "",
   ].filter(Boolean).join(" ");
 
   return (
@@ -229,24 +83,24 @@ export function PrudentiaSidebar({
             <small>{items.find((item) => item.id === navigationGroupForRoute(activeRoute))?.label ?? "Workspace"}</small>
           </span>
         </div>
-        <button ref={triggerRef} type="button" onClick={() => setMobileOpen(true)} aria-expanded={mobileOpen} aria-controls="Prudentia-primary-sidebar" aria-label="Open workspace navigation">
+        <button ref={drawer.triggerRef} type="button" onClick={drawer.open} aria-expanded={drawer.mobileOpen} aria-controls="Prudentia-primary-sidebar" aria-label="Open workspace navigation">
           <Menu size={18} />
         </button>
       </div>
-      <button type="button" className={mobileOpen ? "Prudentia-sidebar-backdrop Prudentia-sidebar-backdrop-visible" : "Prudentia-sidebar-backdrop"} onClick={closeMobileDrawer} aria-label="Close workspace navigation" tabIndex={mobileOpen ? 0 : -1} />
+      <button type="button" className={drawer.mobileOpen ? "Prudentia-sidebar-backdrop Prudentia-sidebar-backdrop-visible" : "Prudentia-sidebar-backdrop"} onClick={drawer.closeAndRestoreFocus} aria-label="Close workspace navigation" tabIndex={drawer.mobileOpen ? 0 : -1} />
       <aside
-        ref={drawerRef}
+        ref={drawer.drawerRef}
         id="Prudentia-primary-sidebar"
         className={sidebarClassName}
         aria-label="Workspace navigation"
-        onKeyDown={handleDrawerKeyDown}
+        onKeyDown={drawer.onKeyDown}
       >
         <div className="Prudentia-sidebar-mobile-heading">
           <span className="Prudentia-sidebar-mobile-heading-brand">
             <PrudentiaBrandMark className="Prudentia-mobile-brand-mark" />
             <strong>Prudentia AI</strong>
           </span>
-          <button type="button" onClick={closeMobileDrawer} aria-label="Close workspace navigation">
+          <button type="button" onClick={drawer.closeAndRestoreFocus} aria-label="Close workspace navigation">
             <X size={16} />
           </button>
         </div>
@@ -280,7 +134,7 @@ export function PrudentiaSidebar({
           )}
         </div>
         <nav className="Prudentia-sidebar-nav" aria-label="Primary navigation">
-          <SidebarItems
+          <SidebarMenu
             activeRoute={activeRoute}
             badgeValue={badgeValue}
             expandedGroup={expandedGroup}
@@ -344,8 +198,8 @@ export function PrudentiaSidebar({
           aria-valuemax={Prudentia_SIDEBAR_MAX_WIDTH}
           aria-valuemin={Prudentia_SIDEBAR_MIN_WIDTH}
           aria-valuenow={sidebarWidth}
-          onKeyDown={handleResizeKeyDown}
-          onPointerDown={handleResizeStart}
+          onKeyDown={resize.onKeyDown}
+          onPointerDown={resize.onPointerDown}
           tabIndex={0}
         >
           <GripVertical size={12} aria-hidden="true" />
@@ -377,80 +231,13 @@ function SidebarCollapseButton({ collapsed, onToggle }: SidebarCollapseButtonPro
   );
 }
 
-function SidebarItems({ activeRoute, badgeValue, expandedGroup, items, onExpand, onNavigate, sidebarCollapsed }: SidebarItemsProps) {
-  let lastSection = "";
-  let firstButton = true;
-  return (
-    <>
-      {items.map((item) => {
-        const showSection = item.section !== lastSection;
-        lastSection = item.section;
-        const Icon = iconByKey[item.icon];
-        const active = item.route === activeRoute || item.children?.some((child) => child.route === activeRoute) === true;
-        const expanded = item.children ? expandedGroup === item.id : false;
-        const firstVisibleRoute = item.children?.[0]?.route ?? item.route;
-        const dataFirst = firstButton ? { "data-sidebar-first": "true" } : {};
-        firstButton = false;
-        return (
-          <div key={item.id} className="Prudentia-nav-group">
-            {showSection ? <p className="Prudentia-sidebar-section">{item.section}</p> : null}
-            <button
-              {...dataFirst}
-              type="button"
-              onClick={() => {
-                if (item.children) onExpand(item.id);
-                if (firstVisibleRoute) onNavigate(firstVisibleRoute);
-              }}
-              className={active ? "Prudentia-sidenav-item-active" : "Prudentia-sidenav-item"}
-              aria-current={!item.children && active ? "page" : undefined}
-              aria-expanded={item.children && !sidebarCollapsed ? expanded : undefined}
-              aria-label={item.label}
-              title={item.label}
-            >
-              <Icon size={16} aria-hidden="true" />
-              <span className="Prudentia-nav-label">{item.label}</span>
-              <NavigationBadgeCount count={badgeValue(item.badge)} />
-              {item.children ? expanded ? <ChevronDown className="Prudentia-nav-chevron" size={13} /> : <ChevronRight className="Prudentia-nav-chevron" size={13} /> : null}
-            </button>
-            {item.children && expanded && !sidebarCollapsed ? (
-              <div className="Prudentia-sidenav-children">
-                {item.children.map((child) => {
-                  const count = badgeValue(child.badge);
-                  const childActive = child.route === activeRoute;
-                  return (
-                    <button
-                      key={child.route}
-                      type="button"
-                      onClick={() => onNavigate(child.route)}
-                      className={childActive ? "Prudentia-sidenav-child-active" : "Prudentia-sidenav-child"}
-                      aria-current={childActive ? "page" : undefined}
-                    >
-                      <span>{child.label}</span>
-                      <NavigationBadgeCount count={count} />
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-function NavigationBadgeCount({ count }: { count: number | null }) {
-  if (count === null || count <= 0) return null;
-  return <small aria-label={`${count} items`}>{count > 99 ? "99+" : count}</small>;
-}
-
 function formatKnowledgeSpace(paths: string[]): string {
   if (paths.length === 0) return "No space assigned";
   const [primary, ...rest] = paths;
   return rest.length ? `${primary} +${rest.length} more` : primary;
 }
 
-type Props = {
+interface Props {
   activeRoute: RouteId;
   headerContent?: ReactNode;
   isLightMode: boolean;
@@ -462,23 +249,9 @@ type Props = {
   sidebarCollapsed: boolean;
   sidebarWidth: number;
   user: AuthUser;
-};
+}
 
-type SidebarItemsProps = {
-  activeRoute: RouteId;
-  badgeValue: (badge: NavigationBadge | undefined) => number | null;
-  expandedGroup: string | null;
-  items: WorkspaceNavigationItem[];
-  onExpand: (group: string) => void;
-  onNavigate: (route: RouteId) => void;
-  sidebarCollapsed: boolean;
-};
-
-type SidebarCollapseButtonProps = {
+interface SidebarCollapseButtonProps {
   collapsed: boolean;
   onToggle: () => void;
-};
-
-function clampSidebarWidth(width: number): number {
-  return Math.min(Prudentia_SIDEBAR_MAX_WIDTH, Math.max(Prudentia_SIDEBAR_MIN_WIDTH, width));
 }
