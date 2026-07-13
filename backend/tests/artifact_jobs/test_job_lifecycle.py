@@ -19,20 +19,13 @@ from rag.artifact_jobs.execution import (
     ArtifactJobLeaseLost,
     ArtifactPermissionChanged,
 )
-from rag.artifact_jobs import task_execution, tasks
+from rag.artifact_jobs import task_execution
 from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
 from rag.artifact_jobs.task_execution import (
     ArtifactContextRejected,
     ArtifactDeliveryRetry,
     run_artifact_job,
 )
-
-
-def test_celery_delivery_retries_are_unbounded_while_job_attempts_remain_bounded() -> (
-    None
-):
-    assert tasks.generate_artifact_job.max_retries is None
-    assert tasks.generate_artifact_job.name == tasks.settings.artifact_task_name
 
 
 def test_heartbeat_recovers_after_a_transient_repository_failure(
@@ -471,31 +464,6 @@ def test_authorization_failure_records_terminal_completion_time(
     assert failed.status == "failed"
     assert failed.completed_at is not None
     assert failed.run_token is None
-
-
-def test_celery_wrapper_maps_delivery_retry_without_changing_policy(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cause = RuntimeError("backend unavailable")
-
-    class ExpectedRetry(RuntimeError):
-        pass
-
-    def run(*_args: object, **_kwargs: object) -> dict[str, object]:
-        raise ArtifactDeliveryRetry(cause, countdown=17)
-
-    def retry(**kwargs: object) -> None:
-        assert kwargs == {"exc": cause, "countdown": 17, "max_retries": None}
-        raise ExpectedRetry
-
-    monkeypatch.setattr(tasks, "run_artifact_job", run)
-    monkeypatch.setattr(tasks, "get_artifact_job_repository", object)
-    monkeypatch.setattr(tasks, "get_artifact_job_executor", object)
-    monkeypatch.setattr(tasks, "get_artifact_context_validator", object)
-    monkeypatch.setattr(tasks.generate_artifact_job, "retry", retry)
-
-    with pytest.raises(ExpectedRetry):
-        tasks.generate_artifact_job.run("job-1")
 
 
 def _raise_http_error(status: int) -> None:

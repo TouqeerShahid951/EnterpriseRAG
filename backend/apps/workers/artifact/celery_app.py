@@ -8,7 +8,7 @@ from rag.core.config import settings
 celery_app = Celery(
     "artifact-generation-worker",
     broker=settings.celery_broker_url or settings.redis_url,
-    include=["rag.artifact_jobs.tasks"],
+    include=["apps.workers.artifact.tasks"],
 )
 celery_app.conf.update(
     task_default_queue=settings.artifact_queue_name,

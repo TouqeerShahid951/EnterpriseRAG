@@ -114,6 +114,14 @@ LEGACY_ARTIFACT_PATHS = (
     RAG_ROOT / "artifact_jobs" / "generated_repository.py",
     RAG_ROOT / "artifact_jobs" / "repository.py",
 )
+ARTIFACT_WORKER_TASK_FILE = (
+    BACKEND_ROOT / "apps" / "workers" / "artifact" / "tasks.py"
+)
+REMOVED_ARTIFACT_TASK_MODULE = "rag.artifact_jobs.tasks"
+REMOVED_ARTIFACT_TASK_PATHS = (
+    RAG_ROOT / "artifact_jobs" / "tasks.py",
+    RAG_ROOT / "artifact_jobs" / "tasks",
+)
 LEGACY_QUERY_MODULES = frozenset(
     {
         "rag.api.routes.query_routes",
@@ -328,6 +336,58 @@ def test_legacy_artifact_modules_are_absent_and_not_imported() -> None:
     violations = _find_violations(
         _python_files(BACKEND_PYTHON_ROOTS),
         lambda target: target in LEGACY_ARTIFACT_MODULES,
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_artifact_celery_adapter_is_owned_by_worker_app() -> None:
+    assert ARTIFACT_WORKER_TASK_FILE.is_file()
+    assert not any(path.exists() for path in REMOVED_ARTIFACT_TASK_PATHS)
+
+    violations = _find_violations(
+        _python_files(BACKEND_PYTHON_ROOTS),
+        lambda target: target == REMOVED_ARTIFACT_TASK_MODULE
+        or target.startswith(f"{REMOVED_ARTIFACT_TASK_MODULE}."),
+        resolve_relative_imports=True,
+    )
+    violations.extend(
+        _find_violations(
+            (RAG_ROOT / "artifact_jobs").rglob("*.py"),
+            lambda target: target == "celery.shared_task",
+            resolve_relative_imports=True,
+        )
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_artifact_worker_task_adapter_has_only_composition_dependencies() -> None:
+    allowed_imports = frozenset(
+        {
+            "__future__",
+            "__future__.annotations",
+            "apps.workers.artifact.celery_app",
+            "apps.workers.artifact.celery_app.celery_app",
+            "billiard.exceptions",
+            "billiard.exceptions.SoftTimeLimitExceeded",
+            "rag.artifact_jobs.dependencies",
+            "rag.artifact_jobs.dependencies.get_artifact_context_validator",
+            "rag.artifact_jobs.dependencies.get_artifact_job_executor",
+            "rag.artifact_jobs.dependencies.get_artifact_job_repository",
+            "rag.artifact_jobs.task_execution",
+            "rag.artifact_jobs.task_execution.ArtifactDeliveryRetry",
+            "rag.artifact_jobs.task_execution.run_artifact_job",
+            "rag.core.config",
+            "rag.core.config.settings",
+            "typing",
+            "typing.Any",
+        }
+    )
+    violations = _find_violations(
+        (ARTIFACT_WORKER_TASK_FILE,),
+        lambda target: target not in allowed_imports,
         resolve_relative_imports=True,
     )
 
@@ -683,7 +743,11 @@ def _python_files(roots: Iterable[Path]) -> Iterable[Path]:
 
 
 def _module_name(path: Path) -> str:
-    return ".".join(path.relative_to(SRC_ROOT).with_suffix("").parts)
+    try:
+        relative = path.relative_to(SRC_ROOT)
+    except ValueError:
+        relative = path.relative_to(BACKEND_ROOT)
+    return ".".join(relative.with_suffix("").parts)
 
 
 def _http_handler_names(path: Path) -> tuple[str, ...]:

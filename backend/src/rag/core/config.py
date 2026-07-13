@@ -206,6 +206,7 @@ class Settings(BaseSettings):
     artifact_pipeline_version: Literal["v1", "v2"] = "v2"
     artifact_queue_backend: str = "celery"
     artifact_queue_name: str = "artifact:jobs"
+    # This is a compatibility identifier for queued messages, not an import path.
     artifact_task_name: str = "rag.artifact_jobs.tasks.generate_artifact_job"
     artifact_retention_days: int = Field(default=30, ge=1, le=365)
     artifact_maintenance_interval_seconds: int = Field(default=300, ge=30)

@@ -40,9 +40,17 @@ def test_document_pipeline_preserves_registered_task_names() -> None:
 
 
 def test_artifact_worker_preserves_registered_task_name() -> None:
-    assert "rag.artifact_jobs.tasks.generate_artifact_job" in _registered_task_names(
-        artifact_app
-    )
+    task_names = _registered_task_names(artifact_app)
+
+    assert "rag.artifact_jobs.tasks.generate_artifact_job" in task_names
+    assert "apps.workers.artifact.tasks.generate_artifact_job" not in task_names
+
+
+def test_artifact_task_is_not_registered_on_other_worker_apps() -> None:
+    task_name = "rag.artifact_jobs.tasks.generate_artifact_job"
+
+    assert task_name not in _registered_task_names(document_pipeline_app)
+    assert task_name not in _registered_task_names(evaluation_app)
 
 
 def test_evaluation_worker_preserves_registered_task_name() -> None:
