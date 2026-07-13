@@ -1,0 +1,232 @@
+
+@media (max-width: 680px) {
+  .Prudentia-theme-switch-label > span {
+    display: none;
+  }
+
+  .Prudentia-account-button small {
+    display: none;
+  }
+
+  .knowledge-spaces-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-space-panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .knowledge-space-overview-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.55rem 0.7rem;
+  }
+
+  .knowledge-space-overview-row-main {
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+  }
+
+  .knowledge-space-overview-main {
+    padding-left: 0;
+  }
+
+  .knowledge-space-overview-stat,
+  .knowledge-space-health {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+
+  .knowledge-space-overview-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+  }
+
+  .knowledge-space-row-chevron {
+    display: none;
+  }
+
+  .knowledge-space-overview-actions {
+    flex-direction: column;
+    padding-right: 0.55rem;
+  }
+
+  .knowledge-space-overview-actions button {
+    min-height: var(--control-height-md);
+    min-width: var(--control-height-md);
+  }
+
+  .knowledge-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-toolbar-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-toolbar-controls-wide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-toolbar-meta {
+    justify-content: space-between;
+  }
+
+  .knowledge-overview-flow,
+  .knowledge-lifecycle-strip,
+  .knowledge-status-shortcuts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-activity-list button,
+  .knowledge-action-list button {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .knowledge-activity-meta,
+  .knowledge-row-trailing {
+    justify-items: start;
+  }
+
+  .knowledge-panel-actions,
+  .knowledge-panel-actions .sv-action-secondary {
+    width: 100%;
+  }
+
+  .ingest-job-filters,
+  .audit-primary-filters,
+  .audit-advanced-filter-grid,
+  .audit-detail-list,
+  .audit-summary-strip,
+  .ingestion-health-metrics,
+  .ingestion-health-grid,
+  .ingestion-graph-task-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ingest-job-search,
+  .audit-search,
+  .audit-date-range {
+    grid-column: auto;
+  }
+
+  .audit-toolbar-actions,
+  .audit-toolbar-actions .sv-action-secondary,
+  .audit-link-list,
+  .audit-link-list .sv-action-secondary {
+    width: 100%;
+  }
+
+  .audit-date-range {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .audit-details-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ingest-job-list-header,
+  .folder-run-items-header,
+  .ingestion-recovery-row,
+  .ingestion-failure-row {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+    flex-direction: column;
+  }
+
+  .ingestion-failure-icon,
+  .ingestion-recovery-icon {
+    display: none;
+  }
+
+  .ingestion-failure-row .sv-action-secondary,
+  .ingestion-recovery-row .sv-action-primary {
+    width: 100%;
+  }
+
+  .ingestion-recovery-blocked {
+    max-width: none;
+    text-align: left;
+  }
+
+  .folder-run-row,
+  .folder-run-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .folder-run-row > svg,
+  .folder-run-item > svg {
+    display: none;
+  }
+
+  .knowledge-doc-surface {
+    overflow-x: visible;
+  }
+
+  .knowledge-document-workspace-with-inspector .knowledge-inspector,
+  .knowledge-explorer-shell-with-inspector .knowledge-inspector {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 60;
+    width: 100%;
+    max-height: min(78dvh, 42rem);
+    overflow: auto;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: 0.5rem 0.5rem 0 0;
+    padding: 0.75rem;
+    box-shadow: 0 -24px 64px rgba(0, 0, 0, 0.42);
+  }
+
+  .knowledge-inspector-header {
+    top: -0.75rem;
+  }
+
+  .knowledge-inspector-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .knowledge-doc-list-header {
+    display: none;
+  }
+
+  .knowledge-doc-row {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0.55rem 0.7rem;
+    padding: 0.85rem;
+  }
+
+  .knowledge-doc-primary,
+  .knowledge-doc-scope,
+  .knowledge-doc-status-stack,
+  .knowledge-doc-effective,
+  .knowledge-doc-actions {
+    grid-column: 2 / -1;
+  }
+
+  .knowledge-document-open {
+    align-items: flex-start;
+  }
+
+  .knowledge-doc-summary {
+    -webkit-line-clamp: 3;
+  }
+
+  .knowledge-doc-status-stack,
+  .knowledge-row-actions {
+    justify-content: flex-start;
+  }
+
+  .knowledge-row-actions .knowledge-row-action-tooltip:first-child .knowledge-action-tooltip {
+    right: auto;
+    left: 0;
+    transform: translateY(0.2rem);
+  }
+
+  .knowledge-row-actions .knowledge-row-action-tooltip:first-child:hover .knowledge-action-tooltip,
+  .knowledge-row-actions .knowledge-row-action-tooltip:first-child:focus-within .knowledge-action-tooltip {
+    transform: translateY(0);
+  }
+}

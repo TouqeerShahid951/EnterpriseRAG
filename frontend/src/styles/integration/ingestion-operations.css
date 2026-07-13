@@ -1,0 +1,327 @@
+
+.ingest-job-list-header,
+.folder-run-items-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.ingest-job-list-header {
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.8rem;
+}
+
+.ingest-job-list-header p,
+.folder-run-items-header span {
+  margin-top: 0.2rem;
+  color: var(--color-secondary);
+  font-size: 0.75rem;
+}
+
+.ingest-job-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ingest-job-table {
+  min-width: min(64rem, 100%);
+}
+
+.ingest-job-table td {
+  vertical-align: top;
+}
+
+.ingest-job-table td > small,
+.ingest-job-table td > p {
+  display: block;
+  max-width: 24rem;
+  margin-top: 0.35rem;
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.ingest-job-progress-cell {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.ingest-job-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+  color: var(--color-error-red);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ingest-parser-provenance {
+  margin-top: 0.65rem;
+  max-width: 30rem;
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+}
+
+.ingest-parser-provenance summary {
+  cursor: pointer;
+  color: var(--color-on-surface);
+  font-weight: 700;
+}
+
+.ingest-parser-provenance dl {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.55rem 0 0;
+}
+
+.ingest-parser-provenance div {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.ingest-parser-provenance dt {
+  color: var(--color-on-surface);
+  font-weight: 700;
+}
+
+.ingest-parser-provenance dd {
+  margin: 0;
+}
+
+.ingestion-health-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.ingestion-health-metric {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 1rem;
+}
+
+.ingestion-health-metric > span {
+  display: inline-flex;
+  height: 2.25rem;
+  width: 2.25rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-high);
+  color: var(--color-primary);
+}
+
+.ingestion-health-metric p,
+.ingestion-health-metric small {
+  display: block;
+  color: var(--color-secondary);
+}
+
+.ingestion-health-metric p {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.ingestion-health-metric strong {
+  display: block;
+  margin: 0.15rem 0;
+  color: var(--color-on-surface);
+  font-size: 1.65rem;
+  line-height: 1.1;
+}
+
+.ingestion-health-metric small {
+  font-size: 0.72rem;
+}
+
+.ingestion-health-metric[data-tone="danger"] > span {
+  background: color-mix(in srgb, var(--color-error-red) 12%, transparent);
+  color: var(--color-error-red);
+}
+
+.ingestion-health-metric[data-tone="warning"] > span {
+  background: color-mix(in srgb, var(--color-warning-amber) 12%, transparent);
+  color: var(--color-warning-amber);
+}
+
+.ingestion-health-metric[data-tone="success"] > span {
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  color: var(--color-success);
+}
+
+.ingestion-health-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.ingestion-graph-panel {
+  grid-column: 1 / -1;
+}
+
+.ingestion-recovery-panel {
+  margin-bottom: 1rem;
+}
+
+.ingestion-stage-list,
+.ingestion-runtime-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.ingestion-stage-list > div,
+.ingestion-runtime-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.7rem 0.8rem;
+}
+
+.ingestion-stage-list span,
+.ingestion-runtime-list span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.ingestion-stage-list strong,
+.ingestion-runtime-list strong {
+  color: var(--color-on-surface);
+  font-size: 0.8rem;
+}
+
+.ingestion-graph-empty {
+  margin-top: 0.85rem;
+  font-size: 0.86rem;
+}
+
+.ingestion-graph-task-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+}
+
+.ingestion-graph-task-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.75rem 0.8rem;
+}
+
+.ingestion-graph-task-list strong {
+  display: block;
+  color: var(--color-on-surface);
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.ingestion-graph-task-list p {
+  margin: 0.18rem 0 0;
+  color: var(--color-on-surface-variant);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.ingestion-graph-task-list span {
+  color: var(--color-on-surface);
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ingestion-failure-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: center;
+  border-top: 1px solid var(--color-surface-border);
+  padding: 1rem;
+}
+
+.ingestion-recovery-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: center;
+  border-top: 1px solid var(--color-surface-border);
+  padding: 1rem;
+}
+
+.ingestion-recovery-icon {
+  display: inline-flex;
+  height: 2.25rem;
+  width: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-warning-amber) 12%, transparent);
+  color: var(--color-warning-amber);
+}
+
+.ingestion-recovery-row strong {
+  color: var(--color-on-surface);
+}
+
+.ingestion-recovery-row p,
+.ingestion-recovery-row small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+}
+
+.ingestion-recovery-blocked {
+  max-width: 11rem;
+  color: var(--color-warning-amber);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.ingestion-failure-icon {
+  display: inline-flex;
+  height: 2.25rem;
+  width: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-error-red) 12%, transparent);
+  color: var(--color-error-red);
+}
+
+.ingestion-failure-row strong {
+  color: var(--color-on-surface);
+}
+
+.ingestion-failure-row p,
+.ingestion-failure-row small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+}

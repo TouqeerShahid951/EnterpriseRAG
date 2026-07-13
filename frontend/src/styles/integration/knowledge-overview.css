@@ -1,0 +1,478 @@
+
+.knowledge-page-header {
+  margin-bottom: 1rem;
+}
+
+.knowledge-context {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) minmax(22rem, 0.74fr);
+  align-items: stretch;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface-card) 88%, transparent);
+  padding: 0.8rem;
+}
+
+.knowledge-context-metric {
+  min-width: 0;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.6rem;
+}
+
+.knowledge-context-metric span {
+  display: block;
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1rem;
+  text-transform: uppercase;
+}
+
+.knowledge-context-metric strong {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--color-on-surface);
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.knowledge-context-metric-success {
+  border-color: color-mix(in srgb, var(--color-success) 30%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-success) 8%, var(--color-surface-container-low));
+}
+
+.knowledge-context-metric-success strong {
+  color: var(--color-on-surface);
+}
+
+.knowledge-section {
+  min-width: 0;
+}
+
+.knowledge-overview-status {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1.4fr) minmax(15rem, 0.74fr);
+  border-bottom: 1px solid var(--color-surface-border);
+  background: var(--color-surface-container-lowest);
+  padding: 0.8rem;
+}
+
+.knowledge-overview-status[data-tone="warning"] {
+  background: color-mix(in srgb, var(--color-warning-amber) 7%, var(--color-surface-container-lowest));
+}
+
+.knowledge-overview-status[data-tone="active"] {
+  background: color-mix(in srgb, var(--color-primary) 7%, var(--color-surface-container-lowest));
+}
+
+.knowledge-overview-status[data-tone="success"] {
+  background: color-mix(in srgb, var(--color-success) 7%, var(--color-surface-container-lowest));
+}
+
+.knowledge-overview-status-main {
+  min-width: 0;
+}
+
+.knowledge-overview-status-main h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.2rem;
+  color: var(--color-on-surface);
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.knowledge-overview-status-main p:not(.sv-metadata) {
+  margin-top: 0.3rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.knowledge-overview-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.knowledge-overview-flow {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.knowledge-overview-flow > div {
+  min-width: 0;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.62rem;
+}
+
+.knowledge-overview-flow span {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--color-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.knowledge-overview-flow strong {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--color-on-surface);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.knowledge-overview-flow [data-tone="warning"] strong {
+  color: var(--color-warning-amber);
+}
+
+.knowledge-overview-flow [data-tone="success"] strong {
+  color: var(--color-success);
+}
+
+.knowledge-spaces-overview {
+  min-width: 0;
+}
+
+.knowledge-spaces-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--color-surface-border);
+  background: var(--color-surface-container-lowest);
+  padding: 0.8rem;
+}
+
+.knowledge-spaces-summary-copy {
+  min-width: 0;
+}
+
+.knowledge-spaces-summary-copy h2 {
+  margin-top: 0.2rem;
+  color: var(--color-on-surface);
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.knowledge-spaces-summary-copy p:not(.sv-metadata) {
+  margin-top: 0.25rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.knowledge-spaces-metrics {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.8rem;
+}
+
+.knowledge-spaces-workbench {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 0.32fr);
+  align-items: stretch;
+}
+
+.knowledge-space-directory-panel,
+.knowledge-space-operations-panel {
+  min-width: 0;
+}
+
+.knowledge-space-directory-panel {
+  border-right: 1px solid var(--color-surface-border);
+}
+
+.knowledge-space-operations-panel {
+  display: grid;
+  align-content: start;
+  background: var(--color-surface-container-lowest);
+}
+
+.knowledge-space-side-section + .knowledge-space-side-section {
+  border-top: 1px solid var(--color-surface-border);
+}
+
+.knowledge-space-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.55rem;
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.75rem 0.85rem;
+}
+
+.knowledge-space-panel-header h3 {
+  color: var(--color-on-surface);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.knowledge-space-panel-header p {
+  margin-top: 0.2rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.knowledge-space-overview-list {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.6rem;
+}
+
+.knowledge-space-overview-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.knowledge-space-overview-row:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+}
+
+.knowledge-space-overview-row-main {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+  grid-template-columns: 2rem minmax(8rem, 1fr) repeat(2, minmax(3.25rem, 0.26fr)) minmax(5.75rem, 0.32fr) 1rem;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+}
+
+button.knowledge-space-overview-row-main {
+  color: inherit;
+}
+
+.knowledge-space-overview-row-static .knowledge-space-overview-row-main {
+  cursor: default;
+}
+
+.knowledge-space-overview-row-main:focus-visible,
+.knowledge-space-overview-actions button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 68%, transparent);
+  outline-offset: 2px;
+}
+
+.knowledge-space-overview-icon {
+  display: inline-flex;
+  height: 2rem;
+  width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-surface-border));
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--color-primary) 9%, var(--color-surface-container-low));
+  color: var(--color-primary);
+}
+
+.knowledge-space-overview-main {
+  min-width: 0;
+  padding-left: calc(var(--space-depth, 0) * 0.8rem);
+}
+
+.knowledge-space-overview-main strong {
+  display: block;
+  overflow: hidden;
+  color: var(--color-on-surface);
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-space-overview-main small,
+.knowledge-space-attention-list small {
+  display: block;
+  overflow: hidden;
+  margin-top: 0.14rem;
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-space-overview-stat {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.knowledge-space-overview-stat strong {
+  color: var(--color-on-surface);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.knowledge-space-overview-stat small {
+  color: var(--color-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.knowledge-space-health {
+  display: inline-flex;
+  min-width: 0;
+  justify-content: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 999px;
+  padding: 0.22rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.knowledge-space-health-success {
+  border-color: color-mix(in srgb, var(--color-success) 32%, transparent);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+  color: var(--color-success);
+}
+
+.knowledge-space-health-active {
+  border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  color: var(--color-primary);
+}
+
+.knowledge-space-health-warning {
+  border-color: color-mix(in srgb, var(--color-warning-amber) 34%, transparent);
+  background: color-mix(in srgb, var(--color-warning-amber) 9%, transparent);
+  color: var(--color-warning-amber);
+}
+
+.knowledge-space-health-danger {
+  border-color: color-mix(in srgb, var(--color-error-red) 34%, transparent);
+  background: var(--color-error-container);
+  color: var(--color-error-red);
+}
+
+.knowledge-space-row-chevron {
+  color: var(--color-secondary);
+  justify-self: end;
+}
+
+.knowledge-space-overview-actions {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding-right: 0.55rem;
+}
+
+.knowledge-space-overview-actions button {
+  display: inline-flex;
+  min-height: 2rem;
+  min-width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  color: var(--color-on-surface-variant);
+}
+
+.knowledge-space-overview-actions button:hover {
+  border-color: var(--color-surface-border);
+  background: var(--color-surface-container-highest);
+  color: var(--color-primary);
+}
+
+.knowledge-space-overview-actions button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.knowledge-space-attention-list,
+.knowledge-space-action-list {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+.knowledge-space-attention-list button,
+.knowledge-space-attention-row,
+.knowledge-space-action-list button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.65rem;
+  text-align: left;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.knowledge-space-attention-list button:hover,
+.knowledge-space-action-list button:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+}
+
+.knowledge-space-attention-list button > span:first-child,
+.knowledge-space-attention-row > span:first-child,
+.knowledge-space-action-list button > span {
+  min-width: 0;
+}
+
+.knowledge-space-attention-list strong,
+.knowledge-space-action-list strong {
+  display: block;
+  overflow: hidden;
+  color: var(--color-on-surface);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-space-action-list button > span {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.knowledge-space-action-list svg {
+  flex: 0 0 auto;
+  color: var(--color-secondary);
+}
+
+.knowledge-space-muted {
+  color: var(--color-on-surface-variant);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  padding: 0.9rem 1rem 1rem;
+}

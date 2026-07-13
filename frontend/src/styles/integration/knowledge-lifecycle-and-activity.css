@@ -1,0 +1,273 @@
+
+.knowledge-status-shortcuts {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--color-surface-border);
+  background: var(--color-surface-container-lowest);
+  padding: 0.8rem;
+}
+
+.knowledge-status-shortcuts button {
+  display: grid;
+  min-height: 3.45rem;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.62rem;
+  text-align: left;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.knowledge-status-shortcuts button:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+}
+
+.knowledge-status-shortcuts button[data-tone="active"] {
+  border-color: color-mix(in srgb, var(--color-primary) 26%, var(--color-surface-border));
+}
+
+.knowledge-status-shortcuts button[data-tone="success"] {
+  border-color: color-mix(in srgb, var(--color-success) 26%, var(--color-surface-border));
+}
+
+.knowledge-status-shortcuts button[data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--color-warning-amber) 30%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-warning-amber) 7%, var(--color-surface-container-low));
+}
+
+.knowledge-status-shortcut-icon,
+.knowledge-lifecycle-icon {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-high);
+  color: var(--color-primary);
+}
+
+.knowledge-status-shortcuts span:not(.knowledge-status-shortcut-icon) {
+  min-width: 0;
+}
+
+.knowledge-status-shortcuts strong,
+.knowledge-lifecycle-copy span {
+  display: block;
+  color: var(--color-on-surface);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.knowledge-status-shortcuts small,
+.knowledge-lifecycle-copy small {
+  display: block;
+  margin-top: 0.12rem;
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.knowledge-status-shortcuts b,
+.knowledge-lifecycle-strip strong {
+  color: var(--color-on-surface);
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.knowledge-lifecycle-strip {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.8rem;
+}
+
+.knowledge-lifecycle-strip > button,
+.knowledge-lifecycle-strip > div {
+  display: grid;
+  min-height: 3.45rem;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.62rem;
+  text-align: left;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.knowledge-lifecycle-strip > button:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+}
+
+.knowledge-lifecycle-strip > [data-tone="success"] {
+  border-color: color-mix(in srgb, var(--color-success) 24%, var(--color-surface-border));
+}
+
+.knowledge-lifecycle-strip > [data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--color-warning-amber) 30%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-warning-amber) 7%, var(--color-surface-container-low));
+}
+
+.knowledge-lifecycle-copy {
+  min-width: 0;
+}
+
+.knowledge-count-skeleton {
+  display: inline-block;
+  width: 2rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-surface-container-low) 90%, transparent) 0%,
+    color-mix(in srgb, var(--color-on-surface) 10%, var(--color-surface-container-high)) 50%,
+    color-mix(in srgb, var(--color-surface-container-low) 90%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 4%, transparent);
+  animation: knowledge-skeleton 1.4s ease-in-out infinite;
+}
+
+.knowledge-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.knowledge-action-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.knowledge-action-list button {
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.45rem;
+  background: var(--color-surface-container-lowest);
+  color: var(--color-on-surface);
+  font-size: 0.78rem;
+  font-weight: 700;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.knowledge-action-list button:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+  color: var(--color-primary);
+}
+
+.knowledge-action-list {
+  flex-direction: column;
+}
+
+.knowledge-activity-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.knowledge-action-list button,
+.knowledge-activity-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.knowledge-activity-list button {
+  min-height: 4.25rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.75rem;
+  text-align: left;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.knowledge-activity-list button:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+}
+
+.knowledge-activity-main {
+  min-width: 0;
+}
+
+.knowledge-activity-main strong {
+  display: block;
+  color: var(--color-on-surface);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-activity-main small,
+.knowledge-activity-meta small {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.2rem;
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.knowledge-activity-meta {
+  display: grid;
+  justify-items: end;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+}
+
+.knowledge-row-trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 0 0 auto;
+}
+
+.knowledge-row-trailing svg {
+  color: var(--color-secondary);
+}
+
+.knowledge-action-list strong {
+  font-size: 1rem;
+}
+
+.knowledge-breakdown-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.knowledge-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--color-surface-border);
+  padding: 0.8rem;
+}
+
+.knowledge-overview-return {
+  flex: 0 0 auto;
+}

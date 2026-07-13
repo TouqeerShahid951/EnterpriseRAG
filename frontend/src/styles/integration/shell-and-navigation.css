@@ -1,0 +1,457 @@
+
+.Prudentia-icon-button {
+  display: inline-flex;
+  min-height: var(--control-height-md);
+  min-width: var(--control-height-md);
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  color: var(--color-on-surface-variant);
+  box-shadow: none;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease, border-color var(--motion-fast) ease;
+}
+
+.Prudentia-icon-button:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 26%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+}
+
+.Prudentia-mobile-nav-bar,
+.Prudentia-sidebar-backdrop,
+.Prudentia-sidebar-mobile-heading {
+  display: none;
+}
+
+.Prudentia-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 40;
+  display: flex;
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  max-width: var(--sidebar-width);
+  flex-direction: column;
+  border-right: 1px solid color-mix(in srgb, var(--color-surface-border) 86%, var(--color-primary) 14%);
+  background: var(--color-surface-container);
+  padding: 0.85rem 0.72rem 0.75rem;
+  box-shadow: none;
+}
+
+.Prudentia-sidebar .Prudentia-brand-mark {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.42rem;
+}
+
+.Prudentia-sidebar-collapse-button {
+  position: relative;
+  display: inline-flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--color-on-surface-variant);
+  box-shadow: none;
+  opacity: 0.78;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.Prudentia-sidebar-collapse-button:hover,
+.Prudentia-sidebar-collapse-button:focus-visible {
+  border-color: color-mix(in srgb, var(--color-primary) 24%, transparent);
+  background: color-mix(in srgb, var(--color-primary-container) 50%, transparent);
+  color: var(--color-primary);
+  opacity: 1;
+}
+
+.Prudentia-sidebar-collapse-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 38%, transparent);
+  outline-offset: 2px;
+}
+
+.Prudentia-sidebar-collapse-logo {
+  display: none;
+}
+
+.Prudentia-sidebar-collapse-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.Prudentia-sidebar-header {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-surface-border) 82%, transparent);
+  margin-bottom: 0.75rem;
+  padding: 0 0.15rem 0.7rem;
+}
+
+.Prudentia-sidebar-product {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.Prudentia-sidebar-product-context {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.Prudentia-sidebar-context-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.Prudentia-sidebar-context-heading h2 {
+  color: var(--color-on-surface);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1rem;
+  text-transform: uppercase;
+}
+
+.Prudentia-sidebar-space-control {
+  min-width: 0;
+  flex: 1;
+}
+
+.Prudentia-sidebar-space-control .rag-space-switcher,
+.Prudentia-sidebar-space-control .rag-space-switcher select {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.Prudentia-sidebar-space-control .rag-space-switcher select {
+  min-height: 2.1rem;
+  border-radius: 0.42rem;
+  padding-inline: 0.62rem;
+  font-size: 0.72rem;
+}
+
+.Prudentia-sidebar-space-control .rag-space-switcher {
+  gap: 0.2rem;
+}
+
+.Prudentia-sidebar-space-control .rag-space-switcher span {
+  font-size: 0.58rem;
+  line-height: 0.85rem;
+}
+
+.Prudentia-sidebar-space-control .rag-space-meta {
+  gap: 0.45rem;
+}
+
+.Prudentia-sidebar-space-control .rag-space-meta small,
+.Prudentia-sidebar-space-control .rag-space-meta span {
+  font-size: 0.62rem;
+}
+
+.Prudentia-sidebar-nav {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.18rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.12rem;
+}
+
+.Prudentia-sidebar-section {
+  margin: 0.68rem 0 0.18rem;
+  padding: 0 0.55rem;
+  color: var(--color-secondary);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 0.85rem;
+  text-transform: uppercase;
+}
+
+.Prudentia-nav-group {
+  display: grid;
+  gap: 0.16rem;
+}
+
+.Prudentia-sidenav-item,
+.Prudentia-sidenav-item-active {
+  position: relative;
+  display: flex;
+  min-height: var(--control-height-md);
+  width: 100%;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  padding: 0.38rem 0.56rem;
+  text-align: left;
+  color: var(--color-on-surface-variant);
+  font-size: 0.76rem;
+  line-height: 1.15;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease, border-color var(--motion-fast) ease;
+}
+
+.Prudentia-sidenav-item:hover {
+  border-color: color-mix(in srgb, var(--color-surface-border) 74%, var(--color-primary) 18%);
+  background: color-mix(in srgb, var(--color-surface-container-high) 86%, transparent);
+  color: var(--color-on-surface);
+}
+
+.Prudentia-sidenav-item-active {
+  border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-primary-container) 68%, var(--color-surface-container-low));
+  color: var(--color-primary);
+  font-weight: 700;
+  box-shadow: inset 2px 0 0 var(--color-primary);
+}
+
+.Prudentia-nav-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.Prudentia-sidenav-item small,
+.Prudentia-sidenav-item-active small,
+.Prudentia-nav-chevron {
+  flex: none;
+}
+
+.Prudentia-sidenav-item small,
+.Prudentia-sidenav-item-active small {
+  display: inline-flex;
+  min-width: 1.08rem;
+  height: 1.08rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-radius: 999px;
+  padding: 0 0.25rem;
+  font-size: 0.56rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.Prudentia-nav-chevron {
+  color: var(--color-secondary);
+}
+
+.Prudentia-sidenav-children {
+  display: grid;
+  gap: 0.1rem;
+  margin: 0.06rem 0 0.18rem 1.35rem;
+  padding-left: 0.55rem;
+  border-left: 1px solid color-mix(in srgb, var(--color-surface-border) 76%, var(--color-primary) 10%);
+}
+
+.Prudentia-sidenav-child,
+.Prudentia-sidenav-child-active {
+  display: flex;
+  min-height: 2.25rem;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  border: 0;
+  border-radius: 0.35rem;
+  padding: 0.2rem 0.38rem;
+  background: transparent;
+  color: var(--color-secondary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.Prudentia-sidenav-child:hover {
+  background: color-mix(in srgb, var(--color-surface-container-high) 78%, transparent);
+  color: var(--color-on-surface);
+}
+
+.Prudentia-sidenav-child-active {
+  background: color-mix(in srgb, var(--color-primary-container) 48%, transparent);
+  color: var(--color-primary);
+}
+
+.Prudentia-sidenav-child small {
+  display: inline-flex;
+  min-width: 1.08rem;
+  height: 1.08rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, currentColor 24%, transparent);
+  border-radius: 999px;
+  padding: 0 0.25rem;
+  font-size: 0.56rem;
+  font-weight: 700;
+}
+
+.Prudentia-main {
+  min-width: 0;
+  height: 100dvh;
+  margin-left: var(--sidebar-width);
+  min-height: 0;
+  padding-top: 0;
+  overflow: hidden;
+  background: var(--color-background);
+}
+
+@media (min-width: 901px) {
+  .Prudentia-sidebar-collapsed {
+    align-items: center;
+    padding: 0.6rem 0.35rem 0.55rem;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-collapse-button {
+    width: 2.25rem;
+    height: 2.25rem;
+    margin: 0 auto;
+    border-color: transparent;
+    background: transparent;
+    opacity: 1;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-context-heading > .Prudentia-brand-mark,
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-product > .Prudentia-brand-mark {
+    display: none;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-collapse-logo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 1;
+    transform: scale(1);
+    transition: opacity 150ms ease, transform 150ms ease;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-collapse-logo .Prudentia-brand-mark {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-collapse-icon {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transform: scale(0.88);
+    transition: opacity 150ms ease, transform 150ms ease;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-collapse-button:hover,
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-collapse-button:focus-visible,
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-context-heading:hover .Prudentia-sidebar-collapse-button {
+    border-color: color-mix(in srgb, var(--color-primary) 24%, transparent);
+    background: color-mix(in srgb, var(--color-primary-container) 50%, transparent);
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-collapse-button:hover .Prudentia-sidebar-collapse-logo,
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-collapse-button:focus-visible .Prudentia-sidebar-collapse-logo,
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-context-heading:hover .Prudentia-sidebar-collapse-logo {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-collapse-button:hover .Prudentia-sidebar-collapse-icon,
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-collapse-button:focus-visible .Prudentia-sidebar-collapse-icon,
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-context-heading:hover .Prudentia-sidebar-collapse-icon {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-header {
+    width: 100%;
+    margin-bottom: 0.4rem;
+    padding: 0 0 0.45rem;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-product,
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-context-heading {
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.35rem;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-product .min-w-0,
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-context-heading .min-w-0,
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-space-control,
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-section,
+  .Prudentia-sidebar-collapsed .Prudentia-nav-label,
+  .Prudentia-sidebar-collapsed .Prudentia-nav-chevron,
+  .Prudentia-sidebar-collapsed .Prudentia-sidenav-item small,
+  .Prudentia-sidebar-collapsed .Prudentia-sidenav-item-active small,
+  .Prudentia-sidebar-collapsed .Prudentia-sidenav-children {
+    display: none;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-nav {
+    width: 100%;
+    align-items: center;
+    gap: 0.16rem;
+    padding: 0;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-nav-group {
+    width: 100%;
+    justify-items: center;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidenav-item,
+  .Prudentia-sidebar-collapsed .Prudentia-sidenav-item-active {
+    width: 2.25rem;
+    min-height: 2.25rem;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-sidebar-footer {
+    width: 100%;
+    justify-items: center;
+    padding-top: 0.45rem;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-account-button,
+  .Prudentia-sidebar-collapsed .Prudentia-theme-switch,
+  .Prudentia-sidebar-collapsed .Prudentia-signout-button {
+    width: 2.25rem;
+    min-height: 2.25rem;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-account-button > div:last-child,
+  .Prudentia-sidebar-collapsed .Prudentia-theme-switch-label > span,
+  .Prudentia-sidebar-collapsed .Prudentia-switch-track {
+    display: none;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-theme-switch-label {
+    gap: 0;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-signout-button {
+    gap: 0;
+    font-size: 0;
+  }
+
+  .Prudentia-sidebar-collapsed .Prudentia-signout-button svg {
+    width: 1rem;
+    height: 1rem;
+  }
+}

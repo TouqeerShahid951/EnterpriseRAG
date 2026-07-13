@@ -1,0 +1,556 @@
+
+.sv-card {
+  min-width: 0;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-card);
+  box-shadow: var(--shadow-raised);
+}
+
+.sv-panel {
+  min-width: 0;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-card);
+  box-shadow: none;
+}
+
+.sv-panel.p-5,
+.sv-card.p-5 {
+  padding: 1rem;
+}
+
+.sv-panel.p-6,
+.sv-card.p-6 {
+  padding: 1.125rem;
+}
+
+.sv-panel.p-8,
+.sv-card.p-8,
+.Prudentia-session-card.p-8 {
+  padding: 1.25rem;
+}
+
+.sv-section-title {
+  color: var(--color-on-surface);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.sv-metadata {
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1rem;
+  text-transform: uppercase;
+}
+
+.sv-action-primary,
+.sv-action-secondary,
+.sv-action-danger {
+  display: inline-flex;
+  position: relative;
+  min-width: 0;
+  min-height: var(--control-height-md);
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: 0.5rem;
+  padding: 0 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
+  transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+
+.sv-action-primary {
+  border: 1px solid color-mix(in srgb, var(--color-primary) 72%, transparent);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: none;
+}
+
+.sv-action-primary:hover {
+  background: color-mix(in srgb, var(--color-primary) 90%, var(--color-on-surface));
+}
+
+.sv-action-secondary {
+  border: 1px solid var(--color-surface-border);
+  background: color-mix(in srgb, var(--color-surface-container-low) 88%, transparent);
+  color: var(--color-on-surface);
+  box-shadow: none;
+}
+
+.sv-action-secondary:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+}
+
+.sv-action-danger {
+  border: 1px solid color-mix(in srgb, var(--color-error-red) 34%, transparent);
+  background: var(--color-error-container);
+  color: var(--color-error-red);
+}
+
+.sv-action-danger:hover {
+  border-color: color-mix(in srgb, var(--color-error-red) 48%, transparent);
+  background: color-mix(in srgb, var(--color-error-red) 12%, var(--color-error-container));
+}
+
+.sv-input,
+.sv-select,
+.sv-textarea {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface) 88%, var(--color-surface-container-low));
+  color: var(--color-on-surface);
+  min-height: var(--control-height-md);
+  padding: 0.55rem 0.7rem;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 4%, transparent);
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.sv-input.sv-input-with-leading-icon {
+  padding-left: 2.75rem;
+}
+
+.sv-textarea {
+  min-height: 8rem;
+  resize: vertical;
+}
+
+.sv-input::placeholder,
+.sv-textarea::placeholder {
+  color: var(--color-secondary);
+}
+
+.sv-input:focus,
+.sv-select:focus,
+.sv-textarea:focus {
+  border-color: color-mix(in srgb, var(--color-primary) 62%, var(--color-surface-border));
+  outline: none;
+  background: var(--color-surface-container-low);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 5%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+:root.light .Prudentia-shell {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--color-primary) 3%, transparent), transparent 24rem),
+    transparent;
+}
+
+:root.light .Prudentia-main {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-container-low) 52%, transparent), transparent 20rem),
+    var(--color-background);
+}
+
+:root.light .Prudentia-sidebar {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 98%, transparent), color-mix(in srgb, var(--color-surface-container) 94%, transparent)),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--color-primary) 4%, transparent), transparent 38%);
+  box-shadow:
+    0.55rem 0 1.7rem color-mix(in srgb, oklch(0.38 0.018 274) 8%, transparent),
+    inset -1px 0 0 color-mix(in srgb, var(--color-on-surface) 5%, transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:root.light .sv-card {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-card) 98%, transparent), color-mix(in srgb, var(--color-surface-container-low) 88%, transparent));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-surface-bright) 72%, transparent),
+    0 0.75rem 1.8rem color-mix(in srgb, oklch(0.38 0.018 274) 5%, transparent);
+}
+
+:root.light .sv-panel,
+:root.light .rag-empty-state {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 96%, transparent), color-mix(in srgb, var(--color-surface-container-low) 90%, transparent));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-surface-bright) 70%, transparent);
+}
+
+:root.light .sv-input,
+:root.light .sv-select,
+:root.light .sv-textarea,
+:root.light .rag-space-switcher select {
+  background: var(--color-surface);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-surface-bright) 78%, transparent);
+}
+
+:root.light .sv-input:focus,
+:root.light .sv-select:focus,
+:root.light .sv-textarea:focus {
+  background: var(--color-surface-bright);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-surface-bright) 86%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+:root.light .sv-action-secondary,
+:root.light .rag-secondary-action,
+:root.light .Prudentia-icon-button {
+  background: color-mix(in srgb, var(--color-surface) 92%, var(--color-surface-container-low));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-surface-bright) 76%, transparent),
+    0 0.3rem 0.8rem color-mix(in srgb, oklch(0.38 0.018 274) 4%, transparent);
+}
+
+:root.light .sv-action-primary {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-primary) 24%, transparent),
+    0 0.55rem 1.2rem color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+
+:root.light .Prudentia-sidenav-item:hover,
+:root.light .Prudentia-sidenav-child:hover {
+  background: color-mix(in srgb, var(--color-surface-container-high) 72%, var(--color-surface));
+}
+
+:root.light .Prudentia-sidenav-item-active {
+  background: color-mix(in srgb, var(--color-primary-container) 74%, var(--color-surface));
+  color: var(--color-primary);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-surface-bright) 64%, transparent);
+}
+
+:root.light .Prudentia-sidenav-child-active {
+  background: color-mix(in srgb, var(--color-primary-container) 68%, var(--color-surface));
+}
+
+:root.light .sv-table-wrap {
+  background: var(--color-surface-card);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-surface-bright) 72%, transparent),
+    0 0.65rem 1.6rem color-mix(in srgb, oklch(0.38 0.018 274) 5%, transparent);
+}
+
+:root.light .sv-table th {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-bright) 52%, transparent), transparent 58%),
+    var(--color-surface-container);
+}
+
+:root.light .rag-chat-header {
+  background: linear-gradient(90deg, var(--color-surface), color-mix(in srgb, var(--color-surface-container-low) 84%, transparent));
+  backdrop-filter: none;
+}
+
+:root.light .rag-corpus-rail,
+:root.light .rag-evidence-panel,
+:root.light .rag-history-drawer {
+  background: var(--color-surface-card);
+  backdrop-filter: none;
+}
+
+:root.light .rag-evidence-panel {
+  box-shadow: -0.7rem 0 1.6rem color-mix(in srgb, oklch(0.38 0.018 274) 6%, transparent);
+}
+
+:root.light .rag-history-drawer {
+  box-shadow: 0.7rem 0 1.4rem color-mix(in srgb, oklch(0.38 0.018 274) 6%, transparent);
+}
+
+:root.light .rag-secondary-action {
+  backdrop-filter: none;
+}
+
+:root:not(.light) .Prudentia-sidebar {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 4%, transparent), transparent 22%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-container) 98%, transparent), color-mix(in srgb, var(--color-surface-card) 94%, transparent)),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--color-primary) 7%, transparent), transparent 36%);
+  box-shadow:
+    0.9rem 0 2.4rem color-mix(in srgb, oklch(0.04 0.012 285) 30%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 7%, transparent),
+    inset -1px 0 0 color-mix(in srgb, var(--color-on-surface) 4%, transparent);
+}
+
+:root:not(.light) .Prudentia-icon-button,
+:root:not(.light) .Prudentia-icon-button {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 5%, transparent), transparent 46%),
+    color-mix(in srgb, var(--color-surface-container-low) 92%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 9%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, oklch(0.04 0.012 285) 28%, transparent);
+}
+
+:root:not(.light) .Prudentia-icon-button:hover,
+:root:not(.light) .Prudentia-sidebar-collapse-button:hover,
+:root:not(.light) .Prudentia-sidebar-collapse-button:focus-visible {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 6%, transparent), transparent 42%),
+    var(--color-surface-container-high);
+}
+
+:root:not(.light) .Prudentia-sidenav-item:hover {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 4%, transparent), transparent 48%),
+    color-mix(in srgb, var(--color-surface-container-high) 88%, transparent);
+}
+
+:root:not(.light) .Prudentia-sidenav-item-active {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 5%, transparent), transparent 48%),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-primary) 14%, transparent), color-mix(in srgb, var(--color-primary-container) 58%, var(--color-surface-container-low)));
+  box-shadow:
+    inset 2px 0 0 var(--color-primary),
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 9%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, oklch(0.04 0.012 285) 24%, transparent);
+}
+
+:root:not(.light) .Prudentia-sidenav-child:hover,
+:root:not(.light) .Prudentia-sidenav-child-active {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 4%, transparent), transparent 54%),
+    color-mix(in srgb, var(--color-surface-container-high) 82%, transparent);
+}
+
+:root:not(.light) .Prudentia-sidenav-child-active {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 4%, transparent), transparent 54%),
+    color-mix(in srgb, var(--color-primary-container) 46%, transparent);
+}
+
+:root:not(.light) .sv-card {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 5%, transparent), transparent 24%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-card) 98%, transparent), color-mix(in srgb, var(--color-surface-container-low) 88%, transparent));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 8%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, oklch(0.04 0.012 285) 26%, transparent),
+    0 1rem 2.4rem color-mix(in srgb, oklch(0.04 0.012 285) 18%, transparent);
+}
+
+:root:not(.light) .sv-panel {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 4%, transparent), transparent 24%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface-card) 94%, transparent), color-mix(in srgb, var(--color-surface-container-low) 82%, transparent));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 8%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, oklch(0.04 0.012 285) 24%, transparent);
+}
+
+:root:not(.light) .sv-action-secondary {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 5%, transparent), transparent 48%),
+    color-mix(in srgb, var(--color-surface-container-low) 90%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 9%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, oklch(0.04 0.012 285) 28%, transparent);
+}
+
+:root:not(.light) .sv-action-secondary:hover {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 6%, transparent), transparent 44%),
+    var(--color-surface-container-high);
+}
+
+:root:not(.light) .sv-input,
+:root:not(.light) .sv-select,
+:root:not(.light) .sv-textarea {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 4%, transparent), transparent 46%),
+    color-mix(in srgb, var(--color-surface) 84%, var(--color-surface-container-low));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 7%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, oklch(0.04 0.012 285) 24%, transparent);
+}
+
+:root:not(.light) .sv-input:focus,
+:root:not(.light) .sv-select:focus,
+:root:not(.light) .sv-textarea:focus {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 5%, transparent), transparent 42%),
+    var(--color-surface-container-low);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 9%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, oklch(0.04 0.012 285) 22%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+
+:root:not(.light) .border-surface-border.bg-surface,
+:root:not(.light) .border-surface-border.bg-surface-container,
+:root:not(.light) .border-surface-border.bg-surface-container-low,
+:root:not(.light) .border-surface-border.bg-surface-container-high,
+:root:not(.light) .border-surface-border.bg-surface-card {
+  background-image:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 4%, transparent), transparent 34%),
+    linear-gradient(180deg, transparent 62%, color-mix(in srgb, oklch(0.04 0.012 285) 24%, transparent));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 7%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, oklch(0.04 0.012 285) 24%, transparent);
+}
+
+.sv-filter-select {
+  min-width: 0;
+  width: 12rem;
+}
+
+.sv-label {
+  display: block;
+  color: var(--color-on-surface-variant);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1rem;
+  text-transform: uppercase;
+}
+
+.sv-field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.sv-pill {
+  display: inline-flex;
+  min-height: 1.75rem;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 5%, transparent), transparent 46%),
+    color-mix(in srgb, var(--color-surface-container-low) 92%, transparent);
+  padding: 0 0.65rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.sv-pill:is(.sv-pill-success, .sv-pill-warning, .knowledge-status-processing, .knowledge-status-queued, .knowledge-status-scheduled, .knowledge-status-human_review, .knowledge-status-failed, .knowledge-status-complete, .knowledge-status-unknown)::before {
+  content: "";
+  width: 0.42rem;
+  height: 0.42rem;
+  flex: none;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 0.18rem color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.sv-pill-success {
+  border-color: color-mix(in srgb, var(--color-success) 36%, transparent);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  color: var(--color-on-surface);
+}
+
+.sv-pill-warning {
+  border-color: color-mix(in srgb, var(--color-warning-amber) 32%, transparent);
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--color-warning-amber);
+}
+
+.sv-metric {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-card);
+  padding: 1rem;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.sv-metric:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 22%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-surface-card) 86%, var(--color-surface-container-high));
+}
+
+.sv-metric-value {
+  color: var(--color-on-surface);
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.sv-skeleton {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.375rem;
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--color-surface-container-high) 92%, transparent) 20%,
+    color-mix(in srgb, var(--color-on-surface) 10%, var(--color-surface-container-highest)) 46%,
+    color-mix(in srgb, var(--color-surface-container-high) 92%, transparent) 72%
+  );
+  background-size: 220% 100%;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 4%, transparent);
+  animation: Prudentia-skeleton-shimmer 1.35s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes Prudentia-skeleton-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -120% 0; }
+}
+
+.sv-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface-card) 78%, transparent);
+  box-shadow: none;
+}
+
+.sv-table {
+  width: 100%;
+  min-width: min(44rem, 100%);
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.sv-table caption {
+  color: var(--color-on-surface-variant);
+  font-size: 0.78rem;
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+}
+
+.sv-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--color-surface-border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-on-surface) 5%, transparent), transparent 60%),
+    color-mix(in srgb, var(--color-surface-container) 98%, transparent);
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.55rem 0.8rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sv-table td {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-surface-border) 78%, transparent);
+  padding: 0.65rem 0.8rem;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.sv-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.sv-table-row {
+  color: var(--color-on-surface);
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+
+.sv-table-row:hover,
+.sv-table-row[aria-selected="true"] {
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface-container-low));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 24%, transparent);
+}

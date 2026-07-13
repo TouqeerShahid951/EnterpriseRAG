@@ -1,0 +1,225 @@
+
+@media (min-width: 1280px) {
+  .connector-profile-form-overview {
+    grid-template-columns: 0.8fr 1fr 1fr 0.7fr 1fr 1fr 1fr auto;
+  }
+}
+
+@media (min-width: 2200px) {
+  .sv-page-header {
+    gap: 1.25rem;
+    margin-bottom: 1.2rem;
+    padding-bottom: 0.9rem;
+  }
+
+  .sv-page :is(.sv-panel.p-5, .sv-card.p-5) {
+    padding: var(--sv-page-panel-pad);
+  }
+
+  .Prudentia-shell[data-route="upload"] .sv-page-inner > .grid,
+  .Prudentia-shell[data-route="document-extraction"] .sv-page-inner > .sv-panel:not(.connector-page-panel) > .space-y-5 {
+    display: grid;
+    gap: var(--sv-page-gap);
+    grid-template-columns: minmax(0, 1.42fr) minmax(25rem, 0.58fr);
+  }
+
+  .Prudentia-shell[data-route="upload"] .sv-page-inner > .grid > form {
+    min-width: 0;
+  }
+
+  .sv-page-inner.database-connectors-page-inner {
+    --sv-page-max-width: min(100%, 150rem);
+  }
+
+  .connector-page-panel {
+    gap: 1.15rem;
+  }
+
+  .connector-workflow-bar {
+    grid-template-columns: minmax(0, 1.2fr) minmax(31rem, 0.8fr);
+    padding: 1.1rem;
+  }
+
+  .connector-overview-grid {
+    gap: 0.8rem;
+  }
+
+  .connector-table-section {
+    padding: 1.1rem;
+    overflow: visible;
+  }
+
+  .connector-profile-table {
+    min-width: 72rem;
+  }
+
+  .connector-profile-table-wrap {
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  .connector-row-actions {
+    align-items: center;
+  }
+
+  .connector-row-menu-items {
+    right: 0;
+    max-width: min(16rem, calc(100vw - 4rem));
+  }
+
+  .knowledge-context {
+    gap: 1rem;
+    grid-template-columns: minmax(0, 1.15fr) minmax(34rem, 0.85fr);
+    padding: 1rem;
+  }
+
+  .knowledge-job-metrics,
+.knowledge-spaces-metrics {
+    gap: 0.85rem;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  }
+
+  .knowledge-overview-status {
+    grid-template-columns: minmax(0, 1.55fr) minmax(22rem, 0.65fr);
+    padding: 1rem;
+  }
+
+  .knowledge-document-workspace-with-inspector,
+  .knowledge-explorer-shell-with-inspector {
+    grid-template-columns: minmax(0, 1fr) minmax(26rem, 30rem);
+  }
+
+  .knowledge-inspector {
+    top: 1.25rem;
+    max-height: calc(100dvh - 2.5rem);
+    padding: 0.9rem;
+  }
+
+  .ingest-job-filters {
+    grid-template-columns: minmax(18rem, 1.35fr) repeat(5, minmax(10rem, 0.8fr));
+    gap: 0.8rem;
+  }
+
+  .ingest-job-search {
+    grid-column: span 2;
+  }
+
+  .ingestion-health-metrics {
+    gap: 0.9rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .ingestion-health-grid {
+    gap: 1.1rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .ingestion-graph-panel,
+  .ingestion-recovery-panel {
+    grid-column: span 2;
+  }
+
+  .ingestion-graph-task-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .audit-toolbar {
+    gap: 0.7rem;
+    padding: 0.8rem;
+  }
+
+  .audit-primary-filters {
+    grid-template-columns: minmax(18rem, 1.4fr) minmax(9rem, 0.5fr) minmax(13rem, 0.8fr) minmax(14rem, 0.8fr);
+    gap: 0.7rem;
+  }
+
+  .audit-advanced-filter-grid {
+    grid-template-columns: repeat(5, minmax(9rem, 1fr));
+    gap: 0.7rem;
+  }
+
+  .audit-table {
+    min-width: 86rem;
+  }
+
+  .audit-event-button {
+    max-width: 48rem;
+  }
+
+  .admin-chat-activity-grid {
+    grid-template-columns: minmax(22rem, 0.38fr) minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 3200px) {
+  .Prudentia-shell[data-route="upload"] .sv-page-inner > .grid,
+  .Prudentia-shell[data-route="document-extraction"] .sv-page-inner > .sv-panel:not(.connector-page-panel) > .space-y-5 {
+    grid-template-columns: minmax(0, 1.65fr) minmax(31rem, 0.55fr);
+  }
+
+  .sv-page-inner.database-connectors-page-inner {
+    --sv-page-max-width: min(100%, 216rem);
+  }
+
+  .connector-workflow-bar {
+    grid-template-columns: minmax(0, 1.35fr) minmax(44rem, 0.65fr);
+  }
+
+  .connector-profile-table {
+    min-width: 92rem;
+  }
+
+  .knowledge-context {
+    grid-template-columns: minmax(0, 1.25fr) minmax(48rem, 0.75fr);
+  }
+
+  .knowledge-document-workspace-with-inspector,
+  .knowledge-explorer-shell-with-inspector {
+    grid-template-columns: minmax(0, 1fr) minmax(30rem, 36rem);
+    gap: 1.3rem;
+  }
+
+  .ingestion-health-metrics {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+
+  .ingestion-health-metric {
+    grid-column: span 2;
+  }
+
+  .ingestion-graph-task-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .audit-summary-strip {
+    gap: 0.5rem;
+  }
+
+  .audit-metric {
+    min-height: 2.25rem;
+    padding: 0.35rem 0.6rem;
+  }
+
+  .audit-table {
+    min-width: 112rem;
+  }
+}
+
+@media (min-width: 5120px) {
+  .sv-page-inner.database-connectors-page-inner {
+    --sv-page-max-width: min(100%, calc(100vw - 4rem));
+  }
+
+  .connector-profile-table {
+    min-width: 122rem;
+  }
+
+  .knowledge-document-workspace-with-inspector,
+  .knowledge-explorer-shell-with-inspector {
+    grid-template-columns: minmax(0, 1fr) minmax(34rem, 42rem);
+  }
+
+  .audit-table {
+    min-width: 148rem;
+  }
+}

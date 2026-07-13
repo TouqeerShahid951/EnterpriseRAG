@@ -1,0 +1,412 @@
+
+@media (max-width: 900px) {
+  .admin-chat-activity-header,
+  .admin-chat-activity-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #root {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+
+  .Prudentia-shell {
+    display: block;
+    overflow-x: hidden;
+  }
+
+  body.Prudentia-mobile-nav-open {
+    overflow: hidden;
+  }
+
+  .Prudentia-mobile-nav-bar {
+    position: sticky;
+    top: 0;
+    z-index: 35;
+    display: flex;
+    min-height: 3.75rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    border-bottom: 1px solid var(--color-surface-border);
+    background: color-mix(in srgb, var(--color-surface-container) 94%, transparent);
+    padding: 0.65rem 1rem;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .Prudentia-mobile-brand {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--color-primary);
+  }
+
+  .Prudentia-mobile-brand-mark {
+    height: 2rem;
+    width: 2rem;
+    border-radius: 0.45rem;
+  }
+
+  .Prudentia-mobile-brand span,
+  .Prudentia-mobile-brand strong,
+  .Prudentia-mobile-brand small {
+    display: block;
+    min-width: 0;
+  }
+
+  .Prudentia-mobile-brand strong {
+    color: var(--color-on-surface);
+    font-size: 0.8rem;
+  }
+
+  .Prudentia-mobile-brand small {
+    overflow: hidden;
+    color: var(--color-secondary);
+    font-size: 0.68rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .Prudentia-mobile-nav-bar > button,
+  .Prudentia-sidebar-mobile-heading button {
+    display: inline-flex;
+    min-height: var(--control-height-md);
+    min-width: var(--control-height-md);
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-surface-border);
+    border-radius: 0.5rem;
+    background: var(--color-surface-container-high);
+    color: var(--color-on-surface);
+  }
+
+  .Prudentia-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 49;
+    display: block;
+    border: 0;
+    background: rgba(0, 0, 0, 0.64);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease;
+  }
+
+  .Prudentia-sidebar-backdrop-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .Prudentia-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    z-index: 50;
+    width: min(22rem, calc(100vw - 2.5rem));
+    min-height: 100dvh;
+    min-width: min(22rem, calc(100vw - 2.5rem));
+    max-width: min(22rem, calc(100vw - 2.5rem));
+    max-height: 100dvh;
+    overflow: hidden;
+    border-right: 1px solid var(--color-surface-border);
+    border-bottom: 0;
+    padding: 1rem;
+    box-shadow: 16px 0 48px rgba(0, 0, 0, 0.42);
+    transform: translateX(-105%);
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform var(--motion-standard) var(--ease-out-product), visibility 0s linear var(--motion-standard);
+  }
+
+  .Prudentia-sidebar-mobile-open {
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+    transition-delay: 0s;
+  }
+
+  .Prudentia-sidebar-mobile-heading {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+    color: var(--color-on-surface);
+  }
+
+  .Prudentia-sidebar-mobile-heading-brand {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .Prudentia-sidebar-collapse-button {
+    display: none;
+  }
+
+  .Prudentia-sidebar-header {
+    margin-bottom: 0.75rem;
+    padding: 0 0 0.75rem;
+  }
+
+  .Prudentia-main {
+    height: auto;
+    margin-left: 0;
+    padding-top: 0;
+    overflow: visible;
+  }
+
+  .Prudentia-sidebar-nav {
+    flex: 1 1 auto;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0 0.25rem 0 0;
+  }
+
+  .Prudentia-sidebar-nav button {
+    min-height: var(--control-height-md);
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .Prudentia-sidebar-footer {
+    display: grid;
+    gap: 0.5rem;
+    padding-inline: 0;
+  }
+
+  .Prudentia-account-button {
+    min-height: var(--control-height-md);
+    width: 100%;
+  }
+
+  .Prudentia-theme-switch,
+  .Prudentia-signout-button {
+    min-height: var(--control-height-md);
+    width: 100%;
+  }
+
+  .Prudentia-sidebar-resize-handle {
+    display: none;
+  }
+
+  .Prudentia-main main#main-content.flex {
+    flex-direction: column;
+  }
+
+  .Prudentia-main main#main-content.flex > aside {
+    width: 100%;
+    border-left: 0;
+    border-top: 1px solid var(--color-surface-border);
+  }
+
+  .sv-page {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    padding: 0.75rem;
+  }
+
+  .sv-page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sv-filter-select {
+    width: 100%;
+  }
+
+  .knowledge-context {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-section-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .knowledge-spaces-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-spaces-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .knowledge-spaces-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-space-directory-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-surface-border);
+  }
+
+  .knowledge-explorer-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-document-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-inspector {
+    position: static;
+    max-height: none;
+  }
+
+  .knowledge-inspector {
+    order: 3;
+  }
+
+  .knowledge-overview-status {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-lifecycle-strip,
+  .knowledge-status-shortcuts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .knowledge-section-header .sv-action-primary,
+  .knowledge-section-header .sv-action-secondary {
+    width: 100%;
+  }
+
+  .sv-dialog,
+  .sv-dialog-sm,
+  .sv-dialog-lg {
+    width: min(calc(100vw - 1rem), 42rem);
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .sv-dialog-panel {
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .ingest-job-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ingest-job-search {
+    grid-column: 1 / -1;
+  }
+
+  .audit-toolbar-top {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .audit-summary-strip {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .audit-primary-filters,
+  .audit-advanced-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .audit-search {
+    grid-column: 1 / -1;
+  }
+
+  .audit-date-range {
+    grid-column: 1 / -1;
+  }
+
+  .audit-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .audit-detail-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ingestion-health-metrics,
+  .ingestion-health-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) and (min-width: 681px) {
+  .knowledge-document-workspace-with-inspector .knowledge-inspector,
+  .knowledge-explorer-shell-with-inspector .knowledge-inspector {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 45;
+    order: initial;
+    width: min(26rem, calc(100vw - 2rem));
+    max-height: none;
+    overflow: auto;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.38);
+  }
+}
+
+@media (max-width: 980px) and (min-width: 761px) {
+  .knowledge-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-toolbar-controls,
+  .knowledge-toolbar-controls-wide {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .knowledge-toolbar-meta {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 760px) and (min-width: 681px) {
+  .knowledge-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-toolbar-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .knowledge-toolbar-controls-wide {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .knowledge-toolbar-meta {
+    justify-content: space-between;
+  }
+
+  .knowledge-doc-list-header {
+    display: none;
+  }
+
+  .knowledge-doc-row {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0.55rem 0.7rem;
+  }
+
+  .knowledge-doc-primary,
+  .knowledge-doc-scope,
+  .knowledge-doc-status-stack,
+  .knowledge-doc-effective,
+  .knowledge-doc-actions {
+    grid-column: 2 / -1;
+  }
+
+  .knowledge-row-actions {
+    justify-content: flex-start;
+  }
+}

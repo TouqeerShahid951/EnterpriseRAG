@@ -1,0 +1,231 @@
+
+.user-management-table th:last-child,
+.user-management-table td:last-child {
+  width: 8.5rem;
+}
+
+.user-management-table td:last-child {
+  vertical-align: middle;
+}
+
+.user-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.25rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-surface-container-low) 78%, transparent);
+  padding: 0.25rem;
+  white-space: nowrap;
+}
+
+.user-row-action {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 0.42rem;
+  background: transparent;
+  color: var(--color-on-surface-variant);
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.user-row-action:hover,
+.user-row-action:focus-visible {
+  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+}
+
+.user-row-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 70%, transparent);
+  outline-offset: 2px;
+}
+
+.user-row-action-danger {
+  color: var(--color-error-red);
+}
+
+.user-row-action-danger:hover,
+.user-row-action-danger:focus-visible {
+  border-color: color-mix(in srgb, var(--color-error-red) 38%, var(--color-surface-border));
+  background: color-mix(in srgb, var(--color-error-container) 76%, transparent);
+  color: var(--color-error-red);
+}
+
+.admin-chat-activity {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-chat-activity-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: start;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 1rem;
+}
+
+.admin-chat-activity-header h3,
+.admin-chat-panel-heading h3,
+.admin-chat-transcript header h3 {
+  margin: 0;
+  color: var(--color-on-surface);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.admin-chat-activity-header p,
+.admin-chat-activity-header small,
+.admin-chat-panel-heading p,
+.admin-chat-transcript header p {
+  margin: 0.2rem 0 0;
+  color: var(--color-on-surface-variant);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.admin-chat-activity-header strong {
+  display: block;
+  color: var(--color-on-surface);
+  font-size: 0.95rem;
+}
+
+.admin-chat-activity-grid {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.8fr) minmax(0, 1.35fr);
+  gap: 1rem;
+  min-height: 27rem;
+}
+
+.admin-chat-session-panel,
+.admin-chat-transcript-panel {
+  min-width: 0;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+  padding: 0.9rem;
+}
+
+.admin-chat-panel-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.admin-chat-session-list,
+.admin-chat-turn-list {
+  display: grid;
+  gap: 0.6rem;
+  max-height: 30rem;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.admin-chat-session-item {
+  width: 100%;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  color: var(--color-on-surface);
+  padding: 0.75rem;
+  text-align: left;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.admin-chat-session-item:hover,
+.admin-chat-session-item.is-active {
+  border-color: color-mix(in srgb, var(--color-primary) 34%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+}
+
+.admin-chat-session-item strong,
+.admin-chat-session-item small {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-chat-session-item strong {
+  font-size: 0.83rem;
+  line-height: 1.35;
+}
+
+.admin-chat-session-item small {
+  margin-top: 0.25rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.admin-chat-transcript {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.admin-chat-turn {
+  display: grid;
+  gap: 0.55rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.85rem;
+}
+
+.admin-chat-turn-user {
+  background: color-mix(in srgb, var(--color-primary) 7%, var(--color-surface-container-low));
+}
+
+.admin-chat-turn > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.admin-chat-turn strong {
+  color: var(--color-on-surface);
+  font-size: 0.78rem;
+}
+
+.admin-chat-turn small {
+  color: var(--color-on-surface-variant);
+  font-size: 0.72rem;
+}
+
+.admin-chat-turn p {
+  margin: 0;
+  color: var(--color-on-surface);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.admin-chat-turn footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.admin-chat-turn footer span {
+  border: 1px solid var(--color-surface-border);
+  border-radius: 999px;
+  background: var(--color-surface-container);
+  color: var(--color-on-surface-variant);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1rem;
+  padding: 0.1rem 0.45rem;
+}

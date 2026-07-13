@@ -1,0 +1,108 @@
+
+.folder-schedule-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.85rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.folder-schedule-runs {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--color-surface-border);
+  padding-top: 0.75rem;
+}
+
+.folder-run-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  width: 100%;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+  padding: 0.7rem 0.8rem;
+  color: var(--color-on-surface);
+  text-align: left;
+}
+
+.folder-run-row-active {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-surface-border));
+  background: var(--color-primary-container);
+}
+
+.folder-run-row strong,
+.folder-run-row small {
+  display: block;
+}
+
+.folder-run-row small {
+  margin-top: 0.2rem;
+  color: var(--color-secondary);
+  font-size: 0.7rem;
+}
+
+.folder-run-items {
+  display: grid;
+  gap: 0.45rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.75rem;
+}
+
+.folder-run-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: center;
+  border-radius: 0.4rem;
+  background: var(--color-surface);
+  padding: 0.65rem;
+}
+
+.folder-run-item strong,
+.folder-run-item small {
+  display: block;
+}
+
+.folder-run-item strong {
+  overflow-wrap: anywhere;
+  color: var(--color-on-surface);
+  font-size: 0.78rem;
+}
+
+.folder-run-item small {
+  overflow-wrap: anywhere;
+  margin-top: 0.15rem;
+  color: var(--color-secondary);
+  font-size: 0.68rem;
+}
+
+.folder-run-item p {
+  grid-column: 2 / -1;
+  color: var(--color-warning-amber);
+  font-size: 0.7rem;
+}
+
+.folder-status-text {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  padding: 0.25rem 0.5rem;
+  color: var(--color-success);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.folder-status-text-attention {
+  background: color-mix(in srgb, var(--color-warning-amber) 12%, transparent);
+  color: var(--color-warning-amber);
+}
