@@ -9,8 +9,8 @@ from typing import Protocol
 from ..auth.abac import build_abac_filter
 from ..auth.document_access import can_read_group_path
 from ..shared.contracts.clearance import can_access_clearance
+from ..shared.contracts.evidence import ConflictPair, SourceAnchor
 from ..schemas.internal import ClaimRecord
-from .schemas import ConflictPair, SourceAnchor
 from .cancellation import call_with_optional_cancellation, cancellation_token_from_context
 from .qdrant import QdrantClient, SearchHit
 from .state import QueryContext, scoped_user_context, visible_group_paths

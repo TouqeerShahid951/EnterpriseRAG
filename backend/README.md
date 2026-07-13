@@ -65,7 +65,13 @@ registration, and maintenance process modules remain thin entrypoints around
 feature dependency providers. Public query transport is owned by `rag.query`:
 its aggregate router composes separate session-history, source-discovery, and
 query-execution routes, while query request and response contracts live in the
-same feature. `apps/api` only includes that aggregate router.
+same feature. `apps/api` only includes that aggregate router. Query maps public
+requests into the immutable `rag.artifact_jobs` submission contract before
+delegating generated-artifact work, so artifact application services do not
+depend on query transport DTOs. Citation, attribution, and conflict models used
+by multiple capabilities are canonically owned by `rag.shared.contracts.evidence`;
+`rag.query.schemas` explicitly re-exports them to preserve the public Python and
+OpenAPI contracts while internal code imports the shared owner directly.
 
 ## Runtime processes
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ..schemas.internal import ClaimRecord
-from ..query.schemas import ConflictPair
+from ..shared.contracts.evidence import ConflictPair
 
 
 @dataclass(frozen=True)

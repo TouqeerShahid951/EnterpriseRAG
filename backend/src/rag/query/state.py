@@ -6,13 +6,14 @@ from dataclasses import replace
 from typing import NotRequired, TypedDict
 
 from ..auth.context import UserContext
-from .schemas import ConflictPair, QueryIntent, QueryNodeTiming, QueryRequest, RAGResponse
+from ..shared.contracts.evidence import ConflictPair
 from .artifact_intent import ArtifactRequest, parse_artifact_request, requires_document_scope
 from .artifact_models import ArtifactContent, ArtifactPlan, ArtifactValidation, CoverageReport, EvidenceUnit
 from .cancellation import QueryCancellationToken
 from .evidence_quality import EvidenceQuality
 from .qdrant import SearchHit
 from .routing_models import QuerySignals, RoutePlan
+from .schemas import QueryIntent, QueryNodeTiming, QueryRequest, RAGResponse
 
 
 class QueryContext(TypedDict):

@@ -133,6 +133,28 @@ ARTIFACT_APPLICATION_FILES = (
     RAG_ROOT / "artifact_jobs" / "task_execution.py",
 )
 ARTIFACT_SUBMISSION_FILE = RAG_ROOT / "artifact_jobs" / "submission.py"
+SHARED_EVIDENCE_CONTRACT_FILE = RAG_ROOT / "shared" / "contracts" / "evidence.py"
+EVIDENCE_CONTRACT_NAMES = frozenset(
+    {
+        "ConflictPair",
+        "EvidenceField",
+        "EvidenceWindow",
+        "HighlightRange",
+        "SourceAnchor",
+        "SourceRegion",
+    }
+)
+QUERY_EVIDENCE_REEXPORT_TARGETS = frozenset(
+    f"rag.query.schemas.{name}" for name in EVIDENCE_CONTRACT_NAMES
+)
+ALLOWED_SHARED_EVIDENCE_IMPORTS = frozenset(
+    {
+        "pydantic",
+        "rag.schemas.common",
+        "rag.shared.contracts.clearance",
+        "typing",
+    }
+)
 EXPECTED_FEATURE_HTTP_HANDLER_OWNERS = {
     "list_documents": "rag.documents.routes",
     "get_document": "rag.documents.routes",
@@ -312,6 +334,46 @@ def test_query_schemas_are_transport_and_runtime_independent() -> None:
                 "rag.query.service",
             }
         ),
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_shared_evidence_contracts_have_exactly_one_class_owner() -> None:
+    actual_owners: dict[str, list[str]] = {
+        name: [] for name in EVIDENCE_CONTRACT_NAMES
+    }
+    for path in sorted(RAG_ROOT.rglob("*.py")):
+        module = _module_name(path)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name in actual_owners:
+                actual_owners[node.name].append(module)
+
+    assert {name: tuple(owners) for name, owners in actual_owners.items()} == {
+        name: ("rag.shared.contracts.evidence",)
+        for name in EVIDENCE_CONTRACT_NAMES
+    }
+
+
+def test_shared_evidence_contracts_are_dependency_light() -> None:
+    violations = _find_violations(
+        (SHARED_EVIDENCE_CONTRACT_FILE,),
+        lambda target: not any(
+            target == allowed or target.startswith(f"{allowed}.")
+            for allowed in ALLOWED_SHARED_EVIDENCE_IMPORTS
+        ),
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_production_code_uses_canonical_shared_evidence_contracts() -> None:
+    violations = _find_violations(
+        RAG_ROOT.rglob("*.py"),
+        lambda target: target in QUERY_EVIDENCE_REEXPORT_TARGETS,
         resolve_relative_imports=True,
     )
 

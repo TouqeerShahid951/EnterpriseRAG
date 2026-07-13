@@ -4,8 +4,8 @@ from pydantic import Field
 
 from .common import ContractModel
 from .docs import SupersedeRequest
-from ..query.schemas import ConflictPair
 from ..documents.upload_schemas import DocType, UploadJobStageProgress, UploadJobState
+from ..shared.contracts.evidence import ConflictPair
 
 
 class ServiceTokenContext(ContractModel):

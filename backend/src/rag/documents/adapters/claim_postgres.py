@@ -7,9 +7,9 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from ...shared.persistence import PostgresConnectionMixin
 from ...schemas.internal import ClaimRecord
-from ...query.schemas import ConflictPair, SourceAnchor
+from ...shared.contracts.evidence import ConflictPair, SourceAnchor
+from ...shared.persistence import PostgresConnectionMixin
 from ..claim_models import IngestClaimsResult
 
 CONFLICT_LOOKUP_QUERY = """

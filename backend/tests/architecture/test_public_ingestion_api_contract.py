@@ -122,6 +122,11 @@ def test_public_document_and_ingest_job_openapi_contract() -> None:
     paths = _load_api_app().openapi()["paths"]
 
     assert _operation_contracts(paths) == EXPECTED_OPERATIONS
+    assert paths["/api/v1/docs/{document_id}/sources/{chunk_id}"]["get"][
+        "responses"
+    ]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/SourceAnchor-Output"
+    }
 
 
 def _operation_contracts(

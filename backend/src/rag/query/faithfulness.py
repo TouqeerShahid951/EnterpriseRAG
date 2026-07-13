@@ -7,11 +7,12 @@ import math
 import re
 from dataclasses import dataclass, field
 
-from .schemas import EvidenceField, EvidenceWindow, HighlightRange, RAGResponse, SourceAnchor
+from ..shared.contracts.evidence import EvidenceField, EvidenceWindow, HighlightRange, SourceAnchor
 from .cancellation import QueryCancellationToken, QueryCancelled, call_with_optional_cancellation
 from .http import ServiceRequestError
 from .inference import InferenceClient
 from .reranker import DEFAULT_RERANKER_MODEL, rank_passages
+from .schemas import RAGResponse
 from .sources import source_citation
 
 FAITHFULNESS_CHECK_FAILED = "faithfulness_check_failed"
