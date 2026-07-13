@@ -74,6 +74,15 @@ EXPECTED_FEATURE_HTTP_HANDLER_OWNERS = {
     "list_query_sources": "rag.query.source_routes",
     "run_query": "rag.query.execution_routes",
     "stream_query": "rag.query.execution_routes",
+    "get_workspace_rag_config": "rag.query.rag_config_routes",
+    "reset_workspace_rag_config": "rag.query.rag_config_routes",
+    "list_workspace_reranker_models": "rag.query.rag_config_routes",
+    "list_workspace_rag_models": "rag.query.rag_config_routes",
+    "test_workspace_rag_config": "rag.query.rag_config_routes",
+    "update_workspace_rag_config": "rag.query.rag_config_routes",
+    "get_vllm_deployment_config": "rag.deployment.routes",
+    "update_vllm_deployment_config": "rag.deployment.routes",
+    "apply_vllm_deployment_config": "rag.deployment.routes",
 }
 
 
@@ -98,7 +107,7 @@ def test_routes_do_not_import_concrete_adapters() -> None:
 
 
 def test_feature_http_handlers_have_exactly_one_owner() -> None:
-    assert len(EXPECTED_FEATURE_HTTP_HANDLER_OWNERS) == 49
+    assert len(EXPECTED_FEATURE_HTTP_HANDLER_OWNERS) == 58
 
     actual_owners: dict[str, list[str]] = {
         name: [] for name in EXPECTED_FEATURE_HTTP_HANDLER_OWNERS
