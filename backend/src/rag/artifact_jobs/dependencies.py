@@ -15,6 +15,7 @@ from .adapters.generated_postgres import PostgresGeneratedArtifactRepository
 from .adapters.internal_context_http import HttpArtifactContextValidator
 from .adapters.job_memory import InMemoryArtifactJobRepository
 from .adapters.job_postgres import PostgresArtifactJobRepository
+from .adapters.query_generation import QueryRuntimeArtifactJsonGenerator
 from .adapters.queue import CeleryArtifactJobQueue, InMemoryArtifactJobQueue
 from .adapters.storage import (
     LocalGeneratedArtifactStorage,
@@ -135,7 +136,7 @@ def get_artifact_job_executor(config: Settings | None = None) -> ArtifactJobExec
         storage_factory=get_generated_artifact_storage,
         identity_repo_factory=get_identity_repository,
         document_repo_factory=get_document_repository,
-        inference=inference,
+        inference=QueryRuntimeArtifactJsonGenerator(inference),
         retriever=build_authorized_corpus_retriever(
             config=selected,
             rag_config=rag_config,

@@ -5,6 +5,9 @@ from io import BytesIO
 import json
 import zipfile
 
+from billiard.exceptions import SoftTimeLimitExceeded
+import pytest
+
 from rag.artifact_jobs.adapters.generated_memory import (
     InMemoryGeneratedArtifactRepository,
 )
@@ -33,6 +36,7 @@ from rag.artifact_jobs.contracts import (
     PresentationSpec,
 )
 from rag.artifact_jobs.execution import ArtifactJobExecutor
+from rag.artifact_jobs.generation import ArtifactGenerationError
 from rag.artifact_jobs.llm_json import LlmContractError
 from rag.artifact_jobs.layout_profiles import select_layout_profile
 from rag.artifact_jobs.planner import plan_document
@@ -373,6 +377,94 @@ def test_planner_falls_back_when_complex_llm_plan_fails() -> None:
 
     assert plan.title == "Timeline Of All Vendor Policy Changes"
     assert [section.title for section in plan.sections] == ["Summary", "Details", "Timeline"]
+
+
+def test_planner_falls_back_when_generation_provider_is_unavailable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level("WARNING", logger="rag.artifact_jobs")
+
+    plan = plan_document(
+        _job(
+            original_request="Create a comprehensive timeline of all vendor policy changes",
+            requested_formats=("pptx",),
+        ),
+        inference=_ProviderFailureInference(),
+        model=None,
+    )
+
+    assert plan.title == "Timeline Of All Vendor Policy Changes"
+    assert [section.title for section in plan.sections] == [
+        "Summary",
+        "Details",
+        "Timeline",
+    ]
+    assert "artifact planning fallback" in caplog.text
+    assert "ArtifactGenerationError" in caplog.text
+
+
+def test_composer_falls_back_when_generation_provider_is_unavailable() -> None:
+    bundle = compose_document_bundle(
+        _job(),
+        _plan(),
+        _evidence_manifest([_evidence_record()]),
+        inference=_ProviderFailureInference(),
+        model=None,
+        section_timeout_seconds=0.01,
+    )
+
+    assert bundle.content.sections[0].blocks[0].list_items[0].evidence_ids == [
+        "E1"
+    ]
+    assert bundle.presentation.slides
+
+
+def test_planner_propagates_soft_time_limit() -> None:
+    with pytest.raises(SoftTimeLimitExceeded):
+        plan_document(
+            _job(
+                original_request="Create a comprehensive timeline of all vendor policy changes",
+                requested_formats=("pptx",),
+            ),
+            inference=_SoftTimeInference(),
+            model=None,
+        )
+
+
+def test_planner_does_not_hide_generator_programming_errors() -> None:
+    with pytest.raises(TypeError, match="invalid generator signature"):
+        plan_document(
+            _job(
+                original_request="Create a comprehensive timeline of all vendor policy changes",
+                requested_formats=("pptx",),
+            ),
+            inference=_BuggyInference(),
+            model=None,
+        )
+
+
+def test_formatter_propagates_soft_time_limit() -> None:
+    with pytest.raises(SoftTimeLimitExceeded):
+        compose_document_bundle(
+            _job(),
+            _plan(),
+            _evidence_manifest([_evidence_record()]),
+            inference=_SoftTimeFormattingInference(),
+            model=None,
+            section_timeout_seconds=0.01,
+        )
+
+
+def test_section_composition_propagates_soft_time_limit() -> None:
+    with pytest.raises(SoftTimeLimitExceeded):
+        compose_document_bundle(
+            _job(),
+            _plan(),
+            _evidence_manifest([_evidence_record()]),
+            inference=_SoftTimeInference(),
+            model=None,
+            section_timeout_seconds=0.01,
+        )
 
 
 def test_retrieval_infers_document_family_scope() -> None:
@@ -1410,6 +1502,39 @@ class _CountingPlannerInference:
 class _FailingInference:
     def generate_json(self, **_kwargs) -> str:
         raise TimeoutError("composition call failed")
+
+
+class _ProviderFailureInference:
+    def generate_json(self, **_kwargs) -> str:
+        raise ArtifactGenerationError("vllm", 503)
+
+
+class _SoftTimeInference:
+    def generate_json(self, **_kwargs) -> str:
+        raise SoftTimeLimitExceeded()
+
+
+class _BuggyInference:
+    def generate_json(self, **_kwargs) -> str:
+        raise TypeError("invalid generator signature")
+
+
+class _SoftTimeFormattingInference:
+    def generate_json(self, *, prompt: str, **_kwargs) -> str:
+        if "formatting specifications" in prompt:
+            raise SoftTimeLimitExceeded()
+        return json.dumps(
+            {
+                "title": "Facts",
+                "blocks": [
+                    {
+                        "kind": "paragraph",
+                        "text": "Evidence fact.",
+                        "evidence_ids": ["E1"],
+                    }
+                ],
+            }
+        )
 
 
 def _planner_plan_json() -> str:

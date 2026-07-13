@@ -1,6 +1,13 @@
 import pytest
 
+from rag.artifact_jobs.request_text import (
+    cleaned_content_query as artifact_cleaned_content_query,
+)
 from rag.query.artifact_intent import cleaned_content_query, parse_artifact_request
+
+
+def test_query_reexports_artifact_owned_request_cleaner() -> None:
+    assert cleaned_content_query is artifact_cleaned_content_query
 
 
 def test_source_pdf_filename_does_not_request_pdf_output() -> None:

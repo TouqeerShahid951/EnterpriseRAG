@@ -79,6 +79,16 @@ ABAC and lifecycle filters, Qdrant access, and reranking. Artifact application
 code never receives raw query state, Qdrant hits, or caller-built storage
 filters.
 
+Artifact planning and composition depend on the narrow
+`rag.artifact_jobs.generation.ArtifactJsonGenerator` contract. The concrete
+query-runtime adapter translates provider failures and is the only artifact
+adapter allowed to depend on query inference internals. Artifact request text
+normalization is owned by `rag.artifact_jobs.request_text` and reused by query
+intake. Deterministic fallbacks handle only known provider, timeout, and invalid
+model-output failures; worker lifecycle interruptions continue to the task
+boundary. Job cancellation is checked between generation calls, so an in-flight
+provider request remains bounded by its configured HTTP timeout.
+
 ## Runtime processes
 
 The deployment has four kinds of long-running process:

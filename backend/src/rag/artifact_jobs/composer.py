@@ -29,8 +29,9 @@ from .contracts import (
     PresentationSlide,
     PresentationSpec,
 )
+from .generation import ArtifactGenerationError, ArtifactJsonGenerator
 from .job_models import ArtifactJobRecord
-from .llm_json import generate_contract
+from .llm_json import LlmContractError, generate_contract
 
 
 COMPOSER_PROMPT_VERSION = "document-composer-v2.1"
@@ -51,7 +52,7 @@ def compose_document_bundle(
     plan: DocumentPlan,
     evidence: EvidenceManifest,
     *,
-    inference: object,
+    inference: ArtifactJsonGenerator,
     model: str | None,
     section_timeout_seconds: float | None = None,
     progress_callback: Callable[[int, int, str], None] | None = None,
@@ -142,7 +143,7 @@ def repair_document_bundle(
     *,
     errors: list[str],
     evidence: EvidenceManifest,
-    inference: object,
+    inference: ArtifactJsonGenerator,
     model: str | None,
 ) -> ArtifactContentBundle:
     allowed = [record.evidence_id for record in evidence.records]
@@ -367,7 +368,7 @@ def _compose_section(
     preferred_blocks: list[str],
     records: list[EvidenceRecord],
     *,
-    inference: object,
+    inference: ArtifactJsonGenerator,
     model: str | None,
 ) -> ContentSection:
     evidence_payload = [
@@ -414,7 +415,7 @@ def _compose_section_with_fallback(
     preferred_blocks: list[str],
     records: list[EvidenceRecord],
     *,
-    inference: object,
+    inference: ArtifactJsonGenerator,
     model: str | None,
     section_timeout_seconds: float | None,
 ) -> ContentSection:
@@ -432,7 +433,7 @@ def _compose_section_with_fallback(
             )
     except SoftTimeLimitExceeded:
         raise
-    except Exception as exc:
+    except (ArtifactGenerationError, LlmContractError, TimeoutError) as exc:
         logger.warning(
             "artifact section composition fallback job_id=%s section_title=%s error_type=%s",
             job.id,
@@ -702,14 +703,14 @@ def _adapt_formats(
     plan: DocumentPlan,
     content: EvidenceBackedContent,
     *,
-    inference: object,
+    inference: ArtifactJsonGenerator,
     model: str | None,
     timeout_seconds: float | None,
 ) -> FormatSpecifications:
     try:
         with _section_deadline(timeout_seconds):
             return _adapt_formats_with_llm(job, plan, content, inference=inference, model=model)
-    except Exception as exc:
+    except (ArtifactGenerationError, LlmContractError, TimeoutError) as exc:
         logger.warning(
             "artifact format adaptation fallback job_id=%s error_type=%s",
             job.id,
@@ -723,7 +724,7 @@ def _adapt_formats_with_llm(
     plan: DocumentPlan,
     content: EvidenceBackedContent,
     *,
-    inference: object,
+    inference: ArtifactJsonGenerator,
     model: str | None,
 ) -> FormatSpecifications:
     prompt = (

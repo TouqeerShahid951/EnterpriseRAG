@@ -7,7 +7,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from ..query.cancellation import QueryCancellationToken, call_with_optional_cancellation
+from .generation import ArtifactJsonGenerator
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -19,19 +19,17 @@ class LlmContractError(RuntimeError):
 
 def generate_contract(
     *,
-    inference: object,
+    inference: ArtifactJsonGenerator,
     model: str | None,
     system: str,
     prompt: str,
     contract: type[ModelT],
-    cancellation_token: QueryCancellationToken | None = None,
 ) -> ModelT:
     raw = _generate(
         inference=inference,
         model=model,
         system=system,
         prompt=prompt,
-        cancellation_token=cancellation_token,
     )
     try:
         return contract.model_validate(_json_object(raw))
@@ -41,7 +39,6 @@ def generate_contract(
             model=model,
             system=system,
             prompt=_repair_prompt(raw=raw, error=first_error, contract=contract),
-            cancellation_token=cancellation_token,
         )
         try:
             return contract.model_validate(_json_object(repaired))
@@ -51,34 +48,19 @@ def generate_contract(
 
 def _generate(
     *,
-    inference: object,
+    inference: ArtifactJsonGenerator,
     model: str | None,
     system: str,
     prompt: str,
-    cancellation_token: QueryCancellationToken | None,
 ) -> str:
-    generator = getattr(inference, "generate_json", None)
-    if generator is not None:
-        return str(
-            call_with_optional_cancellation(
-                generator,
-                cancellation_token,
-                prompt=prompt,
-                model=model,
-                system=system,
-            )
-        )
-    answer = getattr(inference, "answer", None)
-    if answer is None:
-        raise LlmContractError("inference client does not support JSON generation")
-    return str(
-        call_with_optional_cancellation(
-            answer,
-            cancellation_token,
-            question=f"{system}\n\n{prompt}",
-            contexts=[],
-        )
+    raw = inference.generate_json(
+        prompt=prompt,
+        model=model,
+        system=system,
     )
+    if not isinstance(raw, str):
+        raise LlmContractError("artifact JSON generator returned a non-string response")
+    return raw
 
 
 def _json_object(raw: str) -> dict[str, object]:
@@ -104,4 +86,3 @@ def _repair_prompt(*, raw: str, error: Exception, contract: type[BaseModel]) -> 
         f"JSON Schema:\n{json.dumps(contract.model_json_schema(), separators=(',', ':'))}\n\n"
         f"Invalid JSON:\n{raw[:12000]}"
     )
-

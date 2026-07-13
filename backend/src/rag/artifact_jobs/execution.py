@@ -13,7 +13,6 @@ from billiard.exceptions import SoftTimeLimitExceeded
 
 from ..auth.document_access import can_read_document
 from ..core.config import Settings
-from ..query.inference import InferenceClient
 from ..documents.models import DocumentRepository
 from ..auth.identity_models import IdentityRepository, UserRecord
 from ..retrieval.contracts import AuthorizedCorpusRetriever
@@ -28,6 +27,7 @@ from .composer import (
 from .llm_json import LlmContractError
 from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
 from .generated_models import GeneratedArtifactRepository
+from .generation import ArtifactJsonGenerator
 from .job_models import ArtifactJobRecord, ArtifactJobRepository
 from .planner import PLANNER_PROMPT_VERSION, plan_document
 from .publisher import ArtifactPublisher
@@ -68,7 +68,7 @@ class ArtifactJobExecutor:
         storage_factory: Callable[[], GeneratedArtifactStorage],
         identity_repo_factory: Callable[[], IdentityRepository],
         document_repo_factory: Callable[[], DocumentRepository],
-        inference: InferenceClient,
+        inference: ArtifactJsonGenerator,
         retriever: AuthorizedCorpusRetriever,
         model_name: str,
     ) -> None:

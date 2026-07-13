@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
-from ..query.artifact_intent import cleaned_content_query
-from ..query.http import ServiceRequestError
 from .contracts import DocumentPlan, DocumentPlanSection
+from .generation import ArtifactGenerationError, ArtifactJsonGenerator
 from .job_models import ArtifactJobRecord
 from .llm_json import LlmContractError, generate_contract
+from .request_text import cleaned_content_query
 
 
 PLANNER_PROMPT_VERSION = "document-planner-v2.2"
@@ -43,11 +44,13 @@ _CLARIFICATION_TOPIC_PREFIXES = (
     ),
 )
 
+logger = logging.getLogger("rag.artifact_jobs")
+
 
 def plan_document(
     job: ArtifactJobRecord,
     *,
-    inference: object,
+    inference: ArtifactJsonGenerator,
     model: str | None,
 ) -> DocumentPlan:
     topic = _resolve_topic(job)
@@ -62,14 +65,12 @@ def plan_document(
         planned = _llm_plan(
             job, topic=topic, fallback=fallback, inference=inference, model=model
         )
-    except (
-        LlmContractError,
-        RuntimeError,
-        ServiceRequestError,
-        TimeoutError,
-        TypeError,
-        ValueError,
-    ):
+    except (ArtifactGenerationError, LlmContractError, TimeoutError) as exc:
+        logger.warning(
+            "artifact planning fallback job_id=%s error_type=%s",
+            job.id,
+            type(exc).__name__,
+        )
         return fallback
     return _normalize_llm_plan(planned, fallback=fallback, job=job)
 
@@ -79,7 +80,7 @@ def _llm_plan(
     *,
     topic: str,
     fallback: DocumentPlan,
-    inference: object,
+    inference: ArtifactJsonGenerator,
     model: str | None,
 ) -> DocumentPlan:
     return generate_contract(
