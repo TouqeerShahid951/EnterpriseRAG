@@ -11,12 +11,12 @@ from rag.artifact_jobs.adapters.generated_memory import (
 from rag.artifact_jobs.adapters.generated_postgres import (
     PostgresGeneratedArtifactRepository,
 )
-from rag.artifact_jobs.repository import InMemoryArtifactJobRepository
-from rag.services.generated_artifact_cleanup import (
+from rag.artifact_jobs.adapters.storage import LocalGeneratedArtifactStorage
+from rag.artifact_jobs.cleanup import (
     GeneratedArtifactCleanupError,
     GeneratedArtifactCleanupService,
 )
-from rag.services.generated_artifact_storage import LocalGeneratedArtifactStorage
+from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
 
 
 def test_local_storage_stable_object_key_overwrites_atomically_and_deletes_idempotently(

@@ -2,25 +2,18 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
+from ..artifact_jobs.schemas import (
+    ArtifactJobStageProgress as ArtifactJobStageProgress,
+    ArtifactJobSummary as ArtifactJobSummary,
+    GeneratedArtifact as GeneratedArtifact,
+)
+from ..artifact_jobs.types import (
+    ArtifactFormat as ArtifactFormat,
+    ArtifactJobProgressUnit as ArtifactJobProgressUnit,
+    ArtifactJobStatus as ArtifactJobStatus,
+)
 from ..shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
 from .common import ContractModel
-
-
-ArtifactFormat = Literal["docx", "pptx", "pdf"]
-ArtifactJobProgressUnit = Literal["sections", "batches", "slides", "formats", "files"]
-ArtifactJobStatus = Literal[
-    "queued",
-    "planning",
-    "needs_input",
-    "retrieving",
-    "composing",
-    "validating",
-    "rendering",
-    "complete",
-    "partial",
-    "failed",
-    "cancelled",
-]
 
 QueryIntent = Literal[
     "factual_simple",
@@ -172,46 +165,6 @@ class SourceExpansion(ContractModel):
     available: bool = False
     reason: str
     suggested_source_mode: QuerySourceMode = "hybrid"
-
-
-class GeneratedArtifact(ContractModel):
-    id: str
-    filename: str
-    format: ArtifactFormat
-    content_type: str
-    size_bytes: int = Field(..., ge=0)
-    download_url: str
-    created_at: str | None = None
-
-
-class ArtifactJobStageProgress(ContractModel):
-    unit: ArtifactJobProgressUnit
-    current: int = Field(..., ge=0)
-    total: int = Field(..., ge=0)
-    label: str | None = None
-
-
-class ArtifactJobSummary(ContractModel):
-    id: str
-    status: ArtifactJobStatus
-    stage: str
-    progress_pct: int = Field(..., ge=0, le=100)
-    stage_label: str
-    stage_detail: str
-    stage_progress: ArtifactJobStageProgress | None = None
-    requested_formats: list[ArtifactFormat]
-    clarification_questions: list[str] = Field(default_factory=list)
-    artifacts: list[GeneratedArtifact] = Field(default_factory=list)
-    error_code: str | None = None
-    error_message: str | None = None
-    attempt_count: int = Field(default=0, ge=0)
-    max_attempts: int = Field(default=3, ge=1)
-    created_at: str | None = None
-    updated_at: str | None = None
-    started_at: str | None = None
-    completed_at: str | None = None
-    last_heartbeat_at: str | None = None
-    expires_at: str | None = None
 
 
 class QueryNodeTiming(ContractModel):

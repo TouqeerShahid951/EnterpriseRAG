@@ -1,2 +1,1 @@
-"""Service adapters for external upload lifecycle dependencies."""
-
+"""Transitional services awaiting migration to their owning feature."""

@@ -8,7 +8,7 @@ from rag.artifact_jobs.adapters.generated_memory import (
     InMemoryGeneratedArtifactRepository,
 )
 from rag.artifact_jobs.contracts import DocumentPlan
-from rag.artifact_jobs.repository import InMemoryArtifactJobRepository
+from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
 from rag.artifact_jobs.service import ArtifactJobActionError, ArtifactJobService
 from rag.auth.context import UserContext
 from rag.schemas.query import QueryRequest

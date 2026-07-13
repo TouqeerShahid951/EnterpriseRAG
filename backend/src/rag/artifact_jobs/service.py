@@ -6,18 +6,18 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from ..auth.context import UserContext
-from ..schemas.artifact_jobs import ArtifactJobDetail
-from ..schemas.query import (
-    ArtifactFormat,
-    ArtifactJobStageProgress,
-    ArtifactJobSummary,
-    GeneratedArtifact,
-    QueryRequest,
-)
+from ..schemas.query import QueryRequest
 from .contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
 from .generated_models import GeneratedArtifactRepository
 from .job_models import ArtifactJobRecord, ArtifactJobRepository
 from .queue import ArtifactJobQueue
+from .schemas import (
+    ArtifactJobDetail,
+    ArtifactJobStageProgress,
+    ArtifactJobSummary,
+    GeneratedArtifact,
+)
+from .types import ArtifactFormat
 
 
 _PUBLIC_ERROR_MESSAGES = {
@@ -311,24 +311,6 @@ class ArtifactJobService:
             raise ArtifactJobActionError(
                 "artifact_enqueue_failed", "Document generation could not be queued."
             ) from exc
-
-
-def default_artifact_job_service() -> ArtifactJobService:
-    from ..core.config import settings
-    from .generated_repository import get_generated_artifact_repository
-    from .queue import get_artifact_job_queue
-    from .repository import get_artifact_job_repository
-
-    return ArtifactJobService(
-        repo_factory=get_artifact_job_repository,
-        artifact_repo_factory=get_generated_artifact_repository,
-        queue_factory=get_artifact_job_queue,
-        retention_days=settings.artifact_retention_days,
-    )
-
-
-def get_artifact_job_service() -> ArtifactJobService:
-    return default_artifact_job_service()
 
 
 def _artifact_stage_progress(

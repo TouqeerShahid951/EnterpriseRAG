@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from rag.artifact_jobs.planner import plan_document
-from rag.artifact_jobs.repository import InMemoryArtifactJobRepository
+from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
 
 
 _TOPIC_QUESTION = (

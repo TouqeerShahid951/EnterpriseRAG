@@ -7,7 +7,9 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from ..schemas.common import ContractModel
-from ..schemas.query import ArtifactFormat
+from .types import ArtifactFormat
+
+
 RetrievalMode = Literal["focused_search", "document_scan", "structured_rows", "comparison", "timeline"]
 ContentBlockKind = Literal[
     "heading",

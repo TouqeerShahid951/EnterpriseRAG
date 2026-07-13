@@ -1,54 +1,18 @@
-"""Object storage adapters for generated query artifacts."""
+"""Local and MinIO adapters for generated-artifact storage."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 import re
-from typing import Protocol
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from ..core.config import settings
+from ..storage import StoredGeneratedArtifact, StoredGeneratedArtifactContent
 
 
 ARTIFACT_PREFIX = "generated-artifacts"
-
-
-@dataclass(frozen=True)
-class StoredGeneratedArtifact:
-    object_path: str
-    size_bytes: int
-    content_type: str
-
-
-@dataclass(frozen=True)
-class StoredGeneratedArtifactContent:
-    content: bytes
-    content_type: str
-    filename: str
-
-
-class GeneratedArtifactStorage(Protocol):
-    def put(
-        self,
-        *,
-        filename: str,
-        content: bytes,
-        content_type: str,
-        object_key: str | None = None,
-    ) -> StoredGeneratedArtifact: ...
-    def read(self, object_path: str) -> StoredGeneratedArtifactContent: ...
-    def delete(self, object_path: str) -> bool: ...
-    def list_objects(
-        self,
-        *,
-        modified_before: datetime,
-        limit: int = 100,
-    ) -> list[str]: ...
 
 
 class LocalGeneratedArtifactStorage:
@@ -319,24 +283,3 @@ def _content_type_for(filename: str) -> str:
     if lowered.endswith(".pdf"):
         return "application/pdf"
     return "application/octet-stream"
-
-
-@lru_cache
-def default_generated_artifact_storage() -> GeneratedArtifactStorage:
-    if settings.upload_storage_backend == "minio":
-        return MinioGeneratedArtifactStorage(
-            endpoint=settings.minio_endpoint,
-            access_key=settings.minio_access_key,
-            secret_key=settings.minio_secret_key,
-            bucket=settings.minio_bucket,
-            secure=settings.minio_secure,
-        )
-    if settings.upload_storage_backend != "local":
-        raise RuntimeError(
-            f"unsupported generated artifact storage backend: {settings.upload_storage_backend}"
-        )
-    return LocalGeneratedArtifactStorage(settings.upload_storage_dir)
-
-
-def get_generated_artifact_storage() -> GeneratedArtifactStorage:
-    return default_generated_artifact_storage()

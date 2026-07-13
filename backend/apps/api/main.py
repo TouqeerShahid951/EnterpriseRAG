@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 
 from rag.api.routes import (
     admin_routes,
-    artifact_job_routes,
     audit_routes,
     auth_routes,
     connector_routes,
@@ -15,6 +14,7 @@ from rag.api.routes import (
     query_routes,
     review_routes,
 )
+from rag.artifact_jobs import routes as artifact_routes
 from rag.bootstrap.schema import ensure_postgres_schema
 from rag.core.config import settings
 from rag.documents import routes as document_routes
@@ -110,7 +110,7 @@ def create_app() -> FastAPI:
         review_routes.router,
         evaluation_routes.router,
         query_routes.router,
-        artifact_job_routes.router,
+        artifact_routes.router,
     ):
         app.include_router(router, prefix=settings.public_api_prefix)
 

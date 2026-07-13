@@ -58,6 +58,11 @@ mechanics live in `rag.shared.persistence`. The global `rag.services` and
 feature migration. Folder scheduling is now owned end to end by `rag.ingestion`:
 its route and schemas sit beside transport-neutral scheduling and dispatch
 services, while the API and folder-scheduler process only supply dependencies.
+Generated-artifact lifecycle behavior is likewise owned by `rag.artifact_jobs`:
+HTTP contracts, job actions, storage contracts, cleanup, delivery orchestration,
+and concrete adapters live together, while API composition, Celery task
+registration, and maintenance process modules remain thin entrypoints around
+feature dependency providers.
 
 ## Runtime processes
 

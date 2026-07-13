@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from rag.artifact_jobs.adapters.generated_postgres import GENERATED_ARTIFACT_SCHEMA_SQL
-from rag.artifact_jobs.repository import ARTIFACT_JOB_SCHEMA_SQL
+from rag.artifact_jobs.adapters.job_postgres import ARTIFACT_JOB_SCHEMA_SQL
 from rag.core.config import Settings, settings
 from rag.evaluations.repository import EVALUATION_SCHEMA_SQL
 from rag.ops.migrate_folder_ingest_cli import MIGRATION_SQL as FOLDER_INGEST_MIGRATION_SQL

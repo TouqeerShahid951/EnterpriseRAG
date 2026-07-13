@@ -91,6 +91,32 @@ LEGACY_GRAPHRAG_QUEUE_PATHS = (
     RAG_ROOT / "services" / "graphrag_queue.py",
     RAG_ROOT / "services" / "graphrag_queue",
 )
+LEGACY_ARTIFACT_MODULES = frozenset(
+    {
+        "rag.api.routes.artifact_job_routes",
+        "rag.schemas.artifact_jobs",
+        "rag.services.generated_artifact_cleanup",
+        "rag.services.generated_artifact_storage",
+        "rag.artifact_jobs.generated_repository",
+        "rag.artifact_jobs.repository",
+    }
+)
+LEGACY_ARTIFACT_PATHS = (
+    RAG_ROOT / "api" / "routes" / "artifact_job_routes.py",
+    RAG_ROOT / "schemas" / "artifact_jobs.py",
+    RAG_ROOT / "services" / "generated_artifact_cleanup.py",
+    RAG_ROOT / "services" / "generated_artifact_storage.py",
+    RAG_ROOT / "artifact_jobs" / "generated_repository.py",
+    RAG_ROOT / "artifact_jobs" / "repository.py",
+)
+ARTIFACT_APPLICATION_FILES = (
+    RAG_ROOT / "artifact_jobs" / "cleanup.py",
+    RAG_ROOT / "artifact_jobs" / "publisher.py",
+    RAG_ROOT / "artifact_jobs" / "queue.py",
+    RAG_ROOT / "artifact_jobs" / "service.py",
+    RAG_ROOT / "artifact_jobs" / "storage.py",
+    RAG_ROOT / "artifact_jobs" / "task_execution.py",
+)
 EXPECTED_FEATURE_HTTP_HANDLER_OWNERS = {
     "list_documents": "rag.documents.routes",
     "get_document": "rag.documents.routes",
@@ -130,6 +156,11 @@ EXPECTED_FEATURE_HTTP_HANDLER_OWNERS = {
     "cancel_folder_schedule": "rag.ingestion.folders.routes",
     "list_folder_runs": "rag.ingestion.folders.routes",
     "list_folder_run_items": "rag.ingestion.folders.routes",
+    "get_generated_artifact_content": "rag.artifact_jobs.routes",
+    "get_artifact_job": "rag.artifact_jobs.routes",
+    "clarify_artifact_job": "rag.artifact_jobs.routes",
+    "cancel_artifact_job": "rag.artifact_jobs.routes",
+    "retry_artifact_job": "rag.artifact_jobs.routes",
 }
 
 
@@ -150,7 +181,7 @@ def test_routes_do_not_import_concrete_adapters() -> None:
 
 
 def test_feature_http_handlers_have_exactly_one_owner() -> None:
-    assert len(EXPECTED_FEATURE_HTTP_HANDLER_OWNERS) == 38
+    assert len(EXPECTED_FEATURE_HTTP_HANDLER_OWNERS) == 43
 
     actual_owners: dict[str, list[str]] = {
         name: [] for name in EXPECTED_FEATURE_HTTP_HANDLER_OWNERS
@@ -210,6 +241,35 @@ def test_legacy_folder_ingestion_modules_are_absent_and_not_imported() -> None:
             _python_files(NON_RAG_PYTHON_ROOTS),
             _is_legacy_folder_ingestion_module,
         )
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_legacy_artifact_modules_are_absent_and_not_imported() -> None:
+    assert not any(path.exists() for path in LEGACY_ARTIFACT_PATHS)
+
+    violations = _find_violations(
+        _python_files(BACKEND_PYTHON_ROOTS),
+        lambda target: target in LEGACY_ARTIFACT_MODULES,
+        resolve_relative_imports=True,
+    )
+
+    _assert_no_violations(violations)
+
+
+def test_artifact_application_code_is_transport_and_settings_independent() -> None:
+    violations = _find_violations(
+        ARTIFACT_APPLICATION_FILES,
+        lambda target: (
+            target == "celery"
+            or target.startswith("celery.")
+            or target == "fastapi"
+            or target.startswith("fastapi.")
+            or target == "rag.core.config"
+            or target.startswith("rag.artifact_jobs.adapters.")
+        ),
+        resolve_relative_imports=True,
     )
 
     _assert_no_violations(violations)

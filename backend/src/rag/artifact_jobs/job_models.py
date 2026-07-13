@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from ..schemas.query import ArtifactJobStatus
+from .types import ArtifactJobStatus
 
 
 TERMINAL_ARTIFACT_JOB_STATUSES = frozenset(

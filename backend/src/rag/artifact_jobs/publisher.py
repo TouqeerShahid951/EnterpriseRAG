@@ -8,12 +8,12 @@ from hashlib import sha256
 import logging
 
 from ..documents.models import DocumentRepository
-from ..services.generated_artifact_storage import GeneratedArtifactStorage
 from .generated_models import (
     GeneratedArtifactRecord,
     GeneratedArtifactRepository,
 )
 from .job_models import ArtifactJobRecord
+from .storage import GeneratedArtifactStorage
 
 
 logger = logging.getLogger("rag.artifact_jobs.publisher")

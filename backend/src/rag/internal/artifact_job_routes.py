@@ -2,7 +2,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..artifact_jobs.repository import ArtifactJobRepository, get_artifact_job_repository
+from ..artifact_jobs.dependencies import get_artifact_job_repository
+from ..artifact_jobs.job_models import ArtifactJobRepository
 from ..auth.document_access import can_read_document
 from ..documents.repository import DocumentRepository, get_document_repository
 from ..auth.identity_models import IdentityRepository

@@ -8,11 +8,11 @@ import time
 
 from rag.core.config import settings
 from rag.shared.persistence import PostgresConnectionMixin
-from rag.services.generated_artifact_cleanup import (
+from rag.artifact_jobs.cleanup import (
     GeneratedArtifactCleanupError,
     GeneratedArtifactCleanupResult,
-    cleanup_expired_generated_artifacts,
 )
+from rag.artifact_jobs.dependencies import get_generated_artifact_cleanup_service
 
 
 logger = logging.getLogger("rag.artifact_maintenance")
@@ -68,7 +68,7 @@ def main() -> None:
 
 def _run_with_lock() -> GeneratedArtifactCleanupResult | None:
     if settings.document_repository != "postgres":
-        return cleanup_expired_generated_artifacts(limit=DEFAULT_CLEANUP_BATCH_SIZE)
+        return _cleanup_expired_generated_artifacts()
     lock = _LockConnection(settings.database_url)
     with lock._connect() as conn:
         acquired = conn.execute(
@@ -78,9 +78,15 @@ def _run_with_lock() -> GeneratedArtifactCleanupResult | None:
         if not acquired:
             return None
         try:
-            return cleanup_expired_generated_artifacts(limit=DEFAULT_CLEANUP_BATCH_SIZE)
+            return _cleanup_expired_generated_artifacts()
         finally:
             conn.execute("SELECT pg_advisory_unlock(%s)", (ADVISORY_LOCK_ID,))
+
+
+def _cleanup_expired_generated_artifacts() -> GeneratedArtifactCleanupResult:
+    return get_generated_artifact_cleanup_service().cleanup_expired(
+        limit=DEFAULT_CLEANUP_BATCH_SIZE
+    )
 
 
 if __name__ == "__main__":

@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from ..artifact_jobs.generated_models import GeneratedArtifactRepository
-from ..artifact_jobs.job_models import ArtifactJobRepository
-from .generated_artifact_storage import GeneratedArtifactStorage
+from .generated_models import GeneratedArtifactRepository
+from .job_models import ArtifactJobRepository
+from .storage import GeneratedArtifactStorage
 
 
 CleanupFailureStage = Literal[
@@ -254,30 +254,6 @@ class GeneratedArtifactCleanupService:
         if failures:
             raise GeneratedArtifactCleanupError(result)
         return result
-
-
-def default_generated_artifact_cleanup_service() -> GeneratedArtifactCleanupService:
-    from ..artifact_jobs.generated_repository import get_generated_artifact_repository
-    from ..artifact_jobs.repository import get_artifact_job_repository
-    from .generated_artifact_storage import get_generated_artifact_storage
-
-    return GeneratedArtifactCleanupService(
-        repository_factory=get_generated_artifact_repository,
-        storage_factory=get_generated_artifact_storage,
-        job_repository_factory=get_artifact_job_repository,
-    )
-
-
-def cleanup_expired_generated_artifacts(
-    *,
-    as_of: datetime | None = None,
-    limit: int = 100,
-) -> GeneratedArtifactCleanupResult:
-    """Run one bounded cleanup batch for a scheduler or maintenance command."""
-
-    return default_generated_artifact_cleanup_service().cleanup_expired(
-        as_of=as_of, limit=limit
-    )
 
 
 def _failure(

@@ -9,7 +9,6 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from ...schemas.query import ArtifactJobStatus
 from ...shared.contracts.clearance import normalize_clearance_level
 from ..job_models import (
     ACTIVE_ARTIFACT_JOB_STATUSES,
@@ -21,6 +20,7 @@ from ..job_models import (
     _validate_changes,
     _validate_expiry_query,
 )
+from ..types import ArtifactJobStatus
 
 
 class InMemoryArtifactJobRepository:

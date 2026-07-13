@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from ..schemas.query import ArtifactFormat
+from ..artifact_jobs.types import ArtifactFormat
 
 ArtifactOperation = Literal["enumerate", "extract", "summarize", "compare", "timeline", "explain"]
 ArtifactType = Literal["report", "brief", "presentation", "summary", "reference_document"]

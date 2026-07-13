@@ -2,8 +2,6 @@ import asyncio
 from collections.abc import Iterator
 from contextlib import suppress
 from datetime import UTC, datetime
-import logging
-from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -11,17 +9,8 @@ from fastapi.responses import StreamingResponse
 
 from ...auth.abac import normalize_group_path
 from ...auth.context import UserContext
-from ...auth.document_access import can_read_document
 from ...auth.dependencies import require_csrf, require_current_user
 from ...auth.permissions import can_query, has_exact_group_scope, is_global_admin
-from ...artifact_jobs.generated_repository import (
-    GeneratedArtifactRepository,
-    get_generated_artifact_repository,
-)
-from ...artifact_jobs.repository import (
-    ArtifactJobRepository,
-    get_artifact_job_repository,
-)
 from ...artifact_jobs.service import ArtifactJobActionError
 from ...auth.identity_models import IdentityRepository, UserRecord
 from ...auth.identity_repository import get_identity_repository
@@ -30,7 +19,6 @@ from ...query.chat_history_repository import (
     get_chat_history_repository,
 )
 from ...query.chat_history_models import ChatSessionRecord
-from ...documents.repository import DocumentRepository, get_document_repository
 from ...ingestion.folders.dependencies import get_folder_schedule_repository
 from ...ingestion.folders.models import FolderScheduleRepository
 from ...connectors.repositories import (
@@ -60,115 +48,8 @@ from ...schemas.query import (
     QueryStreamEvent,
     RAGResponse,
 )
-from ...services.generated_artifact_storage import (
-    GeneratedArtifactStorage,
-    get_generated_artifact_storage,
-)
 
 router = APIRouter(prefix="/query", tags=["query"])
-logger = logging.getLogger("rag.query.routes")
-
-
-@router.get(
-    "/artifacts/{artifact_id}/content",
-    summary="Download a generated query artifact",
-)
-async def get_generated_artifact_content(
-    artifact_id: str,
-    user: UserRecord = Depends(require_current_user),
-    artifact_repo: GeneratedArtifactRepository = Depends(
-        get_generated_artifact_repository
-    ),
-    artifact_job_repo: ArtifactJobRepository = Depends(get_artifact_job_repository),
-    artifact_storage: GeneratedArtifactStorage = Depends(
-        get_generated_artifact_storage
-    ),
-    audit_repo: DocumentRepository = Depends(get_document_repository),
-) -> StreamingResponse:
-    artifact = artifact_repo.get_artifact(artifact_id)
-    parent_job = (
-        artifact_job_repo.get_job(artifact.job_id)
-        if artifact and artifact.job_id
-        else None
-    )
-    if (
-        artifact is None
-        or artifact.user_id != user.id
-        or artifact.permission_version != user.permission_version
-        or (
-            artifact.expires_at is not None and artifact.expires_at <= datetime.now(UTC)
-        )
-        or (
-            artifact.job_id is not None
-            and (
-                parent_job is None
-                or parent_job.status not in {"complete", "partial"}
-                or parent_job.cancellation_requested
-                or (
-                    parent_job.expires_at is not None
-                    and parent_job.expires_at <= datetime.now(UTC)
-                )
-            )
-        )
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "code": "artifact_not_found",
-                "message": "Generated artifact was not found.",
-            },
-        )
-    if any(
-        (document := audit_repo.get_document(document_id)) is None
-        or not can_read_document(user, document)
-        for document_id in artifact.source_doc_ids
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "code": "artifact_not_found",
-                "message": "Generated artifact was not found.",
-            },
-        )
-    try:
-        stored = artifact_storage.read(artifact.object_path)
-    except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "code": "artifact_file_not_found",
-                "message": "Generated artifact file was not found.",
-            },
-        ) from exc
-    try:
-        audit_repo.append_audit_event(
-            event_type="query.artifact_downloaded",
-            actor_id=user.id,
-            target_type="generated_artifact",
-            target_id=artifact.id,
-            payload={
-                "session_id": artifact.session_id,
-                "trace_id": artifact.trace_id,
-                "format": artifact.format,
-                "filename": artifact.filename,
-            },
-        )
-    except Exception:
-        logger.error(
-            "generated artifact download audit failed artifact_id=%s user_id=%s",
-            artifact.id,
-            user.id,
-            exc_info=True,
-        )
-    filename = artifact.filename or stored.filename
-    return StreamingResponse(
-        iter([stored.content]),
-        media_type=artifact.content_type or stored.content_type,
-        headers={
-            "Content-Disposition": _attachment_content_disposition(filename),
-            "Content-Length": str(len(stored.content)),
-        },
-    )
 
 
 @router.get(
@@ -439,12 +320,6 @@ def _next_stream_event(iterator: Iterator[QueryStreamEvent]) -> QueryStreamEvent
         return next(iterator)
     except StopIteration:
         return None
-
-
-def _attachment_content_disposition(filename: str) -> str:
-    safe_name = filename.replace('"', "'")
-    encoded = quote(filename)
-    return f"attachment; filename=\"{safe_name}\"; filename*=UTF-8''{encoded}"
 
 
 def _query_request_for_user(

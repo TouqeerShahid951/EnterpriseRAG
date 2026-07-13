@@ -10,28 +10,25 @@ import logging
 import re
 from typing import Any
 
-from ..artifact_jobs.adapters.generated_memory import InMemoryGeneratedArtifactRepository
-from ..artifact_jobs.adapters.generated_postgres import (
-    PostgresGeneratedArtifactRepository,
+from ..artifact_jobs.dependencies import (
+    build_generated_artifact_repository,
+    build_generated_artifact_storage,
+    get_generated_artifact_repository,
+    get_generated_artifact_storage,
 )
 from ..artifact_jobs.generated_models import (
     GeneratedArtifactRecord,
     GeneratedArtifactRepository,
 )
-from ..artifact_jobs.generated_repository import get_generated_artifact_repository
+from ..artifact_jobs.schemas import GeneratedArtifact
+from ..artifact_jobs.storage import GeneratedArtifactStorage
 from ..auth.context import UserContext
 from ..core.config import Settings, settings as global_settings
 from ..documents.adapters.memory import InMemoryDocumentRepository
 from ..documents.models import DocumentRepository
 from ..documents.adapters.postgres import PostgresDocumentRepository
 from ..documents.repository import get_document_repository
-from ..schemas.query import GeneratedArtifact, RAGResponse
-from ..services.generated_artifact_storage import (
-    GeneratedArtifactStorage,
-    LocalGeneratedArtifactStorage,
-    MinioGeneratedArtifactStorage,
-    get_generated_artifact_storage,
-)
+from ..schemas.query import RAGResponse
 from .artifact_intent import ArtifactRequest
 from .artifact_models import ArtifactContent
 from .artifact_renderer import render_artifact
@@ -210,9 +207,7 @@ def generated_artifact_from_record(
 def _repo_from_settings(config: Settings) -> GeneratedArtifactRepository:
     if config is global_settings:
         return get_generated_artifact_repository()
-    if config.document_repository == "memory":
-        return InMemoryGeneratedArtifactRepository()
-    return PostgresGeneratedArtifactRepository(config.database_url)
+    return build_generated_artifact_repository(config)
 
 
 def _audit_repo_from_settings(config: Settings) -> DocumentRepository:
@@ -226,19 +221,7 @@ def _audit_repo_from_settings(config: Settings) -> DocumentRepository:
 def _storage_from_settings(config: Settings) -> GeneratedArtifactStorage:
     if config is global_settings:
         return get_generated_artifact_storage()
-    if config.upload_storage_backend == "minio":
-        return MinioGeneratedArtifactStorage(
-            endpoint=config.minio_endpoint,
-            access_key=config.minio_access_key,
-            secret_key=config.minio_secret_key,
-            bucket=config.minio_bucket,
-            secure=config.minio_secure,
-        )
-    if config.upload_storage_backend != "local":
-        raise RuntimeError(
-            f"unsupported generated artifact storage backend: {config.upload_storage_backend}"
-        )
-    return LocalGeneratedArtifactStorage(config.upload_storage_dir)
+    return build_generated_artifact_storage(config)
 
 
 def _title_from_query(query: str) -> str:

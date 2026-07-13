@@ -5,7 +5,8 @@ from __future__ import annotations
 from time import perf_counter
 from uuid import uuid4
 
-from ..artifact_jobs.service import ArtifactJobService, default_artifact_job_service
+from ..artifact_jobs.dependencies import get_artifact_job_service
+from ..artifact_jobs.service import ArtifactJobService
 from ..auth.context import UserContext
 from ..core.config import Settings, settings
 from ..documents.claim_dependencies import claim_repository_from_settings
@@ -73,7 +74,7 @@ class LocalRagService:
             query_planner_enabled=self.rag_config.query_planner_enabled,
             document_repo=document_repo or _document_repository_from_config(config),
         )
-        self.artifact_job_service = artifact_job_service or default_artifact_job_service()
+        self.artifact_job_service = artifact_job_service or get_artifact_job_service()
         self.graph = QueryGraphRunner(self.nodes)
 
     def answer_query(

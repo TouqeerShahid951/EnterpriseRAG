@@ -14,7 +14,7 @@ import tempfile
 import zipfile
 from xml.sax.saxutils import escape
 
-from ..schemas.query import ArtifactFormat
+from .types import ArtifactFormat
 from .contracts import ArtifactContentBundle, ContentBlock, EvidenceCitation
 from .layout_profiles import ArtifactLayoutProfile, select_layout_profile
 

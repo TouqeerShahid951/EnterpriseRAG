@@ -9,14 +9,23 @@ from urllib.error import HTTPError
 from billiard.exceptions import SoftTimeLimitExceeded
 import pytest
 
+from rag.artifact_jobs.adapters import internal_context_http
+from rag.artifact_jobs.adapters.internal_context_http import (
+    HttpArtifactContextValidator,
+)
 from rag.artifact_jobs.execution import (
     ArtifactJobCancelled,
     ArtifactJobExecutor,
     ArtifactJobLeaseLost,
     ArtifactPermissionChanged,
 )
-from rag.artifact_jobs import tasks
-from rag.artifact_jobs.repository import InMemoryArtifactJobRepository
+from rag.artifact_jobs import task_execution, tasks
+from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
+from rag.artifact_jobs.task_execution import (
+    ArtifactContextRejected,
+    ArtifactDeliveryRetry,
+    run_artifact_job,
+)
 
 
 def test_celery_delivery_retries_are_unbounded_while_job_attempts_remain_bounded() -> (
@@ -43,10 +52,9 @@ def test_heartbeat_recovers_after_a_transient_repository_failure(
             return None
 
     repository = FlakyRepository()
-    monkeypatch.setattr(tasks, "get_artifact_job_repository", lambda: repository)
-    monkeypatch.setattr(tasks, "_HEARTBEAT_FAILURE_RETRY_SECONDS", 0)
+    monkeypatch.setattr(task_execution, "_HEARTBEAT_FAILURE_RETRY_SECONDS", 0)
 
-    with tasks._heartbeat("job-1", "worker-1"):
+    with task_execution._heartbeat(repository, "job-1", "worker-1"):
         assert recovered.wait(timeout=1)
 
     assert repository.calls == 2
@@ -296,11 +304,13 @@ def test_internal_context_treats_authorization_statuses_as_permission_changes(
     status: int,
 ) -> None:
     monkeypatch.setattr(
-        tasks, "urlopen", lambda *_args, **_kwargs: _raise_http_error(status)
+        internal_context_http,
+        "urlopen",
+        lambda *_args, **_kwargs: _raise_http_error(status),
     )
 
     with pytest.raises(ArtifactPermissionChanged):
-        tasks._validate_internal_context("job-1")
+        _context_validator().validate("job-1")
 
 
 @pytest.mark.parametrize("status", [408, 429, 500, 503])
@@ -309,14 +319,44 @@ def test_internal_context_treats_backend_failures_as_transient(
     status: int,
 ) -> None:
     monkeypatch.setattr(
-        tasks, "urlopen", lambda *_args, **_kwargs: _raise_http_error(status)
+        internal_context_http,
+        "urlopen",
+        lambda *_args, **_kwargs: _raise_http_error(status),
     )
 
     with pytest.raises(RuntimeError) as raised:
-        tasks._validate_internal_context("job-1")
+        _context_validator().validate("job-1")
 
     assert not isinstance(raised.value, ArtifactPermissionChanged)
-    assert not isinstance(raised.value, tasks.ArtifactContextRejected)
+    assert not isinstance(raised.value, ArtifactContextRejected)
+
+
+def test_internal_context_uses_the_server_service_token_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_headers: dict[str, str] = {}
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def open_request(request, *, timeout: float):
+        assert timeout == 5
+        captured_headers.update(
+            {name.lower(): value for name, value in request.header_items()}
+        )
+        return Response()
+
+    monkeypatch.setattr(internal_context_http, "urlopen", open_request)
+
+    _context_validator().validate("job-1")
+
+    assert captured_headers["x-service-token"] == "service-token"
 
 
 def test_context_validation_failure_is_retried_after_the_job_is_claimed(
@@ -325,23 +365,20 @@ def test_context_validation_failure_is_retried_after_the_job_is_claimed(
     repo = InMemoryArtifactJobRepository()
     job = _job(repo)
 
-    class ExpectedRetry(RuntimeError):
-        pass
+    monkeypatch.setattr(task_execution, "_heartbeat", lambda *_args: nullcontext())
 
-    def retry(**_kwargs: object) -> None:
-        raise ExpectedRetry
+    with pytest.raises(ArtifactDeliveryRetry) as raised:
+        run_artifact_job(
+            job.id,
+            repository=repo,
+            executor_factory=_UnexpectedExecutor,
+            context_validator=_FailingContextValidator(
+                RuntimeError("backend unavailable")
+            ),
+        )
 
-    monkeypatch.setattr(tasks, "get_artifact_job_repository", lambda: repo)
-    monkeypatch.setattr(tasks, "_heartbeat", lambda *_args: nullcontext())
-    monkeypatch.setattr(
-        tasks,
-        "_validate_internal_context",
-        lambda _job_id: (_ for _ in ()).throw(RuntimeError("backend unavailable")),
-    )
-    monkeypatch.setattr(tasks.generate_artifact_job, "retry", retry)
-
-    with pytest.raises(ExpectedRetry):
-        tasks.generate_artifact_job.run(job.id)
+    assert raised.value.countdown == 30
+    assert isinstance(raised.value.cause, RuntimeError)
 
     queued = repo.get_job(job.id)
     assert queued is not None
@@ -359,22 +396,75 @@ def test_context_validation_failure_is_retried_after_the_job_is_claimed(
     )
 
 
+def test_soft_timeout_preserves_timeout_retry_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = InMemoryArtifactJobRepository()
+    job = _job(repo)
+    monkeypatch.setattr(task_execution, "_heartbeat", lambda *_args: nullcontext())
+
+    with pytest.raises(ArtifactDeliveryRetry) as raised:
+        run_artifact_job(
+            job.id,
+            repository=repo,
+            executor_factory=lambda: _FailingExecutor(SoftTimeLimitExceeded()),
+            context_validator=_PassingContextValidator(),
+            timeout_error_types=(SoftTimeLimitExceeded,),
+        )
+
+    assert raised.value.countdown == 30
+    assert isinstance(raised.value.cause, SoftTimeLimitExceeded)
+    queued = repo.get_job(job.id)
+    assert queued is not None
+    assert queued.status == "queued"
+    assert queued.error_code == "artifact_timeout"
+    assert (
+        queued.error_message_safe
+        == "Document generation timed out. You can retry the job."
+    )
+
+
+def test_context_rejection_records_terminal_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = InMemoryArtifactJobRepository()
+    job = _job(repo)
+    monkeypatch.setattr(task_execution, "_heartbeat", lambda *_args: nullcontext())
+
+    result = run_artifact_job(
+        job.id,
+        repository=repo,
+        executor_factory=_UnexpectedExecutor,
+        context_validator=_FailingContextValidator(
+            ArtifactContextRejected("invalid context")
+        ),
+    )
+
+    assert result == {"job_id": job.id, "status": "failed"}
+    failed = repo.get_job(job.id)
+    assert failed is not None
+    assert failed.status == "failed"
+    assert failed.error_code == "artifact_context_rejected"
+    assert failed.completed_at is not None
+
+
 def test_authorization_failure_records_terminal_completion_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = InMemoryArtifactJobRepository()
     job = _job(repo)
 
-    monkeypatch.setattr(tasks, "get_artifact_job_repository", lambda: repo)
-    monkeypatch.setattr(tasks, "_heartbeat", lambda *_args: nullcontext())
-    monkeypatch.setattr(
-        tasks,
-        "_validate_internal_context",
-        lambda _job_id: (_ for _ in ()).throw(ArtifactPermissionChanged("changed")),
-    )
+    monkeypatch.setattr(task_execution, "_heartbeat", lambda *_args: nullcontext())
 
     with pytest.raises(ArtifactPermissionChanged):
-        tasks.generate_artifact_job.run(job.id)
+        run_artifact_job(
+            job.id,
+            repository=repo,
+            executor_factory=_UnexpectedExecutor,
+            context_validator=_FailingContextValidator(
+                ArtifactPermissionChanged("changed")
+            ),
+        )
 
     failed = repo.get_job(job.id)
     assert failed is not None
@@ -383,8 +473,69 @@ def test_authorization_failure_records_terminal_completion_time(
     assert failed.run_token is None
 
 
+def test_celery_wrapper_maps_delivery_retry_without_changing_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cause = RuntimeError("backend unavailable")
+
+    class ExpectedRetry(RuntimeError):
+        pass
+
+    def run(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise ArtifactDeliveryRetry(cause, countdown=17)
+
+    def retry(**kwargs: object) -> None:
+        assert kwargs == {"exc": cause, "countdown": 17, "max_retries": None}
+        raise ExpectedRetry
+
+    monkeypatch.setattr(tasks, "run_artifact_job", run)
+    monkeypatch.setattr(tasks, "get_artifact_job_repository", object)
+    monkeypatch.setattr(tasks, "get_artifact_job_executor", object)
+    monkeypatch.setattr(tasks, "get_artifact_context_validator", object)
+    monkeypatch.setattr(tasks.generate_artifact_job, "retry", retry)
+
+    with pytest.raises(ExpectedRetry):
+        tasks.generate_artifact_job.run("job-1")
+
+
 def _raise_http_error(status: int) -> None:
     raise HTTPError("http://backend.test/context", status, "error", None, None)
+
+
+def _context_validator() -> HttpArtifactContextValidator:
+    return HttpArtifactContextValidator(
+        base_url="http://backend.test",
+        service_token="service-token",
+        timeout_seconds=5,
+    )
+
+
+class _FailingContextValidator:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def validate(self, _job_id: str) -> None:
+        raise self.error
+
+
+class _UnexpectedExecutor:
+    def execute(self, _job_id: str, *, run_token: str | None = None) -> None:
+        _ = run_token
+        raise AssertionError("executor must not run when context validation fails")
+
+
+class _FailingExecutor:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def execute(self, _job_id: str, *, run_token: str | None = None) -> None:
+        _ = run_token
+        raise self.error
+
+
+class _PassingContextValidator:
+    def validate(self, _job_id: str) -> None:
+        return None
 
 
 def _job(

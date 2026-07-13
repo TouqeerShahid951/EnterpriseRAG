@@ -38,7 +38,7 @@ from rag.artifact_jobs.layout_profiles import select_layout_profile
 from rag.artifact_jobs.planner import plan_document
 from rag.artifact_jobs.renderer import render_document
 from rag.artifact_jobs.retrieval import retrieve_document_evidence
-from rag.artifact_jobs.repository import InMemoryArtifactJobRepository
+from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
 from rag.artifact_jobs.service import ArtifactJobService, _public_stage_timings
 from rag.auth.context import UserContext
 from rag.core.config import Settings
@@ -46,7 +46,7 @@ from rag.query.qdrant import SearchHit
 from rag.documents.models import DocumentRecord
 from rag.auth.identity_models import UserRecord
 from rag.query.rag_config_models import RagConfigRecord
-from rag.services.generated_artifact_storage import LocalGeneratedArtifactStorage
+from rag.artifact_jobs.adapters.storage import LocalGeneratedArtifactStorage
 
 
 def test_stage_timing_serializer_handles_missing_and_partial_timings() -> None:

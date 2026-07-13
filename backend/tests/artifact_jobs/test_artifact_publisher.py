@@ -7,9 +7,9 @@ import pytest
 from rag.artifact_jobs.adapters.generated_memory import (
     InMemoryGeneratedArtifactRepository,
 )
+from rag.artifact_jobs.adapters.storage import LocalGeneratedArtifactStorage
 from rag.artifact_jobs.publisher import ArtifactPublisher
-from rag.artifact_jobs.repository import InMemoryArtifactJobRepository
-from rag.services.generated_artifact_storage import LocalGeneratedArtifactStorage
+from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
 
 
 def test_publisher_replaces_metadata_then_removes_the_previous_object(tmp_path) -> None:

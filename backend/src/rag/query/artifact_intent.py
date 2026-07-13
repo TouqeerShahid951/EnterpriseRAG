@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from ..schemas.query import ArtifactFormat
+from ..artifact_jobs.types import ArtifactFormat
 
 
 _GENERATION_VERBS = (

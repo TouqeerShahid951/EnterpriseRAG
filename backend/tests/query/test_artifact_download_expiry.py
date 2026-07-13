@@ -7,11 +7,11 @@ from types import SimpleNamespace
 from fastapi import HTTPException
 import pytest
 
-from rag.api.routes.query_routes import get_generated_artifact_content
 from rag.artifact_jobs.adapters.generated_memory import (
     InMemoryGeneratedArtifactRepository,
 )
-from rag.artifact_jobs.repository import InMemoryArtifactJobRepository
+from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
+from rag.artifact_jobs.routes import get_generated_artifact_content
 
 
 def test_expired_artifact_download_is_rejected_before_storage_read() -> None:

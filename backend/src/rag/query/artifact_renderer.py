@@ -21,7 +21,8 @@ from ..artifact_jobs.contracts import (
     PresentationSpec,
 )
 from ..artifact_jobs.renderer import render_document
-from ..schemas.query import ArtifactFormat, RAGResponse
+from ..artifact_jobs.types import ArtifactFormat
+from ..schemas.query import RAGResponse
 from .artifact_models import (
     ArtifactCitation,
     ArtifactContent,

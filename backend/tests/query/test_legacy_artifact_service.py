@@ -10,7 +10,7 @@ from rag.query.artifact_intent import ArtifactRequest
 from rag.query.artifact_renderer import RenderedArtifact
 from rag.query.artifact_service import GeneratedArtifactService
 from rag.schemas.query import RAGResponse
-from rag.services.generated_artifact_storage import LocalGeneratedArtifactStorage
+from rag.artifact_jobs.adapters.storage import LocalGeneratedArtifactStorage
 
 
 def test_legacy_artifact_audit_failure_does_not_discard_valid_file(tmp_path, monkeypatch) -> None:

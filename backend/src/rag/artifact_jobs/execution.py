@@ -18,7 +18,6 @@ from ..query.qdrant import QdrantClient
 from ..documents.models import DocumentRepository
 from ..auth.identity_models import IdentityRepository, UserRecord
 from ..query.rag_config_models import RagConfigRecord
-from ..services.generated_artifact_storage import GeneratedArtifactStorage
 from .composer import (
     COMPOSER_PROMPT_VERSION,
     FORMATTER_PROMPT_VERSION,
@@ -35,6 +34,7 @@ from .planner import PLANNER_PROMPT_VERSION, plan_document
 from .publisher import ArtifactPublisher
 from .renderer import render_document
 from .retrieval import retrieve_document_evidence
+from .storage import GeneratedArtifactStorage
 from .validation import validate_document_bundle
 
 
@@ -844,36 +844,3 @@ def _progress(unit: str, current: int, total: int, label: str) -> dict[str, obje
 
 def _format_complete_progress(current: int, total: int) -> int:
     return min(96, max(84, 80 + int((max(current, 1) / max(total, 1)) * 15)))
-
-
-def default_artifact_job_executor(
-    config: Settings | None = None,
-) -> ArtifactJobExecutor:
-    from ..core.config import settings
-    from ..query.inference import build_inference_client
-    from ..documents.repository import get_document_repository
-    from ..auth.identity_repository import get_identity_repository
-    from ..query.rag_config_repository import effective_rag_config
-    from ..services.generated_artifact_storage import get_generated_artifact_storage
-    from .generated_repository import get_generated_artifact_repository
-    from .repository import get_artifact_job_repository
-
-    selected = config or settings
-    rag_config = effective_rag_config(config=selected)
-    inference = build_inference_client(rag_config, settings=selected)
-    return ArtifactJobExecutor(
-        config=selected,
-        repo_factory=get_artifact_job_repository,
-        artifact_repo_factory=get_generated_artifact_repository,
-        storage_factory=get_generated_artifact_storage,
-        identity_repo_factory=get_identity_repository,
-        document_repo_factory=get_document_repository,
-        inference=inference,
-        qdrant=QdrantClient(
-            base_url=selected.qdrant_url,
-            collection=selected.qdrant_collection,
-            timeout_seconds=selected.rag_http_timeout_seconds,
-        ),
-        model_name=rag_config.effective_reasoning_model or rag_config.chat_model,
-        rag_config=rag_config,
-    )
