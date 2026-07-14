@@ -1,18 +1,23 @@
 # syntax=docker/dockerfile:1
 
+FROM ghcr.io/astral-sh/uv:0.11.12 AS uv
 FROM python:3.12-slim
 
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_DEFAULT_TIMEOUT=120 \
-    PIP_RETRIES=5 \
-    DEBIAN_FRONTEND=noninteractive \
+COPY --from=uv /uv /uvx /bin/
+
+ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app:/app/src
+    PYTHONPATH=/app:/app/src \
+    PATH=/opt/venv/bin:$PATH \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_LINK_MODE=copy \
+    UV_HTTP_TIMEOUT=120 \
+    UV_HTTP_RETRIES=5
 
 WORKDIR /app
 
-COPY pyproject.toml /app/pyproject.toml
+COPY pyproject.toml uv.lock /app/
 
 ARG PREWARM_FASTEMBED=false
 
@@ -42,10 +47,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && useradd --create-home --shell /usr/sbin/nologin appuser \
     && mkdir -p /models/fastembed /models/huggingface /work
 
-RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    python -c 'import tomllib; data=tomllib.load(open("/app/pyproject.toml","rb")); print("\n".join(data["project"]["dependencies"]))' > /tmp/backend-requirements.txt \
-    && python -m pip install -r /tmp/backend-requirements.txt \
-    && rm /tmp/backend-requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv sync --locked --no-dev --no-install-project
 
 COPY src /app/src
 COPY apps/__init__.py /app/apps/__init__.py
@@ -55,9 +58,7 @@ COPY apps/workers/artifact /app/apps/workers/artifact
 COPY apps/workers/evaluation /app/apps/workers/evaluation
 COPY apps/background /app/apps/background
 
-RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    python -m pip install --no-deps /app \
-    && if [ "$PREWARM_FASTEMBED" = "true" ]; then \
+RUN if [ "$PREWARM_FASTEMBED" = "true" ]; then \
         python -m rag.ops.prewarm_fastembed; \
     fi \
     && chown -R appuser:appuser /models /work

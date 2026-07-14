@@ -132,6 +132,17 @@ $Bundle = "C:\agenticrag-airgap-bundle"
 New-Item -ItemType Directory -Force $Bundle | Out-Null
 ```
 
+Verify the two backend dependency locks before building the transferable images:
+
+```powershell
+uv lock --check --project backend
+uv lock --check --project backend/apps/workers/document_pipeline
+```
+
+Each backend Docker build installs its locked production environment. Treat a
+manifest/lock mismatch as a release error; do not regenerate locks implicitly as
+part of an airgap bundle build.
+
 Build the project images and pull third-party runtime images:
 
 ```powershell

@@ -43,6 +43,8 @@ application-policy defaults. See the backend architecture guide for details.
 Run the primary repository checks from the repository root:
 
 ```bash
+uv lock --check --project backend
+uv lock --check --project backend/apps/workers/document_pipeline
 uv run --project backend ruff check backend/apps backend/src backend/tests
 uv run --project backend pytest backend/tests
 npm --prefix frontend run typecheck

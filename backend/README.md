@@ -12,7 +12,10 @@ code accidentally from the repository root.
 - `src/rag/` contains the installable application package, organized by product
   capability. It must not import `apps`.
 - `tests/` contains capability-aligned unit, integration, and contract tests.
-- `pyproject.toml` and `uv.lock` define the installable backend environment.
+- `pyproject.toml` and `uv.lock` define the general backend environment used by
+  the API and lightweight workers and background services. The document-pipeline
+  image owns its heavier environment in
+  `apps/workers/document_pipeline/pyproject.toml` and the adjacent `uv.lock`.
 
 The `src` directory is not a Python package and must not contain an
 `__init__.py`. Import application code through `rag`, for example
@@ -133,6 +136,13 @@ Reusable feature code under `src/rag` does not register Celery tasks. Worker
 registration and transport-specific retry translation belong under
 `apps/workers`; feature packages own the durable execution policy they invoke.
 
+The general backend image and the document-pipeline image each install from one
+manifest and its adjacent lockfile. Docker builds use locked production syncs and
+must fail when a manifest and lock disagree. The document worker's CPU PyTorch
+index and exact Torch baseline belong to its `pyproject.toml`; Dockerfiles do not
+override package versions, and no shared constraints file competes with either
+lock.
+
 ## Configuration ownership
 
 Configuration is layered by lifecycle rather than stored in one physical file:
@@ -171,7 +181,9 @@ Deployment control has its ownership and privilege boundary documented in
 From this directory:
 
 ```bash
-uv sync --extra dev
+uv lock --check
+uv lock --check --project apps/workers/document_pipeline
+uv sync --locked --extra dev
 .venv/bin/ruff check apps src tests
 .venv/bin/python -m pytest tests
 ```

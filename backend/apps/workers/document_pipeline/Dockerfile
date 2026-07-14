@@ -1,15 +1,18 @@
 # syntax=docker/dockerfile:1
 
+FROM ghcr.io/astral-sh/uv:0.11.12 AS uv
 FROM python:3.12-slim
 
-ARG PYTORCH_CPU_INDEX_URL=https://download.pytorch.org/whl/cpu
+COPY --from=uv /uv /uvx /bin/
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app:/app/src
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-ENV PIP_DEFAULT_TIMEOUT=120
-ENV PIP_RETRIES=5
+ENV PATH=/opt/venv/bin:$PATH
+ENV UV_LINK_MODE=copy
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+ENV UV_HTTP_TIMEOUT=120
+ENV UV_HTTP_RETRIES=5
 ENV SERVICE_NAME=ingestion-worker
 ENV SERVICE_KIND=rag-ingestion-worker-celery
 
@@ -31,13 +34,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && mkdir -p /models/fastembed /models/docling /models/huggingface \
     && chown -R appuser:appuser /models
 
-COPY apps/workers/document_pipeline/pyproject.toml apps/workers/document_pipeline/constraints.txt /app/apps/workers/document_pipeline/
-RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
-    python -m pip install --index-url "$PYTORCH_CPU_INDEX_URL" \
-        "torch==2.12.0" "torchvision==0.27.0" \
-    && python -c 'import tomllib; data=tomllib.load(open("/app/apps/workers/document_pipeline/pyproject.toml","rb")); print("\n".join(data["project"]["dependencies"]))' > /tmp/worker-requirements.txt \
-    && python -m pip install -c /app/apps/workers/document_pipeline/constraints.txt -r /tmp/worker-requirements.txt \
-    && rm /tmp/worker-requirements.txt
+COPY apps/workers/document_pipeline/pyproject.toml apps/workers/document_pipeline/uv.lock /app/apps/workers/document_pipeline/
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    uv sync \
+        --project /app/apps/workers/document_pipeline \
+        --locked \
+        --no-dev \
+        --no-install-project
 
 ENV DOCLING_ARTIFACTS_PATH=/models/docling
 ENV DOCLING_OCR_BACKEND=onnxruntime

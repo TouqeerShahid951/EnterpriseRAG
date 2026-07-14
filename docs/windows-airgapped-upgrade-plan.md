@@ -156,6 +156,18 @@ The release gate must fail while the worktree is dirty. Commit or intentionally
 exclude work before building; do not use a source archive from `HEAD` while
 building images from different uncommitted files.
 
+Confirm that both backend manifests agree with their committed lockfiles before
+building release images:
+
+```bash
+uv lock --check --project backend
+uv lock --check --project backend/apps/workers/document_pipeline
+```
+
+The API and document-pipeline Docker builds use locked production environments,
+so a stale or missing lockfile is a release failure rather than a request to
+resolve newer packages during the build.
+
 ### 2. Build uniquely tagged application images
 
 Keep `VITE_API_BASE_URL` blank. The frontend nginx container proxies `/api/` to
