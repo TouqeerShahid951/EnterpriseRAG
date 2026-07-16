@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
-from ..access_scope_ports import DocumentAccessScopeIndexError
+from rag.documents.access_scope.ports import DocumentAccessScopeIndexError
 
 
 class QdrantDocumentAccessScopeIndex:

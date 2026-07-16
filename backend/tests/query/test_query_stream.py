@@ -5,7 +5,7 @@ from time import perf_counter
 from rag.auth.context import UserContext
 from rag.query.qdrant import SearchHit
 from rag.query.query_stream import _stream_response_tail, _stream_synthesizer, stream_graph
-from rag.query.routing_models import RoutePlan
+from rag.query.routing.routing_models import RoutePlan
 from rag.query.state import QueryContext, initial_state
 from rag.query.schemas import QueryRequest
 

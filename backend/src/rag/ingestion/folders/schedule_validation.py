@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from ...documents.upload_validation import (
+from ...documents.upload.validation import (
     UploadRejected,
     validated_description,
     validate_declared_dates,

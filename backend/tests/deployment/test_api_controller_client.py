@@ -7,7 +7,7 @@ from dataclasses import replace
 from urllib import request as urlrequest
 
 from rag.deployment.controller_client import HttpDeploymentControllerClient
-from rag.query.vllm_config_repository import env_vllm_deployment_config
+from rag.deployment.vllm_config_repository import env_vllm_deployment_config
 
 
 class Response:

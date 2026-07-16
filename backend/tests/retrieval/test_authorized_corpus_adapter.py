@@ -9,7 +9,7 @@ import pytest
 from rag.auth.context import UserContext
 from rag.core.config import Settings
 from rag.query.qdrant import SearchHit
-from rag.query.rag_config_models import RagConfigRecord
+from rag.query.configuration.models import RagConfigRecord
 from rag.retrieval.adapters import query_runtime
 from rag.retrieval.adapters.query_runtime import (
     QueryRuntimeAuthorizedCorpusRetriever,

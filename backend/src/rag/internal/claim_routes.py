@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 
 from ..documents.claim_dependencies import get_claim_repository
 from ..documents.claim_models import ClaimRepository
-from ..schemas.internal import (
+from rag.documents.internal_schemas import (
     ClaimsLookupResponse,
     ClaimsIngestResponse,
     ClaimsSaveRequest,
@@ -11,8 +11,8 @@ from ..schemas.internal import (
     ConflictSaveResponse,
     ConflictCheckRequest,
     ConflictCheckResponse,
-    ServiceTokenContext,
 )
+from rag.internal.schemas import ServiceTokenContext
 from .service_token_auth import require_service_token
 
 router = APIRouter(tags=["internal-claims"])

@@ -22,14 +22,11 @@ from .image_review import (
     image_review_resume_inputs as _image_review_resume_inputs,
 )
 from .indexing_stages import (
+    activate_generation as activate_generation,
     chunk_text as chunk_text,
-    commit_supersession as commit_supersession,
     download_file as download_file,
     embed_chunks as embed_chunks,
-    mark_complete as mark_complete,
     mark_processing as mark_processing,
-    persist_claims as persist_claims,
-    persist_document_metadata as persist_document_metadata,
     upsert_qdrant as upsert_qdrant,
 )
 from .parser_diagnostics import parser_failure_provenance as _parser_failure_provenance
@@ -65,15 +62,12 @@ __all__ = [
     "_low_confidence_ocr_items",
     "_vision_layout_progress_reporter",
     "chunk_text",
-    "commit_supersession",
     "download_file",
     "embed_chunks",
     "extract_text",
     "generate_metadata",
-    "mark_complete",
     "mark_processing",
-    "persist_claims",
-    "persist_document_metadata",
+    "activate_generation",
     "upsert_qdrant",
 ]
 

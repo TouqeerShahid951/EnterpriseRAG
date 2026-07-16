@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from ...documents.adapters.memory_values import _bbox_list, _int_or_none
-from ..review_models import (
+from ..review.models import (
     ImageReviewBatchClosedError,
     ImageReviewBatchRecord,
     ImageReviewCandidateRecord,

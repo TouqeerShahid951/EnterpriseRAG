@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from uuid import uuid4
 
 from ...auth.document_access import can_read_group_path
-from ...schemas.internal import ClaimRecord
+from ..internal_schemas import ClaimRecord
 from ...shared.contracts.evidence import ConflictPair, SourceAnchor
 from ..claim_models import IngestClaimsResult
 

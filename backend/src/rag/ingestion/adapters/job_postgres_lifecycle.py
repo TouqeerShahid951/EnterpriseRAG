@@ -230,6 +230,12 @@ class PostgresIngestJobLifecycleMixin:
                     UPDATE ingest_jobs
                     SET status = 'processing',
                         attempt_count = attempt_count + 1,
+                        failure_attempt_count = failure_attempt_count +
+                            CASE WHEN status = 'processing' THEN 1 ELSE 0 END,
+                        last_failure_run_token = CASE
+                            WHEN status = 'processing' THEN run_token
+                            ELSE last_failure_run_token
+                        END,
                         last_heartbeat_at = NOW(),
                         run_token = %s,
                         error_code = NULL,
@@ -246,7 +252,9 @@ class PostgresIngestJobLifecycleMixin:
                                   < NOW() - (%s * INTERVAL '1 second')
                           )
                       )
-                      AND attempt_count < %s
+                      AND active_delivery_id IS NULL
+                      AND failure_attempt_count +
+                          CASE WHEN status = 'processing' THEN 1 ELSE 0 END < %s
                     RETURNING *
                     """,
                     (
@@ -270,6 +278,7 @@ class PostgresIngestJobLifecycleMixin:
                 if (
                     selected_token is not None
                     and current is not None
+                    and current.get("active_delivery_id") is None
                     and current.get("status") == "processing"
                     and current.get("run_token") == selected_token
                 ):

@@ -11,7 +11,7 @@ from ...auth.identity_models import IdentityRepository, UserRecord
 from ...documents.models import DocumentRepository
 from ...documents.scanning import FileScanner
 from ...documents.storage import UploadStorage
-from ...documents.upload_validation import (
+from ...documents.upload.validation import (
     UploadRejected,
     default_title,
     is_supported_document_name,

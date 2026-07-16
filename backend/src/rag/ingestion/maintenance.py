@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import logging
 
 from rag.core.config import settings
 from rag.documents.models import DocumentRepository
 from rag.documents.repository import get_document_repository
 from rag.ingestion.configuration import IngestConfigRepository
-from rag.ingestion.configuration_dependencies import (
+from rag.ingestion.configuration.dependencies import (
     effective_ingest_config,
     get_ingest_config_repository,
 )
 from rag.ingestion.job_dependencies import ingest_job_repository_for
 from rag.ingestion.job_models import IngestJobRecord, IngestJobRepository
+from rag.shared.persistence import PostgresConnectionMixin
 
+from .adapters.http import ServiceRequestError
+from .delivery.service import IngestDeliveryService, dispatch_pending_deliveries
+from .indexing.qdrant import QdrantClient
+from .publication.dependencies import publication_service_for
+from .publication.service import IndexPublicationService
 from .queue import IngestQueue, get_ingest_queue
 from .recovery import (
     IngestRecoveryError,
@@ -26,6 +33,7 @@ from .worker_control import IngestWorkerControl, get_ingest_worker_control
 
 
 MAX_ATTEMPTS = MAX_INGEST_ATTEMPTS
+logger = logging.getLogger(__name__)
 
 
 def reconcile_ingestion_jobs(
@@ -40,6 +48,8 @@ def reconcile_ingestion_jobs(
     document_repo = document_repo or get_document_repository()
     job_repo = job_repo or ingest_job_repository_for(document_repo)
     queue = queue or get_ingest_queue()
+    delivery = IngestDeliveryService(job_repo)
+    _dispatch_best_effort(delivery, queue)
     control = control or get_ingest_worker_control()
     config = effective_ingest_config(
         repo=config_repo or get_ingest_config_repository()
@@ -61,7 +71,7 @@ def reconcile_ingestion_jobs(
     )
     for candidate in stale_jobs:
         job = candidate.job
-        if job.attempt_count >= MAX_ATTEMPTS:
+        if job.failure_attempt_count >= MAX_ATTEMPTS:
             mutation = job_repo.update_ingest_job(
                 job.id,
                 status="failed",
@@ -75,11 +85,15 @@ def reconcile_ingestion_jobs(
                 run_token=job.run_token,
             )
             if mutation.changed:
+                _retire_failed_generation(document_repo, job.id)
                 _audit(
                     document_repo,
                     job,
                     "exhausted",
-                    {"attempt_count": job.attempt_count},
+                    {
+                        "attempt_count": job.attempt_count,
+                        "failure_attempt_count": job.failure_attempt_count,
+                    },
                 )
             continue
 
@@ -99,6 +113,7 @@ def reconcile_ingestion_jobs(
                 run_token=job.run_token,
             )
             if mutation.changed:
+                _retire_failed_generation(document_repo, job.id)
                 _audit(
                     document_repo,
                     job,
@@ -139,3 +154,53 @@ def _audit(
         target_id=job.id,
         payload={"doc_id": job.doc_id, **payload},
     )
+
+
+def _dispatch_best_effort(
+    delivery: IngestDeliveryService,
+    queue: IngestQueue,
+) -> None:
+    try:
+        dispatch_pending_deliveries(delivery, queue)
+    except Exception:
+        logger.warning("ingestion outbox maintenance deferred")
+
+
+def _retire_failed_generation(document_repo: DocumentRepository, job_id: str) -> None:
+    if settings.document_repository == "postgres" and isinstance(
+        document_repo, PostgresConnectionMixin
+    ):
+        publication_service_for(settings).cancel_building(job_id=job_id)
+
+
+def retire_index_generations(
+    *,
+    publication: IndexPublicationService | None = None,
+    qdrant: QdrantClient | None = None,
+) -> int:
+    """Delete index generations that have already been replaced in PostgreSQL."""
+    if publication is None and settings.document_repository != "postgres":
+        return 0
+    publication = publication or publication_service_for(settings)
+    generations = publication.list_retiring(limit=20)
+    if not generations:
+        return 0
+    qdrant = qdrant or QdrantClient(
+        base_url=settings.qdrant_url,
+        collection=settings.qdrant_collection,
+        timeout_seconds=settings.rag_http_timeout_seconds,
+    )
+    retired = 0
+    for generation in generations:
+        try:
+            qdrant.delete_generation_points(generation.id)
+        except ServiceRequestError as exc:
+            logger.warning(
+                "index generation retirement deferred generation_id=%s service=%s",
+                generation.id,
+                exc.service,
+            )
+            continue
+        if publication.mark_retired(generation.id):
+            retired += 1
+    return retired

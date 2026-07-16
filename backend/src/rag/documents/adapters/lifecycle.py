@@ -8,7 +8,7 @@ from ...graphrag.maintenance_queue import (
 )
 from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
-from ..lifecycle_ports import DocumentVectorIndexError
+from rag.documents.lifecycle.ports import DocumentVectorIndexError
 
 
 class QdrantDocumentVectorIndex:

@@ -8,8 +8,10 @@ from typing import Any
 from ...shared.persistence import PostgresConnectionMixin
 from ...shared.contracts.clearance import clearance_levels_at_or_below
 from ..models import (
+    AuditEventPage,
     AuditEventRecord,
     AuditFilters,
+    AuditSummaryRecord,
     AuditViewerScope,
     EnrichedAuditEvent,
     MAX_AUDIT_SCAN_LIMIT,
@@ -21,19 +23,24 @@ class PostgresAuditRepository(PostgresConnectionMixin):
     def __init__(self, *, database_url: str) -> None:
         self.database_url = database_url
 
-    def search_visible_events(
+    def search_visible_events_page(
         self,
         *,
         filters: AuditFilters,
         viewer: AuditViewerScope,
-        scan_limit: int,
-    ) -> list[EnrichedAuditEvent]:
+        limit: int,
+        offset: int = 0,
+    ) -> AuditEventPage:
+        if limit < 1:
+            raise ValueError("audit page limit must be positive")
+        if offset < 0:
+            raise ValueError("audit page offset must be nonnegative")
         clauses: list[str] = []
-        params: list[object] = [max(1, min(scan_limit, MAX_AUDIT_SCAN_LIMIT))]
+        params: list[object] = []
         if not viewer.global_access:
             visible_groups = sorted(viewer.group_paths)
             if not visible_groups:
-                return []
+                return AuditEventPage()
             allowed_clearances = list(
                 clearance_levels_at_or_below(viewer.clearance_level)
             )
@@ -68,8 +75,35 @@ class PostgresAuditRepository(PostgresConnectionMixin):
         where_sql = (
             " AND ".join(f"({clause})" for clause in clauses) if clauses else "TRUE"
         )
-        rows = self._execute_all(_audit_query(where_sql), tuple(params))
-        return [_enriched_event_from_row(row) for row in rows]
+        rows = self._execute_all(
+            _audit_page_query(where_sql),
+            (*params, limit, offset),
+        )
+        if not rows:
+            return AuditEventPage()
+        return AuditEventPage(
+            items=tuple(
+                _enriched_event_from_row(row)
+                for row in rows
+                if row.get("id") is not None
+            ),
+            total=int(rows[0]["summary_total"]),
+            summary=_audit_summary_from_row(rows[0]),
+        )
+
+    def search_visible_events(
+        self,
+        *,
+        filters: AuditFilters,
+        viewer: AuditViewerScope,
+        scan_limit: int,
+    ) -> list[EnrichedAuditEvent]:
+        page = self.search_visible_events_page(
+            filters=filters,
+            viewer=viewer,
+            limit=max(1, min(scan_limit, MAX_AUDIT_SCAN_LIMIT)),
+        )
+        return list(page.items)
 
 
 def audit_event_from_row(row: dict[str, Any]) -> AuditEventRecord:
@@ -157,74 +191,156 @@ def _append_filter_clauses(
         params.extend([query] * 13)
 
 
-def _audit_query(where_sql: str) -> str:
+def _audit_page_query(where_sql: str) -> str:
     return f"""
-        WITH recent AS (
-            SELECT *
-            FROM audit_log
-            ORDER BY created_at DESC, id DESC
-            LIMIT %s
-        ),
-        enriched AS (
+        WITH enriched AS (
             SELECT
-                recent.id::text AS id,
-                recent.event_type,
-                recent.actor_id::text AS actor_id,
-                recent.target_type,
-                recent.target_id,
-                recent.payload,
-                recent.created_at,
+                audit.id::text AS id,
+                audit.event_type,
+                audit.actor_id::text AS actor_id,
+                audit.target_type,
+                audit.target_id,
+                audit.payload,
+                audit.created_at,
                 COALESCE(
                     actor.email,
                     CASE
-                        WHEN recent.actor_id::text = recent.target_id THEN recent.payload->>'email'
+                        WHEN audit.actor_id::text = audit.target_id THEN audit.payload->>'email'
                     END
                 ) AS actor_email,
                 CASE
-                    WHEN recent.target_type = 'user' THEN COALESCE(target_user.email, recent.payload->>'email')
+                    WHEN audit.target_type = 'user' THEN COALESCE(target_user.email, audit.payload->>'email')
                 END AS target_user_email,
                 CASE
-                    WHEN recent.target_type = 'user' THEN COALESCE(target_user.name, recent.payload->>'name')
+                    WHEN audit.target_type = 'user' THEN COALESCE(target_user.name, audit.payload->>'name')
                 END AS target_user_name,
                 CASE
-                    WHEN recent.event_type LIKE 'auth.%%' THEN 'authentication'
-                    WHEN recent.target_type = 'document'
-                      OR recent.event_type LIKE 'upload.%%'
-                      OR recent.event_type LIKE 'documents.%%'
-                      OR recent.event_type LIKE 'folder_ingest.%%'
-                      OR recent.event_type LIKE 'internal.document%%'
-                      OR recent.event_type LIKE 'internal.supersession%%' THEN 'document'
-                    WHEN recent.event_type LIKE 'ingest.%%'
-                      OR recent.event_type LIKE 'internal.ingest.%%'
-                      OR recent.event_type LIKE 'admin.ingest.%%' THEN 'ingestion'
-                    WHEN recent.target_type = 'user'
-                      OR recent.event_type LIKE 'admin.user.%%' THEN 'user'
-                    WHEN recent.event_type LIKE 'review.%%' THEN 'review'
-                    WHEN recent.event_type LIKE 'query.%%' THEN 'query'
+                    WHEN audit.event_type LIKE 'auth.%%' THEN 'authentication'
+                    WHEN audit.target_type = 'document'
+                      OR audit.event_type LIKE 'upload.%%'
+                      OR audit.event_type LIKE 'documents.%%'
+                      OR audit.event_type LIKE 'folder_ingest.%%'
+                      OR audit.event_type LIKE 'internal.document%%'
+                      OR audit.event_type LIKE 'internal.supersession%%' THEN 'document'
+                    WHEN audit.event_type LIKE 'ingest.%%'
+                      OR audit.event_type LIKE 'internal.ingest.%%'
+                      OR audit.event_type LIKE 'admin.ingest.%%' THEN 'ingestion'
+                    WHEN audit.target_type = 'user'
+                      OR audit.event_type LIKE 'admin.user.%%' THEN 'user'
+                    WHEN audit.event_type LIKE 'review.%%' THEN 'review'
+                    WHEN audit.event_type LIKE 'query.%%' THEN 'query'
                     ELSE 'system'
                 END AS category,
                 CASE
-                    WHEN recent.target_type = 'document' THEN recent.target_id
-                    ELSE recent.payload->>'doc_id'
+                    WHEN audit.target_type = 'document' THEN audit.target_id
+                    ELSE audit.payload->>'doc_id'
                 END AS doc_id,
                 document.title AS doc_title,
                 document.group_path AS doc_group_path,
                 document.clearance_level AS doc_clearance_level,
                 document.deleted_at AS doc_deleted_at
-            FROM recent
-            LEFT JOIN users actor ON actor.id = recent.actor_id
-            LEFT JOIN users target_user ON recent.target_type = 'user' AND target_user.id::text = recent.target_id
+            FROM audit_log audit
+            LEFT JOIN users actor ON actor.id = audit.actor_id
+            LEFT JOIN users target_user ON audit.target_type = 'user' AND target_user.id::text = audit.target_id
             LEFT JOIN documents document
               ON document.id::text = CASE
-                    WHEN recent.target_type = 'document' THEN recent.target_id
-                    ELSE recent.payload->>'doc_id'
+                    WHEN audit.target_type = 'document' THEN audit.target_id
+                    ELSE audit.payload->>'doc_id'
                  END
+        ),
+        filtered AS (
+            SELECT *
+            FROM enriched
+            WHERE {where_sql}
+        ),
+        page AS (
+            SELECT *
+            FROM filtered
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s OFFSET %s
+        ),
+        summary AS (
+            SELECT
+                COUNT(*)::bigint AS summary_total,
+                COUNT(*) FILTER (
+                    WHERE target_type = 'document'
+                       OR doc_id IS NOT NULL
+                       OR category = 'document'
+                )::bigint AS summary_document_events,
+                COUNT(*) FILTER (
+                    WHERE category = 'authentication'
+                )::bigint AS summary_auth_events,
+                COUNT(*) FILTER (
+                    WHERE actor_id IS NULL
+                )::bigint AS summary_system_events,
+                COUNT(DISTINCT actor_id) FILTER (
+                    WHERE actor_id IS NOT NULL
+                )::bigint AS summary_actor_count,
+                COUNT(DISTINCT event_type)::bigint AS summary_event_type_count,
+                COALESCE(
+                    (
+                        SELECT jsonb_object_agg(category, event_count)
+                        FROM (
+                            SELECT category, COUNT(*)::bigint AS event_count
+                            FROM filtered
+                            GROUP BY category
+                        ) category_summary
+                    ),
+                    '{{}}'::jsonb
+                ) AS summary_category_counts,
+                COALESCE(
+                    (
+                        SELECT jsonb_object_agg(target_type_key, event_count)
+                        FROM (
+                            SELECT
+                                COALESCE(target_type, 'workspace') AS target_type_key,
+                                COUNT(*)::bigint AS event_count
+                            FROM filtered
+                            GROUP BY COALESCE(target_type, 'workspace')
+                        ) target_summary
+                    ),
+                    '{{}}'::jsonb
+                ) AS summary_target_type_counts,
+                COALESCE(
+                    (
+                        SELECT jsonb_object_agg(event_type, event_count)
+                        FROM (
+                            SELECT event_type, COUNT(*)::bigint AS event_count
+                            FROM filtered
+                            GROUP BY event_type
+                        ) event_summary
+                    ),
+                    '{{}}'::jsonb
+                ) AS summary_event_type_counts
+            FROM filtered
         )
-        SELECT *
-        FROM enriched
-        WHERE {where_sql}
-        ORDER BY created_at DESC, id DESC
+        SELECT page.*, summary.*
+        FROM summary
+        LEFT JOIN page ON TRUE
+        ORDER BY page.created_at DESC NULLS LAST, page.id DESC NULLS LAST
     """
+
+
+def _audit_summary_from_row(row: dict[str, Any]) -> AuditSummaryRecord:
+    return AuditSummaryRecord(
+        total=int(row["summary_total"]),
+        document_events=int(row["summary_document_events"]),
+        auth_events=int(row["summary_auth_events"]),
+        system_events=int(row["summary_system_events"]),
+        actor_count=int(row["summary_actor_count"]),
+        event_type_count=int(row["summary_event_type_count"]),
+        category_counts=_count_map(row.get("summary_category_counts")),
+        target_type_counts=_count_map(row.get("summary_target_type_counts")),
+        event_type_counts=_count_map(row.get("summary_event_type_counts")),
+    )
+
+
+def _count_map(value: Any) -> dict[str, int]:
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): int(count) for key, count in value.items()}
 
 
 def _enriched_event_from_row(row: dict[str, Any]) -> EnrichedAuditEvent:

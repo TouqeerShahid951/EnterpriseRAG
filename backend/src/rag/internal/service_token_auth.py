@@ -1,7 +1,7 @@
 from fastapi import Header, HTTPException, status
 
 from ..core.config import settings
-from ..schemas.internal import ServiceTokenContext
+from rag.internal.schemas import ServiceTokenContext
 
 
 async def require_service_token(

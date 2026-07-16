@@ -1,8 +1,8 @@
 from billiard.exceptions import SoftTimeLimitExceeded
 import pytest
 
-from rag.evaluations.answer_verifier import verify_answer_content_with_llm
-from rag.schemas.evaluations import EvaluationCase
+from rag.evaluations.answer_verifier import ANSWER_VERIFIER_VERSION, verify_answer_content_with_llm
+from rag.evaluations.schemas import EvaluationCase
 from rag.query.schemas import RAGResponse
 from rag.shared.evaluation.answer_checks import evaluate_literal_checks
 
@@ -61,8 +61,32 @@ def test_answer_verifier_accepts_semantic_match_json() -> None:
 
     assert result["passed"] is True
     assert result["status"] == "checked"
+    assert result["version"] == "v2" == ANSWER_VERIFIER_VERSION
     assert result["confidence"] == 0.9
     assert llm.calls[0]["model"] == "judge-model"
+
+
+def test_answer_verifier_prompt_requires_expected_answer_equivalence_and_literal_constraints() -> None:
+    case = EvaluationCase(
+        id="case",
+        question="Who owns finance?",
+        expected_answer="The chief financial officer owns finance.",
+        must_include=["finance"],
+        must_not_include=["chief operating officer"],
+    )
+    rag_response = response("The chief operating officer owns finance.")
+    literal = evaluate_literal_checks(rag_response.answer, case.must_include, case.must_not_include)
+    llm = FakeJsonLlm(
+        '{"passed": false, "missing_must_include": [], '
+        '"present_must_not_include": ["chief operating officer"]}'
+    )
+
+    verify_answer_content_with_llm(llm, case=case, response=rag_response, literal=literal, model=None)
+
+    prompt = str(llm.calls[0]["prompt"])
+    assert "materially equivalent" in prompt
+    assert "Also enforce every must_include and must_not_include constraint" in prompt
+    assert '"expected_answer": "The chief financial officer owns finance."' in prompt
 
 
 def test_answer_verifier_bad_json_fails_closed() -> None:

@@ -42,8 +42,23 @@ def test_postgres_adapter_builds_scoped_filtered_query_and_enriches_rows() -> No
     created_from = datetime(2026, 7, 1, tzinfo=UTC)
     created_to = datetime(2026, 7, 10, tzinfo=UTC)
     created_at = datetime(2026, 7, 8, 12, 30, tzinfo=UTC)
+    summary = {
+        "summary_total": 2,
+        "summary_document_events": 2,
+        "summary_auth_events": 0,
+        "summary_system_events": 1,
+        "summary_actor_count": 1,
+        "summary_event_type_count": 2,
+        "summary_category_counts": {"document": 2},
+        "summary_target_type_counts": {"document": 2},
+        "summary_event_type_counts": {
+            "upload.queued": 1,
+            "documents.delete": 1,
+        },
+    }
     rows = [
         {
+            **summary,
             "id": "event-1",
             "event_type": "upload.queued",
             "actor_id": "actor-1",
@@ -60,6 +75,7 @@ def test_postgres_adapter_builds_scoped_filtered_query_and_enriches_rows() -> No
             "doc_title": "  Quarterly Plan  ",
         },
         {
+            **summary,
             "id": "event-2",
             "event_type": "documents.delete",
             "actor_id": None,
@@ -76,7 +92,7 @@ def test_postgres_adapter_builds_scoped_filtered_query_and_enriches_rows() -> No
     ]
     repository = CapturingPostgresAuditRepository(rows=rows)
 
-    events = repository.search_visible_events(
+    page = repository.search_visible_events_page(
         filters=AuditFilters(
             search="budget",
             category="document",
@@ -93,14 +109,14 @@ def test_postgres_adapter_builds_scoped_filtered_query_and_enriches_rows() -> No
             group_paths=("/ops", "/finance"),
             clearance_level="NATO_SECRET",
         ),
-        scan_limit=9000,
+        limit=25,
+        offset=10,
     )
 
     assert len(repository.queries) == 1
     query, params = repository.queries[0]
     visible_groups = ["/finance", "/ops"]
-    assert params[:17] == (
-        5000,
+    assert params[:16] == (
         visible_groups,
         ["NATO_UNCLASSIFIED", "NATO_RESTRICTED", "NATO_CONFIDENTIAL", "NATO_SECRET"],
         visible_groups,
@@ -118,8 +134,11 @@ def test_postgres_adapter_builds_scoped_filtered_query_and_enriches_rows() -> No
         created_from,
         created_to,
     )
-    assert params[17:] == ("budget",) * 13
+    assert params[16:-2] == ("budget",) * 13
+    assert params[-2:] == (25, 10)
     assert "FROM audit_log" in query
+    assert "COUNT(DISTINCT actor_id)" in query
+    assert "LIMIT %s OFFSET %s" in query
     assert "document_shares" in query
     assert "doc_id IS NULL" in query
     assert "payload->>'group_path' = ANY(%s::text[])" in query
@@ -129,30 +148,35 @@ def test_postgres_adapter_builds_scoped_filtered_query_and_enriches_rows() -> No
     assert "strpos(lower(id), %s) > 0" in query
     assert "budget" not in query
 
-    assert [event.record.id for event in events] == ["event-1", "event-2"]
-    assert events[0].record.payload["filename"] == "Payload title.pdf"
-    assert events[0].record.created_at == created_at
-    assert events[0].actor_email == "actor@example.test"
-    assert events[0].target_user_email == "target@example.test"
-    assert events[0].target_user_name == "Target User"
-    assert events[0].target_document_title == "Quarterly Plan"
-    assert events[1].target_document_title == "Payload fallback.pdf"
+    assert page.total == 2
+    assert page.summary.document_events == 2
+    assert page.summary.system_events == 1
+    assert page.summary.event_type_counts["upload.queued"] == 1
+    assert [event.record.id for event in page.items] == ["event-1", "event-2"]
+    assert page.items[0].record.payload["filename"] == "Payload title.pdf"
+    assert page.items[0].record.created_at == created_at
+    assert page.items[0].actor_email == "actor@example.test"
+    assert page.items[0].target_user_email == "target@example.test"
+    assert page.items[0].target_user_name == "Target User"
+    assert page.items[0].target_document_title == "Quarterly Plan"
+    assert page.items[1].target_document_title == "Payload fallback.pdf"
 
 
 def test_postgres_adapter_skips_database_for_restricted_viewer_without_groups() -> None:
     repository = CapturingPostgresAuditRepository(rows=[])
 
-    events = repository.search_visible_events(
+    page = repository.search_visible_events_page(
         filters=_empty_filters(),
         viewer=AuditViewerScope(
             global_access=False,
             group_paths=(),
             clearance_level="NATO_RESTRICTED",
         ),
-        scan_limit=100,
+        limit=100,
     )
 
-    assert events == []
+    assert page.items == ()
+    assert page.total == 0
     assert repository.queries == []
 
 

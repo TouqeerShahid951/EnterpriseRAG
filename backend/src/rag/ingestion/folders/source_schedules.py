@@ -15,7 +15,7 @@ from .schedule_access import (
 )
 from .schedule_validation import _validated_schedule_metadata
 from .scheduling import next_run_for_schedule, normalize_timezone
-from .sources import LocalFolderSource
+from rag.ingestion.folders.sources import LocalFolderSource
 
 
 def create_minio_prefix_schedule(

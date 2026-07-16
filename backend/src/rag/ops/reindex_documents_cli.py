@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from typing import Any
+from uuid import uuid4
 
 from rag.shared.contracts.qdrant_schema import collection_mode, collection_vector_size
 
 from ..core.config import settings
 from ..query.http import ServiceRequestError, request_json
+from ..ingestion.adapters.job_postgres import PostgresIngestJobRepository
+from ..ingestion.delivery.service import (
+    IngestDeliveryService,
+    dispatch_pending_deliveries,
+)
 from ..ingestion.queue import CeleryIngestQueue
 from .qdrant_document_repair import mark_documents_not_current
 from .reindex_jobs import (
@@ -17,6 +24,9 @@ from .reindex_jobs import (
     reindex_documents_query,
     superseded_doc_ids_query,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -44,10 +54,21 @@ def main() -> None:
         queue_name=settings.ingest_queue_name,
         task_name=settings.ingest_task_name,
     )
+    delivery = IngestDeliveryService(
+        PostgresIngestJobRepository(settings.database_url)
+    )
     for document in documents:
-        job_id = _create_reindex_job(document.doc_id)
-        queue.enqueue(build_ingest_message(document, job_id))
-        print(f"queued doc_id={document.doc_id} job_id={job_id}")
+        job_id = str(uuid4())
+        mutation = delivery.create_queued_job(
+            build_ingest_message(document, job_id),
+            origin="unknown",
+            event_kind="reindex",
+        )
+        if mutation.job is None or not mutation.changed:
+            raise RuntimeError("unable to create queued reindex delivery")
+        _record_reindex_audit(document.doc_id, mutation.job.id)
+        print(f"queued doc_id={document.doc_id} job_id={mutation.job.id}")
+    _dispatch_best_effort(delivery, queue, limit=len(documents))
 
 
 def _parse_args() -> argparse.Namespace:
@@ -73,26 +94,28 @@ def _fetch_candidate_rows(
         return list(conn.execute(query, params).fetchall())
 
 
-def _create_reindex_job(doc_id: str) -> str:
+def _record_reindex_audit(doc_id: str, job_id: str) -> None:
     with _connect() as conn:
         with conn.transaction():
-            row = conn.execute(
-                """
-                INSERT INTO ingest_jobs (doc_id, status, progress_pct)
-                VALUES (%s, 'queued', 0)
-                RETURNING id::text
-                """,
-                (doc_id,),
-            ).fetchone()
-            conn.execute("UPDATE documents SET ingest_status = 'queued', updated_at = NOW() WHERE id = %s", (doc_id,))
             conn.execute(
                 """
                 INSERT INTO audit_log (event_type, target_type, target_id, payload)
                 VALUES ('rag.reindex_queued', 'document', %s, jsonb_build_object('job_id', %s::text))
                 """,
-                (doc_id, row["id"]),
+                (doc_id, job_id),
             )
-    return str(row["id"])
+
+
+def _dispatch_best_effort(
+    delivery: IngestDeliveryService,
+    queue: CeleryIngestQueue,
+    *,
+    limit: int,
+) -> None:
+    try:
+        dispatch_pending_deliveries(delivery, queue, limit=max(1, limit))
+    except Exception:
+        logger.warning("reindex delivery deferred")
 
 
 def _delete_collection_if_present() -> None:

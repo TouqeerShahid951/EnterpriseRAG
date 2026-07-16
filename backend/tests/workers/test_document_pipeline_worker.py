@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 from billiard.exceptions import SoftTimeLimitExceeded
 import pytest
@@ -226,10 +227,11 @@ def test_ingestion_task_delegates_without_implicitly_queuing_graphrag(
     result = tasks.ingest_document.run(payload)
 
     assert result == {"status": "complete", **payload}
-    assert captured == {
-        "payload": payload,
-        "timeout_error_types": (SoftTimeLimitExceeded,),
-    }
+    assert captured["payload"] == payload
+    assert captured["timeout_error_types"] == (SoftTimeLimitExceeded,)
+    assert isinstance(captured["run_token"], str)
+    assert captured["run_token"]
+    assert set(captured) == {"payload", "timeout_error_types", "run_token"}
     assert graph_dispatches == []
 
 
@@ -243,11 +245,14 @@ def test_ingestion_wrapper_translates_delivery_retry(
     max_retries: int | None,
 ) -> None:
     cause = RuntimeError("backend unavailable")
+    observed_run_token: str | None = None
 
     class ExpectedRetry(RuntimeError):
         pass
 
-    def run(*_args: object, **_kwargs: object) -> dict[str, object]:
+    def run(*_args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal observed_run_token
+        observed_run_token = str(kwargs["run_token"])
         raise IngestDeliveryRetry(
             cause,
             countdown=countdown,
@@ -259,6 +264,7 @@ def test_ingestion_wrapper_translates_delivery_retry(
             "exc": cause,
             "countdown": countdown,
             "max_retries": max_retries,
+            "headers": {tasks._RUN_TOKEN_HEADER: observed_run_token},
         }
         raise ExpectedRetry
 
@@ -267,6 +273,59 @@ def test_ingestion_wrapper_translates_delivery_retry(
 
     with pytest.raises(ExpectedRetry):
         tasks.ingest_document.run({"job_id": "job-1"})
+
+
+def test_ambiguous_attempt_response_retry_reuses_only_its_run_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cause = RuntimeError("response lost after attempt commit")
+    observed_tokens: list[str] = []
+
+    class RetryScheduled(RuntimeError):
+        pass
+
+    class FakeTask:
+        def __init__(self, headers: dict[str, str] | None = None) -> None:
+            self.request = SimpleNamespace(id="job-1", headers=headers)
+            self.retry_options: dict[str, object] | None = None
+
+        def retry(self, **kwargs: object) -> None:
+            self.retry_options = kwargs
+            raise RetryScheduled
+
+    def run(*_args: object, **kwargs: object) -> dict[str, object]:
+        token = str(kwargs["run_token"])
+        observed_tokens.append(token)
+        if len(observed_tokens) == 1:
+            raise IngestDeliveryRetry(cause, countdown=30, max_retries=12)
+        return {"status": "complete"}
+
+    monkeypatch.setattr(tasks, "run_ingest_document", run)
+
+    first_delivery = FakeTask()
+    with pytest.raises(RetryScheduled):
+        tasks._run_ingest_delivery(first_delivery, {"job_id": "job-1"})
+
+    assert first_delivery.retry_options is not None
+    retry_headers = first_delivery.retry_options["headers"]
+    assert isinstance(retry_headers, dict)
+    assert retry_headers == {tasks._RUN_TOKEN_HEADER: observed_tokens[0]}
+
+    retry_delivery = FakeTask(retry_headers)
+    assert retry_delivery.request.id == first_delivery.request.id
+    assert tasks._run_ingest_delivery(retry_delivery, {"job_id": "job-1"}) == {
+        "status": "complete"
+    }
+
+    separately_published_duplicate = FakeTask()
+    assert separately_published_duplicate.request.id == first_delivery.request.id
+    assert tasks._run_ingest_delivery(
+        separately_published_duplicate,
+        {"job_id": "job-1"},
+    ) == {"status": "complete"}
+
+    assert observed_tokens[1] == observed_tokens[0]
+    assert observed_tokens[2] != observed_tokens[0]
 
 
 @pytest.mark.parametrize(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
 from ...auth.abac import normalize_group_path
@@ -13,7 +14,9 @@ from ...documents.models import (
 )
 from ...shared.contracts.clearance import can_access_clearance
 from ..models import (
+    AuditEventPage,
     AuditFilters,
+    AuditSummaryRecord,
     AuditViewerScope,
     EnrichedAuditEvent,
     MAX_AUDIT_SCAN_LIMIT,
@@ -32,7 +35,44 @@ class RepositoryAuditRepository:
         self._documents = documents
         self._identities = identities
 
+    def search_visible_events_page(
+        self,
+        *,
+        filters: AuditFilters,
+        viewer: AuditViewerScope,
+        limit: int,
+        offset: int = 0,
+    ) -> AuditEventPage:
+        if limit < 1:
+            raise ValueError("audit page limit must be positive")
+        if offset < 0:
+            raise ValueError("audit page offset must be nonnegative")
+        matches = self._matching_visible_events(
+            filters=filters,
+            viewer=viewer,
+            scan_limit=MAX_AUDIT_SCAN_LIMIT,
+        )
+        return AuditEventPage(
+            items=tuple(matches[offset : offset + limit]),
+            total=len(matches),
+            summary=_summarize_events(matches),
+        )
+
     def search_visible_events(
+        self,
+        *,
+        filters: AuditFilters,
+        viewer: AuditViewerScope,
+        scan_limit: int,
+    ) -> list[EnrichedAuditEvent]:
+        page = self.search_visible_events_page(
+            filters=filters,
+            viewer=viewer,
+            limit=max(1, min(scan_limit, MAX_AUDIT_SCAN_LIMIT)),
+        )
+        return list(page.items)
+
+    def _matching_visible_events(
         self,
         *,
         filters: AuditFilters,
@@ -210,3 +250,30 @@ def _payload_text(payload: dict[str, Any]) -> str:
             continue
         parts.append(f"{key} {value}")
     return " ".join(parts)
+
+
+def _summarize_events(events: list[EnrichedAuditEvent]) -> AuditSummaryRecord:
+    category_counts = Counter(event.category for event in events)
+    event_type_counts = Counter(event.record.event_type for event in events)
+    target_type_counts = Counter(
+        event.record.target_type or "workspace" for event in events
+    )
+    return AuditSummaryRecord(
+        total=len(events),
+        document_events=sum(
+            1
+            for event in events
+            if event.record.target_type == "document"
+            or isinstance(event.record.payload.get("doc_id"), str)
+            or event.category == "document"
+        ),
+        auth_events=category_counts.get("authentication", 0),
+        system_events=sum(1 for event in events if event.record.actor_id is None),
+        actor_count=len(
+            {event.record.actor_id for event in events if event.record.actor_id}
+        ),
+        event_type_count=len(event_type_counts),
+        category_counts=dict(category_counts),
+        target_type_counts=dict(target_type_counts),
+        event_type_counts=dict(event_type_counts),
+    )

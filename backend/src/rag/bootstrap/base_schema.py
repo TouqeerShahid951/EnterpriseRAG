@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS ingest_jobs_doc_created_idx ON ingest_jobs (doc_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ingest_jobs_created_idx ON ingest_jobs (created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS ingest_jobs_retry_of_idx ON ingest_jobs (retry_of_job_id);
 CREATE UNIQUE INDEX IF NOT EXISTS ingest_jobs_one_active_per_doc_uidx
     ON ingest_jobs (doc_id)
@@ -180,6 +181,17 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS audit_log_created_idx ON audit_log (created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS audit_log_actor_idx ON audit_log (actor_id) WHERE actor_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS audit_log_target_idx ON audit_log (target_type, target_id) WHERE target_type IS NOT NULL;
+CREATE INDEX IF NOT EXISTS audit_log_event_created_idx
+    ON audit_log (event_type, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS audit_log_actor_created_idx
+    ON audit_log (actor_id, created_at DESC, id DESC)
+    WHERE actor_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS audit_log_target_created_idx
+    ON audit_log (target_type, target_id, created_at DESC, id DESC)
+    WHERE target_type IS NOT NULL;
+CREATE INDEX IF NOT EXISTS audit_log_group_created_idx
+    ON audit_log ((payload->>'group_path'), created_at DESC, id DESC)
+    WHERE payload ? 'group_path';
 """
 
 

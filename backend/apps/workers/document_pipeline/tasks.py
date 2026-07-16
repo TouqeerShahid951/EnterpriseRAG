@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+from uuid import uuid4
 
 from billiard.exceptions import SoftTimeLimitExceeded
 
@@ -25,19 +26,25 @@ from .celery_app import celery_app, config
 
 
 TaskHandler = Callable[[Any, dict[str, Any]], dict[str, Any]]
+_RUN_TOKEN_HEADER = "ingest_run_token"
 
 
 def _run_ingest_delivery(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    headers = dict(getattr(getattr(task, "request", None), "headers", None) or {})
+    run_token = str(headers.get(_RUN_TOKEN_HEADER) or "").strip() or str(uuid4())
     try:
         return run_ingest_document(
             payload,
             timeout_error_types=(SoftTimeLimitExceeded,),
+            run_token=run_token,
         )
     except IngestDeliveryRetry as retry:
+        headers[_RUN_TOKEN_HEADER] = run_token
         raise task.retry(
             exc=retry.cause,
             countdown=retry.countdown,
             max_retries=retry.max_retries,
+            headers=headers,
         )
 
 

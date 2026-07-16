@@ -11,9 +11,9 @@ from .cancellation import call_with_optional_cancellation, cancellation_token_fr
 from .state import QueryContext, finalize_response_node_timings, record_node_timing
 from .graph import route_intent, route_output, route_verifier
 from .nodes import QueryNodes
-from .routing_logs import log_node_timing
-from .sources import sources_from_hits
-from .synthesis import (
+from rag.query.routing.routing_logs import log_node_timing
+from rag.query.sources import sources_from_hits
+from rag.query.answering.synthesis import (
     build_conflict_answer,
     build_rag_response,
     conflict_sources,

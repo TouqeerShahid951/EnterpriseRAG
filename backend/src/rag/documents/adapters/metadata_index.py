@@ -5,7 +5,7 @@ from __future__ import annotations
 from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
 from ...shared.contracts.clearance import clearance_rank
-from ..metadata_ports import DocumentMetadataIndexError
+from rag.documents.metadata.ports import DocumentMetadataIndexError
 
 
 class QdrantDocumentMetadataIndex:

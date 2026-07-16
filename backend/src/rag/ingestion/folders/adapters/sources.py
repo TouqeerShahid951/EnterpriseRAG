@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..sources import LocalFolderDirectory, LocalFolderObject, SourceObject
+from rag.ingestion.folders.sources import LocalFolderDirectory, LocalFolderObject, SourceObject
 
 
 class MinioObjectSource:

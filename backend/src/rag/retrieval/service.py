@@ -6,9 +6,9 @@ from typing import Any
 
 from rag.core.config import Settings
 from rag.query.state import QueryContext
-from rag.query.query_retrieval import retrieve_candidates
+from rag.query.retrieval.query_retrieval import retrieve_candidates
 from rag.query.cancellation import QueryCancelled
-from rag.query.live_sql import retrieve_live_sql_hits
+from rag.query.sources.live_sql import retrieve_live_sql_hits
 from rag.query.sources import dedupe_hits
 
 

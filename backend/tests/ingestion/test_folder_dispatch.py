@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import logging
 
 import pytest
@@ -12,6 +12,10 @@ from rag.ingestion.folders.adapters.memory import (
 )
 from rag.ingestion.folders.config import FolderIngestionConfig
 from rag.ingestion.folders.dispatch import dispatch_due_schedules
+from rag.ingestion.delivery.service import (
+    IngestDeliveryService,
+    dispatch_pending_deliveries,
+)
 from rag.ingestion.queue import InMemoryIngestQueue
 
 
@@ -159,49 +163,36 @@ def test_enqueue_failure_remains_retryable_and_queues_once_after_resume() -> Non
     )
 
     assert queue.attempts == 1
-    assert dispatched == []
-    assert schedule_repo.get_schedule(schedule.id).status == "failed"
-    failed_run = schedule_repo.get_run(run.id)
-    assert failed_run is not None
-    assert failed_run.status == "failed"
-    assert failed_run.error_code == "folder_dispatch_failed"
-    assert failed_run.error_message_safe == "queue unavailable"
-    failed_item = schedule_repo.list_run_items(run.id)[0]
-    assert failed_item.id == item.id
-    assert failed_item.status == "scheduled"
-    assert failed_item.skip_code == "folder_enqueue_failed"
-    failed_job = document_repo.get_ingest_job(job.id)
-    assert failed_job is not None
-    assert failed_job.status == "scheduled"
-    assert failed_job.error_code == "folder_enqueue_failed"
+    assert dispatched == [schedule.id]
+    assert schedule_repo.get_schedule(schedule.id).status == "complete"
+    completed_run = schedule_repo.get_run(run.id)
+    assert completed_run is not None and completed_run.status == "complete"
+    queued_item = schedule_repo.list_run_items(run.id)[0]
+    assert queued_item.id == item.id
+    assert queued_item.status == "queued"
+    assert queued_item.skip_code is None
+    queued_job = document_repo.get_ingest_job(job.id)
+    assert queued_job is not None
+    assert queued_job.status == "queued"
+    assert queued_job.failure_attempt_count == 0
+    assert queued_job.delivery_count == 1
 
-    retry_at = now.replace(microsecond=0)
-    schedule_repo.update_schedule_next_run(
-        schedule.id,
-        status="scheduled",
-        next_run_at=retry_at,
-    )
     healthy_queue = InMemoryIngestQueue()
-
-    retried = dispatch_due_schedules(
-        schedule_repo=schedule_repo,
-        document_repo=document_repo,
-        job_repo=document_repo,
-        queue=healthy_queue,
-        minio_source=_EmptyMinioSource(),
-        config=FOLDER_CONFIG,
-        now=retry_at,
+    delivery = IngestDeliveryService(document_repo)
+    retried = dispatch_pending_deliveries(
+        delivery,
+        healthy_queue,
+        now=now + timedelta(seconds=6),
     )
 
-    assert retried == [schedule.id]
+    assert retried.published_count == 1
     assert len(healthy_queue.messages) == 1
-    retried_item = schedule_repo.list_run_items(run.id)[0]
-    assert retried_item.status == "queued"
-    assert retried_item.skip_code is None
-    retried_job = document_repo.get_ingest_job(job.id)
-    assert retried_job is not None
-    assert retried_job.status == "queued"
-    assert retried_job.error_code is None
+    assert dispatch_pending_deliveries(
+        delivery,
+        healthy_queue,
+        now=now + timedelta(seconds=7),
+    ).claimed_count == 0
+    assert len(healthy_queue.messages) == 1
 
 
 def test_recurring_dispatch_uses_injected_default_for_blank_timezone() -> None:

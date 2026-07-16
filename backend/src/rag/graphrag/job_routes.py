@@ -13,7 +13,7 @@ from ..auth.permissions import can_read_document_metadata
 from ..core.config import settings
 from ..documents.repository import DocumentRepository, get_document_repository
 from ..ingestion.configuration import IngestConfigRepository
-from ..ingestion.configuration_dependencies import (
+from ..ingestion.configuration.dependencies import (
     effective_ingest_config,
     get_ingest_config_repository,
 )
@@ -24,8 +24,8 @@ from ..ingestion.worker_control import (
     WorkerControlResult,
     get_graphrag_worker_control,
 )
-from ..schemas.common import ErrorResponse
-from ..schemas.ingest_jobs import (
+from rag.shared.contracts.http import ErrorResponse
+from rag.graphrag.schemas import (
     GraphRAGActiveTask,
     GraphRAGCancelRequest,
     GraphRAGCancelResponse,

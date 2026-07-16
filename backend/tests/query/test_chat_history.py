@@ -28,8 +28,16 @@ class ChatHistoryRepositoryTests(unittest.TestCase):
         first_page = repo.list_sessions(user_id="user-1", permission_version=1, limit=2, offset=0)
         second_page = repo.list_sessions(user_id="user-1", permission_version=1, limit=2, offset=2)
         final_page = repo.list_sessions(user_id="user-1", permission_version=1, limit=2, offset=4)
+        first_page_with_total = repo.list_sessions_page(
+            user_id="user-1",
+            permission_version=1,
+            limit=2,
+            offset=0,
+        )
 
         self.assertEqual(repo.count_sessions(user_id="user-1", permission_version=1), 5)
+        self.assertEqual(first_page_with_total[1], 5)
+        self.assertEqual(first_page_with_total[0], first_page)
         self.assertEqual(len(first_page), 2)
         self.assertEqual(len(second_page), 2)
         self.assertEqual(len(final_page), 1)

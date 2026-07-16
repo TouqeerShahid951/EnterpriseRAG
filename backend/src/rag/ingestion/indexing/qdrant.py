@@ -17,6 +17,7 @@ from rag.shared.contracts.qdrant_schema import (
 )
 
 from ..adapters.http import ServiceRequestError, request_json
+from ..publication.models import aggregate_generation_hash
 
 
 class QdrantClient:
@@ -34,6 +35,7 @@ class QdrantClient:
         self.upsert_batch_size = max(1, upsert_batch_size)
         self._collection_path = f"/collections/{quote(collection, safe='')}"
         self._collection_mode: str | None = None
+        self._vector_size: int | None = None
 
     def ensure_collection(self, vector_size: int) -> None:
         try:
@@ -44,6 +46,7 @@ class QdrantClient:
                 timeout_seconds=self.timeout_seconds,
             )
             self._collection_mode = _validated_mode(payload, vector_size)
+            self._vector_size = vector_size
             self._ensure_payload_indexes()
             return
         except ServiceRequestError as exc:
@@ -59,6 +62,7 @@ class QdrantClient:
             timeout_seconds=self.timeout_seconds,
         )
         self._collection_mode = HYBRID_MODE
+        self._vector_size = vector_size
         self._ensure_payload_indexes()
 
     def replace_document(
@@ -86,6 +90,71 @@ class QdrantClient:
     def delete_document_points(self, doc_id: str) -> None:
         self._delete_document_points(doc_id)
 
+    def stage_generation(
+        self,
+        *,
+        generation_id: str,
+        points: list[dict[str, Any]],
+        guard: Callable[[], None] | None = None,
+    ) -> int:
+        """Replace only an unpublished generation, leaving the active one intact."""
+        _run_guard(guard)
+        self._delete_generation_points(generation_id)
+        staged_points = [
+            point_for_collection_mode(_with_generation_status(point, False), self._collection_mode)
+            for point in points
+        ]
+        self._upsert_points(staged_points, guard=guard)
+        return len(points)
+
+    def verify_generation(
+        self,
+        *,
+        generation_id: str,
+        expected_point_count: int,
+        expected_item_hash: str,
+        vector_dimension: int,
+    ) -> None:
+        if self._vector_size != vector_dimension:
+            raise ServiceRequestError(
+                "qdrant", "index generation vector dimension does not match the collection", 409
+            )
+        points = self._generation_points(generation_id)
+        item_hashes = [
+            str(payload.get("generation_item_hash") or "")
+            for point in points
+            if isinstance((payload := point.get("payload")), dict)
+        ]
+        if (
+            len(points) != expected_point_count
+            or len(item_hashes) != len(points)
+            or not all(item_hashes)
+            or aggregate_generation_hash(item_hashes) != expected_item_hash
+        ):
+            raise ServiceRequestError("qdrant", "index generation verification failed", 409)
+
+    def publish_generation(
+        self,
+        generation_id: str,
+        *,
+        guard: Callable[[], None] | None = None,
+    ) -> None:
+        _run_guard(guard)
+        request_json(
+            self.base_url,
+            f"{self._collection_path}/points/payload?wait=true",
+            service="qdrant",
+            method="POST",
+            payload={
+                "payload": {"generation_published": True, "is_current": True},
+                "filter": _generation_filter(generation_id),
+            },
+            timeout_seconds=self.timeout_seconds,
+        )
+
+    def delete_generation_points(self, generation_id: str) -> None:
+        self._delete_generation_points(generation_id)
+
     def mark_documents_not_current(
         self,
         doc_ids: list[str],
@@ -108,6 +177,16 @@ class QdrantClient:
             service="qdrant",
             method="POST",
             payload={"filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]}},
+            timeout_seconds=self.timeout_seconds,
+        )
+
+    def _delete_generation_points(self, generation_id: str) -> None:
+        request_json(
+            self.base_url,
+            f"{self._collection_path}/points/delete?wait=true",
+            service="qdrant",
+            method="POST",
+            payload={"filter": _generation_filter(generation_id)},
             timeout_seconds=self.timeout_seconds,
         )
 
@@ -153,6 +232,34 @@ class QdrantClient:
         next_page_offset: Any = None
         while True:
             payload = scroll_payload(doc_id, next_page_offset)
+            response = request_json(
+                self.base_url,
+                f"{self._collection_path}/points/scroll",
+                service="qdrant",
+                method="POST",
+                payload=payload,
+                timeout_seconds=self.timeout_seconds,
+            )
+            result = response.get("result")
+            if not isinstance(result, dict) or not isinstance(result.get("points"), list):
+                raise ServiceRequestError("qdrant", "scroll response did not include points", 502)
+            points.extend(result["points"])
+            next_page_offset = result.get("next_page_offset")
+            if next_page_offset is None:
+                return points
+
+    def _generation_points(self, generation_id: str) -> list[dict[str, Any]]:
+        points: list[dict[str, Any]] = []
+        next_page_offset: Any = None
+        while True:
+            payload: dict[str, Any] = {
+                "filter": _generation_filter(generation_id),
+                "limit": 256,
+                "with_payload": True,
+                "with_vector": False,
+            }
+            if next_page_offset is not None:
+                payload["offset"] = next_page_offset
             response = request_json(
                 self.base_url,
                 f"{self._collection_path}/points/scroll",
@@ -233,6 +340,22 @@ def _with_current_status(point: dict[str, Any], is_current: bool) -> dict[str, A
             "is_current": is_current,
         },
     }
+
+
+def _with_generation_status(point: dict[str, Any], published: bool) -> dict[str, Any]:
+    payload = point.get("payload")
+    return {
+        **point,
+        "payload": {
+            **(payload if isinstance(payload, dict) else {}),
+            "generation_published": published,
+            "is_current": published,
+        },
+    }
+
+
+def _generation_filter(generation_id: str) -> dict[str, Any]:
+    return {"must": [{"key": "index_generation_id", "match": {"value": generation_id}}]}
 
 
 def scroll_payload(doc_id: str, offset: Any) -> dict[str, Any]:

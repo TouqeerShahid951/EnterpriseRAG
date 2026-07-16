@@ -25,6 +25,7 @@ def build_qdrant_points(
     file_bytes: bytes,
     claims: list[dict[str, str]] | None = None,
     conflicted_claim_ids: list[str] | None = None,
+    index_generation_id: str | None = None,
 ) -> list[dict[str, object]]:
     if len(chunks) != len(vectors):
         raise ValueError("chunks and vectors must have the same length")
@@ -57,9 +58,20 @@ def build_qdrant_points(
         chunk_claims = claims_for_chunk(claims or [], chunk_id)
         raw_text_hash = hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
         normalized_text_hash = hashlib.sha256(_normalized_text(chunk.text).encode("utf-8")).hexdigest()
+        item_hash = hashlib.sha256(f"{chunk_id}\0{raw_text_hash}".encode("utf-8")).hexdigest()
+        point_identity = f"{index_generation_id}:{chunk_id}" if index_generation_id else chunk_id
+        generation_payload = (
+            {
+                "index_generation_id": index_generation_id,
+                "generation_item_hash": item_hash,
+                "generation_published": False,
+            }
+            if index_generation_id
+            else {}
+        )
         points.append(
             {
-                "id": str(uuid5(NAMESPACE_URL, chunk_id)),
+                "id": str(uuid5(NAMESPACE_URL, point_identity)),
                 "vector": {
                     "dense": vector,
                     "sparse": sparse_vector.as_qdrant(),
@@ -98,7 +110,7 @@ def build_qdrant_points(
                     "doc_type": indexed_doc_type,
                     "effective_date": job.effective_date,
                     "expiry_date": job.expiry_date,
-                    "is_current": True,
+                    "is_current": not bool(index_generation_id),
                     "source_id": f"upload:{content_hash}",
                     "content_hash": content_hash,
                     "chunk_content_hash": raw_text_hash,
@@ -122,6 +134,7 @@ def build_qdrant_points(
                     "claims": chunk_claims,
                     "has_conflict": any(claim_id in conflicted for claim_id in chunk_claim_ids),
                     "is_expired": is_expired,
+                    **generation_payload,
                 },
             }
         )

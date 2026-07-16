@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.ingestion.folders.adapters.memory import InMemoryFolderScheduleRepository
-from rag.services.connector_schedule_retirement import retire_connector_schedules
+from rag.ingestion.folders.retirement import retire_connector_schedules
 
 
 class FakeQdrant:

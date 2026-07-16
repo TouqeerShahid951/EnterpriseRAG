@@ -2,7 +2,8 @@
 
 from fastapi import APIRouter
 
-from . import execution_routes, history_routes, source_routes
+from . import execution_routes, history_routes
+from .sources import source_routes
 
 
 router = APIRouter(tags=["query"])

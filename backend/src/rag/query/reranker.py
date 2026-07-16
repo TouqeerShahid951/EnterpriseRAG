@@ -3,48 +3,60 @@
 from __future__ import annotations
 
 import logging
-import re
 from functools import lru_cache
+from time import monotonic
 from typing import Any
 
-from rag.shared.contracts.structured_payloads import (
-    normalized_match_tokens,
-    normalized_phrase,
-    normalized_tokens,
-)
 from rag.shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL
 from rag.shared.runtime_offline import apply_runtime_offline_defaults
 
+from .cancellation import QueryCancellationToken, QueryCancelled
+from rag.query.retrieval.metadata_scoring import annotate_metadata_matches
 from .qdrant import SearchHit
-from .metadata_scoring import (
-    annotate_low_value_chunk,
-    annotate_metadata_matches,
-    low_value_penalty_score,
-    metadata_score,
-    topic_score,
+from .reranking.coverage import (
+    coverage_obligations as _coverage_obligations,
+    expanded_exhaustive_candidates as _expanded_exhaustive_candidates,
+    merge_exhaustive_coverage_roles as _merge_exhaustive_coverage_roles,
+    required_exhaustive_coverage_units as _required_exhaustive_coverage_units,
 )
+from .reranking.models import (
+    EXHAUSTIVE_RERANK_STRATEGY as _EXHAUSTIVE_RERANK_STRATEGY,
+    ExhaustiveScope as _ExhaustiveScope,
+    ExhaustiveScoring as _ExhaustiveScoring,
+    ExhaustiveUnit as _ExhaustiveUnit,
+    RerankResult,
+    ScoredExhaustiveUnit as _ScoredExhaustiveUnit,
+)
+from .reranking.scope import (
+    heading_matched_exhaustive_unit_keys as _heading_matched_exhaustive_unit_keys,
+    is_toc_exhaustive_hit as _is_toc_exhaustive_hit,
+    is_toc_only_exhaustive_unit as _is_toc_only_exhaustive_unit,
+    referenced_exhaustive_unit_keys as _referenced_exhaustive_unit_keys,
+    requires_document_summary_coverage as _requires_document_summary_coverage,
+    requires_full_section_coverage as _requires_full_section_coverage,
+)
+from .reranking.scoring import (
+    fallback_rank_hits as _fallback_rank_hits,
+    limit_rerank_candidates as _limit_rerank_candidates,
+    rank_scored_hits as _rank_scored_hits,
+)
+from .reranking.text import (
+    hit_doc_id as _hit_doc_id,
+    hit_page as _hit_page,
+    normalized_text as _normalized_phrase,
+    payload_str as _payload_str,
+    searchable_text as _searchable_text,
+    unique_hits as _unique_hits,
+)
+from rag.query.retrieval.retrieval_budget import EXHAUSTIVE_RETRIEVAL_BUDGET_SECONDS
 
-_FIELD_LABEL_SEPARATOR_RE = re.compile(r"[|\n]")
 _LOG = logging.getLogger(__name__)
-_RERANK_STATUS_SCORED = "scored"
-_RERANK_STATUS_FALLBACK = "fallback"
-_STOPWORDS = {
-    "about",
-    "after",
-    "before",
-    "does",
-    "from",
-    "have",
-    "into",
-    "that",
-    "the",
-    "this",
-    "what",
-    "when",
-    "where",
-    "which",
-    "with",
-}
+_EXHAUSTIVE_BATCH_SIZE = 32
+_EXHAUSTIVE_WAVE_SIZE = 512
+_REPRESENTATIVE_TEXT_MAX_CHARS = 1024
+_EXHAUSTIVE_CHILD_TEXT_MAX_CHARS = 1024
+_PAGE_WINDOW_SIZE = 4
+_ORDINAL_WINDOW_SIZE = 8
 
 
 def rerank_hits(
@@ -55,7 +67,37 @@ def rerank_hits(
     max_candidates: int | None = None,
     model_name: str = DEFAULT_RERANKER_MODEL,
     cache_dir: str | None = "/models/fastembed",
+    exhaustive: bool = False,
+    deadline: float | None = None,
+    cancellation_token: QueryCancellationToken | None = None,
 ) -> list[SearchHit]:
+    return list(
+        rerank_hits_with_result(
+            query,
+            hits,
+            top_k=top_k,
+            max_candidates=max_candidates,
+            model_name=model_name,
+            cache_dir=cache_dir,
+            exhaustive=exhaustive,
+            deadline=deadline,
+            cancellation_token=cancellation_token,
+        ).ranked_hits
+    )
+
+
+def rerank_hits_with_result(
+    query: str,
+    hits: list[SearchHit],
+    *,
+    top_k: int,
+    max_candidates: int | None = None,
+    model_name: str = DEFAULT_RERANKER_MODEL,
+    cache_dir: str | None = "/models/fastembed",
+    exhaustive: bool = False,
+    deadline: float | None = None,
+    cancellation_token: QueryCancellationToken | None = None,
+) -> RerankResult:
     if top_k <= 0:
         raise ValueError("top_k must be positive")
     if max_candidates is not None and max_candidates <= 0:
@@ -67,6 +109,9 @@ def rerank_hits(
         max_candidates=max_candidates,
         model_name=model_name,
         cache_dir=cache_dir,
+        exhaustive=exhaustive,
+        deadline=deadline,
+        cancellation_token=cancellation_token,
     )
 
 
@@ -96,19 +141,35 @@ def _cross_encoder_rerank(
     max_candidates: int | None,
     model_name: str,
     cache_dir: str | None,
-) -> list[SearchHit]:
+    exhaustive: bool,
+    deadline: float | None,
+    cancellation_token: QueryCancellationToken | None,
+) -> RerankResult:
     if not model_name:
         raise ValueError("cross-encoder reranker model name is required")
     if not hits:
-        return []
+        return RerankResult(candidates=(), ranked_hits=())
     hits = annotate_metadata_matches(query, hits)
+    if exhaustive and _has_exhaustive_scope(hits):
+        return _exhaustive_cross_encoder_rerank(
+            query,
+            hits,
+            top_k=top_k,
+            max_candidates=max_candidates,
+            model_name=model_name,
+            cache_dir=cache_dir,
+            deadline=deadline,
+            cancellation_token=cancellation_token,
+        )
     hits = _limit_rerank_candidates(query, hits, max_candidates=max_candidates)
     try:
         model = _load_cross_encoder(model_name, cache_dir)
         scores = model.rerank(query, [_searchable_text(hit) for hit in hits])
         score_values = [float(score) for score in scores]
         if len(score_values) != len(hits):
-            raise RuntimeError("cross-encoder reranker returned an unexpected score count")
+            raise RuntimeError(
+                "cross-encoder reranker returned an unexpected score count"
+            )
     except Exception as exc:
         _LOG.warning(
             "cross-encoder reranker failed; falling back to retrieval policy",
@@ -119,149 +180,612 @@ def _cross_encoder_rerank(
             },
             exc_info=True,
         )
-        return _fallback_rank_hits(query, hits, top_k=top_k, error=exc)
-    scored_hits = [
-        annotate_low_value_chunk(
-            query,
-            SearchHit(
-                point_id=hit.point_id,
-                score=hit.score,
-                payload={
-                    **hit.payload,
-                    "_rerank_score": score,
-                    "_rerank_status": _RERANK_STATUS_SCORED,
-                    "_rerank_candidate_count": len(hits),
-                },
-            ),
-            rerank_score=score,
+        return RerankResult(
+            candidates=tuple(hits),
+            ranked_hits=tuple(_fallback_rank_hits(query, hits, top_k=top_k, error=exc)),
         )
-        for hit, score in zip(hits, score_values, strict=True)
-    ]
-    ranked = sorted(
-        enumerate(zip(scored_hits, score_values, strict=True)),
-        key=lambda item: (
-            -_rerank_sort_score(item[1][0], item[1][1]),
-            -metadata_score(item[1][0]),
-            -topic_score(item[1][0]),
-            item[0],
-        ),
+    return RerankResult(
+        candidates=tuple(hits),
+        ranked_hits=tuple(_rank_scored_hits(query, hits, score_values, top_k=top_k)),
     )
-    ranked = _promote_table_field_label_matches(query, ranked)
-    return [hit for _, (hit, _) in ranked[:top_k]]
 
 
-def _limit_rerank_candidates(
-    query: str,
-    hits: list[SearchHit],
-    *,
-    max_candidates: int | None,
-) -> list[SearchHit]:
-    if max_candidates is None or len(hits) <= max_candidates:
-        return hits
-    retrieval_head = hits[:max(1, max_candidates // 4)]
-    query_tokens = _tokens(query)
-    ranked = sorted(
-        enumerate(hits),
-        key=lambda item: (
-            _table_field_label_priority(query, item[1]),
-            -len(query_tokens & _tokens(_searchable_text(item[1]))),
-            -metadata_score(item[1]),
-            -topic_score(item[1]),
-            _structured_origin_priority(item[1]),
-            -item[1].score,
-            item[0],
-        ),
-    )
-    selected = _unique_hits(retrieval_head)
-    seen = {_hit_identity(hit) for hit in selected}
-    for _, hit in ranked:
-        key = _hit_identity(hit)
-        if key in seen:
-            continue
-        selected.append(hit)
-        seen.add(key)
-        if len(selected) >= max_candidates:
-            break
-    return selected
-
-
-def _fallback_rank_hits(
+def _exhaustive_cross_encoder_rerank(
     query: str,
     hits: list[SearchHit],
     *,
     top_k: int,
-    error: Exception,
-) -> list[SearchHit]:
-    query_tokens = _tokens(query)
-    annotated_hits = [annotate_low_value_chunk(query, hit) for hit in hits]
-    ranked = sorted(
-        enumerate(annotated_hits),
-        key=lambda item: (
-            _table_field_label_priority(query, item[1]),
-            -len(query_tokens & _tokens(_searchable_text(item[1]))),
-            -metadata_score(item[1]),
-            -topic_score(item[1]),
-            _structured_origin_priority(item[1]),
-            -item[1].score,
-            low_value_penalty_score(item[1]),
-            item[0],
+    max_candidates: int | None,
+    model_name: str,
+    cache_dir: str | None,
+    deadline: float | None,
+    cancellation_token: QueryCancellationToken | None,
+) -> RerankResult:
+    unique_hits = _unique_hits(hits)
+    authorized_scan_complete = _authorized_scan_complete(unique_hits)
+    units = _build_exhaustive_units(unique_hits)
+    if not units:
+        return _exhaustive_fallback_result(
+            query,
+            unique_hits,
+            top_k=top_k,
+            max_candidates=max_candidates,
+            error=RuntimeError("exhaustive hierarchy unavailable"),
+            stop_reason="hierarchy_unavailable",
+        )
+    scope = _resolve_exhaustive_scope(
+        query,
+        unique_hits,
+        units,
+        max_candidates=max_candidates,
+    )
+    deadline = (
+        monotonic() + EXHAUSTIVE_RETRIEVAL_BUDGET_SECONDS
+        if deadline is None
+        else deadline
+    )
+    if monotonic() >= deadline:
+        return _exhaustive_fallback_result(
+            query,
+            unique_hits,
+            top_k=top_k,
+            max_candidates=max_candidates,
+            error=RuntimeError("exhaustive retrieval deadline exceeded"),
+            stop_reason="deadline_exceeded",
+            representative_count=len(units),
+            candidate_coverage_status="partial",
+        )
+    try:
+        model = _load_cross_encoder(model_name, cache_dir)
+        scoring = _score_exhaustive_hierarchy(
+            model,
+            query,
+            units,
+            scope,
+            cancellation_token=cancellation_token,
+            deadline=deadline,
+        )
+    except QueryCancelled:
+        raise
+    except Exception as exc:
+        _LOG.warning(
+            "exhaustive cross-encoder reranker failed; returning explicitly partial fallback evidence",
+            extra={
+                "candidate_count": len(unique_hits),
+                "error_type": type(exc).__name__,
+                "model_name": model_name,
+                "representative_count": len(units),
+            },
+            exc_info=True,
+        )
+        return _exhaustive_fallback_result(
+            query,
+            unique_hits,
+            top_k=top_k,
+            max_candidates=max_candidates,
+            error=exc,
+            stop_reason="reranker_error",
+            representative_count=len(units),
+        )
+    return _build_exhaustive_result(
+        query,
+        unique_hits,
+        units,
+        scope,
+        scoring,
+        top_k=top_k,
+        max_candidates=max_candidates,
+        authorized_scan_complete=authorized_scan_complete,
+    )
+
+
+def _resolve_exhaustive_scope(
+    query: str,
+    hits: list[SearchHit],
+    units: list[_ExhaustiveUnit],
+    *,
+    max_candidates: int | None,
+) -> _ExhaustiveScope:
+    eligible_units = [
+        unit for unit in units if not _is_toc_only_exhaustive_unit(query, unit)
+    ]
+    referenced_keys, _, exclusive_keys = _referenced_exhaustive_unit_keys(
+        query,
+        hits,
+        eligible_units,
+        head_limit=max_candidates or 40,
+    )
+    heading_keys = _heading_matched_exhaustive_unit_keys(query, eligible_units)
+    if exclusive_keys:
+        heading_keys &= exclusive_keys
+    return _ExhaustiveScope(
+        coverage_eligible_unit_keys=frozenset(unit.key for unit in eligible_units),
+        referenced_unit_keys=frozenset(referenced_keys),
+        heading_matched_unit_keys=frozenset(heading_keys),
+        exclusive_scope_unit_keys=frozenset(exclusive_keys),
+        semantic_scope_resolved=bool(
+            exclusive_keys
+            or _requires_full_section_coverage(query)
+            or _requires_document_summary_coverage(query)
         ),
     )
-    fallback_ranked = [
-        (
-            original_index,
-            (
-                SearchHit(
-                    point_id=hit.point_id,
-                    score=hit.score,
-                    payload={
-                        **hit.payload,
-                        "_rerank_status": _RERANK_STATUS_FALLBACK,
-                        "_rerank_error": type(error).__name__,
-                        "_rerank_candidate_count": len(hits),
-                    },
-                ),
-                hit.score,
-            ),
-        )
-        for original_index, hit in ranked
+
+
+def _score_exhaustive_hierarchy(
+    model: Any,
+    query: str,
+    units: list[_ExhaustiveUnit],
+    scope: _ExhaustiveScope,
+    *,
+    cancellation_token: QueryCancellationToken | None,
+    deadline: float,
+) -> _ExhaustiveScoring:
+    representative_scores, representative_stop = _rerank_passages_batched(
+        model,
+        query,
+        [unit.representative_text for unit in units],
+        cancellation_token=cancellation_token,
+        deadline=deadline,
+    )
+    scored_units = _rank_exhaustive_units(
+        units[: len(representative_scores)], representative_scores
+    )
+    selected_units, selection_complete = _select_exhaustive_units(
+        scored_units,
+        prioritized_keys=(scope.referenced_unit_keys | scope.heading_matched_unit_keys),
+    )
+    coverage_unit_keys = _required_exhaustive_coverage_units(
+        query,
+        [
+            scored
+            for scored in selected_units
+            if scored.unit.key in scope.coverage_eligible_unit_keys
+        ],
+        referenced_unit_keys=set(scope.referenced_unit_keys),
+        heading_matched_unit_keys=set(scope.heading_matched_unit_keys),
+        exclusive_scope_unit_keys=set(scope.exclusive_scope_unit_keys),
+    )
+    qualifying_units = [
+        scored
+        for scored in selected_units
+        if scored.unit.key in coverage_unit_keys
     ]
-    fallback_ranked = _promote_table_field_label_matches(query, fallback_ranked)
-    return [hit for _, (hit, _) in fallback_ranked[:top_k]]
-
-
-def _rerank_sort_score(hit: SearchHit, raw_score: float) -> float:
-    value = hit.payload.get("_rerank_adjusted_score")
-    return float(value) if isinstance(value, int | float) else raw_score
-
-
-def _unique_hits(hits: list[SearchHit]) -> list[SearchHit]:
-    seen: set[tuple[str, str, str]] = set()
-    unique: list[SearchHit] = []
-    for hit in hits:
-        key = _hit_identity(hit)
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(hit)
-    return unique
-
-
-def _hit_identity(hit: SearchHit) -> tuple[str, str, str]:
-    return (
-        str(hit.payload.get("doc_id", "")),
-        str(hit.payload.get("chunk_id", hit.point_id)),
-        hit.point_id,
+    candidates = _expanded_exhaustive_candidates(
+        query,
+        qualifying_units,
+        coverage_unit_keys=coverage_unit_keys,
+        complete_unit_keys=set(scope.exclusive_scope_unit_keys),
+    )
+    child_scores, child_stop = _rerank_exhaustive_children(
+        model,
+        query,
+        [
+            _bounded_stratified_text(
+                _searchable_text(hit),
+                max_chars=_EXHAUSTIVE_CHILD_TEXT_MAX_CHARS,
+            )
+            for hit in candidates
+        ],
+        cancellation_token=cancellation_token,
+        deadline=deadline,
+    )
+    return _ExhaustiveScoring(
+        representative_scores=tuple(representative_scores),
+        candidates=tuple(candidates),
+        child_scores=tuple(child_scores),
+        representative_stop=representative_stop,
+        child_stop=child_stop,
+        selection_complete=selection_complete,
     )
 
 
-def _structured_origin_priority(hit: SearchHit) -> int:
-    origin = hit.payload.get("structured_origin")
-    if origin == "direct":
-        return 0
-    if origin == "sibling":
-        return 2
-    return 1
+def _build_exhaustive_result(
+    query: str,
+    hits: list[SearchHit],
+    units: list[_ExhaustiveUnit],
+    scope: _ExhaustiveScope,
+    scoring: _ExhaustiveScoring,
+    *,
+    top_k: int,
+    max_candidates: int | None,
+    authorized_scan_complete: bool | None,
+) -> RerankResult:
+    scored_candidates = list(scoring.candidates[: len(scoring.child_scores)])
+    stop_reason = scoring.representative_stop or scoring.child_stop
+    if not scored_candidates:
+        return _exhaustive_fallback_result(
+            query,
+            hits,
+            top_k=top_k,
+            max_candidates=max_candidates,
+            error=RuntimeError(
+                stop_reason or "exhaustive candidate scoring incomplete"
+            ),
+            stop_reason=stop_reason or "candidate_scoring_incomplete",
+            representative_count=len(units),
+            representative_scored_count=len(scoring.representative_scores),
+            candidate_coverage_status="partial",
+        )
+    candidate_complete, stop_reason = _candidate_coverage_result(
+        authorized_scan_complete,
+        units,
+        scoring,
+        stop_reason=stop_reason,
+    )
+    ranked_hits = _rank_exhaustive_evidence(
+        query,
+        scored_candidates,
+        list(scoring.child_scores),
+        scope=scope,
+        top_k=top_k,
+    )
+    required_obligations = _coverage_obligations(list(scoring.candidates))
+    covered_obligations = _coverage_obligations(ranked_hits)
+    evidence_complete, evidence_stop_reason = _evidence_coverage_result(
+        candidate_complete,
+        scope.semantic_scope_resolved,
+        required_obligations,
+        covered_obligations,
+    )
+    return RerankResult(
+        candidates=tuple(scored_candidates),
+        ranked_hits=tuple(ranked_hits),
+        strategy=_EXHAUSTIVE_RERANK_STRATEGY,
+        candidate_coverage_status="complete" if candidate_complete else "partial",
+        evidence_coverage_status="complete" if evidence_complete else "partial",
+        stop_reason=stop_reason,
+        evidence_stop_reason=evidence_stop_reason,
+        required_coverage_obligations=tuple(sorted(required_obligations)),
+        covered_coverage_obligations=tuple(sorted(covered_obligations)),
+        representative_count=len(units),
+        representative_scored_count=len(scoring.representative_scores),
+        candidate_wave_count=(
+            (len(scored_candidates) + _EXHAUSTIVE_WAVE_SIZE - 1)
+            // _EXHAUSTIVE_WAVE_SIZE
+        ),
+    )
+
+
+def _candidate_coverage_result(
+    authorized_scan_complete: bool | None,
+    units: list[_ExhaustiveUnit],
+    scoring: _ExhaustiveScoring,
+    *,
+    stop_reason: str | None,
+) -> tuple[bool, str | None]:
+    required_obligations = _coverage_obligations(list(scoring.candidates))
+    scored_candidates = list(scoring.candidates[: len(scoring.child_scores)])
+    covered_obligations = _coverage_obligations(scored_candidates)
+    candidate_set_complete = (
+        required_obligations <= covered_obligations
+        if required_obligations
+        else len(scoring.child_scores) == len(scoring.candidates)
+    )
+    complete = (
+        authorized_scan_complete is True
+        and scoring.representative_stop is None
+        and len(scoring.representative_scores) == len(units)
+        and scoring.selection_complete
+        and candidate_set_complete
+    )
+    if complete:
+        return True, None
+    if stop_reason is not None:
+        return False, stop_reason
+    if authorized_scan_complete is False:
+        return False, "authorized_scan_truncated"
+    if authorized_scan_complete is None:
+        return False, "scan_completeness_unknown"
+    return False, "candidate_budget_exceeded"
+
+
+def _rank_exhaustive_evidence(
+    query: str,
+    candidates: list[SearchHit],
+    scores: list[float],
+    *,
+    scope: _ExhaustiveScope,
+    top_k: int,
+) -> list[SearchHit]:
+    ranked_hits = _rank_scored_hits(
+        query,
+        candidates,
+        scores,
+        top_k=len(candidates),
+    )
+    if scope.exclusive_scope_unit_keys:
+        ranked_hits = [
+            hit
+            for hit in ranked_hits
+            if hit.payload.get("exhaustive_coverage_unit_id")
+            in scope.exclusive_scope_unit_keys
+        ]
+    ranked_hits = [hit for hit in ranked_hits if not _is_toc_exhaustive_hit(query, hit)]
+    return _merge_exhaustive_coverage_roles(
+        ranked_hits,
+        candidates,
+        top_k=top_k,
+    )
+
+
+def _evidence_coverage_result(
+    candidate_complete: bool,
+    semantic_scope_resolved: bool,
+    required_obligations: set[str],
+    covered_obligations: set[str],
+) -> tuple[bool, str | None]:
+    complete = (
+        candidate_complete
+        and semantic_scope_resolved
+        and required_obligations <= covered_obligations
+    )
+    if complete:
+        return True, None
+    if not candidate_complete:
+        return False, "candidate_coverage_incomplete"
+    if not semantic_scope_resolved:
+        return False, "semantic_scope_unresolved"
+    return False, "final_evidence_coverage_incomplete"
+
+
+def _exhaustive_fallback_result(
+    query: str,
+    hits: list[SearchHit],
+    *,
+    top_k: int,
+    max_candidates: int | None,
+    error: Exception,
+    stop_reason: str,
+    representative_count: int = 0,
+    representative_scored_count: int = 0,
+    candidate_coverage_status: str = "unknown",
+) -> RerankResult:
+    fallback_candidates = _limit_rerank_candidates(
+        query,
+        hits,
+        max_candidates=max_candidates,
+    )
+    return RerankResult(
+        candidates=tuple(fallback_candidates),
+        ranked_hits=tuple(
+            _fallback_rank_hits(
+                query,
+                fallback_candidates,
+                top_k=top_k,
+                error=error,
+            )
+        ),
+        strategy=_EXHAUSTIVE_RERANK_STRATEGY,
+        candidate_coverage_status=candidate_coverage_status,
+        evidence_coverage_status="unknown",
+        stop_reason=stop_reason,
+        evidence_stop_reason="candidate_coverage_unknown",
+        representative_count=representative_count,
+        representative_scored_count=representative_scored_count,
+    )
+
+
+def _has_exhaustive_scope(hits: list[SearchHit]) -> bool:
+    return any(
+        str(hit.payload.get("exhaustive_scope_origin", "")) == "document_class_scope"
+        for hit in hits
+    )
+
+
+def _authorized_scan_complete(hits: list[SearchHit]) -> bool | None:
+    statuses = [
+        hit.payload.get("authorized_scan_complete")
+        for hit in hits
+        if hit.payload.get("exhaustive_scope_origin") == "document_class_scope"
+    ]
+    if any(status is False for status in statuses):
+        return False
+    if statuses and all(status is True for status in statuses):
+        return True
+    return None
+
+
+def _build_exhaustive_units(hits: list[SearchHit]) -> list[_ExhaustiveUnit]:
+    parent_sections: dict[tuple[str, str], set[str]] = {}
+    for hit in hits:
+        doc_id = _hit_doc_id(hit)
+        parent_id = _payload_str(hit, "parent_chunk_id")
+        section_id = _payload_str(hit, "parent_section_id")
+        if parent_id:
+            parent_sections.setdefault((doc_id, parent_id), set()).add(section_id)
+
+    grouped: dict[str, list[SearchHit]] = {}
+    group_order: dict[str, int] = {}
+    ordinal_by_doc: dict[str, int] = {}
+    for order, hit in enumerate(hits):
+        doc_id = _hit_doc_id(hit)
+        section_id = _payload_str(hit, "parent_section_id")
+        parent_id = _payload_str(hit, "parent_chunk_id")
+        page = _hit_page(hit)
+        if section_id or parent_id:
+            key = f"{doc_id}|section:{section_id}|parent:{parent_id}"
+        elif page is not None:
+            page_window = max(0, page - 1) // _PAGE_WINDOW_SIZE
+            key = f"{doc_id}|page-window:{page_window}"
+        else:
+            ordinal = ordinal_by_doc.get(doc_id, 0)
+            key = f"{doc_id}|ordinal-window:{ordinal // _ORDINAL_WINDOW_SIZE}"
+            ordinal_by_doc[doc_id] = ordinal + 1
+        grouped.setdefault(key, []).append(hit)
+        group_order.setdefault(key, order)
+
+    units: list[_ExhaustiveUnit] = []
+    for key, children in grouped.items():
+        first = children[0]
+        doc_id = _hit_doc_id(first)
+        parent_id = _payload_str(first, "parent_chunk_id")
+        section_ids = parent_sections.get((doc_id, parent_id), set())
+        parent_is_section_pure = bool(parent_id) and len(section_ids) == 1
+        units.append(
+            _ExhaustiveUnit(
+                key=key,
+                doc_id=doc_id,
+                order=group_order[key],
+                children=tuple(_unique_hits(children)),
+                representative_text=_representative_text(
+                    children,
+                    use_parent_text=parent_is_section_pure,
+                ),
+            )
+        )
+    return sorted(units, key=lambda unit: unit.order)
+
+
+def _representative_text(
+    children: list[SearchHit],
+    *,
+    use_parent_text: bool,
+) -> str:
+    first = children[0]
+    descriptor_parts: list[str] = []
+    for field in (
+        "doc_title",
+        "section_title",
+        "table_title",
+        "table_caption",
+    ):
+        value = first.payload.get(field)
+        if isinstance(value, str) and value.strip():
+            descriptor_parts.append(value.strip())
+    section_path = first.payload.get("section_path")
+    if isinstance(section_path, list):
+        descriptor_parts.extend(
+            value.strip()
+            for item in section_path
+            if isinstance(item, str) and (value := item.strip())
+        )
+
+    body = ""
+    if use_parent_text:
+        parent_text = first.payload.get("parent_text")
+        if isinstance(parent_text, str):
+            body = parent_text.strip()
+    if not body:
+        child_parts: list[str] = []
+        seen: set[str] = set()
+        for child in children:
+            value = _searchable_text(child).strip()
+            normalized = _normalized_phrase(value)
+            if not value or normalized in seen:
+                continue
+            seen.add(normalized)
+            child_parts.append(value)
+        body = "\n".join(child_parts)
+
+    descriptor = "\n".join(dict.fromkeys(descriptor_parts))
+    return _bounded_stratified_text(
+        "\n".join(part for part in (descriptor, body) if part),
+        max_chars=_REPRESENTATIVE_TEXT_MAX_CHARS,
+    )
+
+
+def _bounded_stratified_text(text: str, *, max_chars: int) -> str:
+    normalized = text.strip()
+    if len(normalized) <= max_chars:
+        return normalized
+    window = (max_chars - 2) // 3
+    middle_start = max(0, (len(normalized) - window) // 2)
+    return "\n".join(
+        (
+            normalized[:window].rstrip(),
+            normalized[middle_start : middle_start + window].strip(),
+            normalized[-window:].lstrip(),
+        )
+    )
+
+
+def _rerank_passages_batched(
+    model: Any,
+    query: str,
+    passages: list[str],
+    *,
+    cancellation_token: QueryCancellationToken | None,
+    deadline: float,
+) -> tuple[list[float], str | None]:
+    scores: list[float] = []
+    for start in range(0, len(passages), _EXHAUSTIVE_BATCH_SIZE):
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
+        if monotonic() >= deadline:
+            return scores, "deadline_exceeded"
+        batch = passages[start : start + _EXHAUSTIVE_BATCH_SIZE]
+        batch_scores = [float(score) for score in model.rerank(query, batch)]
+        if len(batch_scores) != len(batch):
+            raise RuntimeError(
+                "cross-encoder reranker returned an unexpected score count"
+            )
+        scores.extend(batch_scores)
+    return scores, None
+
+
+def _rerank_exhaustive_children(
+    model: Any,
+    query: str,
+    passages: list[str],
+    *,
+    cancellation_token: QueryCancellationToken | None,
+    deadline: float,
+) -> tuple[list[float], str | None]:
+    scores: list[float] = []
+    for start in range(0, len(passages), _EXHAUSTIVE_WAVE_SIZE):
+        wave = passages[start : start + _EXHAUSTIVE_WAVE_SIZE]
+        wave_scores, stop_reason = _rerank_passages_batched(
+            model,
+            query,
+            wave,
+            cancellation_token=cancellation_token,
+            deadline=deadline,
+        )
+        scores.extend(wave_scores)
+        if stop_reason is not None:
+            return scores, stop_reason
+    return scores, None
+
+
+def _rank_exhaustive_units(
+    units: list[_ExhaustiveUnit],
+    scores: list[float],
+) -> list[_ScoredExhaustiveUnit]:
+    ranked = sorted(
+        zip(units, scores, strict=True),
+        key=lambda item: (-item[1], item[0].order),
+    )
+    return [
+        _ScoredExhaustiveUnit(unit=unit, score=score, rank=rank)
+        for rank, (unit, score) in enumerate(ranked, start=1)
+    ]
+
+
+def _select_exhaustive_units(
+    ranked_units: list[_ScoredExhaustiveUnit],
+    *,
+    prioritized_keys: set[str],
+) -> tuple[list[_ScoredExhaustiveUnit], bool]:
+    selected: list[_ScoredExhaustiveUnit] = []
+    seen: set[str] = set()
+
+    def add(scored: _ScoredExhaustiveUnit) -> None:
+        if scored.unit.key in seen:
+            return
+        selected.append(scored)
+        seen.add(scored.unit.key)
+
+    best_by_doc: dict[str, _ScoredExhaustiveUnit] = {}
+    for scored in ranked_units:
+        best_by_doc.setdefault(scored.unit.doc_id, scored)
+    for scored in ranked_units:
+        if scored.unit.key in prioritized_keys:
+            add(scored)
+    for scored in sorted(best_by_doc.values(), key=lambda item: item.rank):
+        add(scored)
+    for scored in ranked_units:
+        add(scored)
+    return selected, len(selected) == len(ranked_units)
 
 
 @lru_cache(maxsize=4)
@@ -275,129 +799,3 @@ def _load_cross_encoder(model_name: str, cache_dir: str | None) -> Any:
             "`fastembed`; install backend dependencies before running RAG queries"
         ) from exc
     return TextCrossEncoder(model_name=model_name, cache_dir=cache_dir)
-
-
-def _searchable_text(hit: SearchHit) -> str:
-    payload = hit.payload
-    parts: list[str] = []
-    structured_search_text = payload.get("structured_search_text")
-    if isinstance(structured_search_text, str) and structured_search_text.strip():
-        parts.append(structured_search_text)
-    for key in (
-        "doc_title",
-        "doc_summary",
-        "text",
-        "summary",
-        "table_title",
-        "table_caption",
-        "table_row_label",
-        "section_title",
-        "generated_doc_type",
-        "doc_type",
-    ):
-        value = payload.get(key)
-        if isinstance(value, str):
-            parts.append(value)
-    headers = payload.get("table_column_headers")
-    if isinstance(headers, list):
-        parts.extend(str(header) for header in headers)
-    section_path = payload.get("section_path")
-    if isinstance(section_path, list):
-        parts.extend(str(part) for part in section_path)
-    return " ".join(parts)
-
-
-def _promote_table_field_label_matches(
-    query: str,
-    ranked: list[tuple[int, tuple[SearchHit, float]]],
-) -> list[tuple[int, tuple[SearchHit, float]]]:
-    if not ranked:
-        return ranked
-    priorities = [_table_field_label_priority(query, hit) for _, (hit, _) in ranked]
-    if all(priority == 2 for priority in priorities):
-        return ranked
-    ordered = sorted(
-        enumerate(ranked),
-        key=lambda item: (priorities[item[0]], item[0]),
-    )
-    return [ranked_item for _, ranked_item in ordered]
-
-
-def _table_field_label_priority(query: str, hit: SearchHit) -> int:
-    query_tokens = _match_tokens(query)
-    if not query_tokens:
-        return 2
-    best_priority = 2
-    for label in _candidate_table_field_labels(hit):
-        label_tokens = _match_tokens(label)
-        if len(label_tokens) < 2 or not label_tokens <= query_tokens:
-            continue
-        if _normalized_phrase(label) in _normalized_query_phrases(query):
-            return 0
-        best_priority = min(best_priority, 1)
-    return best_priority
-
-
-def _candidate_table_field_labels(hit: SearchHit) -> list[str]:
-    payload = hit.payload
-    labels: list[str] = []
-    structured_fields = payload.get("structured_fields")
-    if isinstance(structured_fields, list):
-        for field in structured_fields:
-            if not isinstance(field, dict):
-                continue
-            label = field.get("label")
-            if isinstance(label, str) and label.strip():
-                labels.append(label.strip())
-    row_label = payload.get("table_row_label")
-    if isinstance(row_label, str) and row_label.strip():
-        labels.append(row_label.strip())
-    text = payload.get("text")
-    if not isinstance(text, str):
-        return labels
-    for segment in _FIELD_LABEL_SEPARATOR_RE.split(text):
-        label, separator, _ = segment.partition(":")
-        label = label.strip().strip("[]")
-        if separator and 2 <= len(label) <= 80:
-            labels.append(label)
-    return _unique_labels(labels)
-
-
-def _unique_labels(labels: list[str]) -> list[str]:
-    seen: set[str] = set()
-    unique: list[str] = []
-    for label in labels:
-        normalized = _normalized_phrase(label)
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        unique.append(label)
-    return unique
-
-
-def _tokens(text: str) -> set[str]:
-    return {
-        token
-        for token in normalized_tokens(text)
-        if len(token) > 2 and token not in _STOPWORDS
-    }
-
-
-def _match_tokens(text: str) -> set[str]:
-    return {
-        token
-        for token in normalized_match_tokens(text)
-        if len(token) > 2 and token not in _STOPWORDS
-    }
-
-
-def _normalized_phrase(text: str) -> str:
-    return normalized_phrase(text)
-
-
-def _normalized_query_phrases(query: str) -> set[str]:
-    tokens = [token for token in normalized_phrase(query).split() if token]
-    phrases: set[str] = set()
-    for size in range(2, min(6, len(tokens)) + 1):
-        phrases.update(" ".join(tokens[index : index + size]) for index in range(0, len(tokens) - size + 1))
-    return phrases

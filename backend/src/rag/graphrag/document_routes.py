@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from ..auth.dependencies import require_csrf, require_current_user
 from ..auth.identity_models import UserRecord
-from ..schemas.common import ErrorResponse
-from ..schemas.docs import DocumentGraphEnrichmentResponse
+from rag.shared.contracts.http import ErrorResponse
+from rag.graphrag.schemas import DocumentGraphEnrichmentResponse
 from .document_enrichment_dependencies import (
     get_document_graph_enrichment_service,
 )

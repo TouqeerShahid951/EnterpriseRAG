@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -55,6 +55,26 @@ class EnrichedAuditEvent:
     target_document_title: str | None
 
 
+@dataclass(frozen=True)
+class AuditSummaryRecord:
+    total: int = 0
+    document_events: int = 0
+    auth_events: int = 0
+    system_events: int = 0
+    actor_count: int = 0
+    event_type_count: int = 0
+    category_counts: dict[str, int] = field(default_factory=dict)
+    target_type_counts: dict[str, int] = field(default_factory=dict)
+    event_type_counts: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class AuditEventPage:
+    items: tuple[EnrichedAuditEvent, ...] = ()
+    total: int = 0
+    summary: AuditSummaryRecord = field(default_factory=AuditSummaryRecord)
+
+
 class AuditEventWriter(Protocol):
     def append_audit_event(
         self,
@@ -68,6 +88,15 @@ class AuditEventWriter(Protocol):
 
 
 class AuditRepository(Protocol):
+    def search_visible_events_page(
+        self,
+        *,
+        filters: AuditFilters,
+        viewer: AuditViewerScope,
+        limit: int,
+        offset: int = 0,
+    ) -> AuditEventPage: ...
+
     def search_visible_events(
         self,
         *,

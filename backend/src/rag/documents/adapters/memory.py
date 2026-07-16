@@ -11,8 +11,12 @@ from uuid import uuid4
 from ...auth.abac import normalize_group_path
 from ...ingestion.adapters.job_memory import InMemoryIngestJobRepositoryMixin
 from ...ingestion.adapters.review_memory import InMemoryReviewRepositoryMixin
+from ...ingestion.delivery.adapters.memory import (
+    InMemoryIngestDeliveryRepositoryMixin,
+)
+from ...ingestion.delivery.models import IngestOutboxRecord
 from ...ingestion.job_models import IngestJobRecord
-from ...ingestion.review_models import (
+from ...ingestion.review.models import (
     ImageReviewBatchRecord,
     ImageReviewCandidateRecord,
     ReviewBatchRecord,
@@ -30,6 +34,7 @@ from .memory_values import _bbox_list, _int_or_none
 
 
 class InMemoryDocumentRepository(
+    InMemoryIngestDeliveryRepositoryMixin,
     InMemoryIngestJobRepositoryMixin,
     InMemoryReviewRepositoryMixin,
 ):
@@ -38,6 +43,7 @@ class InMemoryDocumentRepository(
         self._entities: dict[str, list[DocumentEntityRecord]] = {}
         self._cross_references: dict[str, list[DocumentCrossReferenceRecord]] = {}
         self._jobs: dict[str, IngestJobRecord] = {}
+        self._ingest_outbox: dict[str, IngestOutboxRecord] = {}
         self._review_batches: dict[str, ReviewBatchRecord] = {}
         self._review_items: dict[str, ReviewItemRecord] = {}
         self._image_review_batches: dict[str, ImageReviewBatchRecord] = {}
@@ -96,6 +102,29 @@ class InMemoryDocumentRepository(
             key=lambda document: document.created_at or datetime.min.replace(tzinfo=UTC),
             reverse=True,
         )
+
+    def count_documents_by_owner_group(
+        self,
+        *,
+        state: Literal["active", "deleted"] = "active",
+        clearance_levels: tuple[ClearanceLevel, ...],
+        group_paths: tuple[str, ...] | None,
+    ) -> dict[str, int]:
+        normalized_groups = (
+            None
+            if group_paths is None
+            else {normalize_group_path(path) for path in group_paths}
+        )
+        counts: dict[str, int] = {}
+        for document in self.list_documents(state=state):
+            if document.clearance_level not in clearance_levels:
+                continue
+            if normalized_groups is not None and not normalized_groups.intersection(
+                document.access_group_paths
+            ):
+                continue
+            counts[document.group_path] = counts.get(document.group_path, 0) + 1
+        return dict(sorted(counts.items()))
 
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None:
         document = self._documents.get(document_id)

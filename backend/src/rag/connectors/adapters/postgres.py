@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from ..models import ConnectorQueryResult, ConnectorTestResult
-from ..row_mapping import column_names, json_safe
-from ..schema_introspection import (
+from rag.connectors.catalog.row_mapping import column_names, json_safe
+from rag.connectors.catalog.introspection import (
     add_foreign_key_rows,
     add_index_rows,
     add_primary_key_rows,

@@ -10,7 +10,7 @@ import { isUploadTerminalStatus, toUploadJobView } from "./uploadJobProgress";
 
 const RECENT_UPLOAD_JOB_LIMIT = 20;
 
-export function usePdfUpload(currentUser: AuthUser | null) {
+export function usePdfUpload(currentUser: AuthUser | null, enabled = true) {
   const queryClient = useQueryClient();
   const [pdfDraft, setPdfDraft] = useState<PdfUploadDraft>(defaultPdfUploadDraft);
   const [submissions, setSubmissions] = useState<UploadSubmission[]>([]);
@@ -55,7 +55,7 @@ export function usePdfUpload(currentUser: AuthUser | null) {
   const recentUploadJobsQuery = useQuery({
     queryKey: ["ingest-jobs", "recent-uploads", "mine", currentUser?.user_id],
     queryFn: () => ingestJobsApi.list({ uploaded_by_me: true, limit: RECENT_UPLOAD_JOB_LIMIT, offset: 0 }),
-    enabled: Boolean(currentUser),
+    enabled: Boolean(currentUser) && enabled,
     refetchInterval: (query) => query.state.data?.items?.some((job) => !isUploadTerminalStatus(job.status)) ? 2500 : false,
     retry: false,
     staleTime: 1000,

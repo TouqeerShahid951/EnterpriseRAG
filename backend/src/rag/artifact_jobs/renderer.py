@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .contracts import ArtifactContentBundle
-from .layout_profiles import select_layout_profile
+from rag.artifact_jobs.generation.layout_profiles import select_layout_profile
 from .renderers.docx import render_docx as _render_docx
 from .renderers.package_validation import (
     office_smoke_check as _office_smoke_check,

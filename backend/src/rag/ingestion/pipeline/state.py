@@ -26,6 +26,7 @@ class IngestState(TypedDict, total=False):
     vectors: list[list[float]]
     sparse_vectors: list[Any]
     points: list[dict[str, Any]]
+    index_generation_id: str
     upsert_count: int
     warnings: list[str]
 

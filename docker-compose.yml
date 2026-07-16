@@ -31,6 +31,8 @@ x-backend-env: &backend-env
   CONNECTOR_LIVE_SQL_VERIFIER_SAMPLE_ROWS: ${CONNECTOR_LIVE_SQL_VERIFIER_SAMPLE_ROWS:-5}
   EVALUATION_ANSWER_LLM_VERIFIER_ENABLED: ${EVALUATION_ANSWER_LLM_VERIFIER_ENABLED:-true}
   EVALUATION_ANSWER_LLM_VERIFIER_MODEL: ${EVALUATION_ANSWER_LLM_VERIFIER_MODEL:-}
+  APPLICATION_IMAGE_DIGEST:
+  EVALUATION_HOST_PROFILE:
   DATABASE_URL: ${DATABASE_URL:-postgresql://agenticrag:agenticrag-local-password@postgres:5432/agenticrag}
   DEPLOYMENT_CONTROLLER_TIMEOUT_SECONDS: ${DEPLOYMENT_CONTROLLER_TIMEOUT_SECONDS:-930}
   DEPLOYMENT_CONTROLLER_TOKEN: ${DEPLOYMENT_CONTROLLER_TOKEN:-replace-with-local-deployment-controller-token}
@@ -515,7 +517,7 @@ services:
       clamav:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "python -m rag.shared.model_cache_health --fastembed && python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/live\", timeout=8)'"]
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/ready\", timeout=8)'"]
       interval: 10s
       timeout: 10s
       start_period: 5s
@@ -565,7 +567,7 @@ services:
       clamav:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "python -m rag.shared.model_cache_health --fastembed && python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/live\", timeout=8)'"]
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/ready\", timeout=8)'"]
       interval: 10s
       timeout: 10s
       start_period: 5s
@@ -576,7 +578,11 @@ services:
     restart: unless-stopped
     command: ["celery", "-A", "apps.workers.artifact.celery_app", "worker", "--loglevel=INFO", "--queues=${ARTIFACT_QUEUE_NAME:-artifact:jobs}"]
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "celery -A apps.workers.artifact.celery_app inspect ping --destination=celery@$${HOSTNAME} --timeout=2 >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
     environment:
       <<: [*backend-env, *artifact-env]
       SERVICE_KIND: artifact-generation-worker-celery
@@ -603,7 +609,11 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "apps.background.artifact_cleanup", "--loop"]
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "python -m apps.background.watchdog $$((3 * ARTIFACT_MAINTENANCE_INTERVAL_SECONDS))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
     environment:
       <<: [*backend-env, *artifact-env]
       SERVICE_KIND: artifact-maintenance
@@ -691,7 +701,7 @@ services:
       neo4j:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -m apps.workers.document_pipeline.healthcheck && python -m rag.shared.model_cache_health --fastembed --docling"]
+      test: ["CMD-SHELL", "celery -A apps.workers.document_pipeline.celery_app inspect ping --destination=ingestion-worker@$${HOSTNAME} --timeout=2 >/dev/null && python -m rag.shared.model_cache_health --fastembed --docling"]
       interval: 10s
       timeout: 5s
       start_period: 10s
@@ -725,7 +735,7 @@ services:
       neo4j:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -m apps.workers.document_pipeline.healthcheck && python -m rag.shared.model_cache_health --fastembed"]
+      test: ["CMD-SHELL", "celery -A apps.workers.document_pipeline.celery_app inspect ping --destination=graphrag-worker@$${HOSTNAME} --timeout=2 >/dev/null && python -m rag.shared.model_cache_health --fastembed"]
       interval: 10s
       timeout: 5s
       start_period: 10s
@@ -754,7 +764,11 @@ services:
     restart: unless-stopped
     command: ["celery", "-A", "apps.workers.evaluation.celery_app", "worker", "--loglevel=INFO", "--queues=${EVALUATION_QUEUE_NAME:-evaluation:jobs}"]
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "celery -A apps.workers.evaluation.celery_app inspect ping --destination=celery@$${HOSTNAME} --timeout=2 >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
     environment:
       <<: *backend-env
       EVALUATION_DIAGNOSTIC_TOP_K: ${EVALUATION_DIAGNOSTIC_TOP_K:-10}
@@ -786,7 +800,11 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "apps.background.folder_ingestion_scheduler", "--loop"]
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "python -m apps.background.watchdog $$((3 * FOLDER_SCHEDULER_INTERVAL_SECONDS))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
     environment:
       <<: *backend-env
       FOLDER_SCHEDULER_INTERVAL_SECONDS: ${FOLDER_SCHEDULER_INTERVAL_SECONDS:-60}
@@ -812,7 +830,11 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "apps.background.ingestion_maintenance", "--loop"]
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "python -m apps.background.watchdog $$((3 * INGEST_MAINTENANCE_INTERVAL_SECONDS))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
     environment:
       <<: *backend-env
       INGEST_MAINTENANCE_INTERVAL_SECONDS: ${INGEST_MAINTENANCE_INTERVAL_SECONDS:-30}

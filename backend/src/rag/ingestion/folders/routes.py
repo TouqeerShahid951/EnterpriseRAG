@@ -69,7 +69,7 @@ from .service import (
     resume_schedule,
     visible_schedules,
 )
-from .sources import LocalFolderSource, list_local_folder_directories
+from rag.ingestion.folders.sources import LocalFolderSource, list_local_folder_directories
 from ..job_dependencies import get_ingest_job_repository
 from ..job_models import IngestJobRepository
 

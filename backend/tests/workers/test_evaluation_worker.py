@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 from billiard.exceptions import SoftTimeLimitExceeded
+from celery.exceptions import Reject
 import pytest
 
 
@@ -24,7 +25,7 @@ EvaluationDeliveryRetry = import_module(
 
 def test_evaluation_task_is_registered_only_on_its_worker_app() -> None:
     assert tasks.run_evaluation.app is celery_app
-    assert tasks.run_evaluation.max_retries == 3
+    assert tasks.run_evaluation.max_retries is None
     assert tasks.run_evaluation.name == tasks.settings.evaluation_task_name
     assert "apps.workers.evaluation.tasks" in celery_app.conf.include
 
@@ -134,12 +135,12 @@ def test_evaluation_task_delegates_without_changing_execution_policy(
     assert captured == {
         "run_id": "run-1",
         "repository_factory": repository_factory,
-        "executor_factory": tasks._evaluation_run_executor,
+        "executor_factory": tasks._evaluation_case_executor,
         "timeout_error_types": (SoftTimeLimitExceeded,),
     }
 
 
-def test_evaluation_executor_propagates_worker_interrupts(
+def test_evaluation_case_executor_propagates_worker_interrupts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     executor = object()
@@ -150,9 +151,54 @@ def test_evaluation_executor_propagates_worker_interrupts(
         }
         return executor
 
-    monkeypatch.setattr(tasks, "default_evaluation_run_executor", build)
+    monkeypatch.setattr(tasks, "default_evaluation_case_executor", build)
 
-    assert tasks._evaluation_run_executor() is executor
+    assert tasks._evaluation_case_executor() is executor
+
+
+def test_successful_case_schedules_fresh_same_task_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduled: dict[str, object] = {}
+
+    def run(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {"run_id": "run-1", "status": "running", "continue": True}
+
+    def apply_async(**kwargs: object) -> None:
+        scheduled.update(kwargs)
+
+    monkeypatch.setattr(tasks, "run_evaluation_run", run)
+    monkeypatch.setattr(tasks.run_evaluation, "apply_async", apply_async)
+
+    result = tasks.run_evaluation.run("run-1")
+
+    assert result == {"run_id": "run-1", "status": "running"}
+    assert scheduled == {
+        "args": ["run-1"],
+        "queue": tasks.settings.evaluation_queue_name,
+        "retry": True,
+        "retry_policy": tasks._PUBLISH_RETRY_POLICY,
+    }
+
+
+def test_continuation_publish_failure_rejects_original_delivery_for_redelivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def run(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {"run_id": "run-1", "status": "running", "continue": True}
+
+    def apply_async(**kwargs: object) -> None:
+        assert kwargs["retry"] is True
+        assert kwargs["retry_policy"] == tasks._PUBLISH_RETRY_POLICY
+        raise RuntimeError("broker unavailable")
+
+    monkeypatch.setattr(tasks, "run_evaluation_run", run)
+    monkeypatch.setattr(tasks.run_evaluation, "apply_async", apply_async)
+
+    with pytest.raises(Reject) as exc_info:
+        tasks.run_evaluation.run("run-1")
+
+    assert exc_info.value.requeue is True
 
 
 def test_celery_wrapper_maps_delivery_retry_without_changing_policy(
@@ -167,7 +213,13 @@ def test_celery_wrapper_maps_delivery_retry_without_changing_policy(
         raise EvaluationDeliveryRetry(cause, countdown=17)
 
     def retry(**kwargs: object) -> None:
-        assert kwargs == {"exc": cause, "countdown": 17, "max_retries": None}
+        assert kwargs == {
+            "exc": cause,
+            "countdown": 17,
+            "max_retries": None,
+            "retry": True,
+            "retry_policy": tasks._PUBLISH_RETRY_POLICY,
+        }
         raise ExpectedRetry
 
     monkeypatch.setattr(tasks, "run_evaluation_run", run)
@@ -175,3 +227,23 @@ def test_celery_wrapper_maps_delivery_retry_without_changing_policy(
 
     with pytest.raises(ExpectedRetry):
         tasks.run_evaluation.run("run-1")
+
+
+def test_retry_publish_reject_is_converted_to_requeue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cause = RuntimeError("backend unavailable")
+
+    def run(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise EvaluationDeliveryRetry(cause, countdown=17)
+
+    def retry(**_kwargs: object) -> None:
+        raise Reject(cause, requeue=False)
+
+    monkeypatch.setattr(tasks, "run_evaluation_run", run)
+    monkeypatch.setattr(tasks.run_evaluation, "retry", retry)
+
+    with pytest.raises(Reject) as exc_info:
+        tasks.run_evaluation.run("run-1")
+
+    assert exc_info.value.requeue is True

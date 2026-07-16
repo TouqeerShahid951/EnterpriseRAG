@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import row_mapping as _row_mapping
-from . import schema_introspection as _schema_introspection
+from .catalog import row_mapping as _row_mapping
+from .catalog import introspection as _schema_introspection
 from .adapters import postgres as _postgres
 from .adapters import sql_server as _sql_server
 from .adapters.fake import FakeConnector

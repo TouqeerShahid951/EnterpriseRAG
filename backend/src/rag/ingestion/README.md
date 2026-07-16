@@ -16,6 +16,8 @@ call this package.
 - `execution.py` builds worker dependencies and executes one ingestion job.
 - `pipeline/` defines the ordered ingestion workflow.
 - `parsers/`, `chunking/`, `metadata/`, and `indexing/` implement pipeline work.
+- `publication/` stages and verifies a replacement index, then atomically switches
+  the document's active generation before asynchronous retirement.
 - `adapters/` contains concrete clients for storage, inference, and backend APIs.
 - `ops/` contains ingestion-specific command-line operations.
 

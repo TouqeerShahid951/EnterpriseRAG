@@ -1,15 +1,15 @@
-"""LLM fallback judge for semantic evaluation answer-content checks."""
+"""LLM judge for semantic evaluation answer-content checks."""
 
 from __future__ import annotations
 
 import json
 
-from ..schemas.evaluations import EvaluationCase
+from rag.evaluations.schemas import EvaluationCase
 from ..query.schemas import RAGResponse
 from ..shared.evaluation.answer_checks import LiteralCheckResult
 
 
-ANSWER_VERIFIER_VERSION = "v1"
+ANSWER_VERIFIER_VERSION = "v2"
 
 
 def verify_answer_content_with_llm(
@@ -72,12 +72,16 @@ def _answer_verifier_prompt(
     return (
         "Judge only whether the answer content satisfies the evaluation expectations. "
         "Do not judge retrieval, source selection, citations, or faithfulness. "
+        "When expected_answer is supplied, require the answer to be materially equivalent: "
+        "it must preserve every material fact and must not contradict the expected answer. "
+        "Also enforce every must_include and must_not_include constraint. "
         "Treat paraphrases, abbreviations, formatting differences, reasonable rounding, "
         "and unit conversions as satisfying the same content. "
         "Be strict with different numeric values, decimal shifts, dates, years, names, and negation. "
         "A forbidden must_not_include item fails if the answer asserts that forbidden content. "
         "Return only JSON with keys passed, missing_must_include, present_must_not_include, reason, and confidence. "
-        "Use passed=true only when every must_include is semantically present and no must_not_include is asserted.\n\n"
+        "Use passed=true only when any supplied expected_answer is materially satisfied, every must_include "
+        "is semantically present, and no must_not_include is asserted.\n\n"
         f"{json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)}"
     )
 

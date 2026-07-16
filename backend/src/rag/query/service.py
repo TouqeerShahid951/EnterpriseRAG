@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from time import perf_counter
 from uuid import uuid4
 
@@ -14,21 +15,29 @@ from ..documents.claim_dependencies import claim_repository_from_settings
 from ..documents.adapters.memory import InMemoryDocumentRepository
 from ..documents.models import DocumentRepository
 from ..documents.adapters.postgres import PostgresDocumentRepository
+from ..ingestion.publication.dependencies import active_generation_resolver_for
 from .schemas import QueryRequest, QueryStreamEvent, RAGResponse
 from .artifact_service import GeneratedArtifactService
 from .artifact_intent import parse_artifact_request
 from .cancellation import QueryCancellationToken
-from .conflicts import ConflictChecker
+from rag.query.answering.conflicts import ConflictChecker
 from .inference import InferenceClient, build_inference_client
 from .qdrant import QdrantClient
-from .rag_config_models import RagConfigRepository
-from .rag_config_repository import effective_rag_config, env_rag_config
+from .configuration.models import RagConfigRecord, RagConfigRepository
+from .configuration.repository import effective_rag_config, env_rag_config
 from .state import initial_state
 from .graph import QueryGraphRunner
 from .query_memory import QuerySessionStore, default_query_session_store
 from .nodes import QueryNodes
 from .query_stream import stream_graph
-from .routing_logs import log_query_complete, log_query_error, log_query_start
+from rag.query.retrieval.retrieval_trace import RetrievalTrace
+from rag.query.routing.routing_logs import log_query_complete, log_query_error, log_query_start
+
+
+@dataclass(frozen=True, slots=True)
+class QueryExecutionResult:
+    response: RAGResponse
+    retrieval_trace: RetrievalTrace
 
 
 class LocalRagService:
@@ -41,12 +50,14 @@ class LocalRagService:
         session_store: QuerySessionStore | None = None,
         conflict_checker: ConflictChecker | None = None,
         rag_config_repo: RagConfigRepository | None = None,
+        rag_config: RagConfigRecord | None = None,
         artifact_service: GeneratedArtifactService | None = None,
         artifact_job_service: ArtifactJobService | None = None,
         document_repo: DocumentRepository | None = None,
     ) -> None:
         self.config = config
-        self.rag_config = (
+        resolved_document_repo = document_repo or _document_repository_from_config(config)
+        self.rag_config = rag_config or (
             effective_rag_config(config=config, repo=rag_config_repo)
             if ollama is None
             else env_rag_config(config)
@@ -56,6 +67,7 @@ class LocalRagService:
             base_url=config.qdrant_url,
             collection=config.qdrant_collection,
             timeout_seconds=config.rag_http_timeout_seconds,
+            active_generation_resolver=active_generation_resolver_for(config),
         )
         self.nodes = QueryNodes(
             config=config,
@@ -73,7 +85,7 @@ class LocalRagService:
             faithfulness_model=self.rag_config.faithfulness_model or self.rag_config.chat_model,
             reranker_model=self.rag_config.reranker_model,
             query_planner_enabled=self.rag_config.query_planner_enabled,
-            document_repo=document_repo or _document_repository_from_config(config),
+            document_repo=resolved_document_repo,
         )
         self.artifact_job_service = artifact_job_service or get_artifact_job_service()
         self.graph = QueryGraphRunner(self.nodes)
@@ -85,6 +97,22 @@ class LocalRagService:
         *,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> RAGResponse:
+        return self.execute_query(
+            request,
+            user,
+            cancellation_token=cancellation_token,
+            capture_retrieval_trace=False,
+        ).response
+
+    def execute_query(
+        self,
+        request: QueryRequest,
+        user: UserContext,
+        *,
+        cancellation_token: QueryCancellationToken | None = None,
+        capture_retrieval_trace: bool = False,
+        force_faithfulness_check: bool = False,
+    ) -> QueryExecutionResult:
         started = perf_counter()
         trace_id = str(uuid4())
         session_id = request.session_id or str(uuid4())
@@ -97,6 +125,8 @@ class LocalRagService:
             started=started,
             token_budget=self.rag_config.retrieval_token_budget,
             cancellation_token=cancellation_token,
+            capture_retrieval_trace=capture_retrieval_trace,
+            force_faithfulness_check=force_faithfulness_check,
         )
         log_query_start(ctx, stream=False)
         try:
@@ -118,7 +148,10 @@ class LocalRagService:
             log_query_error(ctx, stream=False, exc=exc)
             raise
         log_query_complete(ctx, stream=False)
-        return response
+        return QueryExecutionResult(
+            response=response,
+            retrieval_trace=RetrievalTrace(tuple(ctx.get("retrieval_trace", ()))),
+        )
 
     def stream_query(
         self,

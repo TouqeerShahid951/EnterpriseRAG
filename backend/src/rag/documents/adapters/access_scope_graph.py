@@ -11,7 +11,7 @@ from ...graphrag.maintenance_queue import (
     GraphRAGDocumentIndexMessage,
     GraphRAGMaintenanceQueue,
 )
-from ..access_scope_ports import (
+from rag.documents.access_scope.ports import (
     DocumentGraphCleanupError,
     DocumentGraphCleanupResult,
 )

@@ -18,8 +18,8 @@ CANCELLABLE_JOB_STATUSES = frozenset(
 CancellationErrorCategory = Literal["not_found", "forbidden"]
 
 
-class DocumentVectorCleaner(Protocol):
-    def delete_document_vectors(self, document_id: str) -> None: ...
+class BuildingGenerationCleaner(Protocol):
+    def delete_building_vectors(self, job_id: str) -> None: ...
 
 
 class DocumentVectorCleanupError(RuntimeError):
@@ -54,7 +54,7 @@ class CancelIngestJob:
         document_repo: DocumentRepository,
         job_repo: IngestJobRepository,
         queue: IngestQueue,
-        vector_cleaner: DocumentVectorCleaner,
+        vector_cleaner: BuildingGenerationCleaner,
     ) -> None:
         self._document_repo = document_repo
         self._job_repo = job_repo
@@ -105,9 +105,9 @@ class CancelIngestJob:
             return _already_finished(cancellation.job.id, cancellation.job.status)
 
         revoke_error = _revoke_queued_task(self._queue, job.id)
-        vector_cleanup_error = _delete_document_vectors(
+        vector_cleanup_error = _delete_building_vectors(
             self._vector_cleaner,
-            document.id,
+            job.id,
         )
         self._document_repo.append_audit_event(
             event_type="ingest.cancelled",
@@ -149,12 +149,12 @@ def _revoke_queued_task(queue: IngestQueue, job_id: str) -> str | None:
     return None
 
 
-def _delete_document_vectors(
-    cleaner: DocumentVectorCleaner,
-    document_id: str,
+def _delete_building_vectors(
+    cleaner: BuildingGenerationCleaner,
+    job_id: str,
 ) -> str | None:
     try:
-        cleaner.delete_document_vectors(document_id)
+        cleaner.delete_building_vectors(job_id)
     except DocumentVectorCleanupError as exc:
         return str(exc)[:300]
     return None

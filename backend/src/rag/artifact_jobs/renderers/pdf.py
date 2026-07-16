@@ -7,7 +7,7 @@ from io import BytesIO
 from xml.sax.saxutils import escape
 
 from ..contracts import ArtifactContentBundle, EvidenceCitation
-from ..layout_profiles import ArtifactLayoutProfile
+from rag.artifact_jobs.generation.layout_profiles import ArtifactLayoutProfile
 from .shared import _list_items, _reference_line, _source_summary
 
 

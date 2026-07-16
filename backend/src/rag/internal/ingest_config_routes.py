@@ -5,9 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from ..ingestion.configuration import IngestConfigRepository
-from ..ingestion.configuration_dependencies import effective_ingest_config, get_ingest_config_repository
-from ..schemas.ingest_config import IngestRuntimeConfigResponse
-from ..schemas.internal import ServiceTokenContext
+from ..ingestion.configuration.dependencies import effective_ingest_config, get_ingest_config_repository
+from rag.ingestion.configuration.schemas import IngestRuntimeConfigResponse
+from rag.internal.schemas import ServiceTokenContext
 from .service_token_auth import require_service_token
 
 router = APIRouter(tags=["internal-ingest-config"])

@@ -2,8 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..documents.models import DocumentCrossReferenceRecord, DocumentEntityRecord
 from ..documents.repository import DocumentRepository, get_document_repository
-from ..schemas.internal import DocumentImageAssetsReplaceRequest, DocumentImageAssetsReplaceResponse, DocumentMetadataSaveRequest, InternalMutationResponse, InternalSupersedeRequest, ServiceTokenContext
-from ..services.document_image_asset_storage import DocumentImageAssetStorage, get_document_image_asset_storage
+from rag.documents.internal_schemas import (
+    DocumentImageAssetsReplaceRequest,
+    DocumentImageAssetsReplaceResponse,
+    DocumentMetadataSaveRequest,
+    InternalSupersedeRequest,
+)
+from rag.internal.schemas import InternalMutationResponse, ServiceTokenContext
+from rag.documents.dependencies import get_document_image_asset_storage
+from rag.documents.image_asset_storage import DocumentImageAssetStorage
 from .service_token_auth import require_service_token
 
 router = APIRouter(tags=["internal-docs"])

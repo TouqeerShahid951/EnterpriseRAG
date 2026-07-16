@@ -7,32 +7,27 @@ from typing import Callable
 
 from ..errors import UnsupportedDocumentError, WorkerStepError
 from .connector_record import parse_connector_record_document
-from .docling_adapter import DoclingProgressCallback, parse_docling_docx
-from .hierarchy import apply_hierarchy
-from .images import (
+from rag.ingestion.parsers.docling.adapter import DoclingProgressCallback
+from rag.ingestion.parsers.images import (
     ImageAnalyzer,
     ImageAssetStore,
     ImageProgressCallback,
     ImageSource,
     PdfVisualSourceResult,
-    docx_image_sources,
     parse_image_document,
 )
 from .json import parse_json_document
 from .models import DocumentParseResult, ParsedImageAsset, ParsedPdfItem
-from .pdf_image_processing import (
+from rag.ingestion.parsers.pdf.image_processing import (
     DEFAULT_PDF_IMAGE_MAX_FULL_PAGE_FALLBACKS,
     PdfImageSelection,
     page_count,
-    renumber_items,
 )
-from .pdf_layout_repair import VisionLayoutProgressCallback
+from rag.ingestion.parsers.pdf.layout_repair import VisionLayoutProgressCallback
 from .provenance import base_report
+from rag.ingestion.parsers.word import DOCX_CONTENT_TYPE, parse_word_document
 
 PDF_CONTENT_TYPE = "application/pdf"
-DOCX_CONTENT_TYPE = (
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-)
 JPEG_CONTENT_TYPE = "image/jpeg"
 PNG_CONTENT_TYPE = "image/png"
 JSON_CONTENT_TYPE = "application/json"
@@ -135,31 +130,11 @@ def parse_document_with_operations(
             vision_layout_repair_enabled=vision_layout_repair_enabled,
         )
     if kind == "docx":
-        items = validated_docx_items(file_bytes)
-        image_assets = []
-        if image_context is not None:
-            image_items, image_assets = operations.image_sources_to_items(
-                docx_image_sources(file_bytes),
-                doc_id=image_context[0],
-                store=image_context[1],
-                analyzer=image_context[2],
-                start_index=len(items),
-                progress_callback=image_progress_callback,
-            )
-            items = renumber_items([*items, *image_items])
-        return DocumentParseResult(
-            items=items,
-            provenance=base_report(
-                document_kind="docx",
-                page_count=None,
-                primary_parser="docling",
-                secondary_parser="vision" if image_context is not None else None,
-                routing_mode="docling_docx",
-                config={},
-                items=items,
-            )
-            | {"image_asset_count": len(image_assets)},
-            assets=image_assets,
+        return parse_word_document(
+            file_bytes,
+            image_context=image_context,
+            image_items_factory=operations.image_sources_to_items,
+            image_progress_callback=image_progress_callback,
         )
     if kind == "image":
         if image_context is None:
@@ -348,22 +323,6 @@ def resume_pdf_image_review_with_operations(
         skipped_image_count=skipped_review_count,
         skipped_review_count=skipped_review_count,
     )
-
-
-def validated_docx_items(file_bytes: bytes) -> list[ParsedPdfItem]:
-    try:
-        items = parse_docling_docx(file_bytes)
-    except ImportError as exc:
-        raise WorkerStepError(
-            "docx_dependency_missing", "Docling DOCX dependency is not installed."
-        ) from exc
-    except Exception as exc:
-        raise WorkerStepError(
-            "docx_parse_failed", "Docling failed to parse DOCX."
-        ) from exc
-    if not items or not "".join(item.text for item in items).strip():
-        raise UnsupportedDocumentError()
-    return apply_hierarchy(renumber_items(items))
 
 
 def document_kind(content_type: str | None, file_path: str) -> str:

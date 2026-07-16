@@ -8,7 +8,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from rag.api.routes import audit_routes
+from rag.audit import routes as audit_routes
 from rag.auth.dependencies import require_current_user
 from rag.audit.adapters.memory import RepositoryAuditRepository
 from rag.documents.adapters.memory import InMemoryDocumentRepository
@@ -299,6 +299,32 @@ def test_audit_export_uses_filters_and_records_export_event() -> None:
     assert repo.audit_events[-1]["event_type"] == "audit.exported"
     assert repo.audit_events[-1]["payload"]["row_count"] == 1
     assert repo.audit_events[-1]["payload"]["matched_count"] == 1
+
+
+def test_audit_export_reports_database_total_when_rows_are_truncated() -> None:
+    repo = InMemoryDocumentRepository()
+    admin = _user("platform_admin", email="admin@example.test")
+    for index in range(2):
+        repo.append_audit_event(
+            event_type="auth.login",
+            actor_id=admin.id,
+            target_type="user",
+            target_id=admin.id,
+            payload={"email": admin.email, "index": index},
+        )
+
+    response = _export(
+        user=admin,
+        repo=repo,
+        identity=FakeIdentityRepository([admin]),
+        category="authentication",
+        max_rows=1,
+    )
+
+    assert response.body.decode("utf-8").count("auth.login") == 1
+    assert repo.audit_events[-1]["payload"]["row_count"] == 1
+    assert repo.audit_events[-1]["payload"]["matched_count"] == 2
+    assert repo.audit_events[-1]["payload"]["truncated"] is True
 
 
 def test_deleted_user_target_email_falls_back_to_payload() -> None:

@@ -12,9 +12,9 @@ from rag.documents.adapters.access_scope_graph import GraphRAGDocumentStore
 from rag.documents.adapters.lifecycle import GraphRAGPartitionRebuildQueue, QdrantDocumentVectorIndex
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.documents.adapters.metadata_index import QdrantDocumentMetadataIndex
-from rag.documents.lifecycle_service import DocumentLifecycleService
-from rag.documents.metadata_service import DocumentMetadataService
-from rag.documents.reingestion_service import DocumentReingestionService
+from rag.documents.lifecycle.service import DocumentLifecycleService
+from rag.documents.metadata.service import DocumentMetadataService
+from rag.documents.lifecycle.reingestion_service import DocumentReingestionService
 from rag.documents.storage import StoredUploadContent
 from rag.graphrag.adapters.document_enrichment_queue import GraphRAGDocumentEnrichmentQueue
 from rag.graphrag.cleanup import GraphRAGCleanupResult

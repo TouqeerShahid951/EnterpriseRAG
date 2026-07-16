@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -26,6 +26,12 @@ class IngestJobRecord:
     updated_at: datetime | None
     completed_at: datetime | None
     run_token: str | None = None
+    delivery_count: int = 0
+    failure_attempt_count: int = 0
+    review_resume_count: int = 0
+    resource_promotion_count: int = 0
+    active_delivery_id: str | None = None
+    last_failure_run_token: str | None = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +83,16 @@ class IngestJobView:
 class IngestJobPage:
     items: tuple[IngestJobView, ...]
     total: int
+
+
+@dataclass(frozen=True)
+class IngestJobSummary:
+    total: int = 0
+    active: int = 0
+    needs_attention: int = 0
+    status_counts: dict[str, int] = field(default_factory=dict)
+    stage_counts: dict[str, int] = field(default_factory=dict)
+    origin_counts: dict[str, int] = field(default_factory=dict)
 
 
 class IngestJobRepository(Protocol):
@@ -162,6 +178,13 @@ class IngestJobSearchRepository(Protocol):
         limit: int | None,
         offset: int = 0,
     ) -> IngestJobPage: ...
+
+    def summarize_visible_ingest_jobs(
+        self,
+        *,
+        access: IngestJobAccess,
+        filters: IngestJobFilters,
+    ) -> IngestJobSummary: ...
 
 
 class IngestJobStore(IngestJobRepository, IngestJobSearchRepository, Protocol):

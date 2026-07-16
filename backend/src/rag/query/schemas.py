@@ -3,7 +3,7 @@ from typing import Any, Literal
 from pydantic import Field, model_validator
 
 from ..artifact_jobs.schemas import ArtifactJobSummary, GeneratedArtifact
-from ..schemas.common import ContractModel
+from rag.shared.contracts.http import ContractModel
 from ..shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
 from ..shared.contracts.evidence import (
     ConflictPair as ConflictPair,
@@ -25,6 +25,8 @@ QueryIntent = Literal[
 FaithfulnessStatus = Literal["pending", "checked", "skipped", "failed"]
 QuerySourceMode = Literal["auto", "corpus_only", "db_only", "hybrid"]
 QuerySourceKind = Literal["connector_schema_catalog"]
+AnswerStatus = Literal["complete", "partial", "clarification", "abstained"]
+CoverageCompleteness = Literal["complete", "partial", "unknown", "not_applicable"]
 
 
 class QueryRequest(ContractModel):
@@ -75,9 +77,18 @@ class QueryNodeTiming(ContractModel):
     detail: str | None = None
 
 
+class QueryCoverage(ContractModel):
+    required_slots: list[str] = Field(default_factory=list)
+    covered_slots: list[str] = Field(default_factory=list)
+    completeness: CoverageCompleteness = "not_applicable"
+    warnings: list[str] = Field(default_factory=list)
+
+
 class RAGResponse(ContractModel):
     trace_id: str
     answer: str
+    answer_status: AnswerStatus = "complete"
+    coverage: QueryCoverage = Field(default_factory=QueryCoverage)
     sources: list[SourceAnchor] = Field(default_factory=list)
     artifacts: list[GeneratedArtifact] = Field(default_factory=list)
     artifact_job: ArtifactJobSummary | None = None

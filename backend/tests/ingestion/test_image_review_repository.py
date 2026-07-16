@@ -3,7 +3,7 @@ from uuid import uuid4
 import pytest
 
 from rag.documents.adapters.memory import InMemoryDocumentRepository
-from rag.ingestion.review_models import ImageReviewBatchClosedError
+from rag.ingestion.review.models import ImageReviewBatchClosedError
 
 
 def test_image_review_decision_returns_none_for_unknown_batch() -> None:

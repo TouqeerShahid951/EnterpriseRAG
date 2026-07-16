@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, Request, Response, status
 from ..core.config import settings
 from .identity_models import IdentityRepository, UserRecord
 from .identity_repository import get_identity_repository
-from ..schemas.auth import AuthUser
+from rag.auth.schemas.session import AuthUser
 from .issued_tokens import ACCESS_TOKEN_TYPE, REFRESH_TOKEN_TYPE
 from .permissions import can_manage_users, can_manage_workspace_config, can_review, is_global_admin
 from .refresh_sessions import RefreshSessionStore, auth_idle_ttl_seconds, get_refresh_session_store

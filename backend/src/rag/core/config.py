@@ -232,6 +232,8 @@ class Settings(BaseSettings):
     evaluation_diagnostic_top_k: int = Field(default=10, ge=1, le=100)
     evaluation_answer_llm_verifier_enabled: bool = True
     evaluation_answer_llm_verifier_model: str | None = None
+    application_image_digest: str | None = None
+    evaluation_host_profile: str | None = None
     rag_session_store: str = "redis"
     rag_session_prefix: str = "rag:session"
     rag_session_ttl_seconds: int = 14400

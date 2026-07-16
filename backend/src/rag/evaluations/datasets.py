@@ -6,10 +6,13 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from ..schemas.evaluations import EvaluationCase
+from pydantic import TypeAdapter, ValidationError
+
+from rag.evaluations.schemas import EvaluationCase, EvaluationEvidenceExpectation
 
 
 SourceFormat = Literal["json", "jsonl"]
+_EVIDENCE_EXPECTATIONS_ADAPTER = TypeAdapter(list[EvaluationEvidenceExpectation])
 
 
 @dataclass(frozen=True)
@@ -44,9 +47,10 @@ def normalize_dataset_content(
     if source_format == "json":
         return _normalize_json(cleaned, name=name)
     try:
-        return _normalize_json(cleaned, name=name)
-    except EvaluationDatasetError:
+        json.loads(cleaned)
+    except json.JSONDecodeError:
         return _normalize_jsonl(cleaned, name=name)
+    return _normalize_json(cleaned, name=name)
 
 
 def _normalize_json(content: str, *, name: str | None) -> NormalizedEvaluationDataset:
@@ -55,7 +59,7 @@ def _normalize_json(content: str, *, name: str | None) -> NormalizedEvaluationDa
     except json.JSONDecodeError as exc:
         raise EvaluationDatasetError("evaluation_dataset_invalid_json", f"Dataset JSON is invalid: {exc}") from exc
     if isinstance(payload, list):
-        cases = tuple(_case_from_jsonl_row(row, index) for index, row in enumerate(payload))
+        cases = tuple(_case_from_row(row, index, source_shape="json") for index, row in enumerate(payload))
         return _dataset(
             name=name or "Imported JSON evaluation",
             description=None,
@@ -72,7 +76,7 @@ def _normalize_json(content: str, *, name: str | None) -> NormalizedEvaluationDa
             name=name or "Imported JSON evaluation",
             description=None,
             source_format="json",
-            cases=(_case_from_jsonl_row(payload, 0),),
+            cases=(_case_from_row(payload, 0, source_shape="json"),),
             metadata={},
         )
     raise EvaluationDatasetError(
@@ -90,7 +94,7 @@ def _normalize_jsonl(content: str, *, name: str | None) -> NormalizedEvaluationD
             row = json.loads(line)
         except json.JSONDecodeError as exc:
             raise EvaluationDatasetError("evaluation_dataset_invalid_jsonl", f"Line {line_number} is invalid JSON: {exc}") from exc
-        cases.append(_case_from_jsonl_row(row, line_number - 1))
+        cases.append(_case_from_row(row, line_number - 1, source_shape="jsonl"))
     if not cases:
         raise EvaluationDatasetError("evaluation_dataset_empty", "JSONL dataset did not contain any cases.")
     return _dataset(
@@ -125,12 +129,13 @@ def _normalize_repo_fixture(payload: dict[str, Any], *, name: str | None) -> Nor
                 must_not_include=_string_list(row.get("wrong_if_mentions")),
                 expected_source_docs=expected_docs,
                 acceptable_source_pages=_int_list(row.get("acceptable_source_pages")),
+                evidence_expectations=_evidence_expectations(row, index),
                 min_sources=_optional_int(row.get("min_sources")) or 0,
                 must_cite_source=bool(response_checks.get("requires_citations", False)),
                 min_faithfulness_score=float(response_checks.get("min_faithfulness_score") or 0.0),
                 allow_degraded=bool(response_checks.get("allow_degraded", False)),
                 latency_threshold_ms=_optional_int(row.get("latency_threshold_ms")),
-                metadata={"source_shape": "repo_fixture"},
+                metadata=_case_metadata(row, index, source_shape="repo_fixture"),
             )
         )
     return _dataset(
@@ -147,7 +152,7 @@ def _normalize_repo_fixture(payload: dict[str, Any], *, name: str | None) -> Nor
     )
 
 
-def _case_from_jsonl_row(row: object, index: int) -> EvaluationCase:
+def _case_from_row(row: object, index: int, *, source_shape: SourceFormat) -> EvaluationCase:
     if not isinstance(row, dict):
         raise EvaluationDatasetError("evaluation_case_invalid", f"Case row {index + 1} must be an object.")
     return EvaluationCase(
@@ -164,13 +169,40 @@ def _case_from_jsonl_row(row: object, index: int) -> EvaluationCase:
         must_not_include=_string_list(row.get("must_not_include")) or _string_list(row.get("wrong_if_mentions")),
         expected_source_docs=_string_list(row.get("expected_source_docs")),
         acceptable_source_pages=_int_list(row.get("acceptable_source_pages")),
+        evidence_expectations=_evidence_expectations(row, index),
         min_sources=_optional_int(row.get("min_sources")) or 0,
         must_cite_source=bool(row.get("must_cite_source") or row.get("requires_citations") or False),
         min_faithfulness_score=float(row.get("min_faithfulness_score") or 0.0),
         allow_degraded=bool(row.get("allow_degraded", False)),
         latency_threshold_ms=_optional_int(row.get("latency_threshold_ms")),
-        metadata={"source_shape": "jsonl"},
+        metadata=_case_metadata(row, index, source_shape=source_shape),
     )
+
+
+def _evidence_expectations(
+    row: dict[str, Any], index: int
+) -> list[EvaluationEvidenceExpectation]:
+    if "evidence_expectations" not in row:
+        return []
+    try:
+        return _EVIDENCE_EXPECTATIONS_ADAPTER.validate_python(row["evidence_expectations"])
+    except ValidationError as exc:
+        raise EvaluationDatasetError(
+            "evaluation_case_invalid_evidence_expectations",
+            f"Case row {index + 1} evidence_expectations must be a list of valid expectation objects.",
+        ) from exc
+
+
+def _case_metadata(row: dict[str, Any], index: int, *, source_shape: str) -> dict[str, Any]:
+    if "metadata" not in row:
+        return {"source_shape": source_shape}
+    metadata = row["metadata"]
+    if not isinstance(metadata, dict):
+        raise EvaluationDatasetError(
+            "evaluation_case_invalid_metadata",
+            f"Case row {index + 1} metadata must be an object.",
+        )
+    return {**metadata, "source_shape": source_shape}
 
 
 def _dataset(

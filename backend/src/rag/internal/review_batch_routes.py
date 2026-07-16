@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ..ingestion.review_dependencies import (
+from ..ingestion.review.dependencies import (
     get_human_review_repository,
     get_image_review_repository,
 )
-from ..ingestion.review_models import (
+from ..ingestion.review.models import (
     HumanReviewRepository,
     ImageReviewRepository,
 )
-from ..schemas.internal import (
+from rag.ingestion.review.internal_schemas import (
     ImageReviewApprovedKeysResponse,
     ImageReviewBatchCreateRequest,
     ImageReviewBatchCreateResponse,
@@ -21,8 +21,8 @@ from ..schemas.internal import (
     ReviewBatchCreateRequest,
     ReviewBatchCreateResponse,
     ReviewBatchParsedItemsResponse,
-    ServiceTokenContext,
 )
+from rag.internal.schemas import ServiceTokenContext
 from .service_token_auth import require_service_token
 
 router = APIRouter(tags=["internal-review"])

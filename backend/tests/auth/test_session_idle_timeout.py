@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException, Response
 from starlette.requests import Request
 
-from rag.api.routes.auth_routes import issue_login
+from rag.auth.routes.session import issue_login
 from rag.auth.dependencies import require_current_user
 from rag.auth.issued_tokens import create_auth_tokens
 from rag.auth.refresh_sessions import InMemoryRefreshSessionStore, auth_idle_ttl_seconds

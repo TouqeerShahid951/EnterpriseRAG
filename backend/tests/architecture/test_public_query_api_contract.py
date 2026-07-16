@@ -121,6 +121,8 @@ EXPECTED_SCHEMAS: dict[str, SchemaContract] = {
             {
                 "trace_id",
                 "answer",
+                "answer_status",
+                "coverage",
                 "sources",
                 "artifacts",
                 "artifact_job",
@@ -152,6 +154,17 @@ EXPECTED_SCHEMAS: dict[str, SchemaContract] = {
                 "degraded",
             }
         ),
+    ),
+    "QueryCoverage": (
+        frozenset(
+            {
+                "required_slots",
+                "covered_slots",
+                "completeness",
+                "warnings",
+            }
+        ),
+        frozenset(),
     ),
     "ChatSession": (
         frozenset({"id", "title", "created_at", "updated_at", "turns"}),
@@ -350,6 +363,18 @@ def test_public_query_openapi_contract() -> None:
     ]
     assert rag_response["faithfulness_score"]["minimum"] == 0
     assert rag_response["faithfulness_score"]["maximum"] == 1
+    assert rag_response["answer_status"]["enum"] == [
+        "complete",
+        "partial",
+        "clarification",
+        "abstained",
+    ]
+    assert schemas["QueryCoverage"]["properties"]["completeness"]["enum"] == [
+        "complete",
+        "partial",
+        "unknown",
+        "not_applicable",
+    ]
 
     session_parameters = {
         parameter["name"]: parameter["schema"]

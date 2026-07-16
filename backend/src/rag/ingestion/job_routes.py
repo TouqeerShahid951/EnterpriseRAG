@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from starlette.concurrency import run_in_threadpool
 
 from ..auth.abac import normalize_group_path
 from ..auth.dependencies import require_admin_user, require_csrf, require_current_user
@@ -23,14 +24,14 @@ from .job_models import (
 from .job_dependencies import get_ingest_job_repository
 from ..auth.identity_models import UserRecord
 from .configuration import IngestConfigRepository
-from .configuration_dependencies import effective_ingest_config, get_ingest_config_repository
+from .configuration.dependencies import effective_ingest_config, get_ingest_config_repository
 from .cancellation import (
     CancelIngestJob,
-    DocumentVectorCleaner,
+    BuildingGenerationCleaner,
     IngestCancellationError,
 )
 from .cancellation_dependencies import get_document_vector_cleaner
-from ..schemas.ingest_jobs import (
+from rag.ingestion.schemas import (
     IngestJobCancelResponse,
     IngestJobItem,
     IngestJobListResponse,
@@ -56,7 +57,7 @@ from .worker_control import (
     IngestWorkerControl,
     get_ingest_worker_control,
 )
-from ..documents.upload_status import build_job_status_response
+from ..documents.upload.status import build_job_status_response
 
 
 router = APIRouter(prefix="/ingest-jobs", tags=["ingest-jobs"])
@@ -87,7 +88,8 @@ async def list_ingest_jobs(
     status_filter = _job_status(job_status)
     origin_filter = _job_origin(origin)
     normalized_group = normalize_group_path(group_path) if group_path else None
-    page = search_visible_ingest_jobs(
+    page = await run_in_threadpool(
+        search_visible_ingest_jobs,
         repo=job_repo,
         access=_ingest_job_access(user),
         filters=IngestJobFilters(
@@ -120,7 +122,8 @@ async def summarize_ingest_jobs(
     job_repo: IngestJobSearchRepository = Depends(get_ingest_job_repository),
 ) -> IngestJobSummaryResponse:
     normalized_group = normalize_group_path(group_path) if group_path else None
-    summary = summarize_visible_ingest_jobs(
+    summary = await run_in_threadpool(
+        summarize_visible_ingest_jobs,
         repo=job_repo,
         access=_ingest_job_access(user),
         filters=IngestJobFilters(
@@ -152,7 +155,7 @@ async def cancel_ingest_job(
     repo: DocumentRepository = Depends(get_document_repository),
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
     queue: IngestQueue = Depends(get_ingest_queue),
-    vector_cleaner: DocumentVectorCleaner = Depends(get_document_vector_cleaner),
+    vector_cleaner: BuildingGenerationCleaner = Depends(get_document_vector_cleaner),
 ) -> IngestJobCancelResponse:
     require_csrf(request)
     try:

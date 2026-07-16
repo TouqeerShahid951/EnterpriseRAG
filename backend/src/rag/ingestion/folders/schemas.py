@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from ...schemas.common import ContractModel
+from rag.shared.contracts.http import ContractModel
 from ...shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
 
 

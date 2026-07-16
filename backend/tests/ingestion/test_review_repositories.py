@@ -17,11 +17,11 @@ from rag.ingestion.adapters.image_review_postgres import (
     PostgresImageReviewRepository,
     image_review_batch_from_row,
 )
-from rag.ingestion.review_dependencies import (
+from rag.ingestion.review.dependencies import (
     human_review_repository_for,
     image_review_repository_for,
 )
-from rag.schemas.internal import ServiceTokenContext
+from rag.internal.schemas import ServiceTokenContext
 
 
 def test_memory_review_providers_reuse_document_repository_instance() -> None:

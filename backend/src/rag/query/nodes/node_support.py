@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from ..cancellation import cancellation_token_from_context
-from ..query_intent import should_include_superseded
-from ..routing_models import RoutePlan
+from rag.query.routing.query_intent import should_include_superseded
+from rag.query.routing.routing_models import RoutePlan
 from ..state import QueryContext
 
 

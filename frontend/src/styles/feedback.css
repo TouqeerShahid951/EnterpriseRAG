@@ -10,6 +10,11 @@
   pointer-events: none;
 }
 
+body:has(.review-workspace) .Prudentia-toast-viewport {
+  top: 1rem;
+  bottom: auto;
+}
+
 .Prudentia-toast {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

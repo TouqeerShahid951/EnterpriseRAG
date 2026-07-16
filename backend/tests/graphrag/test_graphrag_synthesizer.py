@@ -5,7 +5,7 @@ from rag.graphrag.graphrag_synthesizer import synthesize_graphrag_response
 from rag.graphrag.models import CommunitySummary, SourceRef
 from rag.graphrag.qdrant import CommunitySearchHit
 from rag.query.qdrant import SearchHit
-from rag.query.routing_models import RoutePlan
+from rag.query.routing.routing_models import RoutePlan
 from rag.query.state import initial_state
 from rag.query.schemas import QueryRequest
 

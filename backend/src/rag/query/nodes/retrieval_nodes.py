@@ -5,15 +5,21 @@ from __future__ import annotations
 from ...graphrag.graphrag_retriever import GraphRAGRetriever
 from ..artifact_pipeline import assess_artifact_evidence
 from ..cancellation import cancellation_token_from_context
-from ..conflicts import apply_conflict_detection, apply_hybrid_disagreement_detection
-from ..evidence_quality import EvidenceQuality, assess_evidence_quality
-from ..query_intent import rewrite_for_retry
-from ..query_retrieval import merge_artifact_protected_hits, merge_route_protected_hits
-from ..reasoning import rewrite_query_with_reasoning
-from ..reranker import rerank_hits
-from ..routing_evidence import inspect_evidence_for_reroute
-from ..routing_logs import log_artifact_evidence, log_retrieval_summary, log_verifier_decision
-from ..sources import build_evidence_hits
+from rag.query.answering.conflicts import apply_conflict_detection, apply_hybrid_disagreement_detection
+from rag.query.answering.evidence_quality import EvidenceQuality, assess_evidence_quality
+from rag.query.routing.query_intent import rewrite_for_retry
+from rag.query.retrieval.query_retrieval import merge_artifact_protected_hits, merge_route_protected_hits
+from ..qdrant import SearchHit
+from rag.query.answering.reasoning import rewrite_query_with_reasoning
+from ..reranker import _coverage_obligations, rerank_hits_with_result
+from rag.query.retrieval.retrieval_trace import (
+    RetrievalStageName,
+    RetrievalStageStatus,
+    retrieval_trace_stage,
+)
+from rag.query.routing.routing_evidence import inspect_evidence_for_reroute
+from rag.query.routing.routing_logs import log_artifact_evidence, log_retrieval_summary, log_verifier_decision
+from rag.query.sources import build_evidence_hits
 from ..state import QueryContext
 from .node_support import (
     _apply_route_plan,
@@ -44,6 +50,7 @@ class RetrievalNodes:
                     "graphrag",
                     f"communities={len(result.communities)},source_chunks={len(result.source_hits)}",
                 )
+                _record_retrieval_stage(ctx, "retrieved", ctx["retrieved_hits"])
                 log_retrieval_summary(ctx, stage="retrieved")
                 return ctx
             if "graphrag_communities" in ctx:
@@ -54,6 +61,7 @@ class RetrievalNodes:
         ctx["retrieved_hits"] = self.retrieval_service.retrieve(ctx)
         if "abac_retriever" not in ctx["execution_modes"]:
             _mark_execution(ctx, "abac_retriever", *_retrieval_execution_summary(ctx))
+        _record_retrieval_stage(ctx, "retrieved", ctx["retrieved_hits"])
         log_retrieval_summary(ctx, stage="retrieved")
         return ctx
 
@@ -61,19 +69,97 @@ class RetrievalNodes:
         _raise_if_cancelled(ctx)
         plan = ctx.get("route_plan")
         if plan is not None and not plan.use_reranker:
+            _record_retrieval_stage(ctx, "rerank_input", [], status="skipped")
+            _record_retrieval_stage(ctx, "reranked", ctx["retrieved_hits"])
+            _record_retrieval_stage(ctx, "post_policy", ctx["retrieved_hits"])
             log_retrieval_summary(ctx, stage="rerank_skipped", before_count=len(ctx["retrieved_hits"]))
             return ctx
         query = " ".join(ctx["sub_queries"] or [ctx["request"].query])
         original_hits = ctx["retrieved_hits"]
-        ranked_hits = rerank_hits(
+        exhaustive = bool(
+            plan is not None
+            and plan.intent == "aggregation"
+            and any(
+                str(hit.payload.get("exhaustive_scope_origin", ""))
+                == "document_class_scope"
+                for hit in original_hits
+            )
+        )
+        rerank_result = rerank_hits_with_result(
             query,
             original_hits,
             top_k=plan.top_k if plan else self.config.rag_top_k,
             max_candidates=self.config.rag_reranker_max_candidates,
             model_name=self.reranker_model,
             cache_dir=self.config.rag_reranker_cache_dir,
+            exhaustive=exhaustive,
+            deadline=ctx.get("exhaustive_deadline") if exhaustive else None,
+            cancellation_token=cancellation_token_from_context(ctx),
         )
-        if plan is not None:
+        _record_retrieval_stage(ctx, "rerank_input", rerank_result.candidates)
+        ranked_hits = list(rerank_result.ranked_hits)
+        _record_retrieval_stage(ctx, "reranked", ranked_hits)
+        if exhaustive:
+            coverage_reasons = [
+                reason
+                for reason in (
+                    rerank_result.stop_reason,
+                    rerank_result.evidence_stop_reason,
+                )
+                if reason
+            ]
+            ctx["exhaustive_coverage"] = {
+                "candidate_status": rerank_result.candidate_coverage_status,
+                "evidence_status": rerank_result.evidence_coverage_status,
+                "reasons": list(dict.fromkeys(coverage_reasons)),
+                "required_obligations": list(
+                    rerank_result.required_coverage_obligations
+                ),
+                "covered_obligations": list(
+                    rerank_result.covered_coverage_obligations
+                ),
+            }
+        exhaustive_incomplete = bool(
+            exhaustive
+            and (
+                rerank_result.candidate_coverage_status != "complete"
+                or rerank_result.evidence_coverage_status != "complete"
+            )
+        )
+        if exhaustive_incomplete:
+            ctx["degraded"] = True
+            ctx["degraded_reason"] = ctx["degraded_reason"] or (
+                "exhaustive_reranker_unavailable"
+                if rerank_result.candidate_coverage_status == "unknown"
+                else (
+                    "exhaustive_candidate_coverage_partial"
+                    if rerank_result.candidate_coverage_status != "complete"
+                    else "exhaustive_final_evidence_coverage_partial"
+                )
+            )
+            _mark_execution(
+                ctx,
+                "reranker",
+                "fallback",
+                rerank_result.stop_reason
+                or rerank_result.evidence_stop_reason,
+            )
+        elif exhaustive:
+            _mark_execution(
+                ctx,
+                "reranker",
+                "deterministic",
+                f"strategy={rerank_result.strategy},representatives={rerank_result.representative_scored_count}",
+            )
+        hierarchical_candidates = bool(
+            rerank_result.strategy == "exhaustive_hierarchical"
+            and any(
+                hit.payload.get("rerank_candidate_origin")
+                == "exhaustive_section_expansion"
+                for hit in rerank_result.candidates
+            )
+        )
+        if plan is not None and not hierarchical_candidates:
             ranked_hits = merge_route_protected_hits(
                 original_hits=original_hits,
                 ranked_hits=ranked_hits,
@@ -84,6 +170,7 @@ class RetrievalNodes:
             ranked_hits=ranked_hits,
             artifact_plan=ctx.get("artifact_plan"),
         )
+        _record_retrieval_stage(ctx, "post_policy", ctx["retrieved_hits"])
         log_retrieval_summary(ctx, stage="reranked", before_count=len(original_hits))
         return ctx
 
@@ -264,13 +351,66 @@ class RetrievalNodes:
     def evidence_builder(self, ctx: QueryContext) -> QueryContext:
         _raise_if_cancelled(ctx)
         if "artifact_plan" in ctx:
+            _record_retrieval_stage(ctx, "final_evidence", ctx["retrieved_hits"])
             return ctx
         plan = ctx.get("route_plan")
+        exhaustive_coverage = ctx.get("exhaustive_coverage")
+        required_coverage_obligations = (
+            set(exhaustive_coverage["required_obligations"])
+            if exhaustive_coverage is not None
+            else _coverage_obligations(ctx["retrieved_hits"])
+        )
         ctx["retrieved_hits"] = build_evidence_hits(
             ctx["retrieved_hits"],
             token_budget=ctx["token_budget"],
             limit=plan.top_k if plan else self.config.rag_top_k,
-            broader_table_context=_should_promote_parent_context(plan),
+            broader_table_context=(
+                _should_promote_parent_context(plan)
+                or any(
+                    hit.payload.get("coverage_role")
+                    == "exhaustive_section_representative"
+                    for hit in ctx["retrieved_hits"]
+                )
+            ),
             query=" ".join(ctx.get("sub_queries") or [ctx["request"].query]),
         )
+        final_coverage_obligations = _coverage_obligations(ctx["retrieved_hits"])
+        if exhaustive_coverage is not None:
+            exhaustive_coverage["covered_obligations"] = sorted(
+                final_coverage_obligations
+            )
+        if not required_coverage_obligations <= final_coverage_obligations:
+            if exhaustive_coverage is not None:
+                exhaustive_coverage["evidence_status"] = "partial"
+                if "final_evidence_budget_incomplete" not in exhaustive_coverage["reasons"]:
+                    exhaustive_coverage["reasons"].append(
+                        "final_evidence_budget_incomplete"
+                    )
+            ctx["degraded"] = True
+            ctx["degraded_reason"] = (
+                ctx["degraded_reason"] or "exhaustive_final_evidence_coverage_partial"
+            )
+        _record_retrieval_stage(ctx, "final_evidence", ctx["retrieved_hits"])
         return ctx
+
+
+def _record_retrieval_stage(
+    ctx: QueryContext,
+    name: RetrievalStageName,
+    hits: list[SearchHit] | tuple[SearchHit, ...],
+    *,
+    status: RetrievalStageStatus = "completed",
+) -> None:
+    stages = ctx.get("retrieval_trace")
+    if stages is None:
+        return
+    if name == "retrieved":
+        attempt = sum(stage.name == "retrieved" for stage in stages)
+    else:
+        attempt = next(
+            (stage.attempt for stage in reversed(stages) if stage.name == "retrieved"),
+            0,
+        )
+    stages.append(
+        retrieval_trace_stage(name, hits, attempt=attempt, status=status)
+    )

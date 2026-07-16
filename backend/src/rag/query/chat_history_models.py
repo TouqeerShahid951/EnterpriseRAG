@@ -20,6 +20,14 @@ class ChatSessionRecord:
 
 
 class ChatHistoryRepository(Protocol):
+    def list_sessions_page(
+        self,
+        *,
+        user_id: str,
+        permission_version: int,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> tuple[list[ChatSessionRecord], int]: ...
     def list_sessions(self, *, user_id: str, permission_version: int, limit: int = 30, offset: int = 0) -> list[ChatSessionRecord]: ...
     def count_sessions(self, *, user_id: str, permission_version: int) -> int: ...
     def get_session(self, *, session_id: str, user_id: str, permission_version: int) -> ChatSessionRecord | None: ...

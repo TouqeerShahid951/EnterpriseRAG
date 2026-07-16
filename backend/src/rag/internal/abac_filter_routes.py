@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, Query
 
 from ..auth.abac import build_abac_filter
 from ..auth.context import UserContext
-from ..schemas.internal import AbacFilterResponse, ServiceTokenContext
+from rag.auth.schemas.internal import AbacFilterResponse
+from rag.internal.schemas import ServiceTokenContext
 from .service_token_auth import require_service_token
 
 router = APIRouter(tags=["internal-abac"])

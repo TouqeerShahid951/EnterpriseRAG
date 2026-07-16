@@ -11,14 +11,29 @@ import { authenticatedRouteForUser, canAccessRoute, canonicalRoute, defaultRoute
 import { formatIdleCountdown } from "@/features/auth/state/authSessionTiming";
 import { useAuthSession } from "@/features/auth/state/useAuthSession";
 import { useChatSession } from "@/features/chat/state/useChatSession";
-import { useDocumentInventory } from "@/features/documents/state/useDocumentInventory";
+import {
+  useDocumentCatalogSummary,
+  useDocumentInventory,
+} from "@/features/documents/state/useDocumentInventory";
 import { usePdfUpload } from "@/features/upload/state/usePdfUpload";
 import { readStoredBoolean, writeStoredBoolean } from "@/lib/utils/uiPreferences";
-import type { Document, User as AuthUser } from "@/types/api";
+import type { DocumentGroupCount, User as AuthUser } from "@/types/api";
 import { isDocumentInSpace, userSpacesFromPaths } from "@/lib/utils/groups";
 import "@/styles.css";
 
 const THEME_STORAGE_KEY = "Prudentia-theme-light";
+const DOCUMENT_INVENTORY_ROUTES = new Set<RouteId>([
+  "chat",
+  "document-overview",
+  "evaluations",
+  "overview",
+  "upload",
+]);
+const UPLOAD_JOB_ROUTES = new Set<RouteId>([
+  "document-overview",
+  "knowledge-spaces",
+  "upload",
+]);
 
 const PrudentiaAccountPage = lazy(() => import("@/features/auth/pages/PrudentiaAccountPage").then((module) => ({ default: module.PrudentiaAccountPage })));
 const PrudentiaAccessPage = lazy(() => import("@/features/access/pages/PrudentiaAccessPage").then((module) => ({ default: module.PrudentiaAccessPage })));
@@ -42,13 +57,21 @@ function App() {
   const [isLightMode, setIsLightMode] = useState(() => readStoredBoolean(THEME_STORAGE_KEY, false));
   const auth = useAuthSession();
   const resolvedRoute = auth.currentUser ? authenticatedRouteForUser(auth.currentUser, routeFromLocation()) : activeRoute;
-  const chat = useChatSession(auth.currentUser);
-  const inventory = useDocumentInventory(auth.currentUser);
-  const pdfUpload = usePdfUpload(auth.currentUser);
-  const sidebarSpaceOptions = useMemo(() => knowledgeSpaceOptions(auth.currentUser, inventory.documents), [auth.currentUser, inventory.documents]);
+  const chat = useChatSession(auth.currentUser, resolvedRoute === "chat");
+  const inventory = useDocumentInventory(auth.currentUser, DOCUMENT_INVENTORY_ROUTES.has(resolvedRoute));
+  const documentSummary = useDocumentCatalogSummary(auth.currentUser, resolvedRoute !== "source-viewer");
+  const pdfUpload = usePdfUpload(auth.currentUser, UPLOAD_JOB_ROUTES.has(resolvedRoute));
+  const sidebarSpaceOptions = useMemo(
+    () => knowledgeSpaceOptions(auth.currentUser, documentSummary.groups),
+    [auth.currentUser, documentSummary.groups],
+  );
   const sidebarDocumentCount = useMemo(
-    () => documentsInActiveSpace(inventory.documents, chat.activeSpacePath).length,
-    [chat.activeSpacePath, inventory.documents],
+    () => documentCountInActiveSpace(
+      documentSummary.groups,
+      documentSummary.total,
+      chat.activeSpacePath,
+    ),
+    [chat.activeSpacePath, documentSummary.groups, documentSummary.total],
   );
 
   useLayoutEffect(() => {
@@ -148,7 +171,7 @@ function App() {
       activeSpacePath={chat.activeSpacePath}
       allowAllSpaces={isGlobalAdmin(user)}
       documentCount={sidebarDocumentCount}
-      documentsLoading={inventory.documentsQuery.isLoading}
+      documentsLoading={documentSummary.summaryQuery.isLoading}
       onActiveSpaceChange={chat.changeActiveSpacePath}
       spaceSwitchDisabled={resolvedRoute === "chat" && chat.hasPendingGeneration}
       spaces={sidebarSpaceOptions}
@@ -261,16 +284,29 @@ function RouteLoading({ label }: { label: string }) {
   );
 }
 
-function documentsInActiveSpace(documents: Document[], activeSpacePath: string | null): Document[] {
-  if (!activeSpacePath) return documents;
-  return documents.filter((document) => isDocumentInSpace(document.group_path, activeSpacePath));
+function documentCountInActiveSpace(
+  groups: DocumentGroupCount[],
+  total: number,
+  activeSpacePath: string | null,
+): number {
+  if (!activeSpacePath) return total;
+  return groups
+    .filter((group) => isDocumentInSpace(group.group_path, activeSpacePath))
+    .reduce((count, group) => count + group.count, 0);
 }
 
-function knowledgeSpaceOptions(user: AuthUser | null, documents: Document[]): ChatSpaceOption[] {
+function knowledgeSpaceOptions(
+  user: AuthUser | null,
+  groups: DocumentGroupCount[],
+): ChatSpaceOption[] {
   if (!user) return [];
-  const paths = isGlobalAdmin(user) ? Array.from(new Set(documents.map((document) => document.group_path))).sort() : user.group_paths ?? [];
+  const paths = isGlobalAdmin(user)
+    ? groups.map((group) => group.group_path)
+    : user.group_paths ?? [];
   return userSpacesFromPaths(paths).map((space) => ({
-    documentCount: documents.filter((document) => isDocumentInSpace(document.group_path, space.path)).length,
+    documentCount: groups
+      .filter((group) => isDocumentInSpace(group.group_path, space.path))
+      .reduce((count, group) => count + group.count, 0),
     name: space.name,
     path: space.path,
   }));

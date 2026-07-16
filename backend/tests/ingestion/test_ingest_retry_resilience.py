@@ -6,14 +6,14 @@ from types import SimpleNamespace
 import pytest
 
 from rag.ingestion import execution as ingestion_execution
-from rag.ingestion.adapters.backend import IngestAttempt
+from rag.ingestion.adapters.backend import IngestAttempt, IngestFailure
 from rag.ingestion.adapters.http import ServiceRequestError
 from rag.ingestion.contracts import IngestJobPayload
 from rag.ingestion.execution import (
     IngestDeliveryRetry,
+    _handle_rejected_attempt,
     _job_is_cancelled,
     _record_event,
-    _resume_exhausted_review_attempt,
     _retry_or_fail,
     _start_attempt,
     run_ingest_document,
@@ -27,12 +27,15 @@ class FakeBackend:
         fail_update: bool = False,
         fail_status: bool = False,
         fail_event: bool = False,
+        retry_scheduled: bool = True,
     ) -> None:
         self.fail_update = fail_update
         self.fail_status = fail_status
         self.fail_event = fail_event
+        self.retry_scheduled = retry_scheduled
         self.events: list[dict[str, object]] = []
         self.updates: list[dict[str, object]] = []
+        self.failures: list[dict[str, object]] = []
 
     def start_attempt(self, **_kwargs: object) -> IngestAttempt:
         return IngestAttempt(
@@ -53,82 +56,76 @@ class FakeBackend:
         if self.fail_update:
             raise ServiceRequestError("backend", "connection refused")
 
+    def record_failure(self, **kwargs: object) -> IngestFailure:
+        self.failures.append(kwargs)
+        if self.fail_update:
+            raise ServiceRequestError("backend", "connection refused")
+        return IngestFailure(
+            job_status="queued" if self.retry_scheduled else "failed",
+            failure_attempt_count=1,
+            retry_scheduled=self.retry_scheduled,
+            changed=True,
+        )
+
     def record_event(self, *, job_id: str, event_type: str, payload: dict[str, object]) -> None:
         if self.fail_event:
             raise ServiceRequestError("backend", "connection refused")
         self.events.append({"job_id": job_id, "event_type": event_type, "payload": payload})
 
 
-def test_retry_uses_base_countdown_when_job_is_requeued() -> None:
+def test_retry_records_failure_and_schedules_outbox_delivery() -> None:
     backend = FakeBackend()
 
-    with pytest.raises(IngestDeliveryRetry) as exc_info:
-        _retry_or_fail(
-            config=SimpleNamespace(ingest_stale_after_seconds=120),
-            backend=backend,  # type: ignore[arg-type]
-            job=_job(),
-            attempt=IngestAttempt(accepted=True, disposition="accepted", attempt_count=1, max_attempts=3, job_status="processing"),
-            exc=ServiceRequestError("backend", "connection refused"),
-            error_code="backend_unavailable",
-        )
-
-    assert exc_info.value.countdown == 30
-    assert exc_info.value.max_retries is None
-    assert backend.updates[0]["status"] == "queued"
-    assert backend.events[0]["payload"] == {
-        "error_code": "backend_unavailable",
-        "attempt_count": 1,
-        "next_attempt": 2,
-        "countdown_seconds": 30,
-        "status_requeued": True,
-    }
-
-
-def test_retry_waits_for_stale_window_when_backend_requeue_update_fails(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    backend = FakeBackend(fail_update=True)
-    caplog.set_level(logging.WARNING, logger="rag.ingestion.execution")
-
-    with pytest.raises(IngestDeliveryRetry) as exc_info:
-        _retry_or_fail(
-            config=SimpleNamespace(ingest_stale_after_seconds=120),
-            backend=backend,  # type: ignore[arg-type]
-            job=_job(),
-            attempt=IngestAttempt(accepted=True, disposition="accepted", attempt_count=1, max_attempts=3, job_status="processing"),
-            exc=ServiceRequestError("backend", "connection refused"),
-            error_code="backend_unavailable",
-        )
-
-    assert exc_info.value.countdown == 125
-    assert exc_info.value.max_retries is None
-    assert "ingestion job update failed" in caplog.text
-    assert backend.updates[0]["status"] == "queued"
-    assert backend.events[0]["payload"] == {
-        "error_code": "backend_unavailable",
-        "attempt_count": 1,
-        "next_attempt": 2,
-        "countdown_seconds": 125,
-        "status_requeued": False,
-    }
-
-
-def test_review_resume_can_continue_at_retry_limit() -> None:
-    backend = FakeBackend()
-    resumed = _resume_exhausted_review_attempt(
-        backend,  # type: ignore[arg-type]
-        _job(image_review_batch_id="batch-1"),
-        IngestAttempt(accepted=False, disposition="exhausted", attempt_count=3, max_attempts=3, job_status="queued"),
-        "worker-1",
+    result = _retry_or_fail(
+        config=SimpleNamespace(ingest_stale_after_seconds=120),
+        backend=backend,  # type: ignore[arg-type]
+        job=_job(),
+        attempt=IngestAttempt(accepted=True, disposition="accepted", attempt_count=1, max_attempts=3, job_status="processing"),
+        exc=ServiceRequestError("backend", "connection refused"),
+        error_code="backend_unavailable",
     )
 
-    assert resumed is not None
-    assert resumed.accepted is True
-    assert resumed.disposition == "review_resume"
-    assert resumed.attempt_count == 3
-    assert backend.updates[0]["status"] == "processing"
-    assert backend.updates[0]["run_token"] == "worker-1"
-    assert backend.events[0]["event_type"] == "review_resume_after_retry_limit"
+    assert result["status"] == "queued"
+    assert backend.failures[0]["retry_message"] == _job().to_dict()
+    assert backend.events[0]["payload"] == {
+        "error_code": "backend_unavailable",
+        "failure_attempt_count": 1,
+        "max_attempts": 3,
+    }
+
+
+def test_retry_propagates_failure_record_error_for_stale_recovery() -> None:
+    backend = FakeBackend(fail_update=True)
+
+    with pytest.raises(ServiceRequestError):
+        _retry_or_fail(
+            config=SimpleNamespace(ingest_stale_after_seconds=120),
+            backend=backend,  # type: ignore[arg-type]
+            job=_job(),
+            attempt=IngestAttempt(accepted=True, disposition="accepted", attempt_count=1, max_attempts=3, job_status="processing"),
+            exc=ServiceRequestError("backend", "connection refused"),
+            error_code="backend_unavailable",
+        )
+
+    assert backend.events == []
+
+
+def test_duplicate_delivery_is_ignored_without_mutating_job() -> None:
+    backend = FakeBackend()
+    result = _handle_rejected_attempt(
+        backend,  # type: ignore[arg-type]
+        _job(),
+        IngestAttempt(
+            accepted=False,
+            disposition="duplicate",
+            attempt_count=1,
+            max_attempts=3,
+            job_status="queued",
+        ),
+    )
+
+    assert result["status"] == "duplicate_ignored"
+    assert backend.updates == []
 
 
 def test_start_attempt_transient_failure_requests_a_bounded_delivery_retry() -> None:
@@ -183,16 +180,13 @@ def test_injected_timeout_reaches_the_transport_neutral_retry_policy(
         raise_timeout,
     )
 
-    with pytest.raises(IngestDeliveryRetry) as exc_info:
-        run_ingest_document(
-            _job().to_dict(),
-            timeout_error_types=(WorkerTimeout,),
-        )
+    result = run_ingest_document(
+        _job().to_dict(),
+        timeout_error_types=(WorkerTimeout,),
+    )
 
-    assert isinstance(exc_info.value.cause, WorkerTimeout)
-    assert exc_info.value.countdown == 30
-    assert exc_info.value.max_retries is None
-    assert backend.updates[-1]["status"] == "queued"
+    assert result["status"] == "queued"
+    assert backend.failures[-1]["error_code"] == "ingest_timeout"
     assert backend.events[-1]["payload"]["error_code"] == "ingest_timeout"
 
 

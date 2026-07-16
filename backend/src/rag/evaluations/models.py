@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Protocol
+from datetime import datetime, timedelta
+from typing import Any, Literal, Protocol
 
-from ..schemas.evaluations import EvaluationCase, EvaluationRunStatus
+from rag.evaluations.schemas import EvaluationCase, EvaluationRunStatus
+
+
+EvaluationCaseExecutionStatus = Literal[
+    "queued", "running", "complete", "failed", "cancelled"
+]
+EvaluationCaseClaimDisposition = Literal[
+    "claimed", "busy", "exhausted", "terminal", "not_found"
+]
+EvaluationCaseTerminalStatus = Literal["complete", "failed"]
+TERMINAL_EVALUATION_CASE_STATUSES = frozenset({"complete", "failed", "cancelled"})
+DEFAULT_EVALUATION_CASE_LEASE_TIMEOUT = timedelta(seconds=120)
 
 
 @dataclass(frozen=True)
@@ -84,6 +95,62 @@ class EvaluationCaseResultRecord:
     created_at: datetime | None
 
 
+@dataclass(frozen=True)
+class EvaluationCaseExecutionRecord:
+    run_id: str
+    case_id: str
+    case_index: int
+    status: EvaluationCaseExecutionStatus
+    attempt_count: int
+    max_attempts: int
+    last_heartbeat_at: datetime | None
+    run_token: str | None
+    error_code: str | None
+    error_message_safe: str | None
+    created_at: datetime | None
+    updated_at: datetime | None
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+@dataclass(frozen=True)
+class EvaluationCaseResultPayload:
+    question: str
+    status: str
+    passed: bool
+    primary_failure_stage: str | None
+    failure_stages: tuple[str, ...]
+    checks_json: dict[str, Any]
+    answer: str
+    sources_json: tuple[dict[str, Any], ...]
+    diagnostic_json: dict[str, Any]
+    trace_id: str | None
+    node_timings_json: tuple[dict[str, Any], ...]
+    faithfulness_score: float | None
+    faithfulness_status: str | None
+    unfounded_claims: tuple[str, ...]
+    degraded: bool
+    degraded_reason: str | None
+    latency_ms: int
+    error_message_safe: str | None
+
+
+@dataclass(frozen=True)
+class EvaluationCaseClaim:
+    disposition: EvaluationCaseClaimDisposition
+    run: EvaluationRunRecord | None
+    execution: EvaluationCaseExecutionRecord | None
+    retry_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class EvaluationCaseCommit:
+    accepted: bool
+    run: EvaluationRunRecord | None
+    execution: EvaluationCaseExecutionRecord | None
+    result: EvaluationCaseResultRecord | None
+
+
 class EvaluationRepository(Protocol):
     def create_dataset(
         self,
@@ -116,12 +183,55 @@ class EvaluationRepository(Protocol):
     ) -> EvaluationRunRecord: ...
     def list_runs(self) -> list[EvaluationRunRecord]: ...
     def get_run(self, run_id: str) -> EvaluationRunRecord | None: ...
-    def update_run(self, run_id: str, changes: dict[str, Any]) -> EvaluationRunRecord | None: ...
+    def update_run(
+        self, run_id: str, changes: dict[str, Any]
+    ) -> EvaluationRunRecord | None: ...
     def start_attempt(self, run_id: str) -> tuple[EvaluationRunRecord | None, bool]: ...
     def heartbeat(self, run_id: str) -> EvaluationRunRecord | None: ...
     def clear_case_results(self, run_id: str) -> None: ...
     def add_case_result(self, **kwargs: Any) -> EvaluationCaseResultRecord: ...
     def list_case_results(self, run_id: str) -> list[EvaluationCaseResultRecord]: ...
+    def list_case_executions(
+        self, run_id: str
+    ) -> list[EvaluationCaseExecutionRecord]: ...
+    def claim_next_case(
+        self,
+        run_id: str,
+        *,
+        run_token: str,
+        stale_before: datetime | None = None,
+    ) -> EvaluationCaseClaim: ...
+    def heartbeat_case(
+        self,
+        run_id: str,
+        case_id: str,
+        *,
+        run_token: str,
+    ) -> EvaluationCaseExecutionRecord | None: ...
+    def requeue_case_attempt(
+        self,
+        run_id: str,
+        case_id: str,
+        *,
+        run_token: str,
+        error_code: str,
+        error_message_safe: str,
+    ) -> EvaluationCaseExecutionRecord | None: ...
+    def complete_case_attempt(
+        self,
+        run_id: str,
+        case_id: str,
+        *,
+        run_token: str,
+        result: EvaluationCaseResultPayload,
+        execution_status: EvaluationCaseTerminalStatus = "complete",
+        error_code: str | None = None,
+        error_message_safe: str | None = None,
+    ) -> EvaluationCaseCommit: ...
+    def cancel_run(self, run_id: str) -> EvaluationRunRecord | None: ...
+    def reset_run_for_retry(
+        self, run_id: str
+    ) -> tuple[EvaluationRunRecord | None, bool]: ...
 
 
 _RUN_UPDATABLE_FIELDS = {
@@ -138,4 +248,10 @@ _RUN_UPDATABLE_FIELDS = {
     "started_at",
     "completed_at",
 }
-_RUN_JSON_FIELDS = {"summary_json", "rag_config_snapshot", "group_paths", "document_ids", "selected_case_ids"}
+_RUN_JSON_FIELDS = {
+    "summary_json",
+    "rag_config_snapshot",
+    "group_paths",
+    "document_ids",
+    "selected_case_ids",
+}

@@ -6,7 +6,7 @@ from datetime import datetime
 from io import BytesIO
 
 from ..contracts import ArtifactContentBundle, ContentBlock, EvidenceCitation
-from ..layout_profiles import ArtifactLayoutProfile
+from rag.artifact_jobs.generation.layout_profiles import ArtifactLayoutProfile
 from .shared import _list_items, _reference_line, _source_summary, _with_sources
 
 

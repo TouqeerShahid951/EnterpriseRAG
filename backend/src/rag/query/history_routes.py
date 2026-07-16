@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from starlette.concurrency import run_in_threadpool
 
 from ..auth.dependencies import require_csrf, require_current_user
 from ..auth.identity_models import UserRecord
@@ -28,15 +29,12 @@ async def list_chat_sessions(
     repo: ChatHistoryRepository = Depends(get_chat_history_repository),
 ) -> ChatSessionListResponse:
     require_query_user(user)
-    sessions = repo.list_sessions(
+    sessions, total = await run_in_threadpool(
+        repo.list_sessions_page,
         user_id=user.id,
         permission_version=user.permission_version,
         limit=limit,
         offset=offset,
-    )
-    total = repo.count_sessions(
-        user_id=user.id,
-        permission_version=user.permission_version,
     )
     return ChatSessionListResponse(
         items=[_chat_session_summary_response(session) for session in sessions],
@@ -57,7 +55,8 @@ async def get_chat_session(
     repo: ChatHistoryRepository = Depends(get_chat_history_repository),
 ) -> ChatSession:
     require_query_user(user)
-    session = repo.get_session(
+    session = await run_in_threadpool(
+        repo.get_session,
         session_id=session_id,
         user_id=user.id,
         permission_version=user.permission_version,
@@ -86,14 +85,13 @@ async def delete_chat_session(
 ) -> None:
     require_csrf(request)
     require_query_user(user)
-    repo.delete_session(
+    await run_in_threadpool(
+        repo.delete_session,
         session_id=session_id,
         user_id=user.id,
         permission_version=user.permission_version,
     )
     return None
-
-
 def _chat_session_response(session: ChatSessionRecord) -> ChatSession:
     return ChatSession(
         id=session.id,

@@ -47,6 +47,13 @@ export function queryResponse() {
   return {
     trace_id: "trace-1",
     answer: "Done",
+    answer_status: "complete",
+    coverage: {
+      required_slots: [],
+      covered_slots: [],
+      completeness: "not_applicable",
+      warnings: [],
+    },
     sources: [],
     artifacts: [],
     artifact_job: null,

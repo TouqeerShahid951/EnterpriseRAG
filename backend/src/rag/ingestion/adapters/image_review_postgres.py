@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from ...shared.persistence import PostgresConnectionMixin
-from ..review_models import (
+from ..review.models import (
     ImageReviewBatchClosedError,
     ImageReviewBatchRecord,
     ImageReviewCandidateRecord,

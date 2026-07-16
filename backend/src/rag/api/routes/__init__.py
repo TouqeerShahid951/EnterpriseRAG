@@ -1,2 +1,0 @@
-"""Versioned public API routers."""
-

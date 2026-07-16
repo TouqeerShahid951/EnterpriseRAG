@@ -3,27 +3,40 @@
 from fastapi import APIRouter
 
 from ...core.config import settings
-from . import access, catalog, content, lifecycle, metadata
-from .access import (
+from rag.documents.access_scope import routes as access
+from rag.documents.access_scope.routes import (
     get_document_shares,
     replace_document_shares,
     transfer_document_owner,
     unshare_document,
 )
+from rag.documents.lifecycle import routes as lifecycle
+from rag.documents.lifecycle.routes import (
+    delete_document,
+    permanently_delete_document,
+    restore_document,
+)
+from rag.documents.metadata import routes as metadata
+from rag.documents.metadata.routes import (
+    supersede_documents,
+    update_document_clearance,
+    update_document_topics,
+)
+
+from . import catalog, content
 from .authorization import require_visible_document, require_writable_document
-from .catalog import get_document, get_document_versions, list_documents
+from .catalog import (
+    get_document,
+    get_document_versions,
+    list_documents,
+    summarize_documents,
+)
 from .content import (
     RANGE_RE,
     get_document_content,
     get_document_image_asset_content,
     get_document_qdrant_client,
     get_document_source,
-)
-from .lifecycle import delete_document, permanently_delete_document, restore_document
-from .metadata import (
-    supersede_documents,
-    update_document_clearance,
-    update_document_topics,
 )
 from .presenters import document_shares_to_schema, document_to_schema, version_node
 
@@ -54,6 +67,7 @@ __all__ = [
     "restore_document",
     "router",
     "settings",
+    "summarize_documents",
     "supersede_documents",
     "transfer_document_owner",
     "unshare_document",

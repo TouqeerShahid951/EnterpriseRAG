@@ -1,12 +1,12 @@
 """Map document domain records to public HTTP response schemas."""
 
-from ...schemas.docs import (
+from rag.documents.access_scope.schemas import DocumentSharesResponse
+from rag.documents.metadata.schemas import VersionNode
+from rag.documents.schemas import (
     Document,
     DocumentClaim,
     DocumentCrossReference,
     DocumentEntity,
-    DocumentSharesResponse,
-    VersionNode,
 )
 from ..repository import DocumentRecord
 

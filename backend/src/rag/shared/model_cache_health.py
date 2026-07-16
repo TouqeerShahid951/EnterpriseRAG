@@ -12,6 +12,12 @@ from .contracts.rag_defaults import (
     DEFAULT_RERANKER_MODEL,
     DEFAULT_SPARSE_MODEL,
 )
+from .fastembed_cache import (
+    RERANKER_REQUIRED_SNAPSHOT_FILES,
+    has_complete_fastembed_model_cache,
+    has_fastembed_model_cache,
+    huggingface_cache_dir_names,
+)
 
 DEFAULT_FASTEMBED_CACHE_PATH = Path(DEFAULT_FASTEMBED_CACHE_DIR)
 DEFAULT_DOCLING_CACHE_DIR = Path("/models/docling")
@@ -21,13 +27,23 @@ def verify_fastembed_cache(
     cache_dir: Path, *, dense_model: str, sparse_model: str, reranker_model: str
 ) -> None:
     missing: list[Path] = []
-    for model_name in (dense_model, sparse_model, reranker_model):
+    for model_name in (dense_model, sparse_model):
         model_dirs = [
             cache_dir / cache_name
-            for cache_name in _huggingface_cache_dir_names(model_name)
+            for cache_name in huggingface_cache_dir_names(model_name)
         ]
-        if not any(_has_snapshot(model_dir) for model_dir in model_dirs):
+        if not has_fastembed_model_cache(cache_dir, model_name):
             missing.append(model_dirs[0])
+    reranker_dirs = [
+        cache_dir / cache_name
+        for cache_name in huggingface_cache_dir_names(reranker_model)
+    ]
+    if not has_complete_fastembed_model_cache(
+        cache_dir,
+        reranker_model,
+        required_files=RERANKER_REQUIRED_SNAPSHOT_FILES,
+    ):
+        missing.append(reranker_dirs[0])
     if missing:
         _raise_missing("FastEmbed", cache_dir, missing)
 
@@ -86,32 +102,15 @@ def main() -> None:
         verify_docling_cache(args.docling_cache_dir)
 
 
-def _huggingface_cache_dir_name(model_name: str) -> str:
-    return "models--" + model_name.strip().replace("/", "--")
-
-
-def _huggingface_cache_dir_names(model_name: str) -> list[str]:
-    normalized = model_name.strip()
-    names = [_huggingface_cache_dir_name(normalized)]
-    # FastEmbed's quantized catalog entries can map to a base Hugging Face
-    # repository without the logical "-Q" suffix.
-    if normalized.endswith("-Q"):
-        names.append(_huggingface_cache_dir_name(normalized.removesuffix("-Q")))
-    return names
-
-
-def _has_snapshot(path: Path) -> bool:
-    snapshots = path / "snapshots"
-    return _is_nonempty_dir(path) and _is_nonempty_dir(snapshots)
-
-
 def _is_nonempty_dir(path: Path) -> bool:
     return path.is_dir() and any(path.iterdir())
 
 
 def _raise_missing(label: str, cache_dir: Path, missing: list[Path]) -> None:
     preview = ", ".join(str(path) for path in missing)
-    raise SystemExit(f"{label} model cache missing under {cache_dir}: {preview}")
+    raise SystemExit(
+        f"{label} model cache missing or invalid under {cache_dir}: {preview}"
+    )
 
 
 def _env_value(name: str, default: str) -> str:

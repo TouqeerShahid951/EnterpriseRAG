@@ -1,0 +1,13 @@
+# Local/generated artifacts. The FIR gold contains identifier-shaped test data
+# and must not be committed until synthetic provenance or an approved redaction
+# policy has been documented.
+corpus-manifest.json
+dataset.jsonl
+exclusion-manifest.json
+generated-corpus/
+ingestion-results.json
+ranking-gold.json
+smoke-results.json
+*-smoke-results.json
+release-gate-results.json
+source-gold/fir_gold.jsonl

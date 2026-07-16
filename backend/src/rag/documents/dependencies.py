@@ -6,7 +6,12 @@ from functools import lru_cache
 
 from ..core.config import settings
 from .adapters.file_scanning import ClamAvFileScanner, NoopFileScanner
+from .adapters.image_asset_storage import (
+    LocalDocumentImageAssetStorage,
+    MinioDocumentImageAssetStorage,
+)
 from .adapters.upload_storage import LocalUploadStorage, MinioUploadStorage
+from .image_asset_storage import DocumentImageAssetStorage
 from .scanning import FileScanner
 from .storage import UploadStorage
 
@@ -30,6 +35,28 @@ def default_upload_storage() -> UploadStorage:
 
 def get_upload_storage() -> UploadStorage:
     return default_upload_storage()
+
+
+@lru_cache
+def default_document_image_asset_storage() -> DocumentImageAssetStorage:
+    if settings.upload_storage_backend == "minio":
+        return MinioDocumentImageAssetStorage(
+            endpoint=settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            bucket=settings.minio_bucket,
+            secure=settings.minio_secure,
+        )
+    if settings.upload_storage_backend != "local":
+        raise RuntimeError(
+            "unsupported document image asset storage backend: "
+            f"{settings.upload_storage_backend}"
+        )
+    return LocalDocumentImageAssetStorage(settings.upload_storage_dir)
+
+
+def get_document_image_asset_storage() -> DocumentImageAssetStorage:
+    return default_document_image_asset_storage()
 
 
 @lru_cache

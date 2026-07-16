@@ -11,11 +11,11 @@ from rag.deployment.application import (
     VllmDeploymentApplyRejected,
     VllmDeploymentApplyService,
 )
-from rag.query.adapters.vllm_config_memory import (
+from rag.deployment.adapters.vllm_config_memory import (
     InMemoryVllmDeploymentConfigRepository,
 )
-from rag.query.vllm_config_models import VllmDeploymentConfigRecord
-from rag.query.vllm_config_repository import env_vllm_deployment_config
+from rag.deployment.vllm_config_models import VllmDeploymentConfigRecord
+from rag.deployment.vllm_config_repository import env_vllm_deployment_config
 
 
 class RecordingController:

@@ -14,34 +14,36 @@ ARTIFACT_APPLICATION_FILES = (
 )
 ARTIFACT_SUBMISSION_FILE = RAG_ROOT / "artifact_jobs" / "submission.py"
 ARTIFACT_RETRIEVAL_FILE = RAG_ROOT / "artifact_jobs" / "retrieval.py"
-ARTIFACT_EXECUTION_FILE = RAG_ROOT / "artifact_jobs" / "execution.py"
-ARTIFACT_GENERATION_PORT_FILE = RAG_ROOT / "artifact_jobs" / "generation.py"
+ARTIFACT_EXECUTION_FILE = RAG_ROOT / "artifact_jobs" / "execution" / "executor.py"
+ARTIFACT_GENERATION_PORT_FILE = (
+    RAG_ROOT / "artifact_jobs" / "generation" / "contracts.py"
+)
 ARTIFACT_REQUEST_TEXT_FILE = RAG_ROOT / "artifact_jobs" / "request_text.py"
 ARTIFACT_QUERY_COMPOSITION_FILE = RAG_ROOT / "artifact_jobs" / "dependencies.py"
 ARTIFACT_QUERY_GENERATION_ADAPTER_FILE = (
     RAG_ROOT / "artifact_jobs" / "adapters" / "query_generation.py"
 )
 ARTIFACT_GENERATION_APPLICATION_FILES = (
-    RAG_ROOT / "artifact_jobs" / "bundle_repair.py",
-    RAG_ROOT / "artifact_jobs" / "composer.py",
-    RAG_ROOT / "artifact_jobs" / "composition.py",
-    RAG_ROOT / "artifact_jobs" / "composition_deadline.py",
-    RAG_ROOT / "artifact_jobs" / "execution.py",
-    RAG_ROOT / "artifact_jobs" / "fallback_composition.py",
-    RAG_ROOT / "artifact_jobs" / "format_adaptation.py",
-    RAG_ROOT / "artifact_jobs" / "llm_json.py",
-    RAG_ROOT / "artifact_jobs" / "planner.py",
+    RAG_ROOT / "artifact_jobs" / "execution" / "bundle_repair.py",
+    RAG_ROOT / "artifact_jobs" / "generation" / "composer.py",
+    RAG_ROOT / "artifact_jobs" / "generation" / "composition.py",
+    RAG_ROOT / "artifact_jobs" / "generation" / "composition_deadline.py",
+    RAG_ROOT / "artifact_jobs" / "execution" / "executor.py",
+    RAG_ROOT / "artifact_jobs" / "generation" / "fallback_composition.py",
+    RAG_ROOT / "artifact_jobs" / "generation" / "format_adaptation.py",
+    RAG_ROOT / "artifact_jobs" / "generation" / "llm_json.py",
+    RAG_ROOT / "artifact_jobs" / "generation" / "planner.py",
 )
 QUERY_RETRIEVAL_IMPLEMENTATION_MODULES = frozenset(
     {
-        "rag.query.intent_router",
+        "rag.query.routing.intent_router",
         "rag.query.qdrant",
-        "rag.query.query_retrieval",
-        "rag.query.rag_config_models",
+        "rag.query.retrieval.query_retrieval",
+        "rag.query.configuration.models",
         "rag.query.reranker",
         "rag.query.sources",
         "rag.query.state",
-        "rag.query.temporal",
+        "rag.query.retrieval.temporal",
     }
 )
 
@@ -131,8 +133,8 @@ def test_artifact_query_composition_imports_are_explicitly_allowlisted() -> None
             {
                 "rag.query.inference",
                 "rag.query.inference.build_inference_client",
-                "rag.query.rag_config_repository",
-                "rag.query.rag_config_repository.effective_rag_config",
+                "rag.query.configuration.repository",
+                "rag.query.configuration.repository.effective_rag_config",
             }
         ),
         ARTIFACT_QUERY_GENERATION_ADAPTER_FILE: frozenset(

@@ -6,7 +6,7 @@ from ..core.config import settings
 from ..documents.models import DocumentRepository
 from ..documents.repository import get_document_repository
 from ..ingestion.configuration import IngestConfigRepository
-from ..ingestion.configuration_dependencies import (
+from ..ingestion.configuration.dependencies import (
     effective_ingest_config,
     get_ingest_config_repository,
 )

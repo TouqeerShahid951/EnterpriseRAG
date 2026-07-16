@@ -11,6 +11,8 @@ from rag.core.config import Settings, settings
 from rag.documents.image_asset_schema import DOCUMENT_IMAGE_ASSET_SCHEMA_SQL
 from rag.evaluations.repository import EVALUATION_SCHEMA_SQL
 from rag.ingestion.adapters.configuration_postgres import PostgresIngestConfigRepository
+from rag.ingestion.delivery.schema import ensure_ingest_delivery_schema
+from rag.ingestion.publication.schema import ensure_ingest_publication_schema
 from rag.ops.migrate_folder_ingest_cli import MIGRATION_SQL as FOLDER_INGEST_MIGRATION_SQL
 from rag.ops.migrate_image_review_cli import DDL as IMAGE_REVIEW_DDL
 from rag.ops.migrate_ingest_job_origin_cli import MIGRATION_SQL as INGEST_JOB_ORIGIN_MIGRATION_SQL
@@ -21,7 +23,7 @@ from rag.ops.migrate_parser_provenance_cli import DDL as PARSER_PROVENANCE_DDL
 from rag.ops.migrate_user_deletion_cli import MIGRATION_SQL as USER_DELETION_MIGRATION_SQL
 from rag.query.adapters.chat_history_postgres import CHAT_HISTORY_SCHEMA_SQL
 from rag.query.adapters.rag_config_postgres import PostgresRagConfigRepository
-from rag.query.adapters.vllm_config_postgres import PostgresVllmDeploymentConfigRepository
+from rag.deployment.adapters.vllm_config_postgres import PostgresVllmDeploymentConfigRepository
 from rag.query.claim_schema import CLAIM_SCHEMA_SQL
 from rag.shared.persistence import PostgresConnectionMixin
 
@@ -49,6 +51,8 @@ def ensure_postgres_schema(config: Settings = settings) -> None:
         conn.execute(INGEST_PROGRESS_DDL)
         conn.execute(PARSER_PROVENANCE_DDL)
         conn.execute(INGEST_RESILIENCE_DDL)
+        ensure_ingest_delivery_schema(conn)
+        ensure_ingest_publication_schema(conn)
         conn.execute(OCR_REVIEW_DDL)
         conn.execute(IMAGE_REVIEW_DDL)
         conn.execute(USER_DELETION_MIGRATION_SQL)

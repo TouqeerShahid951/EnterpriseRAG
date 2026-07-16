@@ -70,6 +70,49 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
         )
         return [document_from_row(row) for row in rows]
 
+    def count_documents_by_owner_group(
+        self,
+        *,
+        state: Literal["active", "deleted"] = "active",
+        clearance_levels: tuple[ClearanceLevel, ...],
+        group_paths: tuple[str, ...] | None,
+    ) -> dict[str, int]:
+        if state not in {"active", "deleted"}:
+            raise ValueError("document state must be active or deleted")
+        deleted_clause = "d.deleted_at IS NULL" if state == "active" else "d.deleted_at IS NOT NULL"
+        parameters: tuple[Any, ...] = (list(clearance_levels),)
+        group_clause = ""
+        if group_paths is not None:
+            normalized_groups = [normalize_group_path(path) for path in group_paths]
+            group_clause = """
+              AND (
+                  d.group_path = ANY(%s::text[])
+                  OR EXISTS (
+                      SELECT 1
+                      FROM document_shares share
+                      WHERE share.document_id = d.id
+                        AND share.group_path = ANY(%s::text[])
+                  )
+              )
+            """
+            parameters += (normalized_groups, normalized_groups)
+        rows = self._execute_all(
+            f"""
+            SELECT d.group_path, COUNT(*)::bigint AS document_count
+            FROM documents d
+            WHERE {deleted_clause}
+              AND d.clearance_level = ANY(%s::text[])
+              {group_clause}
+            GROUP BY d.group_path
+            ORDER BY d.group_path
+            """,
+            parameters,
+        )
+        return {
+            str(row["group_path"]): int(row["document_count"])
+            for row in rows
+        }
+
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None:
         deleted_clause = "" if include_deleted else "AND d.deleted_at IS NULL"
         row = self._execute_optional(
@@ -525,6 +568,11 @@ def document_from_row(row: dict[str, Any]) -> DocumentRecord:
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
         shared_group_paths=shared,
+        active_index_generation_id=(
+            str(row["active_index_generation_id"])
+            if row.get("active_index_generation_id")
+            else None
+        ),
     )
 
 

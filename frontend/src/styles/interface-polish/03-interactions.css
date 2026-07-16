@@ -10,6 +10,10 @@
   .knowledge-inspector-tab,
   .knowledge-inspector-tab-active,
   .rag-secondary-action,
+  .rag-composer-source-segments button,
+  .rag-composer-icon-action,
+  .rag-composer-send-action,
+  .rag-mobile-history-trigger,
   .rag-source-chip,
   .rag-artifact-download,
   .rag-chat-history-item,
@@ -37,6 +41,10 @@
   .knowledge-icon-action,
   .knowledge-icon-button,
   .rag-secondary-action,
+  .rag-composer-source-segments button,
+  .rag-composer-icon-action,
+  .rag-composer-send-action,
+  .rag-mobile-history-trigger,
   .rag-eval-tab,
   .review-tabs button,
   .source-viewer-original-link,
@@ -65,4 +73,3 @@
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
-

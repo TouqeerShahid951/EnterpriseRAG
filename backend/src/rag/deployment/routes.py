@@ -6,15 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..auth.dependencies import require_platform_admin_user
 from ..auth.identity_models import UserRecord
-from ..query.vllm_config_repository import (
+from .vllm_config_repository import (
     VllmDeploymentConfigRecord,
     VllmDeploymentConfigRepository,
     VllmServiceLimitsRecord,
     effective_vllm_deployment_config,
     get_vllm_deployment_config_repository,
 )
-from ..schemas.common import ErrorResponse
-from ..schemas.rag_config import (
+from rag.shared.contracts.http import ErrorResponse
+from .schemas import (
     VllmDeploymentConfigRequest,
     VllmDeploymentConfigResponse,
     VllmServiceDeploymentLimits,

@@ -46,17 +46,20 @@ def run_ingest_document(
     payload: dict[str, Any],
     *,
     timeout_error_types: tuple[type[Exception], ...] = (),
+    run_token: str | None = None,
 ) -> dict[str, Any]:
     job = IngestJobPayload.from_dict(payload)
     config = WorkerConfig.from_env()
     backend = build_backend_client(config)
-    run_token = str(uuid4())
-    attempt = _start_attempt(backend, job.job_id, run_token)
+    run_token = str(run_token or "").strip() or str(uuid4())
+    attempt = _start_attempt(
+        backend,
+        job.job_id,
+        run_token,
+        delivery_id=job.delivery_id,
+    )
     if not attempt.accepted:
-        resume_attempt = _resume_exhausted_review_attempt(backend, job, attempt, run_token)
-        if resume_attempt is None:
-            return _handle_rejected_attempt(backend, job, attempt)
-        attempt = resume_attempt
+        return _handle_rejected_attempt(backend, job, attempt)
 
     deps: IngestDependencies | None = None
     try:
@@ -153,7 +156,7 @@ def _handle_rejected_attempt(
 ) -> dict[str, Any]:
     if attempt.job_status in {"complete", "failed", "human_review", "cancelled"}:
         return {"job_id": job.job_id, "doc_id": job.doc_id, "status": attempt.job_status}
-    if attempt.disposition == "busy":
+    if attempt.disposition in {"busy", "duplicate"}:
         return {"job_id": job.job_id, "doc_id": job.doc_id, "status": "duplicate_ignored"}
     backend.update_job(
         job_id=job.job_id,
@@ -166,60 +169,27 @@ def _handle_rejected_attempt(
         backend,
         job.job_id,
         "exhausted",
-        {"attempt_count": attempt.attempt_count, "max_attempts": attempt.max_attempts},
+        {
+            "failure_attempt_count": attempt.failure_attempt_count,
+            "max_attempts": attempt.max_attempts,
+        },
     )
     return {"job_id": job.job_id, "doc_id": job.doc_id, "status": "failed", "error_code": "retry_exhausted"}
-
-
-def _resume_exhausted_review_attempt(
-    backend: BackendInternalClient,
-    job: IngestJobPayload,
-    attempt: IngestAttempt,
-    run_token: str,
-) -> IngestAttempt | None:
-    if not (job.review_batch_id or job.image_review_batch_id):
-        return None
-    if attempt.disposition != "exhausted" or attempt.job_status != "queued" or attempt.attempt_count < attempt.max_attempts:
-        return None
-    try:
-        updated = _update_job_best_effort(
-            backend,
-            job_id=job.job_id,
-            status="processing",
-            progress_pct=5,
-            error_code=None,
-            error_message_safe=None,
-            run_token=run_token,
-        )
-    except ServiceRequestError as exc:
-        if _is_lease_lost(exc):
-            return None
-        raise
-    if not updated:
-        return None
-    _record_event(
-        backend,
-        job.job_id,
-        "review_resume_after_retry_limit",
-        {"attempt_count": attempt.attempt_count, "max_attempts": attempt.max_attempts},
-    )
-    return IngestAttempt(
-        accepted=True,
-        disposition="review_resume",
-        attempt_count=attempt.attempt_count,
-        max_attempts=attempt.max_attempts,
-        job_status="processing",
-        run_token=run_token,
-    )
 
 
 def _start_attempt(
     backend: BackendInternalClient,
     job_id: str,
     run_token: str,
+    *,
+    delivery_id: str | None = None,
 ) -> IngestAttempt:
     try:
-        return backend.start_attempt(job_id=job_id, run_token=run_token)
+        return backend.start_attempt(
+            job_id=job_id,
+            run_token=run_token,
+            delivery_id=delivery_id,
+        )
     except ServiceRequestError as exc:
         if is_transient_service_error(exc):
             raise IngestDeliveryRetry(
@@ -241,67 +211,34 @@ def _retry_or_fail(
 ) -> dict[str, Any]:
     if _job_is_cancelled(backend, job.job_id):
         return _cancelled_result(config, backend=backend, job=job)
-    if attempt.attempt_count >= attempt.max_attempts:
-        try:
-            _update_job_best_effort(
-                backend,
-                job_id=job.job_id,
-                status="failed",
-                progress_pct=100,
-                error_code=error_code,
-                error_message_safe=str(exc)[:500],
-            )
-        except ServiceRequestError as lease_exc:
-            if _is_lease_lost(lease_exc):
-                return _lease_lost_result(job)
-            raise
-        _record_event(
-            backend,
-            job.job_id,
-            "exhausted",
-            {"error_code": error_code, "attempt_count": attempt.attempt_count},
-        )
-        raise exc
-
-    countdown = 30 * (2 ** (attempt.attempt_count - 1))
     try:
-        requeued = _update_job_best_effort(
-            backend,
+        failure = backend.record_failure(
             job_id=job.job_id,
-            status="queued",
-            progress_pct=0,
-            error_code=None,
-            error_message_safe=None,
+            error_code=error_code,
+            error_message_safe=str(exc)[:500],
+            retry_message=job.to_dict(),
         )
     except ServiceRequestError as lease_exc:
         if _is_lease_lost(lease_exc):
             return _lease_lost_result(job)
         raise
-    retry_countdown = _retry_countdown(config, countdown, requeued=requeued)
+    disposition = "retry" if failure.retry_scheduled else "exhausted"
     _record_event(
         backend,
         job.job_id,
-        "retry",
+        disposition,
         {
             "error_code": error_code,
-            "attempt_count": attempt.attempt_count,
-            "next_attempt": attempt.attempt_count + 1,
-            "countdown_seconds": retry_countdown,
-            "status_requeued": requeued,
+            "failure_attempt_count": failure.failure_attempt_count,
+            "max_attempts": attempt.max_attempts,
         },
     )
-    raise IngestDeliveryRetry(
-        exc,
-        countdown=retry_countdown,
-        max_retries=None,
-    ) from exc
-
-
-def _retry_countdown(config: WorkerConfig, base_countdown: int, *, requeued: bool) -> int:
-    if requeued:
-        return base_countdown
-    stale_after = max(0, int(getattr(config, "ingest_stale_after_seconds", 120)))
-    return max(base_countdown, stale_after + 5)
+    return {
+        "job_id": job.job_id,
+        "doc_id": job.doc_id,
+        "status": failure.job_status,
+        "error_code": error_code if not failure.retry_scheduled else None,
+    }
 
 
 def _update_job_best_effort(
@@ -349,12 +286,11 @@ def _mark_failed_or_lease_lost(
     error_message_safe: str,
 ) -> dict[str, Any] | None:
     try:
-        backend.update_job(
+        backend.record_failure(
             job_id=job.job_id,
-            status="failed",
-            progress_pct=100,
             error_code=error_code,
             error_message_safe=error_message_safe,
+            retry_message=None,
         )
     except ServiceRequestError as exc:
         if _is_lease_lost(exc):
@@ -409,7 +345,10 @@ def _cleanup_cancelled_vectors(
         upsert_batch_size=config.qdrant.upsert_batch_size,
     )
     try:
-        qdrant.delete_document_points(job.doc_id)
+        generation_id = backend.cancel_index_generation(job_id=job.job_id)
+        if generation_id is None:
+            return
+        qdrant.delete_generation_points(generation_id)
     except ServiceRequestError as exc:
         _record_event(
             backend,

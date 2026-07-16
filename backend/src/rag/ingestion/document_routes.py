@@ -6,19 +6,16 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from ..auth.dependencies import require_csrf, require_current_user
 from ..auth.identity_models import UserRecord
-from ..documents.reingestion_dependencies import (
+from ..documents.lifecycle.reingestion_dependencies import (
     get_document_reingestion_service,
 )
-from ..documents.reingestion_service import (
+from ..documents.lifecycle.reingestion_service import (
     DocumentReingestionRejected,
     DocumentReingestionResult,
     DocumentReingestionService,
 )
-from ..schemas.common import ErrorResponse
-from ..schemas.docs import (
-    DocumentReingestRequest,
-    DocumentReingestResponse,
-)
+from rag.shared.contracts.http import ErrorResponse
+from rag.ingestion.schemas import DocumentReingestRequest, DocumentReingestResponse
 
 router = APIRouter(prefix="/docs", tags=["documents"])
 

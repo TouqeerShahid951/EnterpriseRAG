@@ -9,7 +9,7 @@ from pathlib import PurePosixPath
 
 from ...documents.models import DocumentRepository
 from ...documents.storage import UploadStorage
-from ...documents.upload_validation import (
+from ...documents.upload.validation import (
     UploadRejected,
     default_title,
     is_supported_document_name,
@@ -17,6 +17,7 @@ from ...documents.upload_validation import (
     validate_upload_size,
 )
 from ..contracts import IngestJobPayload
+from ..delivery.service import IngestDeliveryService, dispatch_pending_deliveries
 from .config import FolderIngestionConfig
 from .models import (
     FolderRunItemRecord,
@@ -24,7 +25,7 @@ from .models import (
     FolderScheduleRepository,
 )
 from .scheduling import next_recurring_window_after_current
-from .sources import LocalFolderSource, MinioPrefixSource
+from rag.ingestion.folders.sources import LocalFolderSource, MinioPrefixSource
 from ..job_models import IngestJobRepository
 from ..queue import IngestQueue
 
@@ -45,6 +46,7 @@ def dispatch_due_schedules(
     limit: int = 20,
 ) -> list[str]:
     current = (now or datetime.now(UTC)).astimezone(UTC)
+    delivery = IngestDeliveryService(job_repo)
     dispatched: list[str] = []
     for schedule in schedule_repo.list_due_schedules(current, limit=limit):
         if schedule.source_type == "connector":
@@ -67,8 +69,7 @@ def dispatch_due_schedules(
                     run.id,
                     schedule_repo=schedule_repo,
                     document_repo=document_repo,
-                    job_repo=job_repo,
-                    queue=queue,
+                    delivery=delivery,
                 )
                 next_run_at = None
                 next_status = "complete"
@@ -83,7 +84,7 @@ def dispatch_due_schedules(
                     schedule_repo=schedule_repo,
                     document_repo=document_repo,
                     job_repo=job_repo,
-                    queue=queue,
+                    delivery=delivery,
                     local_folder_source=local_folder_source,
                     storage=storage,
                     config=config,
@@ -108,7 +109,7 @@ def dispatch_due_schedules(
                     schedule_repo=schedule_repo,
                     document_repo=document_repo,
                     job_repo=job_repo,
-                    queue=queue,
+                    delivery=delivery,
                     minio_source=minio_source,
                     config=config,
                 )
@@ -155,6 +156,7 @@ def dispatch_due_schedules(
                 last_run_at=current,
                 next_run_at=None,
             )
+    _dispatch_best_effort(delivery, queue)
     return dispatched
 
 
@@ -187,16 +189,14 @@ def _dispatch_snapshot(
     *,
     schedule_repo: FolderScheduleRepository,
     document_repo: DocumentRepository,
-    job_repo: IngestJobRepository,
-    queue: IngestQueue,
+    delivery: IngestDeliveryService,
 ) -> None:
     _ = run_id
     _queue_pending_items(
         schedule,
         schedule_repo=schedule_repo,
         document_repo=document_repo,
-        job_repo=job_repo,
-        queue=queue,
+        delivery=delivery,
     )
 
 
@@ -205,17 +205,15 @@ def _queue_pending_items(
     *,
     schedule_repo: FolderScheduleRepository,
     document_repo: DocumentRepository,
-    job_repo: IngestJobRepository,
-    queue: IngestQueue,
+    delivery: IngestDeliveryService,
 ) -> None:
     for item in schedule_repo.list_pending_items_for_schedule(schedule.id):
         _queue_item(
             schedule,
             item,
             document_repo=document_repo,
-            job_repo=job_repo,
             schedule_repo=schedule_repo,
-            queue=queue,
+            delivery=delivery,
         )
 
 
@@ -226,7 +224,7 @@ def _dispatch_local_folder(
     schedule_repo: FolderScheduleRepository,
     document_repo: DocumentRepository,
     job_repo: IngestJobRepository,
-    queue: IngestQueue,
+    delivery: IngestDeliveryService,
     local_folder_source: LocalFolderSource,
     storage: UploadStorage | None,
     config: FolderIngestionConfig,
@@ -240,8 +238,7 @@ def _dispatch_local_folder(
         schedule,
         schedule_repo=schedule_repo,
         document_repo=document_repo,
-        job_repo=job_repo,
-        queue=queue,
+        delivery=delivery,
     )
     seen_paths: set[str] = set()
     for source_object in local_folder_source.list_objects(root_path=root_path):
@@ -381,9 +378,8 @@ def _dispatch_local_folder(
             schedule,
             item,
             document_repo=document_repo,
-            job_repo=job_repo,
             schedule_repo=schedule_repo,
-            queue=queue,
+            delivery=delivery,
             supersedes=supersedes,
         )
 
@@ -408,7 +404,7 @@ def _dispatch_minio_prefix(
     schedule_repo: FolderScheduleRepository,
     document_repo: DocumentRepository,
     job_repo: IngestJobRepository,
-    queue: IngestQueue,
+    delivery: IngestDeliveryService,
     minio_source: MinioPrefixSource,
     config: FolderIngestionConfig,
 ) -> None:
@@ -416,8 +412,7 @@ def _dispatch_minio_prefix(
         schedule,
         schedule_repo=schedule_repo,
         document_repo=document_repo,
-        job_repo=job_repo,
-        queue=queue,
+        delivery=delivery,
     )
     bucket = str(schedule.source_config.get("bucket") or "")
     prefix = str(schedule.source_config.get("prefix") or "")
@@ -554,9 +549,8 @@ def _dispatch_minio_prefix(
             schedule,
             item,
             document_repo=document_repo,
-            job_repo=job_repo,
             schedule_repo=schedule_repo,
-            queue=queue,
+            delivery=delivery,
             supersedes=supersedes,
         )
 
@@ -581,9 +575,8 @@ def _queue_item(
     item: FolderRunItemRecord,
     *,
     document_repo: DocumentRepository,
-    job_repo: IngestJobRepository,
     schedule_repo: FolderScheduleRepository,
-    queue: IngestQueue,
+    delivery: IngestDeliveryService,
     supersedes: list[str] | None = None,
 ) -> None:
     if (
@@ -608,51 +601,47 @@ def _queue_item(
             skip_message="Scheduled document was not found.",
         )
         return
-    job_repo.update_ingest_job(item.job_id, status="queued", progress_pct=0)
-    try:
-        queue.enqueue(
-            IngestJobPayload(
-                job_id=item.job_id,
-                doc_id=item.document_id,
-                file_path=item.object_path,
-                group_path=schedule.group_path,
-                acl_group_paths=list(document.access_group_paths),
-                clearance_level=schedule.clearance_level,
-                doc_type=schedule.doc_type,
-                effective_date=(
-                    schedule.effective_date.isoformat()
-                    if schedule.effective_date
-                    else None
-                ),
-                supersedes=(
-                    supersedes
-                    if supersedes is not None
-                    else list(document.pending_supersedes)
-                ),
-                expiry_date=(
-                    schedule.expiry_date.isoformat() if schedule.expiry_date else None
-                ),
-                description=schedule.description,
-                content_type=item.content_type,
-            )
-        )
-    except Exception:
-        job_repo.update_ingest_job(
-            item.job_id,
-            status="scheduled",
-            progress_pct=0,
-            error_code="folder_enqueue_failed",
-            error_message_safe="Folder ingestion queue was unavailable.",
-        )
+    message = IngestJobPayload(
+        job_id=item.job_id,
+        doc_id=item.document_id,
+        file_path=item.object_path,
+        group_path=schedule.group_path,
+        acl_group_paths=list(document.access_group_paths),
+        clearance_level=schedule.clearance_level,
+        doc_type=schedule.doc_type,
+        effective_date=(
+            schedule.effective_date.isoformat()
+            if schedule.effective_date
+            else None
+        ),
+        supersedes=(
+            supersedes
+            if supersedes is not None
+            else list(document.pending_supersedes)
+        ),
+        expiry_date=(
+            schedule.expiry_date.isoformat() if schedule.expiry_date else None
+        ),
+        description=schedule.description,
+        content_type=item.content_type,
+    )
+    mutation = delivery.queue_existing_job(
+        item.job_id,
+        message,
+        expected_statuses=frozenset({"scheduled"}),
+        event_kind="folder",
+    )
+    job = mutation.job
+    if job is None or (not mutation.changed and job.status != "queued"):
         schedule_repo.update_run_item_status(
             item.id,
-            status="scheduled",
-            skip_code="folder_enqueue_failed",
-            skip_message="Folder ingestion queue was unavailable.",
+            status="failed",
+            skip_code="job_not_queueable",
+            skip_message="Scheduled ingestion job is no longer queueable.",
             document_id=item.document_id,
             job_id=item.job_id,
         )
-        raise
+        return
     schedule_repo.update_run_item_status(
         item.id,
         status="queued",
@@ -666,3 +655,13 @@ def _queue_item(
 def _source_id(schedule_id: str, source_path: str, content_hash: str) -> str:
     path_hash = hashlib.sha256(source_path.encode("utf-8")).hexdigest()[:16]
     return f"folder:{schedule_id}:{path_hash}:{content_hash}"
+
+
+def _dispatch_best_effort(
+    delivery: IngestDeliveryService,
+    queue: IngestQueue,
+) -> None:
+    try:
+        dispatch_pending_deliveries(delivery, queue)
+    except Exception:
+        logger.warning("folder ingestion delivery deferred")

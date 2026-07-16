@@ -8,7 +8,7 @@ from ..auth.identity_repository import get_identity_repository
 from ..core.config import Settings, settings
 from ..documents.repository import get_document_repository
 from ..query.inference import build_inference_client
-from ..query.rag_config_repository import effective_rag_config
+from ..query.configuration.repository import effective_rag_config
 from ..retrieval.dependencies import build_authorized_corpus_retriever
 from .adapters.generated_memory import InMemoryGeneratedArtifactRepository
 from .adapters.generated_postgres import PostgresGeneratedArtifactRepository

@@ -1,9 +1,13 @@
-"""Persistence, chunking, embedding, and indexing stages."""
+"""Chunking, embedding, and generation-safe indexing stages."""
+
+import hashlib
+import json
 
 from ..chunking import chunk_items
 from ..indexing.claims import build_claim_records
 from ..indexing.metadata_text import build_embedding_texts
 from ..indexing.payloads import build_qdrant_points
+from ..publication.models import aggregate_generation_hash, generation_id_for_job
 from .progress import (
     bounded_progress,
     items_progress,
@@ -24,18 +28,6 @@ def download_file(state: IngestState, deps: IngestDependencies) -> IngestState:
     state["file_bytes"] = deps.storage.read(state["payload"].file_path)
     deps.backend.update_job(
         job_id=state["payload"].job_id, status="processing", progress_pct=20
-    )
-    return state
-
-
-def persist_document_metadata(
-    state: IngestState, deps: IngestDependencies
-) -> IngestState:
-    deps.backend.save_document_metadata(
-        doc_id=state["payload"].doc_id, metadata=state["metadata"]
-    )
-    deps.backend.update_job(
-        job_id=state["payload"].job_id, status="processing", progress_pct=55
     )
     return state
 
@@ -65,17 +57,6 @@ def chunk_text(state: IngestState, deps: IngestDependencies) -> IngestState:
             len(state["chunks"]),
             "Built retrieval chunks",
         ),
-    )
-    return state
-
-
-def persist_claims(state: IngestState, deps: IngestDependencies) -> IngestState:
-    state["conflicted_claim_ids"] = deps.backend.save_ingest_claims(
-        doc_id=state["payload"].doc_id,
-        claims=state["claims"],
-    )
-    deps.backend.update_job(
-        job_id=state["payload"].job_id, status="processing", progress_pct=65
     )
     return state
 
@@ -113,6 +94,8 @@ def embed_chunks(state: IngestState, deps: IngestDependencies) -> IngestState:
         ),
     )
     state["sparse_vectors"] = deps.sparse_embedder.embed_many(embedding_texts)
+    generation_id = generation_id_for_job(state["payload"].job_id)
+    state["index_generation_id"] = generation_id
     state["points"] = build_qdrant_points(
         job=state["payload"],
         chunks=state["chunks"],
@@ -121,7 +104,25 @@ def embed_chunks(state: IngestState, deps: IngestDependencies) -> IngestState:
         metadata=state["metadata"],
         file_bytes=state["file_bytes"],
         claims=state["claims"],
-        conflicted_claim_ids=state.get("conflicted_claim_ids", []),
+        index_generation_id=generation_id,
+    )
+    item_hashes = [
+        str(point["payload"]["generation_item_hash"])
+        for point in state["points"]
+        if isinstance(point.get("payload"), dict)
+    ]
+    deps.backend.stage_index_generation(
+        job_id=state["payload"].job_id,
+        generation_id=generation_id,
+        input_hash=hashlib.sha256(state["file_bytes"]).hexdigest(),
+        configuration_digest=_configuration_digest(deps),
+        expected_point_count=len(state["points"]),
+        expected_item_hash=aggregate_generation_hash(item_hashes),
+        vector_dimension=len(state["vectors"][0]),
+        metadata=state["metadata"],
+        claims=state["claims"],
+        supersedes=state["payload"].supersedes,
+        warnings=state.get("warnings", []),
     )
     deps.backend.update_job(
         job_id=state["payload"].job_id,
@@ -149,9 +150,25 @@ def upsert_qdrant(state: IngestState, deps: IngestDependencies) -> IngestState:
             "vectors", 0, len(state["points"]), "Writing vectors to Qdrant"
         ),
     )
-    state["upsert_count"] = deps.qdrant.replace_document(
-        doc_id=state["payload"].doc_id,
+    generation_id = state["index_generation_id"]
+    state["upsert_count"] = deps.qdrant.stage_generation(
+        generation_id=generation_id,
         points=state["points"],
+        guard=lambda: raise_if_job_cancelled(deps, job_id),
+    )
+    deps.qdrant.verify_generation(
+        generation_id=generation_id,
+        expected_point_count=state["upsert_count"],
+        expected_item_hash=aggregate_generation_hash(
+            str(point["payload"]["generation_item_hash"])
+            for point in state["points"]
+            if isinstance(point.get("payload"), dict)
+        ),
+        vector_dimension=len(state["vectors"][0]),
+    )
+    deps.backend.verify_index_generation(job_id=job_id, generation_id=generation_id)
+    deps.qdrant.publish_generation(
+        generation_id,
         guard=lambda: raise_if_job_cancelled(deps, job_id),
     )
     deps.backend.update_job(
@@ -168,25 +185,21 @@ def upsert_qdrant(state: IngestState, deps: IngestDependencies) -> IngestState:
     return state
 
 
-def commit_supersession(state: IngestState, deps: IngestDependencies) -> IngestState:
-    if state["payload"].supersedes:
-        job_id = state["payload"].job_id
-        deps.qdrant.mark_documents_not_current(
-            state["payload"].supersedes,
-            guard=lambda: raise_if_job_cancelled(deps, job_id),
-        )
-        deps.backend.commit_supersession(
-            new_doc_id=state["payload"].doc_id,
-            supersedes=state["payload"].supersedes,
-        )
-    return state
-
-
-def mark_complete(state: IngestState, deps: IngestDependencies) -> IngestState:
-    deps.backend.update_job(
+def activate_generation(state: IngestState, deps: IngestDependencies) -> IngestState:
+    deps.backend.activate_index_generation(
         job_id=state["payload"].job_id,
-        status="complete",
-        progress_pct=100,
-        warnings=state.get("warnings", []),
+        generation_id=state["index_generation_id"],
     )
     return state
+
+
+def _configuration_digest(deps: IngestDependencies) -> str:
+    payload = {
+        "chunk_target_tokens": deps.chunk_target_tokens,
+        "chunk_overlap_tokens": deps.chunk_overlap_tokens,
+        "parent_max_tokens": deps.parent_max_tokens,
+        "quality_preset": deps.ingestion_quality_preset,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()

@@ -7,7 +7,7 @@ from http.client import HTTPException as HttpClientException
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
-from ..query.vllm_config_models import (
+from .vllm_config_models import (
     VllmDeploymentConfigRecord,
     VllmServiceLimitsRecord,
 )

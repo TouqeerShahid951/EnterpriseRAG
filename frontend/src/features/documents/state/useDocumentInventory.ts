@@ -2,13 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 import { documentsApi } from "@/lib/api/contracts";
 import type { User } from "@/types/api";
 
-export function useDocumentInventory(currentUser: User | null) {
+export function useDocumentInventory(currentUser: User | null, enabled = true) {
   const documentsQuery = useQuery({
     queryKey: ["documents", "list", "active"],
     queryFn: () => documentsApi.list(),
     retry: false,
     staleTime: 5000,
-    enabled: Boolean(currentUser),
+    enabled: Boolean(currentUser) && enabled,
   });
 
   const documents = documentsQuery.data?.items ?? [];
@@ -21,6 +21,22 @@ export function useDocumentInventory(currentUser: User | null) {
     documents,
     documentsQuery,
     latestCurrentDocument: currentDocuments[0] ?? null,
+  };
+}
+
+export function useDocumentCatalogSummary(currentUser: User | null, enabled = true) {
+  const summaryQuery = useQuery({
+    queryKey: ["documents", "summary"],
+    queryFn: () => documentsApi.summary(),
+    retry: false,
+    staleTime: 5000,
+    enabled: Boolean(currentUser) && enabled,
+  });
+
+  return {
+    groups: summaryQuery.data?.groups ?? [],
+    summaryQuery,
+    total: summaryQuery.data?.total ?? 0,
   };
 }
 

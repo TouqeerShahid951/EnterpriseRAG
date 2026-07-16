@@ -28,6 +28,9 @@ def prewarm_fastembed_models(
     sparse_cache_dir: Path,
     reranker_cache_dir: Path,
 ) -> None:
+    # Airgap bundles are commonly extracted on filesystems that cannot preserve
+    # Hugging Face snapshot symlinks. Store portable regular files instead.
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
     apply_runtime_offline_defaults()
     _load_dense_model(dense_model, dense_cache_dir)
     _load_sparse_model(sparse_model, sparse_cache_dir)

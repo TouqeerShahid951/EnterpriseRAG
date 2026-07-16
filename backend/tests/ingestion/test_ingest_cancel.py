@@ -12,7 +12,8 @@ from rag.core.config import settings
 from rag.internal.ingest_status_routes import update_ingest_job_status
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.identity_models import UserRecord
-from rag.schemas.internal import InternalJobStatusRequest, ServiceTokenContext
+from rag.ingestion.internal_schemas import InternalJobStatusRequest
+from rag.internal.schemas import ServiceTokenContext
 
 
 class FakeQueue:
@@ -27,8 +28,8 @@ class FakeVectorCleaner:
     def __init__(self) -> None:
         self.deleted: list[str] = []
 
-    def delete_document_vectors(self, document_id: str) -> None:
-        self.deleted.append(document_id)
+    def delete_building_vectors(self, job_id: str) -> None:
+        self.deleted.append(job_id)
 
 
 def test_cancel_active_ingest_job_marks_cancelled_and_cleans_vectors() -> None:
@@ -55,7 +56,7 @@ def test_cancel_active_ingest_job_marks_cancelled_and_cleans_vectors() -> None:
     assert updated.completed_at is not None
     assert repo.get_document(document.id).ingest_status == "cancelled"  # type: ignore[union-attr]
     assert queue.cancelled == [job.id]
-    assert vector_cleaner.deleted == [document.id]
+    assert vector_cleaner.deleted == [job.id]
     assert repo.audit_events[-1]["event_type"] == "ingest.cancelled"
 
 

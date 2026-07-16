@@ -6,6 +6,7 @@ import argparse
 import logging
 import time
 
+from apps.background.watchdog import heartbeat
 from rag.core.config import settings
 from rag.shared.persistence import PostgresConnectionMixin
 from rag.artifact_jobs.cleanup import (
@@ -34,6 +35,7 @@ def main() -> None:
     if not args.loop and not args.once:
         args.once = True
 
+    heartbeat()
     while True:
         try:
             result = _run_with_lock()
@@ -53,6 +55,7 @@ def main() -> None:
                     result.deleted_orphan_count,
                     result.skipped_orphan_count,
                 )
+            heartbeat()
         except GeneratedArtifactCleanupError as exc:
             logger.error(
                 "artifact cleanup failed failures=%d",

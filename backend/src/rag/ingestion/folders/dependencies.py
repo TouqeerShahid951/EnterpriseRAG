@@ -10,7 +10,7 @@ from .adapters.postgres import PostgresFolderScheduleRepository
 from .adapters.sources import LocalFileSystemSource, MinioObjectSource
 from .config import FolderIngestionConfig
 from .models import FolderScheduleRepository
-from .sources import LocalFolderSource, MinioPrefixSource
+from rag.ingestion.folders.sources import LocalFolderSource, MinioPrefixSource
 
 
 def get_folder_ingestion_config() -> FolderIngestionConfig:

@@ -135,9 +135,20 @@ export interface QueryNodeTiming {
   detail: string | null;
 }
 
+type AnswerStatus = "complete" | "partial" | "clarification" | "abstained";
+
+interface QueryCoverage {
+  required_slots: string[];
+  covered_slots: string[];
+  completeness: "complete" | "partial" | "unknown" | "not_applicable";
+  warnings: string[];
+}
+
 export interface RAGResponse {
   trace_id: string;
   answer: string;
+  answer_status?: AnswerStatus;
+  coverage?: QueryCoverage;
   sources: SourceAnchor[];
   artifacts?: GeneratedArtifact[];
   artifact_job?: ArtifactJobSummary | null;

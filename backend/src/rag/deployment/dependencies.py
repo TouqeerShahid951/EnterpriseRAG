@@ -3,8 +3,8 @@
 from fastapi import Depends
 
 from ..core.config import settings
-from ..query.vllm_config_models import VllmDeploymentConfigRepository
-from ..query.vllm_config_repository import (
+from .vllm_config_models import VllmDeploymentConfigRepository
+from .vllm_config_repository import (
     get_vllm_deployment_config_repository,
 )
 from .application import (

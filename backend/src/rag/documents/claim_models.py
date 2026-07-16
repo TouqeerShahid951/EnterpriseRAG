@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from ..schemas.internal import ClaimRecord
+from .internal_schemas import ClaimRecord
 from ..shared.contracts.evidence import ConflictPair
 
 

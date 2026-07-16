@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .schema_catalog import column_allowed, normalize_identifier, normalize_table_key, table_allowed, table_key
+from rag.connectors.catalog.schema_catalog import column_allowed, normalize_identifier, normalize_table_key, table_allowed, table_key
 
 _BLOCKED_SQL_TOKENS = {
     "alter",

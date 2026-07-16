@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import time
 
+from apps.background.watchdog import heartbeat
 from rag.core.config import settings
 from rag.ingestion.folders.dependencies import (
     get_folder_ingestion_config,
@@ -36,8 +37,10 @@ def main() -> None:
     if not args.loop and not args.once:
         args.once = True
 
+    heartbeat()
     while True:
         dispatched = _dispatch_with_lock()
+        heartbeat()
         if dispatched:
             print(f"dispatched_folder_schedules={','.join(dispatched)}")
         if not args.loop:

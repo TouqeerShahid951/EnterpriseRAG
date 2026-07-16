@@ -5,7 +5,7 @@ from __future__ import annotations
 from ...core.config import Settings
 from ...retrieval.service import RetrievalService
 from ..artifact_service import GeneratedArtifactService, generated_artifact_service_from_settings
-from ..conflicts import ConflictChecker
+from rag.query.answering.conflicts import ConflictChecker
 from ..inference import InferenceClient
 from ..qdrant import QdrantClient
 from ..query_memory import QuerySessionStore

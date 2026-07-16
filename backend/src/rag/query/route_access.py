@@ -9,7 +9,7 @@ from ..auth.permissions import can_query, has_exact_group_scope, is_global_admin
 from ..connectors.repositories import ConnectorProfileRepository
 from ..ingestion.folders.models import FolderScheduleRepository
 from .schemas import QueryRequest
-from .source_resolution import QuerySourceAccessError, validate_query_source_access
+from rag.query.sources.source_resolution import QuerySourceAccessError, validate_query_source_access
 
 
 def query_request_for_user(

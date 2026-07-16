@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from ..schemas.common import ContractModel
+from rag.shared.contracts.http import ContractModel
 from .types import ArtifactFormat
 
 

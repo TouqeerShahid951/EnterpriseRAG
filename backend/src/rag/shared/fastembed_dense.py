@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 from .contracts.rag_defaults import (
     DEFAULT_FASTEMBED_CACHE_DIR,
     DEFAULT_FASTEMBED_DENSE_MODEL,
 )
+from .fastembed_cache import has_fastembed_model_cache
 from .runtime_offline import apply_runtime_offline_defaults
 
 __all__ = (
@@ -47,16 +47,6 @@ def list_supported_dense_models(
     return sorted(models)
 
 
-def has_fastembed_model_cache(cache_dir: str | None, model_name: str) -> bool:
-    if not cache_dir or not model_name.strip():
-        return False
-    root = Path(cache_dir)
-    return any(
-        _has_snapshot(root / cache_name)
-        for cache_name in _huggingface_cache_dir_names(model_name)
-    )
-
-
 def _supported_model_sources(models: list[dict[str, Any]]) -> dict[str, str]:
     result: dict[str, str] = {}
     for model in models:
@@ -69,23 +59,6 @@ def _supported_model_sources(models: list[dict[str, Any]]) -> dict[str, str]:
         hf_source = sources.get("hf") if isinstance(sources, dict) else None
         result[name] = str(hf_source or name).strip()
     return result
-
-
-def _huggingface_cache_dir_names(model_name: str) -> list[str]:
-    normalized = model_name.strip()
-    names = [_huggingface_cache_dir_name(normalized)]
-    if normalized.endswith("-Q"):
-        names.append(_huggingface_cache_dir_name(normalized.removesuffix("-Q")))
-    return names
-
-
-def _huggingface_cache_dir_name(model_name: str) -> str:
-    return "models--" + model_name.replace("/", "--")
-
-
-def _has_snapshot(path: Path) -> bool:
-    snapshots = path / "snapshots"
-    return path.is_dir() and snapshots.is_dir() and any(snapshots.iterdir())
 
 
 def embed_dense_texts(

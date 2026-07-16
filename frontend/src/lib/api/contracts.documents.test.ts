@@ -37,6 +37,20 @@ describe("documentsApi", () => {
     expect(url).not.toContain("include_descendants");
   });
 
+  it("loads the lightweight document catalog summary", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      groups: [{ group_path: "/finance", count: 3 }],
+      total: 3,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await documentsApi.summary();
+
+    const calls = fetchMock.mock.calls as unknown as Array<[unknown]>;
+    expect(String(calls[0][0])).toContain("/api/v1/docs/summary");
+    expect(response.total).toBe(3);
+  });
+
   it("updates document clearance through a CSRF-protected patch", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ ...legacyDocument, clearance_level: "NATO_SECRET", ingest_status: "completed" }));
     vi.stubGlobal("fetch", fetchMock);

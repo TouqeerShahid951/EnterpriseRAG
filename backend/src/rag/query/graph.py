@@ -8,7 +8,7 @@ from typing import Any
 
 from .state import QueryContext, finalize_response_node_timings, record_node_timing
 from .nodes import QueryNodes
-from .routing_logs import log_node_timing
+from rag.query.routing.routing_logs import log_node_timing
 
 try:
     from langgraph.graph import END, StateGraph

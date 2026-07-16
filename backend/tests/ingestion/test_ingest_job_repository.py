@@ -21,11 +21,11 @@ from rag.ingestion.job_models import (
 )
 from rag.ingestion.adapters.job_postgres import PostgresIngestJobRepository
 from rag.ingestion.job_dependencies import get_ingest_job_repository, ingest_job_repository_for
-from rag.schemas.internal import (
+from rag.ingestion.internal_schemas import (
     InternalJobAttemptRequest,
     InternalJobStatusRequest,
-    ServiceTokenContext,
 )
+from rag.internal.schemas import ServiceTokenContext
 
 
 ACTIVE_STATUSES = frozenset({"scheduled", "queued", "processing", "human_review"})
@@ -84,6 +84,36 @@ def test_postgres_search_uses_one_scoped_statement_for_page_and_total() -> None:
     assert params[-2:] == (1, 1)
     assert page.total == 2
     assert [item.document_title for item in page.items] == ["Report.pdf"]
+
+
+def test_postgres_summary_uses_one_scoped_aggregate_statement() -> None:
+    repository = _CapturingPostgresIngestSummaryRepository()
+
+    summary = repository.summarize_visible_ingest_jobs(
+        access=IngestJobAccess(
+            clearance_levels=("NATO_RESTRICTED",),
+            group_paths=("/ops",),
+        ),
+        filters=IngestJobFilters(),
+    )
+
+    assert len(repository.queries) == 1
+    query, params = repository.queries[0]
+    assert "ROW_NUMBER() OVER" in query
+    assert "GROUP BY stage" in query
+    assert "GROUP BY origin" in query
+    assert "LIMIT" not in query
+    assert params == (
+        ["NATO_RESTRICTED"],
+        ["/ops"],
+        ["/ops"],
+    )
+    assert summary.total == 4
+    assert summary.active == 1
+    assert summary.needs_attention == 2
+    assert summary.status_counts == {"complete": 3, "failed": 1}
+    assert summary.stage_counts == {"complete": 3, "failed": 1}
+    assert summary.origin_counts == {"upload": 4}
 
 
 def test_update_compare_and_set_rejects_stale_status_and_cancelled_resurrection() -> None:
@@ -322,7 +352,7 @@ def test_maintenance_does_not_fail_or_audit_job_heartbeat_after_stale_scan(
     repo, _, job_id = _repository_with_job(status="processing")
     job = repo.get_ingest_job(job_id)
     assert job is not None
-    stale_job = replace(job, attempt_count=3)
+    stale_job = replace(job, attempt_count=3, failure_attempt_count=3)
     racing_repo = _HeartbeatBeforeMaintenanceRepository(repo)
     monkeypatch.setattr(
         ingest_maintenance,
@@ -394,6 +424,29 @@ class _CapturingPostgresIngestJobRepository(PostgresIngestJobRepository):
                 "uploaded_by": "user-1",
                 "total": 2,
             }
+        ]
+
+
+class _CapturingPostgresIngestSummaryRepository(PostgresIngestJobRepository):
+    def __init__(self) -> None:
+        super().__init__("postgresql://unused")
+        self.queries: list[tuple[str, tuple[object, ...]]] = []
+
+    def _execute_all(
+        self,
+        query: str,
+        params: tuple[object, ...] = (),
+    ) -> list[dict[str, object]]:
+        self.queries.append((query, params))
+        return [
+            {"dimension": "metric", "name": "total", "value": 4},
+            {"dimension": "metric", "name": "active", "value": 1},
+            {"dimension": "metric", "name": "needs_attention", "value": 2},
+            {"dimension": "status", "name": "complete", "value": 3},
+            {"dimension": "status", "name": "failed", "value": 1},
+            {"dimension": "stage", "name": "complete", "value": 3},
+            {"dimension": "stage", "name": "failed", "value": 1},
+            {"dimension": "origin", "name": "upload", "value": 4},
         ]
 
 

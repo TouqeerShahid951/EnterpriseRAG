@@ -28,7 +28,7 @@ QUERY_EVIDENCE_REEXPORT_TARGETS = frozenset(
 ALLOWED_SHARED_EVIDENCE_IMPORTS = frozenset(
     {
         "pydantic",
-        "rag.schemas.common",
+        "rag.shared.contracts.http",
         "rag.shared.contracts.clearance",
         "typing",
     }
@@ -47,7 +47,7 @@ def test_query_schemas_are_transport_and_runtime_independent() -> None:
                 "rag.query.routes",
                 "rag.query.execution_routes",
                 "rag.query.history_routes",
-                "rag.query.source_routes",
+                "rag.query.sources.source_routes",
                 "rag.query.service",
             }
         ),

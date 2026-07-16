@@ -40,6 +40,7 @@ class DocumentRecord:
     created_at: datetime | None
     updated_at: datetime | None
     shared_group_paths: tuple[str, ...] = ()
+    active_index_generation_id: str | None = None
 
     @property
     def owner_group_path(self) -> str:
@@ -100,6 +101,13 @@ class DocumentImageAssetRecord:
 class DocumentRepository(Protocol):
     def create_document(self, **kwargs: Any) -> DocumentRecord: ...
     def list_documents(self, *, state: Literal["active", "deleted"] = "active") -> list[DocumentRecord]: ...
+    def count_documents_by_owner_group(
+        self,
+        *,
+        state: Literal["active", "deleted"] = "active",
+        clearance_levels: tuple[ClearanceLevel, ...],
+        group_paths: tuple[str, ...] | None,
+    ) -> dict[str, int]: ...
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None: ...
     def replace_document_shares(
         self,

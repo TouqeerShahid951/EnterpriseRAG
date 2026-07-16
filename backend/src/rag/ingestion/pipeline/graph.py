@@ -9,15 +9,12 @@ from ..contracts import IngestJobPayload
 from .state import IngestDependencies, IngestState
 from .steps import (
     chunk_text,
-    commit_supersession,
+    activate_generation,
     download_file,
     embed_chunks,
     extract_text,
     generate_metadata,
-    mark_complete,
     mark_processing,
-    persist_claims,
-    persist_document_metadata,
     upsert_qdrant,
 )
 
@@ -40,27 +37,21 @@ def _add_nodes(graph, deps: IngestDependencies) -> None:
     graph.add_node("download_file", _cancellable(download_file, deps))
     graph.add_node("extract_text", _cancellable(extract_text, deps))
     graph.add_node("generate_metadata", _cancellable(generate_metadata, deps))
-    graph.add_node("persist_document_metadata", _cancellable(persist_document_metadata, deps))
     graph.add_node("chunk_text", _cancellable(chunk_text, deps))
     graph.add_node("embed_chunks", _cancellable(embed_chunks, deps))
     graph.add_node("upsert_qdrant", _cancellable(upsert_qdrant, deps))
-    graph.add_node("persist_claims", _cancellable(persist_claims, deps))
-    graph.add_node("commit_supersession", _cancellable(commit_supersession, deps))
-    graph.add_node("mark_complete", _cancellable(mark_complete, deps))
+    graph.add_node("activate_generation", _cancellable(activate_generation, deps))
 
 
 def _add_edges(graph, *, end_node: str) -> None:
     graph.add_edge("mark_processing", "download_file")
     graph.add_edge("download_file", "extract_text")
     graph.add_edge("extract_text", "generate_metadata")
-    graph.add_edge("generate_metadata", "persist_document_metadata")
-    graph.add_edge("persist_document_metadata", "chunk_text")
-    graph.add_edge("chunk_text", "persist_claims")
-    graph.add_edge("persist_claims", "embed_chunks")
+    graph.add_edge("generate_metadata", "chunk_text")
+    graph.add_edge("chunk_text", "embed_chunks")
     graph.add_edge("embed_chunks", "upsert_qdrant")
-    graph.add_edge("upsert_qdrant", "commit_supersession")
-    graph.add_edge("commit_supersession", "mark_complete")
-    graph.add_edge("mark_complete", end_node)
+    graph.add_edge("upsert_qdrant", "activate_generation")
+    graph.add_edge("activate_generation", end_node)
 
 
 def _cancellable(

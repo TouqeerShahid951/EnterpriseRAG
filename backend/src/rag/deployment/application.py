@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Protocol
 
-from ..query.vllm_config_models import (
+from .vllm_config_models import (
     VllmDeploymentConfigRecord,
     VllmDeploymentConfigRepository,
 )

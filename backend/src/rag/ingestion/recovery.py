@@ -5,13 +5,16 @@ from __future__ import annotations
 import mimetypes
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import logging
 
 from ..documents.models import DocumentRecord, DocumentRepository
 from .job_models import IngestJobRecord, IngestJobRepository
 from .contracts import IngestJobPayload
+from .delivery.service import IngestDeliveryService, dispatch_pending_deliveries
 from .queue import IngestQueue
 
 MAX_INGEST_ATTEMPTS = 3
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -51,7 +54,7 @@ def list_stale_ingest_jobs(
         active_document = document_repo.get_document(job.doc_id)
         last_activity = ingest_job_last_activity(job)
         stale_for_seconds = max(0, int((observed_at - last_activity).total_seconds())) if last_activity else stale_after_seconds
-        if job.attempt_count >= max_attempts:
+        if job.failure_attempt_count >= max_attempts:
             code = "retry_exhausted"
             message = f"Retry limit reached ({max_attempts} attempts). Investigate the failure before starting a new ingestion."
         elif active_document is None or not active_document.file_path:
@@ -99,7 +102,7 @@ def requeue_stale_ingest_job(
     cutoff = observed_at - timedelta(seconds=stale_after_seconds)
     if not is_stale_ingest_job(job, cutoff):
         raise IngestRecoveryError("job_not_stale", "The job has a recent heartbeat and cannot be requeued.")
-    if job.attempt_count >= max_attempts:
+    if job.failure_attempt_count >= max_attempts:
         raise IngestRecoveryError("retry_exhausted", "The job has reached the ingestion retry limit.")
 
     document = document_repo.get_document(job.doc_id)
@@ -109,18 +112,27 @@ def requeue_stale_ingest_job(
             "The source document is unavailable for ingestion recovery.",
         )
 
-    requeued = job_repo.requeue_stale_ingest_job(
+    delivery = IngestDeliveryService(job_repo)
+    mutation = delivery.recover_stale_job(
         job.id,
+        ingest_queue_message(document, job),
         stale_before=cutoff,
-        max_attempts=max_attempts,
+        max_failures=max_attempts,
+        event_kind="stale_recovery",
     )
-    if requeued is None:
+    if mutation.exhausted:
+        raise IngestRecoveryError(
+            "retry_exhausted",
+            "The job has reached the ingestion retry limit.",
+        )
+    if mutation.job is None or not mutation.changed:
         raise IngestRecoveryError(
             "job_state_changed",
             "The job changed while recovery was requested. Refresh ingestion health and try again.",
         )
+    recovered_job = mutation.job
 
-    queue.enqueue(ingest_queue_message(document, job))
+    _dispatch_best_effort(delivery, queue, job.id)
     document_repo.append_audit_event(
         event_type=audit_event_type,
         actor_id=actor_id,
@@ -128,12 +140,13 @@ def requeue_stale_ingest_job(
         target_id=job.id,
         payload={
             "doc_id": job.doc_id,
-            "attempt_count": job.attempt_count,
-            "next_attempt": job.attempt_count + 1,
+            "attempt_count": recovered_job.attempt_count,
+            "failure_attempt_count": recovered_job.failure_attempt_count,
+            "next_attempt": recovered_job.attempt_count + 1,
             "stale_after_seconds": stale_after_seconds,
         },
     )
-    return requeued
+    return recovered_job
 
 
 def is_stale_ingest_job(job: IngestJobRecord, cutoff: datetime) -> bool:
@@ -161,3 +174,17 @@ def ingest_queue_message(document: DocumentRecord, job: IngestJobRecord) -> Inge
         description=document.description,
         content_type=content_type,
     )
+
+
+def _dispatch_best_effort(
+    delivery: IngestDeliveryService,
+    queue: IngestQueue,
+    job_id: str,
+) -> None:
+    try:
+        dispatch_pending_deliveries(delivery, queue, limit=1)
+    except Exception:
+        logger.warning(
+            "ingestion delivery deferred job_id=%s event_kind=stale_recovery",
+            job_id,
+        )

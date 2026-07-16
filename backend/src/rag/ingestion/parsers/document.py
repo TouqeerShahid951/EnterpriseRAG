@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from .docling_adapter import DoclingProgressCallback
+from rag.ingestion.parsers.docling.adapter import DoclingProgressCallback
 from .document_dispatch import (
     CONNECTOR_RECORD_CONTENT_TYPE as CONNECTOR_RECORD_CONTENT_TYPE,
     DOCX_CONTENT_TYPE as DOCX_CONTENT_TYPE,
@@ -27,9 +27,8 @@ from .document_dispatch import (
     looks_like_json_bytes as _looks_like_json_bytes_impl,
     parse_document_with_operations,
     resume_pdf_image_review_with_operations,
-    validated_docx_items as _validated_docx_items_impl,
 )
-from .images import (
+from rag.ingestion.parsers.images import (
     ImageAnalyzer,
     ImageAssetStore,
     ImageProgressCallback,
@@ -48,7 +47,7 @@ from .images import (
     _vision_analysis_payload as _vision_analysis_payload,
 )
 from .models import DocumentParseResult, ParsedImageAsset, ParsedPdfItem
-from .pdf_fallback import (
+from rag.ingestion.parsers.pdf.fallback import (
     parse_error_code as _parse_error_code_impl,
     parse_error_quality_flag as _parse_error_quality_flag_impl,
     parse_pdf_with_ocr_fallback as _parse_pdf_with_ocr_fallback,
@@ -56,7 +55,7 @@ from .pdf_fallback import (
     pdf_parser_config as _pdf_parser_config,
     vision_fallback_items as _vision_fallback_items_impl,
 )
-from .pdf_image_processing import (
+from rag.ingestion.parsers.pdf.image_processing import (
     DEFAULT_PDF_IMAGE_MAX_FULL_PAGE_FALLBACKS as DEFAULT_PDF_IMAGE_MAX_FULL_PAGE_FALLBACKS,
     PDF_IMAGE_FULL_PAGE_AREA_RATIO as PDF_IMAGE_FULL_PAGE_AREA_RATIO,
     PDF_IMAGE_MIN_FIGURE_AREA_RATIO as PDF_IMAGE_MIN_FIGURE_AREA_RATIO,
@@ -81,7 +80,7 @@ from .pdf_image_processing import (
     select_pdf_image_sources_for_analysis as _select_pdf_image_sources_for_analysis,
     pdf_visual_source_set as _pdf_visual_sources_impl,
 )
-from .pdf_layout_repair import (
+from rag.ingestion.parsers.pdf.layout_repair import (
     MIN_VISION_LAYOUT_CHARS as MIN_VISION_LAYOUT_CHARS,
     MIN_VISION_LAYOUT_CONFIDENCE as MIN_VISION_LAYOUT_CONFIDENCE,
     VISION_LAYOUT_ORDER_FLAGS as VISION_LAYOUT_ORDER_FLAGS,
@@ -114,6 +113,7 @@ from .pdf_layout_repair import (
     log_skipped_vision_layout_repair as _log_skipped_vision_layout_repair,
     repair_pdf_complex_layout_with_vision as _repair_pdf_complex_layout_with_vision_impl,
 )
+from rag.ingestion.parsers.word import validated_docx_items as _validated_docx_items_impl
 
 logger = logging.getLogger(__name__)
 

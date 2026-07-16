@@ -80,6 +80,28 @@
   }
 }
 
+@media (max-width: 900px) {
+  .rag-chat-page {
+    height: calc(100dvh - 3.75rem);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .rag-chat-body {
+    display: flex;
+    min-height: 0;
+  }
+
+  .rag-chat-thread {
+    min-height: 0;
+    flex: 1;
+  }
+
+  .rag-composer-shell {
+    padding-bottom: calc(0.7rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 @media (min-width: 768px) and (max-width: 1279px) {
   .workspace-overview-metrics .sv-metric + .sv-metric {
     border-left: 0;
@@ -207,3 +229,15 @@
   }
 }
 
+@media (max-width: 480px) {
+  .rag-composer-source-segments {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rag-composer-source-segments button {
+    min-height: var(--control-height-md);
+    justify-content: center;
+  }
+}

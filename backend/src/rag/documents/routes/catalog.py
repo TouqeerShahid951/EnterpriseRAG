@@ -3,13 +3,22 @@
 from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from starlette.concurrency import run_in_threadpool
 
 from ...auth.abac import normalize_group_path
 from ...auth.dependencies import require_current_user
 from ...auth.document_access import can_read_document
 from ...auth.identity_models import UserRecord
-from ...schemas.common import ErrorResponse
-from ...schemas.docs import Document, DocumentListResponse, VersionChainResponse
+from ...auth.permissions import can_read_document_metadata, is_global_admin
+from ...shared.contracts.clearance import clearance_levels_at_or_below
+from rag.shared.contracts.http import ErrorResponse
+from rag.documents.metadata.schemas import VersionChainResponse
+from rag.documents.schemas import (
+    Document,
+    DocumentCatalogSummary,
+    DocumentGroupCount,
+    DocumentListResponse,
+)
 from ..claim_dependencies import get_claim_repository
 from ..claim_models import ClaimRepository
 from ..repository import DocumentRepository, get_document_repository
@@ -28,13 +37,45 @@ async def list_documents(
 ) -> DocumentListResponse:
     state_value = _document_state(state)
     normalized_group = normalize_group_path(group_path) if group_path else None
+    records = await run_in_threadpool(repo.list_documents, state=state_value)
     documents = [
         document_to_schema(document)
-        for document in repo.list_documents(state=state_value)
+        for document in records
         if can_read_document(user, document)
         and _matches_group_filter(document.access_group_paths, normalized_group)
     ]
     return DocumentListResponse(items=documents, total=len(documents))
+
+
+@router.get(
+    "/summary",
+    response_model=DocumentCatalogSummary,
+    summary="Summarize visible documents by owner group",
+)
+async def summarize_documents(
+    user: UserRecord = Depends(require_current_user),
+    repo: DocumentRepository = Depends(get_document_repository),
+) -> DocumentCatalogSummary:
+    if not can_read_document_metadata(user):
+        return DocumentCatalogSummary(total=0)
+    group_paths = (
+        None
+        if is_global_admin(user)
+        else tuple(sorted({normalize_group_path(path) for path in user.group_paths}))
+    )
+    counts = await run_in_threadpool(
+        repo.count_documents_by_owner_group,
+        clearance_levels=clearance_levels_at_or_below(user.clearance_level),
+        group_paths=group_paths,
+    )
+    groups = [
+        DocumentGroupCount(group_path=group_path, count=count)
+        for group_path, count in sorted(counts.items())
+    ]
+    return DocumentCatalogSummary(
+        groups=groups,
+        total=sum(group.count for group in groups),
+    )
 
 
 @router.get(

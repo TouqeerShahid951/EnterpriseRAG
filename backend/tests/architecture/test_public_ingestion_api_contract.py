@@ -18,6 +18,10 @@ PUBLIC_OPERATION_PREFIXES = ("/api/v1/docs", "/api/v1/ingest-jobs")
 
 EXPECTED_OPERATIONS: dict[OperationKey, OperationContract] = {
     ("GET", "/api/v1/docs"): (("documents",), frozenset({"200", "422"})),
+    ("GET", "/api/v1/docs/summary"): (
+        ("documents",),
+        frozenset({"200"}),
+    ),
     ("GET", "/api/v1/docs/{document_id}"): (
         ("documents",),
         frozenset({"200", "404", "422"}),

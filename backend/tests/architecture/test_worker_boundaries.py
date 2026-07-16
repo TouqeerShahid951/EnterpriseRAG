@@ -10,9 +10,7 @@ from _dependency_scanner import (
 )
 
 
-ARTIFACT_WORKER_TASK_FILE = (
-    BACKEND_ROOT / "apps" / "workers" / "artifact" / "tasks.py"
-)
+ARTIFACT_WORKER_TASK_FILE = BACKEND_ROOT / "apps" / "workers" / "artifact" / "tasks.py"
 REMOVED_ARTIFACT_TASK_MODULE = "rag.artifact_jobs.tasks"
 REMOVED_ARTIFACT_TASK_PATHS = (
     RAG_ROOT / "artifact_jobs" / "tasks.py",
@@ -47,8 +45,10 @@ def test_artifact_celery_adapter_is_owned_by_worker_app() -> None:
 
     violations = find_violations(
         python_files(BACKEND_PYTHON_ROOTS),
-        lambda target: target == REMOVED_ARTIFACT_TASK_MODULE
-        or target.startswith(f"{REMOVED_ARTIFACT_TASK_MODULE}."),
+        lambda target: (
+            target == REMOVED_ARTIFACT_TASK_MODULE
+            or target.startswith(f"{REMOVED_ARTIFACT_TASK_MODULE}.")
+        ),
         resolve_relative_imports=True,
     )
     violations.extend(
@@ -101,8 +101,10 @@ def test_evaluation_celery_adapter_is_owned_by_worker_app() -> None:
 
     violations = find_violations(
         python_files(BACKEND_PYTHON_ROOTS),
-        lambda target: target == REMOVED_EVALUATION_TASK_MODULE
-        or target.startswith(f"{REMOVED_EVALUATION_TASK_MODULE}."),
+        lambda target: (
+            target == REMOVED_EVALUATION_TASK_MODULE
+            or target.startswith(f"{REMOVED_EVALUATION_TASK_MODULE}.")
+        ),
         resolve_relative_imports=True,
     )
     violations.extend(
@@ -125,11 +127,13 @@ def test_evaluation_worker_task_adapter_has_only_composition_dependencies() -> N
             "apps.workers.evaluation.celery_app.celery_app",
             "billiard.exceptions",
             "billiard.exceptions.SoftTimeLimitExceeded",
+            "celery.exceptions",
+            "celery.exceptions.Reject",
             "rag.core.config",
             "rag.core.config.settings",
             "rag.evaluations.execution",
-            "rag.evaluations.execution.EvaluationRunExecutor",
-            "rag.evaluations.execution.default_evaluation_run_executor",
+            "rag.evaluations.execution.EvaluationCaseExecutor",
+            "rag.evaluations.execution.default_evaluation_case_executor",
             "rag.evaluations.repository",
             "rag.evaluations.repository.get_evaluation_repository",
             "rag.evaluations.task_execution",
@@ -156,10 +160,12 @@ def test_document_pipeline_celery_adapters_are_owned_by_worker_app() -> None:
 
     violations = find_violations(
         python_files(BACKEND_PYTHON_ROOTS),
-        lambda target: target in REMOVED_DOCUMENT_PIPELINE_TASK_MODULES
-        or any(
-            target.startswith(f"{module}.")
-            for module in REMOVED_DOCUMENT_PIPELINE_TASK_MODULES
+        lambda target: (
+            target in REMOVED_DOCUMENT_PIPELINE_TASK_MODULES
+            or any(
+                target.startswith(f"{module}.")
+                for module in REMOVED_DOCUMENT_PIPELINE_TASK_MODULES
+            )
         ),
         resolve_relative_imports=True,
     )
@@ -173,10 +179,12 @@ def test_document_pipeline_celery_adapters_are_owned_by_worker_app() -> None:
     violations.extend(
         find_violations(
             (RAG_ROOT / "ingestion" / "execution.py",),
-            lambda target: target == "billiard"
-            or target.startswith("billiard.")
-            or target == "celery"
-            or target.startswith("celery."),
+            lambda target: (
+                target == "billiard"
+                or target.startswith("billiard.")
+                or target == "celery"
+                or target.startswith("celery.")
+            ),
             resolve_relative_imports=True,
         )
     )
@@ -211,6 +219,8 @@ def test_document_pipeline_task_adapter_has_only_composition_dependencies() -> N
             "typing",
             "typing.Any",
             "typing.Callable",
+            "uuid",
+            "uuid.uuid4",
         }
     )
     violations = find_violations(

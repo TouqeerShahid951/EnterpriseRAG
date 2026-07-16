@@ -5,8 +5,12 @@ from __future__ import annotations
 import argparse
 import time
 
+from apps.background.watchdog import heartbeat
 from rag.core.config import settings
-from rag.ingestion.maintenance import reconcile_ingestion_jobs
+from rag.ingestion.maintenance import (
+    reconcile_ingestion_jobs,
+    retire_index_generations,
+)
 from rag.shared.persistence import PostgresConnectionMixin
 
 
@@ -28,8 +32,10 @@ def main() -> None:
     if not args.loop and not args.once:
         args.once = True
 
+    heartbeat()
     while True:
         recovered = _run_with_lock()
+        heartbeat()
         if recovered:
             print(f"recovered_ingest_jobs={','.join(recovered)}", flush=True)
         if not args.loop:
@@ -39,7 +45,7 @@ def main() -> None:
 
 def _run_with_lock() -> list[str]:
     if settings.document_repository != "postgres":
-        return reconcile_ingestion_jobs()
+        return _run_maintenance()
     lock = _LockConnection(settings.database_url)
     with lock._connect() as conn:
         acquired = conn.execute(
@@ -49,12 +55,18 @@ def _run_with_lock() -> list[str]:
         if not acquired:
             return []
         try:
-            return reconcile_ingestion_jobs()
+            return _run_maintenance()
         finally:
             conn.execute(
                 "SELECT pg_advisory_unlock(%s)",
                 (ADVISORY_LOCK_ID,),
             )
+
+
+def _run_maintenance() -> list[str]:
+    recovered = reconcile_ingestion_jobs()
+    retire_index_generations()
+    return recovered
 
 
 if __name__ == "__main__":

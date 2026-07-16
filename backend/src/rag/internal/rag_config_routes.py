@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from ..query.rag_config_repository import RagConfigRepository, effective_rag_config, get_rag_config_repository
-from ..query.rag_config_mapping import rag_config_response
-from ..schemas.internal import ServiceTokenContext
-from ..schemas.rag_config import RagConfigResponse
+from ..query.configuration.repository import RagConfigRepository, effective_rag_config, get_rag_config_repository
+from ..query.configuration.mapping import rag_config_response
+from rag.internal.schemas import ServiceTokenContext
+from rag.query.configuration.schemas import RagConfigResponse
 from .service_token_auth import require_service_token
 
 router = APIRouter(tags=["internal-rag-config"])

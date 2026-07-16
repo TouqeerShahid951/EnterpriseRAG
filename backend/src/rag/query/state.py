@@ -10,10 +10,19 @@ from ..shared.contracts.evidence import ConflictPair
 from .artifact_intent import ArtifactRequest, parse_artifact_request, requires_document_scope
 from .artifact_models import ArtifactContent, ArtifactPlan, ArtifactValidation, CoverageReport, EvidenceUnit
 from .cancellation import QueryCancellationToken
-from .evidence_quality import EvidenceQuality
+from rag.query.answering.evidence_quality import EvidenceQuality
 from .qdrant import SearchHit
-from .routing_models import QuerySignals, RoutePlan
+from rag.query.retrieval.retrieval_trace import RetrievalTraceStage
+from rag.query.routing.routing_models import QuerySignals, RoutePlan
 from .schemas import QueryIntent, QueryNodeTiming, QueryRequest, RAGResponse
+
+
+class ExhaustiveCoverageState(TypedDict):
+    candidate_status: str
+    evidence_status: str
+    reasons: list[str]
+    required_obligations: list[str]
+    covered_obligations: list[str]
 
 
 class QueryContext(TypedDict):
@@ -33,6 +42,10 @@ class QueryContext(TypedDict):
     sub_queries: list[str]
     is_current_only: bool
     retrieved_hits: list[SearchHit]
+    retrieval_trace: NotRequired[list[RetrievalTraceStage]]
+    exhaustive_coverage: NotRequired[ExhaustiveCoverageState]
+    exhaustive_deadline: NotRequired[float]
+    force_faithfulness_check: bool
     session_turns: list[dict[str, object]]
     node_trace: list[dict[str, str | None]]
     node_timings: list[dict[str, str | int | None]]
@@ -71,6 +84,8 @@ def initial_state(
     started: float,
     token_budget: int = 12000,
     cancellation_token: QueryCancellationToken | None = None,
+    capture_retrieval_trace: bool = False,
+    force_faithfulness_check: bool = False,
 ) -> QueryContext:
     artifact_request = parse_artifact_request(request.query)
     if (
@@ -93,6 +108,7 @@ def initial_state(
         "sub_queries": [request.query],
         "is_current_only": True,
         "retrieved_hits": [],
+        "force_faithfulness_check": force_faithfulness_check,
         "session_turns": [],
         "node_trace": [],
         "node_timings": [],
@@ -115,6 +131,8 @@ def initial_state(
         ctx["artifact_request"] = artifact_request
     if cancellation_token is not None:
         ctx["cancellation_token"] = cancellation_token
+    if capture_retrieval_trace:
+        ctx["retrieval_trace"] = []
     return ctx
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from rag.query.cancellation import QueryCancellationToken, call_with_optional_cancellation
 from rag.query.sources import citation_label, source_citation, sources_from_hits
 from rag.query.state import QueryContext
-from rag.query.synthesis import (
+from rag.query.answering.synthesis import (
     build_rag_response,
     ensure_answer_has_citation,
     is_global_abstention,

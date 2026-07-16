@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..models import ConnectorQueryResult, ConnectorTestResult
-from ..row_mapping import json_safe
+from rag.connectors.catalog.row_mapping import json_safe
 
 
 class FakeConnector:

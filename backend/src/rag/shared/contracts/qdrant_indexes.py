@@ -10,6 +10,8 @@ PAYLOAD_INDEXES: tuple[tuple[str, str], ...] = (
     ("clearance_level", "keyword"),
     ("clearance_rank", "integer"),
     ("is_current", "bool"),
+    ("index_generation_id", "keyword"),
+    ("generation_published", "bool"),
     ("source_deleted", "bool"),
     ("retrieval_status", "keyword"),
     ("doc_type", "keyword"),

@@ -1,0 +1,1 @@
+"""Concrete publication persistence adapters."""

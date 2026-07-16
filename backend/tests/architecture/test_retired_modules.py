@@ -15,6 +15,20 @@ from _dependency_scanner import (
 
 LEGACY_FEATURE_ROUTE_MODULES = frozenset(
     {
+        "rag.artifact_jobs.bundle_repair",
+        "rag.artifact_jobs.composer",
+        "rag.artifact_jobs.composition",
+        "rag.artifact_jobs.composition_deadline",
+        "rag.artifact_jobs.execution_errors",
+        "rag.artifact_jobs.execution_progress",
+        "rag.artifact_jobs.execution_rendering",
+        "rag.artifact_jobs.execution_state",
+        "rag.artifact_jobs.fallback_composition",
+        "rag.artifact_jobs.format_adaptation",
+        "rag.artifact_jobs.layout_profiles",
+        "rag.artifact_jobs.llm_json",
+        "rag.artifact_jobs.planner",
+        "rag.artifact_jobs.validation",
         "rag.api.routes.document_routes",
         "rag.api.routes.folder_ingest_routes",
         "rag.api.routes.ingest_job_routes",
@@ -105,6 +119,113 @@ LEGACY_QUERY_PATHS = (
     RAG_ROOT / "schemas" / "query.py",
 )
 
+RETIRED_BUCKET_PREFIXES = frozenset({"rag.api", "rag.schemas", "rag.services"})
+REORGANIZED_MODULES = frozenset(
+    {
+        "rag.connectors.catalog_routes",
+        "rag.connectors.enrichment_routes",
+        "rag.connectors.http_presenters",
+        "rag.connectors.profile_routes",
+        "rag.connectors.route_support",
+        "rag.connectors.row_mapping",
+        "rag.connectors.schema_catalog",
+        "rag.connectors.schema_enrichment",
+        "rag.connectors.schema_introspection",
+        "rag.documents.access_scope_dependencies",
+        "rag.documents.access_scope_ports",
+        "rag.documents.access_scope_service",
+        "rag.documents.lifecycle_dependencies",
+        "rag.documents.lifecycle_ports",
+        "rag.documents.lifecycle_service",
+        "rag.documents.metadata_dependencies",
+        "rag.documents.metadata_ports",
+        "rag.documents.metadata_service",
+        "rag.documents.reingestion_dependencies",
+        "rag.documents.reingestion_service",
+        "rag.documents.routes.access",
+        "rag.documents.routes.lifecycle",
+        "rag.documents.routes.metadata",
+        "rag.documents.upload_routes",
+        "rag.documents.upload_schemas",
+        "rag.documents.upload_service",
+        "rag.documents.upload_status",
+        "rag.documents.upload_validation",
+        "rag.ingestion.parsers.docling_adapter",
+        "rag.ingestion.parsers.docling_models",
+        "rag.ingestion.parsers.docling_repairs",
+        "rag.ingestion.parsers.image_analysis",
+        "rag.ingestion.parsers.image_contracts",
+        "rag.ingestion.parsers.image_normalization",
+        "rag.ingestion.parsers.image_sources",
+        "rag.ingestion.parsers.inspect_pdf",
+        "rag.ingestion.parsers.layered",
+        "rag.ingestion.parsers.pdf_fallback",
+        "rag.ingestion.parsers.pdf_image_candidates",
+        "rag.ingestion.parsers.pdf_image_processing",
+        "rag.ingestion.parsers.pdf_layout_repair",
+        "rag.ingestion.parsers.pdf_visual_component_detection",
+        "rag.ingestion.parsers.pdf_visual_page_selection",
+        "rag.ingestion.parsers.pdf_visual_region_detection",
+        "rag.ingestion.parsers.pdf_visual_region_geometry",
+        "rag.ingestion.parsers.pdf_visual_regions",
+        "rag.ingestion.parsers.pdf_visual_source_mapping",
+        "rag.ingestion.parsers.pymupdf",
+        "rag.ingestion.configuration_dependencies",
+        "rag.ingestion.human_review_routes",
+        "rag.ingestion.image_review_routes",
+        "rag.ingestion.review_access",
+        "rag.ingestion.review_dependencies",
+        "rag.ingestion.review_models",
+        "rag.ingestion.review_presenters",
+        "rag.ingestion.review_routes",
+        "rag.query.adapters.vllm_config_memory",
+        "rag.query.adapters.vllm_config_postgres",
+        "rag.query.conflicts",
+        "rag.query.evidence_quality",
+        "rag.query.faithfulness",
+        "rag.query.intent_router",
+        "rag.query.live_sql",
+        "rag.query.metadata_scoring",
+        "rag.query.query_intent",
+        "rag.query.query_retrieval",
+        "rag.query.rag_config_http_mapping",
+        "rag.query.rag_config_mapping",
+        "rag.query.rag_config_models",
+        "rag.query.rag_config_repository",
+        "rag.query.rag_config_routes",
+        "rag.query.rag_config_service",
+        "rag.query.rag_config_validation",
+        "rag.query.reasoning",
+        "rag.query.retrieval_budget",
+        "rag.query.retrieval_document_scope",
+        "rag.query.retrieval_hits",
+        "rag.query.retrieval_plans",
+        "rag.query.retrieval_policy",
+        "rag.query.retrieval_recall",
+        "rag.query.retrieval_structured",
+        "rag.query.retrieval_trace",
+        "rag.query.routing_evidence",
+        "rag.query.routing_logs",
+        "rag.query.routing_models",
+        "rag.query.routing_rules",
+        "rag.query.routing_signals",
+        "rag.query.routing_verifier",
+        "rag.query.source_advisory",
+        "rag.query.source_catalog",
+        "rag.query.source_context_budget",
+        "rag.query.source_evidence_selection",
+        "rag.query.source_mapping",
+        "rag.query.source_matching",
+        "rag.query.source_parent_promotion",
+        "rag.query.source_resolution",
+        "rag.query.source_routes",
+        "rag.query.synthesis",
+        "rag.query.temporal",
+        "rag.query.vllm_config_models",
+        "rag.query.vllm_config_repository",
+    }
+)
+
 
 def test_legacy_feature_route_modules_are_absent_and_not_imported() -> None:
     assert not any(path.exists() for path in LEGACY_FEATURE_ROUTE_FILES)
@@ -171,6 +292,33 @@ def test_legacy_query_modules_are_absent_and_not_imported() -> None:
     violations = find_violations(
         python_files(BACKEND_PYTHON_ROOTS),
         lambda target: target in LEGACY_QUERY_MODULES,
+        resolve_relative_imports=True,
+    )
+
+    assert_no_violations(violations)
+
+
+def test_reorganized_modules_cannot_return_to_retired_locations() -> None:
+    retired_bucket_paths = tuple(
+        RAG_ROOT.joinpath(*module.split(".")[1:])
+        for module in RETIRED_BUCKET_PREFIXES
+    )
+    reorganized_paths = tuple(
+        RAG_ROOT.joinpath(*module.split(".")[1:]).with_suffix(".py")
+        for module in REORGANIZED_MODULES
+    )
+    assert not any(path.exists() for path in (*retired_bucket_paths, *reorganized_paths))
+
+    violations = find_violations(
+        python_files(BACKEND_PYTHON_ROOTS),
+        lambda target: any(
+            target == prefix or target.startswith(f"{prefix}.")
+            for prefix in RETIRED_BUCKET_PREFIXES
+        )
+        or any(
+            target == module or target.startswith(f"{module}.")
+            for module in REORGANIZED_MODULES
+        ),
         resolve_relative_imports=True,
     )
 

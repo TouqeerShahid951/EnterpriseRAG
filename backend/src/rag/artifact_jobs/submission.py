@@ -2,7 +2,7 @@
 
 from pydantic import ConfigDict, Field
 
-from ..schemas.common import ContractModel
+from rag.shared.contracts.http import ContractModel
 
 
 class ArtifactJobSubmission(ContractModel):

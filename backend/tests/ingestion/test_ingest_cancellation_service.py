@@ -25,8 +25,8 @@ class RecordingVectorCleaner:
     def __init__(self) -> None:
         self.deleted: list[str] = []
 
-    def delete_document_vectors(self, document_id: str) -> None:
-        self.deleted.append(document_id)
+    def delete_building_vectors(self, job_id: str) -> None:
+        self.deleted.append(job_id)
 
 
 def test_cancellation_orders_state_revoke_vectors_then_audit() -> None:
@@ -207,9 +207,9 @@ class _OrderedVectorCleaner:
         self._repo = repo
         self._job_id = job_id
 
-    def delete_document_vectors(self, document_id: str) -> None:
-        _ = document_id
-        assert self._repo.get_ingest_job(self._job_id).status == "cancelled"  # type: ignore[union-attr]
+    def delete_building_vectors(self, job_id: str) -> None:
+        assert job_id == self._job_id
+        assert self._repo.get_ingest_job(job_id).status == "cancelled"  # type: ignore[union-attr]
         self._repo.operations.append("vectors")
 
 
@@ -220,8 +220,8 @@ class _FailingQueue:
 
 
 class _FailingVectorCleaner:
-    def delete_document_vectors(self, document_id: str) -> None:
-        _ = document_id
+    def delete_building_vectors(self, job_id: str) -> None:
+        _ = job_id
         raise DocumentVectorCleanupError("qdrant unavailable")
 
 

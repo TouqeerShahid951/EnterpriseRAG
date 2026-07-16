@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
-from ..schemas.common import ContractModel
+from rag.shared.contracts.http import ContractModel
 from .contracts import DocumentPlan
 from .types import ArtifactFormat, ArtifactJobProgressUnit, ArtifactJobStatus
 

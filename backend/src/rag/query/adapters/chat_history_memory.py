@@ -13,7 +13,14 @@ class InMemoryChatHistoryRepository:
     def __init__(self) -> None:
         self._sessions: dict[tuple[str, str, int], ChatSessionRecord] = {}
 
-    def list_sessions(self, *, user_id: str, permission_version: int, limit: int = 30, offset: int = 0) -> list[ChatSessionRecord]:
+    def list_sessions_page(
+        self,
+        *,
+        user_id: str,
+        permission_version: int,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> tuple[list[ChatSessionRecord], int]:
         sessions = [
             session
             for (session_user_id, _session_id, session_permission_version), session in self._sessions.items()
@@ -24,10 +31,20 @@ class InMemoryChatHistoryRepository:
             key=lambda session: session.updated_at or datetime.min.replace(tzinfo=UTC),
             reverse=True,
         )
-        return [
+        page = [
             replace(session, turns=(), question_count=_question_count(session.turns))
             for session in sorted_sessions[offset:offset + limit]
         ]
+        return page, len(sorted_sessions)
+
+    def list_sessions(self, *, user_id: str, permission_version: int, limit: int = 30, offset: int = 0) -> list[ChatSessionRecord]:
+        sessions, _ = self.list_sessions_page(
+            user_id=user_id,
+            permission_version=permission_version,
+            limit=limit,
+            offset=offset,
+        )
+        return sessions
 
     def count_sessions(self, *, user_id: str, permission_version: int) -> int:
         return sum(

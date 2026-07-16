@@ -5,12 +5,12 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ..cancellation import cancellation_token_from_context
-from ..intent_router import route_query
-from ..query_intent import plan_sub_queries, should_include_superseded
-from ..reasoning import extract_temporal_scope_with_reasoning, plan_sub_queries_with_reasoning
-from ..routing_logs import log_route_decision
-from ..routing_models import RoutePlan
-from ..source_resolution import resolve_query_source
+from rag.query.routing.intent_router import route_query
+from rag.query.routing.query_intent import plan_sub_queries, should_include_superseded
+from rag.query.answering.reasoning import extract_temporal_scope_with_reasoning, plan_sub_queries_with_reasoning
+from rag.query.routing.routing_logs import log_route_decision
+from rag.query.routing.routing_models import RoutePlan
+from rag.query.sources.source_resolution import resolve_query_source
 from ..state import QueryContext
 from .node_support import _apply_route_plan, _mark_execution, _raise_if_cancelled
 
@@ -65,7 +65,7 @@ class RoutingNodes:
             return ctx
         query = ctx["request"].query
         if self.config.rag_intent_router_version != "v1":
-            from ..query_intent import classify_intent, resolve_conversational_query
+            from rag.query.routing.query_intent import classify_intent, resolve_conversational_query
 
             ctx["intent"] = classify_intent(query)
             ctx["is_current_only"] = not should_include_superseded(query)

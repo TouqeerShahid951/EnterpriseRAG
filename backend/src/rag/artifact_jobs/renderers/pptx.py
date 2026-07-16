@@ -9,7 +9,7 @@ from io import BytesIO
 import re
 
 from ..contracts import ArtifactContentBundle, ContentBlock, EvidenceCitation
-from ..layout_profiles import ArtifactLayoutProfile
+from rag.artifact_jobs.generation.layout_profiles import ArtifactLayoutProfile
 from .shared import _compact, _list_items, _reference_line, _source_summary
 
 

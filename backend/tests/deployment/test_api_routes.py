@@ -8,12 +8,12 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from rag.api.routes import admin_rag_config_routes
+from rag.deployment import routes as admin_rag_config_routes
 from rag.auth.dependencies import require_platform_admin_user
 from rag.auth.identity_models import UserRecord
 from rag.deployment.application import VllmDeploymentApplyRejected
 from rag.deployment.dependencies import get_vllm_deployment_apply_service
-from rag.query.vllm_config_models import VllmDeploymentConfigRecord
+from rag.deployment.vllm_config_models import VllmDeploymentConfigRecord
 
 
 class StubApplyService:

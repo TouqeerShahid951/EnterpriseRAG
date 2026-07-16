@@ -51,8 +51,8 @@ export function RagEvaluationDiagnostics({ result }: { result: EvaluationCaseRes
       <EvidenceCoverage checks={checks} diagnostic={diagnostic} fallbackCount={fallbackCount} />
 
       <div className="rag-eval-candidate-grid">
-        <CandidateTable title="Retrieved Candidates" detail="Hybrid retrieval before reranking" rows={retrievalRows} />
-        <CandidateTable title="Reranked Candidates" detail="Cross-encoder output when available" rows={rerankedRows} empty="Reranked candidates are not recorded by the backend yet." />
+        <CandidateTable title="Retrieved Candidates" detail="Actual production candidates before reranking" rows={retrievalRows} />
+        <CandidateTable title="Reranked Candidates" detail="Actual production reranker output when available" rows={rerankedRows} empty="No reranked candidates were recorded." />
         <CandidateTable title="Final Sources" detail="Evidence cited or available to the answer" rows={finalRows} empty="No final answer sources." />
       </div>
     </section>

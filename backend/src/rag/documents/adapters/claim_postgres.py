@@ -7,7 +7,7 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from ...schemas.internal import ClaimRecord
+from ..internal_schemas import ClaimRecord
 from ...shared.contracts.evidence import ConflictPair, SourceAnchor
 from ...shared.persistence import PostgresConnectionMixin
 from ..claim_models import IngestClaimsResult
@@ -88,23 +88,11 @@ class PostgresClaimRepository(PostgresConnectionMixin):
         )
 
     def replace_claims_and_detect_conflicts(self, doc_id: str, claims: list[ClaimRecord]) -> IngestClaimsResult:
-        conflict_count = 0
-        conflicted_claim_ids: set[str] = set()
-        normalized_claims = [claim.model_copy(update={"doc_id": doc_id}) for claim in claims]
         with self._connect() as conn:
             with conn.transaction():
-                conn.execute("DELETE FROM claims WHERE doc_id = %s", (doc_id,))
-                for claim in normalized_claims:
-                    claim_id = _upsert_claim(conn, claim)
-                    result = _insert_conflicts_for_claim(conn, claim_id, claim)
-                    if result.rowcount:
-                        conflict_count += result.rowcount
-                        conflicted_claim_ids.add(claim_id)
-        return IngestClaimsResult(
-            saved_count=len(normalized_claims),
-            conflict_count=conflict_count,
-            conflicted_claim_ids=tuple(sorted(conflicted_claim_ids)),
-        )
+                return replace_claims_and_detect_conflicts_in_transaction(
+                    conn, doc_id=doc_id, claims=claims
+                )
 
     def lookup_claims(self, *, entity: str, attribute: str) -> list[ClaimRecord]:
         rows = self._execute_all(
@@ -173,6 +161,30 @@ class PostgresClaimRepository(PostgresConnectionMixin):
             CONFLICT_LOOKUP_QUERY,
             _conflict_params(claim, claim_id, doc_id, visible_group_paths),
         )
+
+
+def replace_claims_and_detect_conflicts_in_transaction(
+    conn: Any,
+    *,
+    doc_id: str,
+    claims: list[ClaimRecord],
+) -> IngestClaimsResult:
+    """Replace one document's claims inside a caller-owned transaction."""
+    conflict_count = 0
+    conflicted_claim_ids: set[str] = set()
+    normalized_claims = [claim.model_copy(update={"doc_id": doc_id}) for claim in claims]
+    conn.execute("DELETE FROM claims WHERE doc_id = %s", (doc_id,))
+    for claim in normalized_claims:
+        claim_id = _upsert_claim(conn, claim)
+        result = _insert_conflicts_for_claim(conn, claim_id, claim)
+        if result.rowcount:
+            conflict_count += result.rowcount
+            conflicted_claim_ids.add(claim_id)
+    return IngestClaimsResult(
+        saved_count=len(normalized_claims),
+        conflict_count=conflict_count,
+        conflicted_claim_ids=tuple(sorted(conflicted_claim_ids)),
+    )
 
 
 def _upsert_claim(conn: Any, claim: ClaimRecord) -> str:

@@ -14,25 +14,52 @@ class PostgresChatHistoryRepository(PostgresConnectionMixin):
         self.database_url = database_url
         self._ensure_tables()
 
-    def list_sessions(self, *, user_id: str, permission_version: int, limit: int = 30, offset: int = 0) -> list[ChatSessionRecord]:
+    def list_sessions_page(
+        self,
+        *,
+        user_id: str,
+        permission_version: int,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> tuple[list[ChatSessionRecord], int]:
         rows = self._execute_all(
             """
             SELECT s.*,
-                   COALESCE(COUNT(t.turn_index) FILTER (WHERE t.role = 'user'), 0)::int AS question_count
+                   COUNT(*) OVER()::int AS total_count,
+                   (
+                       SELECT COUNT(*)::int
+                       FROM chat_session_turns t
+                       WHERE t.session_id = s.id
+                         AND t.user_id = s.user_id
+                         AND t.permission_version = s.permission_version
+                         AND t.role = 'user'
+                   ) AS question_count
             FROM chat_sessions s
-            LEFT JOIN chat_session_turns t
-              ON t.session_id = s.id
-             AND t.user_id = s.user_id
-             AND t.permission_version = s.permission_version
             WHERE s.user_id = %s AND s.permission_version = %s
-            GROUP BY s.id, s.user_id, s.permission_version
             ORDER BY s.updated_at DESC, s.id DESC
             LIMIT %s
             OFFSET %s
             """,
             (user_id, permission_version, limit, offset),
         )
-        return [session_from_row(row) for row in rows]
+        sessions = [session_from_row(row) for row in rows]
+        if rows:
+            return sessions, int(rows[0]["total_count"])
+        if offset:
+            return sessions, self.count_sessions(
+                user_id=user_id,
+                permission_version=permission_version,
+            )
+        return sessions, 0
+
+    def list_sessions(self, *, user_id: str, permission_version: int, limit: int = 30, offset: int = 0) -> list[ChatSessionRecord]:
+        sessions, _ = self.list_sessions_page(
+            user_id=user_id,
+            permission_version=permission_version,
+            limit=limit,
+            offset=offset,
+        )
+        return sessions
 
     def count_sessions(self, *, user_id: str, permission_version: int) -> int:
         row = self._execute_one(

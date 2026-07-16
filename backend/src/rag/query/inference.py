@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from typing import Protocol
 
 from ..core.config import Settings
-from .rag_config_models import RagConfigRecord
+from .configuration.models import RagConfigRecord
 from .cancellation import QueryCancellationToken
 
 

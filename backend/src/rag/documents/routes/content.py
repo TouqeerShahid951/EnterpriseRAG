@@ -13,14 +13,12 @@ from ...connectors.models import CONNECTOR_RECORD_CONTENT_TYPE
 from ...core.config import settings
 from ...query.http import ServiceRequestError
 from ...query.qdrant import QdrantClient
-from ...query.sources import source_from_hit
-from ...schemas.common import ErrorResponse
+from ...ingestion.publication.dependencies import active_generation_resolver_for
+from rag.query.sources import source_from_hit
+from rag.shared.contracts.http import ErrorResponse
 from ...shared.contracts.evidence import SourceAnchor
-from ...services.document_image_asset_storage import (
-    DocumentImageAssetStorage,
-    get_document_image_asset_storage,
-)
-from ..dependencies import get_upload_storage
+from ..dependencies import get_document_image_asset_storage, get_upload_storage
+from ..image_asset_storage import DocumentImageAssetStorage
 from ..repository import DocumentRecord, DocumentRepository, get_document_repository
 from ..storage import UploadStorage
 from .authorization import require_visible_document
@@ -35,6 +33,7 @@ def get_document_qdrant_client() -> QdrantClient:
         base_url=settings.qdrant_url,
         collection=settings.qdrant_collection,
         timeout_seconds=settings.rag_http_timeout_seconds,
+        active_generation_resolver=active_generation_resolver_for(settings),
     )
 
 

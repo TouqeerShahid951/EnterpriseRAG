@@ -3,13 +3,13 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from rag.api.routes import admin_user_routes
+from rag.auth.routes import admin_users as admin_user_routes
 from rag.auth.passwords import hash_password, verify_password
 from rag.auth.refresh_sessions import InMemoryRefreshSessionStore
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.adapters.identity_memory import InMemoryIdentityRepository
 from rag.auth.identity_models import UserRecord
-from rag.schemas.admin import UserPasswordResetRequest
+from rag.auth.schemas.admin import UserPasswordResetRequest
 
 
 def test_admin_reset_password_forces_change_revokes_sessions_and_audits() -> None:

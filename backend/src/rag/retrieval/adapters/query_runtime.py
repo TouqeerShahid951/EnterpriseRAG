@@ -8,18 +8,18 @@ from ...auth.abac import build_abac_filter
 from ...auth.context import UserContext
 from ...core.config import Settings
 from ...query.inference import InferenceClient
-from ...query.intent_router import route_query
+from rag.query.routing.intent_router import route_query
 from ...query.qdrant import QdrantClient, SearchHit
-from ...query.query_retrieval import (
+from rag.query.retrieval.query_retrieval import (
     add_document_scope,
     add_expiry_scope,
     add_stale_scope,
     retrieve_candidates,
 )
-from ...query.rag_config_models import RagConfigRecord
+from ...query.configuration.models import RagConfigRecord
 from ...query.reranker import rerank_hits
 from ...query.state import initial_retrieval_state
-from ...query.temporal import add_effective_date_scope, target_date_for_query
+from rag.query.retrieval.temporal import add_effective_date_scope, target_date_for_query
 from ...shared.contracts.group_paths import normalize_group_path
 from ..contracts import AuthorizedCorpusRequest, RetrievedChunk
 

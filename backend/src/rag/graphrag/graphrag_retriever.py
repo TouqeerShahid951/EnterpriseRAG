@@ -8,7 +8,7 @@ from typing import Any
 from rag.auth.abac import build_abac_filter
 from rag.query.cancellation import call_with_optional_cancellation, cancellation_token_from_context
 from rag.query.qdrant import QdrantClient, SearchHit
-from rag.query.query_retrieval import add_document_scope
+from rag.query.retrieval.query_retrieval import add_document_scope
 from rag.query.state import QueryContext, scoped_user_context
 
 from .models import CommunitySummary, SourceRef

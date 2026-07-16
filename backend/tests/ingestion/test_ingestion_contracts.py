@@ -24,6 +24,7 @@ def test_ingest_payload_round_trips_every_supported_wire_field() -> None:
         quality_preset="high_accuracy",
         review_batch_id="review-1",
         image_review_batch_id="image-review-1",
+        delivery_id="f7282b32-50db-4f3f-b99c-a242f777ce62",
     )
 
     serialized = original.to_dict()
@@ -61,6 +62,14 @@ def test_ingest_payload_rejects_unknown_clearance() -> None:
     payload["clearance_level"] = "UNKNOWN"
 
     with pytest.raises(ValueError, match="clearance_level"):
+        IngestJobPayload.from_dict(payload)
+
+
+def test_ingest_payload_rejects_invalid_delivery_id() -> None:
+    payload = _valid_payload()
+    payload["delivery_id"] = "not-a-uuid"
+
+    with pytest.raises(ValueError, match="delivery_id"):
         IngestJobPayload.from_dict(payload)
 
 

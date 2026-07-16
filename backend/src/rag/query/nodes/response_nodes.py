@@ -6,10 +6,10 @@ from time import perf_counter
 
 from ...graphrag.graphrag_synthesizer import synthesize_graphrag_response
 from ..cancellation import cancellation_token_from_context
-from ..faithfulness import FAITHFULNESS_CHECK_FAILED, attributed_sources, evaluate_faithfulness
-from ..routing_logs import log_faithfulness_result, log_route_outcome
+from rag.query.answering.faithfulness import FAITHFULNESS_CHECK_FAILED, attributed_sources, evaluate_faithfulness
+from rag.query.routing.routing_logs import log_faithfulness_result, log_route_outcome
 from ..state import QueryContext
-from ..synthesis import synthesize_response
+from rag.query.answering.synthesis import synthesize_response
 from .node_support import (
     _artifact_generation_requested,
     _mark_execution,
@@ -101,6 +101,11 @@ class ResponseNodes:
     def should_run_faithfulness(self, ctx: QueryContext) -> bool:
         if "response" not in ctx:
             return False
+        artifact_request = ctx.get("artifact_request")
+        if artifact_request is not None and artifact_request.needs_clarification:
+            return False
+        if ctx.get("force_faithfulness_check", False):
+            return True
         policy = str(self.config.rag_faithfulness_policy or "high_risk").strip().lower()
         if policy in _FAITHFULNESS_NEVER:
             return False

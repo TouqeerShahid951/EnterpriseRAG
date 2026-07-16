@@ -16,6 +16,7 @@ from ..job_models import (
     IngestJobMutationResult,
     IngestJobPage,
     IngestJobRecord,
+    IngestJobSummary,
     IngestJobView,
 )
 
@@ -188,6 +189,8 @@ class InMemoryIngestJobRepositoryMixin:
     ) -> IngestAttemptResult:
         job = self._jobs.get(job_id)
         selected_token = run_token
+        if job is not None and job.active_delivery_id is not None:
+            return IngestAttemptResult(job=job, claimed=False)
         if (
             selected_token is not None
             and job is not None
@@ -198,17 +201,22 @@ class InMemoryIngestJobRepositoryMixin:
         now = datetime.now(UTC)
         heartbeat = job.last_heartbeat_at or job.updated_at or job.created_at if job else None
         processing_is_stale = heartbeat is None or (now - heartbeat).total_seconds() >= stale_after_seconds
+        stale_failure_count = int(job is not None and job.status == "processing")
         if (
             job is None
             or job.status not in {"queued", "processing"}
             or (job.status == "processing" and not processing_is_stale)
-            or job.attempt_count >= max_attempts
+            or job.failure_attempt_count + stale_failure_count >= max_attempts
         ):
             return IngestAttemptResult(job=job, claimed=False)
         updated = replace(
             job,
             status="processing",
             attempt_count=job.attempt_count + 1,
+            failure_attempt_count=job.failure_attempt_count + stale_failure_count,
+            last_failure_run_token=(
+                job.run_token if stale_failure_count else job.last_failure_run_token
+            ),
             last_heartbeat_at=now,
             run_token=selected_token,
             error_code=None,
@@ -365,9 +373,72 @@ class InMemoryIngestJobRepositoryMixin:
         selected = views[offset:] if limit is None else views[offset:offset + limit]
         return IngestJobPage(items=tuple(selected), total=total)
 
+    def summarize_visible_ingest_jobs(
+        self,
+        *,
+        access: IngestJobAccess,
+        filters: IngestJobFilters,
+    ) -> IngestJobSummary:
+        from ...documents.upload.status import stage_for_job_status
+
+        page = self.search_visible_ingest_jobs(
+            access=access,
+            filters=filters,
+            limit=None,
+        )
+        jobs = [view.job for view in page.items]
+        status_counts = _count_ingest_values(job.status for job in jobs)
+        stage_counts = _count_ingest_values(
+            stage_for_job_status(
+                job.status,
+                max(0, min(100, int(job.progress_pct))),
+                stage_progress=job.stage_progress,
+            )
+            for job in jobs
+        )
+        origin_counts = _count_ingest_values(
+            job.origin
+            if job.origin in {"upload", "reingest", "restore", "folder", "connector", "unknown"}
+            else "unknown"
+            for job in jobs
+        )
+        latest_by_document: dict[str, IngestJobRecord] = {}
+        for job in sorted(jobs, key=_latest_ingest_job_key, reverse=True):
+            latest_by_document.setdefault(job.doc_id, job)
+        active_statuses = {"scheduled", "queued", "processing", "human_review"}
+        return IngestJobSummary(
+            total=page.total,
+            active=sum(status_counts.get(status, 0) for status in active_statuses),
+            needs_attention=sum(
+                1
+                for job in latest_by_document.values()
+                if job.status in {*active_statuses, "failed"}
+            ),
+            status_counts=status_counts,
+            stage_counts=stage_counts,
+            origin_counts=origin_counts,
+        )
+
 
 def _ingest_job_sort_key(job: IngestJobRecord) -> tuple[datetime, str]:
     return (job.created_at or datetime.min.replace(tzinfo=UTC), job.id)
+
+
+def _latest_ingest_job_key(job: IngestJobRecord) -> tuple[float, str]:
+    timestamps = [
+        value.timestamp()
+        for value in (job.created_at, job.updated_at)
+        if isinstance(value, datetime)
+    ]
+    return (max(timestamps, default=float("-inf")), job.id)
+
+
+def _count_ingest_values(values: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for raw_value in values:
+        value = str(raw_value)
+        counts[value] = counts.get(value, 0) + 1
+    return counts
 
 
 def _validate_ingest_job_page(*, limit: int | None, offset: int) -> None:
@@ -401,4 +472,3 @@ def _next_run_token(
     if current.run_token is None and run_token is not None:
         return run_token
     return current.run_token
-

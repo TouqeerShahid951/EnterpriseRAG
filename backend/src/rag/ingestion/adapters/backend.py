@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from threading import Lock
 from typing import Any
 
@@ -61,6 +62,15 @@ class IngestAttempt:
     max_attempts: int
     job_status: str
     run_token: str | None = None
+    failure_attempt_count: int = 0
+
+
+@dataclass(frozen=True)
+class IngestFailure:
+    job_status: str
+    failure_attempt_count: int
+    retry_scheduled: bool
+    changed: bool
 
 
 @dataclass(frozen=True)
@@ -137,16 +147,38 @@ class BackendInternalClient:
             else:
                 self._clear_run_token(job_id)
 
-    def start_attempt(self, *, job_id: str, run_token: str) -> IngestAttempt:
-        payload = request_json(
-            self.base_url,
-            f"/internal/ingest/jobs/{job_id}/attempt",
-            service="backend",
-            method="POST",
-            payload={"run_token": run_token},
-            headers={"X-Service-Token": self.service_token},
-            timeout_seconds=self.timeout_seconds,
-        )
+    def start_attempt(
+        self,
+        *,
+        job_id: str,
+        run_token: str,
+        delivery_id: str | None = None,
+    ) -> IngestAttempt:
+        request_payload = {"run_token": run_token}
+        if delivery_id is not None:
+            request_payload["delivery_id"] = delivery_id
+        try:
+            payload = request_json(
+                self.base_url,
+                f"/internal/ingest/jobs/{job_id}/attempt",
+                service="backend",
+                method="POST",
+                payload=request_payload,
+                headers={"X-Service-Token": self.service_token},
+                timeout_seconds=self.timeout_seconds,
+            )
+        except ServiceRequestError as exc:
+            if delivery_id is None or not _legacy_attempt_rejects_delivery_id(exc):
+                raise
+            payload = request_json(
+                self.base_url,
+                f"/internal/ingest/jobs/{job_id}/attempt",
+                service="backend",
+                method="POST",
+                payload={"run_token": run_token},
+                headers={"X-Service-Token": self.service_token},
+                timeout_seconds=self.timeout_seconds,
+            )
         response_run_token = payload.get("run_token")
         accepted_run_token = (
             str(response_run_token)
@@ -164,6 +196,46 @@ class BackendInternalClient:
             max_attempts=int(payload["max_attempts"]),
             job_status=str(payload["job_status"]),
             run_token=accepted_run_token,
+            failure_attempt_count=int(payload.get("failure_attempt_count") or 0),
+        )
+
+    def record_failure(
+        self,
+        *,
+        job_id: str,
+        error_code: str,
+        error_message_safe: str,
+        retry_message: dict[str, Any] | None,
+    ) -> IngestFailure:
+        run_token = self._require_run_token(job_id)
+        request_payload: dict[str, object] = {
+            "run_token": run_token,
+            "error_code": error_code,
+            "error_message_safe": error_message_safe,
+        }
+        if retry_message is not None:
+            request_payload["retry_message"] = retry_message
+        try:
+            payload = request_json(
+                self.base_url,
+                f"/internal/ingest/jobs/{job_id}/failure",
+                service="backend",
+                method="POST",
+                payload=request_payload,
+                headers={"X-Service-Token": self.service_token},
+                timeout_seconds=self.timeout_seconds,
+            )
+        except ServiceRequestError as exc:
+            if exc.status_code == 409:
+                self._mark_lease_lost(job_id)
+            raise
+        if payload.get("changed"):
+            self._clear_run_token(job_id)
+        return IngestFailure(
+            job_status=str(payload["status"]),
+            failure_attempt_count=int(payload["failure_attempt_count"]),
+            retry_scheduled=bool(payload["retry_scheduled"]),
+            changed=bool(payload["changed"]),
         )
 
     def get_job_status(self, *, job_id: str) -> IngestJobSnapshot:
@@ -300,6 +372,95 @@ class BackendInternalClient:
             headers={"X-Service-Token": self.service_token},
             timeout_seconds=self.timeout_seconds,
         )
+
+    def stage_index_generation(
+        self,
+        *,
+        job_id: str,
+        generation_id: str,
+        input_hash: str,
+        configuration_digest: str,
+        expected_point_count: int,
+        expected_item_hash: str,
+        vector_dimension: int,
+        metadata: dict[str, Any],
+        claims: list[dict[str, Any]],
+        supersedes: list[str],
+        warnings: list[str],
+    ) -> None:
+        self._index_generation_transition(
+            job_id=job_id,
+            path="index-generation",
+            payload={
+                "generation_id": generation_id,
+                "run_token": self._require_run_token(job_id),
+                "input_hash": input_hash,
+                "configuration_digest": configuration_digest,
+                "expected_point_count": expected_point_count,
+                "expected_item_hash": expected_item_hash,
+                "vector_dimension": vector_dimension,
+                "metadata": metadata,
+                "claims": claims,
+                "supersedes": supersedes,
+                "warnings": warnings,
+            },
+        )
+
+    def verify_index_generation(self, *, job_id: str, generation_id: str) -> None:
+        self._index_generation_transition(
+            job_id=job_id,
+            path="index-generation/verified",
+            payload={
+                "generation_id": generation_id,
+                "run_token": self._require_run_token(job_id),
+            },
+        )
+
+    def activate_index_generation(self, *, job_id: str, generation_id: str) -> None:
+        self._index_generation_transition(
+            job_id=job_id,
+            path="index-generation/activate",
+            payload={
+                "generation_id": generation_id,
+                "run_token": self._require_run_token(job_id),
+            },
+        )
+        self._clear_run_token(job_id)
+
+    def cancel_index_generation(self, *, job_id: str) -> str | None:
+        payload = request_json(
+            self.base_url,
+            f"/internal/ingest/jobs/{job_id}/index-generation/cancel",
+            service="backend",
+            method="POST",
+            payload={},
+            headers={"X-Service-Token": self.service_token},
+            timeout_seconds=self.timeout_seconds,
+        )
+        generation_id = payload.get("generation_id")
+        return str(generation_id) if generation_id else None
+
+    def _index_generation_transition(
+        self,
+        *,
+        job_id: str,
+        path: str,
+        payload: dict[str, Any],
+    ) -> None:
+        try:
+            request_json(
+                self.base_url,
+                f"/internal/ingest/jobs/{job_id}/{path}",
+                service="backend",
+                method="POST",
+                payload=payload,
+                headers={"X-Service-Token": self.service_token},
+                timeout_seconds=self.timeout_seconds,
+            )
+        except ServiceRequestError as exc:
+            if _is_lease_lost_error(exc):
+                self._mark_lease_lost(job_id)
+            raise
 
     def create_review_batch(
         self,
@@ -444,6 +605,10 @@ class BackendInternalClient:
             self._lease_lost_jobs.add(job_id)
 
 
+def _is_lease_lost_error(exc: ServiceRequestError) -> bool:
+    return exc.status_code == 409 and "ingest_job_lease_lost" in exc.message
+
+
 def _runtime_config_from_payload(payload: dict[str, Any]) -> InferenceRuntimeConfig:
     return InferenceRuntimeConfig(
         provider=str(payload.get("provider") or "ollama"),
@@ -469,6 +634,24 @@ def _runtime_config_from_payload(payload: dict[str, Any]) -> InferenceRuntimeCon
         chat_timeout_seconds=float(payload["chat_timeout_seconds"]),
         embed_timeout_seconds=float(payload["embed_timeout_seconds"]),
         thinking_enabled=bool(payload.get("thinking_enabled", False)),
+    )
+
+
+def _legacy_attempt_rejects_delivery_id(exc: ServiceRequestError) -> bool:
+    if exc.status_code != 422:
+        return False
+    try:
+        body = json.loads(exc.message)
+    except json.JSONDecodeError:
+        return False
+    details = body.get("detail") if isinstance(body, dict) else None
+    if not isinstance(details, list) or len(details) != 1:
+        return False
+    detail = details[0]
+    return (
+        isinstance(detail, dict)
+        and detail.get("type") == "extra_forbidden"
+        and detail.get("loc") == ["body", "delivery_id"]
     )
 
 

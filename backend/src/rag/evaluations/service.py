@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+import logging
 from typing import Any
 
 from ..auth.context import UserContext
-from ..query.rag_config_repository import effective_rag_config
-from ..query.rag_config_mapping import rag_config_response
-from ..schemas.evaluations import (
+from ..query.configuration.repository import effective_rag_config
+from ..query.configuration.mapping import rag_config_response
+from rag.evaluations.schemas import (
     EvaluationCaseResult,
     EvaluationDatasetDetail,
     EvaluationDatasetSummary,
@@ -24,6 +25,10 @@ from .models import (
     EvaluationRunRecord,
 )
 from .queue import EvaluationRunQueue
+from .runtime_pins import RUNTIME_PINS_KEY, capture_runtime_pins
+
+
+logger = logging.getLogger(__name__)
 
 
 class EvaluationActionError(RuntimeError):
@@ -41,11 +46,15 @@ class EvaluationService:
         queue_factory: Callable[[], EvaluationRunQueue],
         retention_days: int,
         rag_config_snapshot_factory: Callable[[], dict[str, Any]] | None = None,
+        runtime_pins_factory: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
         self.repo_factory = repo_factory
         self.queue_factory = queue_factory
         self.retention_days = retention_days
-        self.rag_config_snapshot_factory = rag_config_snapshot_factory or _rag_config_snapshot
+        self.rag_config_snapshot_factory = (
+            rag_config_snapshot_factory or _rag_config_snapshot
+        )
+        self.runtime_pins_factory = runtime_pins_factory or _runtime_pins
 
     def import_dataset(
         self,
@@ -56,7 +65,9 @@ class EvaluationService:
         user_id: str | None,
     ) -> EvaluationDatasetDetail:
         try:
-            normalized = normalize_dataset_content(content, name=name, source_format=source_format)
+            normalized = normalize_dataset_content(
+                content, name=name, source_format=source_format
+            )
         except EvaluationDatasetError as exc:
             raise EvaluationActionError(exc.code, exc.message) from exc
         record = self.repo_factory().create_dataset(
@@ -70,12 +81,16 @@ class EvaluationService:
         return dataset_detail(record)
 
     def list_datasets(self) -> list[EvaluationDatasetSummary]:
-        return [dataset_summary(record) for record in self.repo_factory().list_datasets()]
+        return [
+            dataset_summary(record) for record in self.repo_factory().list_datasets()
+        ]
 
     def get_dataset(self, dataset_id: str) -> EvaluationDatasetDetail:
         record = self.repo_factory().get_dataset(dataset_id)
         if record is None:
-            raise EvaluationActionError("evaluation_dataset_not_found", "Evaluation dataset was not found.")
+            raise EvaluationActionError(
+                "evaluation_dataset_not_found", "Evaluation dataset was not found."
+            )
         return dataset_detail(record)
 
     def submit_run(
@@ -91,10 +106,32 @@ class EvaluationService:
         repo = self.repo_factory()
         dataset = repo.get_dataset(dataset_id)
         if dataset is None:
-            raise EvaluationActionError("evaluation_dataset_not_found", "Evaluation dataset was not found.")
+            raise EvaluationActionError(
+                "evaluation_dataset_not_found", "Evaluation dataset was not found."
+            )
         selected = _select_cases(dataset, case_ids=case_ids, limit=limit)
         if not selected:
-            raise EvaluationActionError("evaluation_run_empty", "No evaluation cases matched the run selection.")
+            raise EvaluationActionError(
+                "evaluation_run_empty", "No evaluation cases matched the run selection."
+            )
+        rag_config_snapshot = self.rag_config_snapshot_factory()
+        try:
+            rag_config_snapshot[RUNTIME_PINS_KEY] = self.runtime_pins_factory(
+                rag_config_snapshot=rag_config_snapshot,
+                user=user,
+                group_path=group_path,
+                document_ids=document_ids,
+            )
+        except Exception as exc:  # noqa: BLE001 - submission must fail before enqueue
+            logger.warning(
+                "evaluation runtime pin capture failed error_type=%s",
+                type(exc).__name__,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            raise EvaluationActionError(
+                "evaluation_runtime_pins_unavailable",
+                "Evaluation runtime pins could not be captured.",
+            ) from exc
         run = repo.create_run(
             dataset_id=dataset.id,
             user_id=user.user_id,
@@ -106,22 +143,36 @@ class EvaluationService:
             group_path=group_path,
             document_ids=document_ids,
             selected_case_ids=[case.id for case in selected],
-            rag_config_snapshot=self.rag_config_snapshot_factory(),
+            rag_config_snapshot=rag_config_snapshot,
             case_count=len(selected),
             retention_days=self.retention_days,
         )
         try:
             self.queue_factory().enqueue(run.id)
         except RuntimeError as exc:
-            run = repo.update_run(run.id, {
-                "status": "failed",
-                "stage": "failed",
-                "progress_pct": 100,
-                "error_code": "evaluation_enqueue_failed",
-                "error_message_safe": str(exc)[:300],
-                "completed_at": datetime.now(UTC),
-            }) or run
-            raise EvaluationActionError("evaluation_enqueue_failed", "Evaluation run could not be queued.") from exc
+            logger.warning(
+                "evaluation initial enqueue failed run_id=%s error_type=%s",
+                run.id,
+                type(exc).__name__,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            run = (
+                repo.update_run(
+                    run.id,
+                    {
+                        "status": "failed",
+                        "stage": "failed",
+                        "progress_pct": 100,
+                        "error_code": "evaluation_enqueue_failed",
+                        "error_message_safe": "Evaluation run could not be queued.",
+                        "completed_at": datetime.now(UTC),
+                    },
+                )
+                or run
+            )
+            raise EvaluationActionError(
+                "evaluation_enqueue_failed", "Evaluation run could not be queued."
+            ) from exc
         return run_summary(run, dataset)
 
     def list_runs(self) -> list[EvaluationRunSummary]:
@@ -134,7 +185,9 @@ class EvaluationService:
         repo = self.repo_factory()
         run = repo.get_run(run_id)
         if run is None:
-            raise EvaluationActionError("evaluation_run_not_found", "Evaluation run was not found.")
+            raise EvaluationActionError(
+                "evaluation_run_not_found", "Evaluation run was not found."
+            )
         dataset = repo.get_dataset(run.dataset_id)
         results = repo.list_case_results(run.id)
         return run_detail(run, dataset, results)
@@ -143,53 +196,74 @@ class EvaluationService:
         repo = self.repo_factory()
         run = repo.get_run(run_id)
         if run is None:
-            raise EvaluationActionError("evaluation_run_not_found", "Evaluation run was not found.")
+            raise EvaluationActionError(
+                "evaluation_run_not_found", "Evaluation run was not found."
+            )
         if run.status in {"complete", "partial", "failed", "cancelled"}:
             return run_summary(run, repo.get_dataset(run.dataset_id))
-        updated = repo.update_run(run.id, {
-            "cancellation_requested": True,
-            "status": "cancelled",
-            "stage": "cancelled",
-            "progress_pct": 100,
-            "completed_at": datetime.now(UTC),
-        }) or run
+        updated = repo.cancel_run(run.id) or run
         return run_summary(updated, repo.get_dataset(updated.dataset_id))
 
     def retry(self, run_id: str) -> EvaluationRunSummary:
         repo = self.repo_factory()
         run = repo.get_run(run_id)
         if run is None:
-            raise EvaluationActionError("evaluation_run_not_found", "Evaluation run was not found.")
+            raise EvaluationActionError(
+                "evaluation_run_not_found", "Evaluation run was not found."
+            )
         if run.status not in {"failed", "partial", "cancelled"}:
-            raise EvaluationActionError("evaluation_run_not_retryable", "Only failed, partial, or cancelled runs can be retried.")
+            raise EvaluationActionError(
+                "evaluation_run_not_retryable",
+                "Only failed, partial, or cancelled runs can be retried.",
+            )
         if run.attempt_count >= run.max_attempts:
-            raise EvaluationActionError("evaluation_retry_exhausted", "This evaluation run has reached its retry limit.")
-        repo.clear_case_results(run.id)
-        updated = repo.update_run(run.id, {
-            "status": "queued",
-            "stage": "queued",
-            "progress_pct": 0,
-            "completed_count": 0,
-            "passed_count": 0,
-            "failed_count": 0,
-            "summary_json": {},
-            "cancellation_requested": False,
-            "error_code": None,
-            "error_message_safe": None,
-            "completed_at": None,
-        }) or run
+            raise EvaluationActionError(
+                "evaluation_retry_exhausted",
+                "This evaluation run has reached its retry limit.",
+            )
+        updated, accepted = repo.reset_run_for_retry(run.id)
+        if updated is None:
+            raise EvaluationActionError(
+                "evaluation_run_not_found", "Evaluation run was not found."
+            )
+        if not accepted:
+            if updated.error_code == "evaluation_case_execution_state_missing":
+                raise EvaluationActionError(
+                    "evaluation_retry_state_missing",
+                    "This legacy evaluation run does not have recoverable case state.",
+                )
+            if updated.attempt_count >= updated.max_attempts:
+                raise EvaluationActionError(
+                    "evaluation_retry_exhausted",
+                    "This evaluation run has reached its retry limit.",
+                )
+            raise EvaluationActionError(
+                "evaluation_run_not_retryable",
+                "This evaluation run is no longer retryable.",
+            )
         try:
             self.queue_factory().enqueue(updated.id)
         except RuntimeError as exc:
-            repo.update_run(updated.id, {
-                "status": "failed",
-                "stage": "failed",
-                "progress_pct": 100,
-                "error_code": "evaluation_enqueue_failed",
-                "error_message_safe": str(exc)[:300],
-                "completed_at": datetime.now(UTC),
-            })
-            raise EvaluationActionError("evaluation_enqueue_failed", "Evaluation run could not be queued.") from exc
+            logger.warning(
+                "evaluation retry enqueue failed run_id=%s error_type=%s",
+                updated.id,
+                type(exc).__name__,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            repo.update_run(
+                updated.id,
+                {
+                    "status": "failed",
+                    "stage": "failed",
+                    "progress_pct": 100,
+                    "error_code": "evaluation_enqueue_failed",
+                    "error_message_safe": "Evaluation run could not be queued.",
+                    "completed_at": datetime.now(UTC),
+                },
+            )
+            raise EvaluationActionError(
+                "evaluation_enqueue_failed", "Evaluation run could not be queued."
+            ) from exc
         return run_summary(updated, repo.get_dataset(updated.dataset_id))
 
 
@@ -214,7 +288,9 @@ def dataset_detail(record: EvaluationDatasetRecord) -> EvaluationDatasetDetail:
     )
 
 
-def run_summary(run: EvaluationRunRecord, dataset: EvaluationDatasetRecord | None) -> EvaluationRunSummary:
+def run_summary(
+    run: EvaluationRunRecord, dataset: EvaluationDatasetRecord | None
+) -> EvaluationRunSummary:
     return EvaluationRunSummary(
         id=run.id,
         dataset_id=run.dataset_id,
@@ -301,6 +377,26 @@ def _select_cases(
 def _rag_config_snapshot() -> dict[str, Any]:
     config = effective_rag_config()
     return rag_config_response(config).model_dump(mode="json")
+
+
+def _runtime_pins(
+    *,
+    rag_config_snapshot: dict[str, Any],
+    user: UserContext,
+    group_path: str | None,
+    document_ids: list[str],
+) -> dict[str, Any]:
+    from ..core.config import settings
+    from ..documents.repository import get_document_repository
+
+    return capture_runtime_pins(
+        config=settings,
+        rag_config_snapshot=rag_config_snapshot,
+        document_repo=get_document_repository(),
+        user=user,
+        group_path=group_path,
+        document_ids=document_ids,
+    )
 
 
 def _iso(value: datetime | None) -> str | None:

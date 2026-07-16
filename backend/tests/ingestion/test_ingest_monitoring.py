@@ -108,9 +108,11 @@ def test_stale_requeue_uses_verified_activity_and_records_audit() -> None:
     )
 
     assert requeued.status == "queued"
+    assert requeued.failure_attempt_count == 1
     assert queue.messages[0].job_id == job.id
     assert repo.audit_events[-1]["event_type"] == "admin.ingest.requeued"
     assert repo.audit_events[-1]["actor_id"] == "admin-1"
+    assert repo.audit_events[-1]["payload"]["failure_attempt_count"] == 1
 
 
 class _UnexpectedSearchRepository:

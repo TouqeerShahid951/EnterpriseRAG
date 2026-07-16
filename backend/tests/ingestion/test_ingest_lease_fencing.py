@@ -22,11 +22,11 @@ from rag.internal.ingest_status_routes import (
 from rag.ingestion import maintenance as ingest_maintenance
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
-from rag.schemas.internal import (
+from rag.ingestion.internal_schemas import (
     InternalJobAttemptRequest,
     InternalJobStatusRequest,
-    ServiceTokenContext,
 )
+from rag.internal.schemas import ServiceTokenContext
 
 
 ACTIVE_STATUSES = frozenset({"scheduled", "queued", "processing", "human_review"})
@@ -408,7 +408,7 @@ def test_maintenance_does_not_fail_job_heartbeat_after_stale_scan(
     _, _, job_id = _populate_repository(repo, status="processing")
     job = repo.get_ingest_job(job_id)
     assert job is not None
-    stale_job = replace(job, attempt_count=3)
+    stale_job = replace(job, attempt_count=3, failure_attempt_count=3)
     monkeypatch.setattr(
         ingest_maintenance,
         "list_stale_ingest_jobs",
@@ -444,6 +444,7 @@ def test_maintenance_uses_observed_token_to_fail_stale_exhausted_job(
     stale_job = replace(
         current,
         attempt_count=3,
+        failure_attempt_count=3,
         last_heartbeat_at=old,
         updated_at=old,
     )

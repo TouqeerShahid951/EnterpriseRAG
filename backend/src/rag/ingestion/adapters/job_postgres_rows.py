@@ -32,6 +32,20 @@ def _job_from_row(row: dict[str, Any]) -> IngestJobRecord:
         if row.get("stage_progress") is not None
         else None,
         attempt_count=int(row.get("attempt_count") or 0),
+        delivery_count=int(row.get("delivery_count") or 0),
+        failure_attempt_count=int(row.get("failure_attempt_count") or 0),
+        review_resume_count=int(row.get("review_resume_count") or 0),
+        resource_promotion_count=int(row.get("resource_promotion_count") or 0),
+        active_delivery_id=(
+            str(row["active_delivery_id"])
+            if row.get("active_delivery_id")
+            else None
+        ),
+        last_failure_run_token=(
+            str(row["last_failure_run_token"])
+            if row.get("last_failure_run_token")
+            else None
+        ),
         last_heartbeat_at=row.get("last_heartbeat_at"),
         run_token=str(row["run_token"]) if row.get("run_token") else None,
         warnings=tuple(str(value) for value in _json_list(row.get("warnings"))),

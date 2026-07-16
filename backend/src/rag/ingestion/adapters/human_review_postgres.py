@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from ...shared.persistence import PostgresConnectionMixin
-from ..review_models import ReviewBatchRecord, ReviewDecisionRecord, ReviewItemRecord
+from ..review.models import ReviewBatchRecord, ReviewDecisionRecord, ReviewItemRecord
 
 
 class PostgresHumanReviewRepository(PostgresConnectionMixin):
