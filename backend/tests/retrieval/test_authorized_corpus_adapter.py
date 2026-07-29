@@ -139,6 +139,7 @@ def test_search_maps_scope_and_preserves_routing_and_reranking_policy(
         "max_candidates": 12,
         "model_name": "test-reranker",
         "cache_dir": "/models/test-reranker",
+        "device": "auto",
     }
     normalized_text = "policy finding"
     assert result == (

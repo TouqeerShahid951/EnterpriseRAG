@@ -230,7 +230,12 @@ function CaseDetailPanel({ result }: { result: EvaluationCaseResult | null }) {
         {result.node_timings.length === 0 ? <p className="text-secondary">No node timings were recorded.</p> : null}
         <div className="rag-eval-timing-list">
           {result.node_timings.map((timing, index) => (
-            <span key={`${String(timing.node ?? index)}-${index}`}>{String(timing.node ?? "node")} · {String(timing.duration_ms ?? 0)}ms</span>
+            <span key={`${timing.node}-${index}`}>
+              {timing.node} · {timing.duration_ms}ms
+              {Object.entries(timing.phase_timings_ms ?? {}).map(([phase, durationMs]) => (
+                <small key={phase}> · {phase.split("_").join(" ")} {durationMs}ms</small>
+              ))}
+            </span>
           ))}
         </div>
       </section>

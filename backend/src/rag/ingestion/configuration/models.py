@@ -6,13 +6,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from rag.ingestion.quality import DEFAULT_INGESTION_QUALITY_PRESET
-
-
 @dataclass(frozen=True)
 class IngestConfigRecord:
     worker_concurrency: int = 1
-    quality_preset: str = DEFAULT_INGESTION_QUALITY_PRESET
     ocr_review_confidence_threshold: float = 0.9
     pdf_image_review_threshold: int = 64
     vision_layout_repair_enabled: bool = False

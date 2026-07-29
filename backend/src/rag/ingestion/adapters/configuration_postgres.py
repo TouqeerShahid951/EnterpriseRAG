@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from ...shared.persistence import PostgresConnectionMixin
 from ..configuration import IngestConfigRecord
-from ..quality import normalize_ingestion_quality_preset
 
 ACTIVE_CONFIG_KEY = "active"
 
@@ -17,7 +16,7 @@ class PostgresIngestConfigRepository(PostgresConnectionMixin):
         self._ensure_table()
         row = self._execute_optional(
             """
-            SELECT worker_concurrency, quality_preset, ocr_review_confidence_threshold, pdf_image_review_threshold, vision_layout_repair_enabled, graph_enrichment_enabled, updated_by, updated_at
+            SELECT worker_concurrency, ocr_review_confidence_threshold, pdf_image_review_threshold, vision_layout_repair_enabled, graph_enrichment_enabled, updated_by, updated_at
             FROM workspace_ingest_config
             WHERE config_key = %s
             """,
@@ -27,7 +26,6 @@ class PostgresIngestConfigRepository(PostgresConnectionMixin):
             return None
         return IngestConfigRecord(
             worker_concurrency=int(row["worker_concurrency"]),
-            quality_preset=normalize_ingestion_quality_preset(row.get("quality_preset")),
             ocr_review_confidence_threshold=float(row["ocr_review_confidence_threshold"]),
             pdf_image_review_threshold=int(row["pdf_image_review_threshold"]),
             vision_layout_repair_enabled=bool(row["vision_layout_repair_enabled"]),
@@ -41,25 +39,23 @@ class PostgresIngestConfigRepository(PostgresConnectionMixin):
         row = self._execute_one(
             """
             INSERT INTO workspace_ingest_config (
-                config_key, worker_concurrency, quality_preset, ocr_review_confidence_threshold, pdf_image_review_threshold,
+                config_key, worker_concurrency, ocr_review_confidence_threshold, pdf_image_review_threshold,
                 vision_layout_repair_enabled, graph_enrichment_enabled, updated_by
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::uuid)
+            VALUES (%s, %s, %s, %s, %s, %s, %s::uuid)
             ON CONFLICT (config_key) DO UPDATE SET
                 worker_concurrency = EXCLUDED.worker_concurrency,
-                quality_preset = EXCLUDED.quality_preset,
                 ocr_review_confidence_threshold = EXCLUDED.ocr_review_confidence_threshold,
                 pdf_image_review_threshold = EXCLUDED.pdf_image_review_threshold,
                 vision_layout_repair_enabled = EXCLUDED.vision_layout_repair_enabled,
                 graph_enrichment_enabled = EXCLUDED.graph_enrichment_enabled,
                 updated_by = EXCLUDED.updated_by,
                 updated_at = NOW()
-            RETURNING worker_concurrency, quality_preset, ocr_review_confidence_threshold, pdf_image_review_threshold, vision_layout_repair_enabled, graph_enrichment_enabled, updated_by, updated_at
+            RETURNING worker_concurrency, ocr_review_confidence_threshold, pdf_image_review_threshold, vision_layout_repair_enabled, graph_enrichment_enabled, updated_by, updated_at
             """,
             (
                 ACTIVE_CONFIG_KEY,
                 config.worker_concurrency,
-                normalize_ingestion_quality_preset(config.quality_preset),
                 config.ocr_review_confidence_threshold,
                 config.pdf_image_review_threshold,
                 config.vision_layout_repair_enabled,
@@ -69,7 +65,6 @@ class PostgresIngestConfigRepository(PostgresConnectionMixin):
         )
         return IngestConfigRecord(
             worker_concurrency=int(row["worker_concurrency"]),
-            quality_preset=normalize_ingestion_quality_preset(row.get("quality_preset")),
             ocr_review_confidence_threshold=float(row["ocr_review_confidence_threshold"]),
             pdf_image_review_threshold=int(row["pdf_image_review_threshold"]),
             vision_layout_repair_enabled=bool(row["vision_layout_repair_enabled"]),
@@ -85,7 +80,6 @@ class PostgresIngestConfigRepository(PostgresConnectionMixin):
                 CREATE TABLE IF NOT EXISTS workspace_ingest_config (
                     config_key TEXT PRIMARY KEY DEFAULT 'active',
                     worker_concurrency INTEGER NOT NULL DEFAULT 1,
-                    quality_preset TEXT NOT NULL DEFAULT 'fast',
                     ocr_review_confidence_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.9,
                     pdf_image_review_threshold INTEGER NOT NULL DEFAULT 64,
                     vision_layout_repair_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -95,9 +89,6 @@ class PostgresIngestConfigRepository(PostgresConnectionMixin):
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     CONSTRAINT workspace_ingest_config_singleton CHECK (config_key = 'active'),
                     CONSTRAINT workspace_ingest_config_concurrency CHECK (worker_concurrency BETWEEN 1 AND 10),
-                    CONSTRAINT workspace_ingest_config_quality_preset CHECK (
-                        quality_preset IN ('fast', 'balanced', 'high_accuracy')
-                    ),
                     CONSTRAINT workspace_ingest_config_ocr_review_threshold CHECK (
                         ocr_review_confidence_threshold >= 0 AND ocr_review_confidence_threshold <= 1
                     ),
@@ -105,12 +96,6 @@ class PostgresIngestConfigRepository(PostgresConnectionMixin):
                         pdf_image_review_threshold BETWEEN 0 AND 10000
                     )
                 )
-                """
-            )
-            conn.execute(
-                """
-                ALTER TABLE workspace_ingest_config
-                ADD COLUMN IF NOT EXISTS quality_preset TEXT NOT NULL DEFAULT 'fast'
                 """
             )
             conn.execute(
@@ -135,20 +120,6 @@ class PostgresIngestConfigRepository(PostgresConnectionMixin):
                 """
                 ALTER TABLE workspace_ingest_config
                 ADD COLUMN IF NOT EXISTS graph_enrichment_enabled BOOLEAN NOT NULL DEFAULT FALSE
-                """
-            )
-            conn.execute(
-                """
-                ALTER TABLE workspace_ingest_config
-                DROP CONSTRAINT IF EXISTS workspace_ingest_config_quality_preset
-                """
-            )
-            conn.execute(
-                """
-                ALTER TABLE workspace_ingest_config
-                ADD CONSTRAINT workspace_ingest_config_quality_preset CHECK (
-                    quality_preset IN ('fast', 'balanced', 'high_accuracy')
-                )
                 """
             )
             conn.execute(

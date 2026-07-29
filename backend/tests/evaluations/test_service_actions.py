@@ -13,6 +13,7 @@ from rag.evaluations.queue import InMemoryEvaluationRunQueue
 from rag.evaluations.runtime_pins import (
     EvaluationRuntimePinError,
     RUNTIME_PINS_KEY,
+    _digest,
     capture_runtime_pins,
     resolve_pinned_runtime,
 )
@@ -196,6 +197,70 @@ def test_submit_run_captures_runtime_pins_once() -> None:
     assert pins["query_settings"]["rag_top_k"] == 17
     assert pins["model_identifiers"]["chat"] == "chat-a"
     assert service.get_run(submitted.id).rag_config_snapshot[RUNTIME_PINS_KEY] == pins
+
+
+def test_runtime_pins_ignore_retired_artifact_pipeline_setting() -> None:
+    documents = InMemoryDocumentRepository()
+    snapshot: dict[str, object] = {"chat_model": "chat-a"}
+    pins = capture_runtime_pins(
+        config=Settings(document_repository="memory", rag_top_k=17),
+        rag_config_snapshot=snapshot,
+        document_repo=documents,
+        user=_user(),
+        group_path="/quality",
+        document_ids=[],
+    )
+    legacy_query_settings = {
+        **pins["query_settings"],
+        "artifact_pipeline_version": "v1",
+    }
+    pins["query_settings"] = legacy_query_settings
+    pins["query_settings_hash"] = _digest(legacy_query_settings)
+    snapshot[RUNTIME_PINS_KEY] = pins
+
+    _, frozen_config = resolve_pinned_runtime(
+        snapshot,
+        current_config=Settings(document_repository="memory", rag_top_k=3),
+        document_repo=documents,
+        user=_user(),
+        group_path="/quality",
+        document_ids=[],
+    )
+
+    assert frozen_config.rag_top_k == 17
+    assert not hasattr(frozen_config, "artifact_pipeline_version")
+
+
+def test_runtime_pins_ignore_retired_faithfulness_threshold() -> None:
+    documents = InMemoryDocumentRepository()
+    snapshot: dict[str, object] = {"chat_model": "chat-a"}
+    pins = capture_runtime_pins(
+        config=Settings(document_repository="memory", rag_top_k=17),
+        rag_config_snapshot=snapshot,
+        document_repo=documents,
+        user=_user(),
+        group_path="/quality",
+        document_ids=[],
+    )
+    legacy_query_settings = {
+        **pins["query_settings"],
+        "rag_faithfulness_threshold": 0.8,
+    }
+    pins["query_settings"] = legacy_query_settings
+    pins["query_settings_hash"] = _digest(legacy_query_settings)
+    snapshot[RUNTIME_PINS_KEY] = pins
+
+    _, frozen_config = resolve_pinned_runtime(
+        snapshot,
+        current_config=Settings(document_repository="memory", rag_top_k=3),
+        document_repo=documents,
+        user=_user(),
+        group_path="/quality",
+        document_ids=[],
+    )
+
+    assert frozen_config.rag_top_k == 17
+    assert not hasattr(frozen_config, "rag_faithfulness_threshold")
 
 
 def test_submit_run_does_not_enqueue_when_runtime_pins_are_unavailable() -> None:

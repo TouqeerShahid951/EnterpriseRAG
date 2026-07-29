@@ -83,7 +83,7 @@ export function RuntimeAdvancedSettings({ form, onChange }: { form: RagConfigFor
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="sv-field">
-          <span className="sv-label">JSON/Layout output budget</span>
+          <span className="sv-label">Artifact JSON output budget</span>
           <input
             type="number"
             min={256}
@@ -92,7 +92,9 @@ export function RuntimeAdvancedSettings({ form, onChange }: { form: RagConfigFor
             onChange={(event) => onChange({ ...form, json_num_predict: event.target.value })}
             className="sv-input"
           />
-          <span className="text-body-md text-secondary">Used by planning, composition, and layout contracts.</span>
+          <span className="text-body-md text-secondary">
+            Controls artifact planning, composition, and layout JSON; does not change normal answer length.
+          </span>
         </label>
         <label className="sv-field">
           <span className="sv-label">Evidence token budget</span>
@@ -104,7 +106,9 @@ export function RuntimeAdvancedSettings({ form, onChange }: { form: RagConfigFor
             onChange={(event) => onChange({ ...form, retrieval_token_budget: event.target.value })}
             className="sv-input"
           />
-          <span className="text-body-md text-secondary">Caps retrieved evidence passed into synthesis.</span>
+          <span className="text-body-md text-secondary">
+            Maximum evidence passed into synthesis; route-specific safety limits may use less.
+          </span>
         </label>
         <label className="sv-field">
           <span className="sv-label">Chat timeout</span>
@@ -115,7 +119,7 @@ export function RuntimeAdvancedSettings({ form, onChange }: { form: RagConfigFor
             onChange={(event) => onChange({ ...form, chat_timeout_seconds: event.target.value })}
             className="sv-input"
           />
-          <span className="text-body-md text-secondary">Maximum seconds to wait for language roles.</span>
+          <span className="text-body-md text-secondary">Maximum seconds to wait for final answer synthesis.</span>
         </label>
         <label className="sv-field">
           <span className="sv-label">Embed timeout</span>
@@ -127,6 +131,48 @@ export function RuntimeAdvancedSettings({ form, onChange }: { form: RagConfigFor
             className="sv-input"
           />
           <span className="text-body-md text-secondary">Maximum seconds to wait for embedding requests.</span>
+        </label>
+        <label className="sv-field">
+          <span className="sv-label">Reasoning timeout</span>
+          <input
+            type="number"
+            min={1}
+            max={300}
+            value={form.reasoning_timeout_seconds}
+            onChange={(event) => onChange({ ...form, reasoning_timeout_seconds: event.target.value })}
+            className="sv-input"
+          />
+          <span className="text-body-md text-secondary">
+            Maximum seconds for planning, rewrites, dates, and an AI Evidence Gate decision.
+          </span>
+        </label>
+        <label className="sv-field">
+          <span className="sv-label">Router timeout</span>
+          <input
+            type="number"
+            min={1}
+            max={30}
+            value={form.routing_timeout_seconds}
+            onChange={(event) => onChange({ ...form, routing_timeout_seconds: event.target.value })}
+            className="sv-input"
+          />
+          <span className="text-body-md text-secondary">
+            Maximum seconds to wait for an ambiguous-query routing decision.
+          </span>
+        </label>
+        <label className="sv-field">
+          <span className="sv-label">Faithfulness timeout</span>
+          <input
+            type="number"
+            min={1}
+            max={300}
+            value={form.faithfulness_timeout_seconds}
+            onChange={(event) => onChange({ ...form, faithfulness_timeout_seconds: event.target.value })}
+            className="sv-input"
+          />
+          <span className="text-body-md text-secondary">
+            Maximum seconds for an AI check of the synthesized answer.
+          </span>
         </label>
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -169,6 +215,48 @@ export function RuntimeAdvancedSettings({ form, onChange }: { form: RagConfigFor
               className="h-5 w-5 accent-primary"
             />
           </span>
+        </label>
+        <label className="flex items-start justify-between gap-3 rounded border border-surface-border bg-surface-container-low p-3">
+          <span>
+            <span className="block text-body-md font-bold text-on-surface">Evidence Gate</span>
+            <span className="mt-1 block text-body-md text-secondary">
+              Adaptive skips the AI judge only for strong, low-risk factual lookups. Always checks every retrieved answer; Never keeps deterministic verification only.
+            </span>
+          </span>
+          <select
+            aria-label="Evidence Gate policy"
+            value={form.evidence_gate_policy}
+            onChange={(event) => onChange({
+              ...form,
+              evidence_gate_policy: event.target.value as RagConfigFormState["evidence_gate_policy"],
+            })}
+            className="sv-select w-28 shrink-0"
+          >
+            <option value="adaptive">Adaptive</option>
+            <option value="always">Always</option>
+            <option value="never">Never</option>
+          </select>
+        </label>
+        <label className="flex items-start justify-between gap-3 rounded border border-surface-border bg-surface-container-low p-3">
+          <span>
+            <span className="block text-body-md font-bold text-on-surface">Faithfulness checker</span>
+            <span className="mt-1 block text-body-md text-secondary">
+              Adaptive verifies clear, directly cited answers with the local reranker and sends uncertain or higher-risk answers to the AI judge. Never disables the AI judge.
+            </span>
+          </span>
+          <select
+            aria-label="Faithfulness checker policy"
+            value={form.faithfulness_policy}
+            onChange={(event) => onChange({
+              ...form,
+              faithfulness_policy: event.target.value as RagConfigFormState["faithfulness_policy"],
+            })}
+            className="sv-select w-28 shrink-0"
+          >
+            <option value="adaptive">Adaptive</option>
+            <option value="always">Always</option>
+            <option value="never">Never</option>
+          </select>
         </label>
       </div>
     </section>

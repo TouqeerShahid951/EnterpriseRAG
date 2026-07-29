@@ -24,7 +24,6 @@ from rag.ingestion.job_dependencies import get_ingest_job_repository
 from rag.ingestion.job_models import IngestJobRepository
 from rag.auth.identity_models import IdentityRepository, UserRecord
 from rag.auth.identity_repository import get_identity_repository
-from rag.shared.contracts.http import StubResponse
 from rag.shared.contracts.clearance import DEFAULT_CLEARANCE_LEVEL
 from rag.documents.dependencies import get_file_scanner, get_upload_storage
 from rag.documents.scanning import FileScanner
@@ -52,10 +51,7 @@ _UPLOAD_STATUS_BY_CATEGORY = {
     "",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=UploadResponse,
-    responses={
-        status.HTTP_202_ACCEPTED: {"model": UploadResponse},
-        status.HTTP_501_NOT_IMPLEMENTED: {"model": StubResponse},
-    },
+    responses={status.HTTP_202_ACCEPTED: {"model": UploadResponse}},
     summary="Queue a document upload for ingestion",
 )
 async def create_upload(
@@ -117,10 +113,7 @@ async def create_upload(
 
 @router.get(
     "/{job_id}/status",
-    responses={
-        status.HTTP_200_OK: {"model": JobStatusResponse},
-        status.HTTP_501_NOT_IMPLEMENTED: {"model": StubResponse},
-    },
+    responses={status.HTTP_200_OK: {"model": JobStatusResponse}},
     summary="Read upload job status",
 )
 async def get_upload_status(

@@ -25,7 +25,7 @@ type FolderRunStatus = "scheduled" | "running" | "complete" | "failed" | "cancel
 
 type FolderRunItemStatus = "scheduled" | "queued" | "skipped" | "failed";
 
-export type ConnectorType = "sql_server" | "postgres" | "mysql" | "mariadb" | "mongodb" | "oracle" | "opensearch" | "elasticsearch" | "redis" | "cassandra" | "fake";
+export type ConnectorType = "sql_server" | "postgres";
 
 export type ConnectorIngestionMode = "json_snapshot" | "direct_chunks";
 

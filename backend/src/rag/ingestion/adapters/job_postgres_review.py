@@ -26,14 +26,6 @@ def _close_pending_review_items(conn: Any, job_id: str) -> int:
         """,
         (job_id,),
     )
-    conn.execute(
-        """
-        UPDATE image_review_batches
-        SET status = 'rejected', updated_at = NOW()
-        WHERE job_id = %s AND status = 'pending'
-        """,
-        (job_id,),
-    )
     image_rows = conn.execute(
         """
         UPDATE image_review_candidates
@@ -49,4 +41,12 @@ def _close_pending_review_items(conn: Any, job_id: str) -> int:
         """,
         (job_id,),
     ).fetchall()
+    conn.execute(
+        """
+        UPDATE image_review_batches
+        SET status = 'rejected', updated_at = NOW()
+        WHERE job_id = %s AND status = 'pending'
+        """,
+        (job_id,),
+    )
     return len(item_rows) + len(image_rows)

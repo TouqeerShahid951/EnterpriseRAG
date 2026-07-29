@@ -1,23 +1,27 @@
 import { useEffect, useMemo, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, CloudUpload, FileClock, FileSearch, FileText, Loader2, ShieldCheck, TimerReset, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, CloudUpload, FileClock, FileSearch, FileText, Loader2, ShieldCheck, TimerReset, X } from "lucide-react";
 
-import { adminApi, documentsApi, ingestJobsApi } from "@/lib/api/contracts";
+import { abbreviationsApi, adminApi, documentsApi, ingestJobsApi } from "@/lib/api/contracts";
 import { canManageSpaces, canUploadToSpace, canWriteDocument, clearanceLevelsAssignableBy, hasExactGroupScope, isGlobalAdmin } from "@/lib/auth/authz";
 import { useToast } from "@/components/feedback/ToastProvider";
 import { InlineMessage } from "@/components/layout/Common";
 import { PrudentiaWorkspace } from "@/components/layout/PrudentiaWorkspace";
 import type { RouteId } from "@/routes/routes";
 import { formatFileSize, mergeDocumentFiles } from "@/features/upload/state/pdfUploadBatch";
+import { graphEnrichmentTaskForJob } from "@/features/upload/state/uploadJobProgress";
 import type { Document, User as AuthUser } from "@/types/api";
 import type { PdfUploadDraft, UploadBatchItemView } from "@/types/chat";
 import { errorMessage } from "@/lib/utils/format";
 import { flattenGroups, userSpacesFromPaths } from "@/lib/utils/groups";
 import { ClearanceSelect, Guardrail, SelectField, SharedSpacesField } from "@/features/upload/components/UploadFormFields";
 import { BatchUploadStatus } from "@/features/upload/components/BatchUploadStatus";
+import { AbbreviationGlossaryManager } from "@/features/upload/components/AbbreviationGlossaryManager";
 
 
-export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocuments, currentUser, onCancelIngestJob, onClearUploadJobs, onLogout, onNavigate, onPdfDraftChange, onPdfSubmit, pdfDraft, selectionError, uploadPending }: Props) {
+export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocuments, currentUser, mode = "documents", onCancelIngestJob, onClearUploadJobs, onLogout, onNavigate, onPdfDraftChange, onPdfSubmit, pdfDraft, selectionError, uploadPending }: Props) {
+  const isGlossary = mode === "glossary";
+  const IntakeContainer = isGlossary ? "details" : "div";
   const queryClient = useQueryClient();
   const { notify } = useToast();
   const canLoadSpaceDirectory = canManageSpaces(currentUser);
@@ -42,14 +46,26 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
   );
   const clearanceOptions = useMemo(() => clearanceLevelsAssignableBy(currentUser), [currentUser]);
   const writableCurrentDocuments = currentDocuments.filter((document) => canWriteDocument(currentUser, document.group_path, document.clearance_level));
+  const glossaryQuery = useQuery({
+    queryKey: ["abbreviation-glossary"],
+    queryFn: abbreviationsApi.get,
+    retry: false,
+    enabled: isGlossary,
+  });
+  const currentGlossarySources = glossaryQuery.data?.sources ?? [];
+  const currentGlossarySourceIds = useMemo(
+    () => currentGlossarySources.map((source) => source.document_id),
+    [currentGlossarySources],
+  );
   const selectedSpaceIsWritable = Boolean(pdfDraft.groupPath && canUploadToSpace(currentUser, pdfDraft.groupPath));
   const selectedSharedSpacesAreValid = pdfDraft.sharedGroupPaths.every((path) => eligibleSharedSpacePaths.includes(path));
-  const shouldPollGraphStatus = batchItems.some((item) => item.job?.status === "complete");
+  const completedJobs = batchItems.flatMap((item) => item.job?.status === "complete" ? [item.job] : []);
+  const shouldLoadGraphStatus = !isGlossary && completedJobs.length > 0;
   const graphStatusQuery = useQuery({
     queryKey: ["ingest-jobs", "graphrag-status", "upload-batch"],
     queryFn: ingestJobsApi.graphragStatus,
-    enabled: shouldPollGraphStatus,
-    refetchInterval: shouldPollGraphStatus ? 5000 : false,
+    enabled: shouldLoadGraphStatus,
+    refetchInterval: (query) => completedJobs.some((job) => graphEnrichmentTaskForJob(job, query.state.data)) ? 5000 : false,
     staleTime: 3000,
     retry: false,
   });
@@ -76,6 +92,7 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
   });
 
   useEffect(() => {
+    if (isGlossary) return;
     if (pdfDraft.groupPath && !writableSpacePaths.includes(pdfDraft.groupPath)) {
       onPdfDraftChange({ groupPath: "", sharedGroupPaths: [], supersedesText: "" });
       return;
@@ -84,49 +101,103 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
     if (nextShared.length !== pdfDraft.sharedGroupPaths.length) {
       onPdfDraftChange({ sharedGroupPaths: nextShared });
     }
-  }, [eligibleSharedSpacePaths, onPdfDraftChange, pdfDraft.groupPath, pdfDraft.sharedGroupPaths, writableSpacePaths]);
+  }, [eligibleSharedSpacePaths, isGlossary, onPdfDraftChange, pdfDraft.groupPath, pdfDraft.sharedGroupPaths, writableSpacePaths]);
+
+  useEffect(() => {
+    if (!isGlossary) return;
+    const ownerPath = currentDocuments.find((document) => document.id === currentGlossarySourceIds[0])?.group_path
+      ?? writableSpacePaths[0]
+      ?? "";
+    const replacementId = pdfDraft.files.length <= 1 && currentGlossarySourceIds.includes(pdfDraft.supersedesText)
+      ? pdfDraft.supersedesText
+      : "";
+    if (
+      pdfDraft.groupPath !== ownerPath
+      || pdfDraft.sharedGroupPaths.length > 0
+      || pdfDraft.clearanceLevel !== "NATO_UNCLASSIFIED"
+      || pdfDraft.effectiveDate
+      || pdfDraft.expiryDate
+      || pdfDraft.supersedesText !== replacementId
+    ) {
+      onPdfDraftChange({
+        groupPath: ownerPath,
+        sharedGroupPaths: [],
+        clearanceLevel: "NATO_UNCLASSIFIED",
+        effectiveDate: "",
+        expiryDate: "",
+        supersedesText: replacementId,
+      });
+    }
+  }, [currentDocuments, currentGlossarySourceIds, isGlossary, onPdfDraftChange, pdfDraft, writableSpacePaths]);
 
   function handleFilesSelected(files: FileList | null) {
     if (!files) return;
-    onPdfDraftChange({ files: mergeDocumentFiles(pdfDraft.files, Array.from(files)) });
+    onPdfDraftChange({
+      files: mergeDocumentFiles(pdfDraft.files, Array.from(files)),
+    });
   }
 
   return (
-    <PrudentiaWorkspace activeRoute="upload" onLogout={onLogout} onNavigate={onNavigate} user={currentUser}>
+    <PrudentiaWorkspace activeRoute={isGlossary ? "abbreviation-glossary" : "upload"} onLogout={onLogout} onNavigate={onNavigate} user={currentUser}>
       <main className="sv-page" id="main-content">
         <div className="sv-page-inner sv-page-inner-workbench max-w-6xl">
           <header className="sv-page-header">
             <div>
               <p className="sv-eyebrow">Document Intake</p>
-              <h1 className="sv-page-title">Add Files</h1>
-              <p className="sv-page-subtitle">Upload one or more PDF, DOCX, JPG, PNG, and JSON files, or schedule folder ingestion into off-peak indexing windows.</p>
+              <h1 className="sv-page-title">{isGlossary ? "Abbreviation Glossary" : "Add Files"}</h1>
+              <p className="sv-page-subtitle">{isGlossary ? "Define the language Prudentia uses to match queries. Add terms directly or manage several governed PDF sources." : "Upload PDF, DOCX, JPG, PNG, and JSON files into governed Knowledge Spaces, then follow each file through indexing."}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => onNavigate("ingestion-jobs")} className="sv-action-secondary">
                 <FileClock size={16} />
-                Activity
+                {isGlossary ? "All intake activity" : "Activity"}
               </button>
-              <button type="button" onClick={() => onNavigate("knowledge-spaces")} className="sv-action-secondary">
-                <FileText size={16} />
-                Knowledge Spaces
-              </button>
+              {!isGlossary ? (
+                <button type="button" onClick={() => onNavigate("knowledge-spaces")} className="sv-action-secondary">
+                  <FileText size={16} />
+                  Knowledge Spaces
+                </button>
+              ) : null}
             </div>
           </header>
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-            <form onSubmit={onPdfSubmit} className="sv-panel p-5">
-              <div className="mb-5 flex items-start justify-between gap-4 border-b border-surface-border pb-4">
-                <div>
-                  <h2 className="sv-section-title">Source package</h2>
-                  <p className="mt-1 text-body-md text-on-surface-variant">Select a document batch and attach the metadata used by retrieval filters.</p>
+          {isGlossary ? (
+            <AbbreviationGlossaryManager
+              importStatusKey={batchItems.map((item) => `${item.job?.jobId ?? item.id}:${item.job?.status ?? "queued"}`).join("|")}
+            />
+          ) : null}
+
+          <IntakeContainer className={isGlossary ? "group mt-4" : undefined}>
+            {isGlossary ? (
+              <summary className="sv-panel flex min-h-16 cursor-pointer list-none flex-col items-start justify-between gap-3 p-4 text-left sm:flex-row sm:items-center [&::-webkit-details-marker]:hidden">
+                <div className="min-w-0">
+                  <p className="sv-eyebrow">Governed source</p>
+                  <h2 className="sv-section-title mt-1">Manage PDF sources</h2>
+                  <p className="mt-1 text-body-md text-on-surface-variant">Add several governed PDFs at once, or replace one active source without affecting the others.</p>
                 </div>
-                <span className="sv-pill sv-pill-success">{pdfDraft.files.length > 0 ? `${pdfDraft.files.length} selected` : "Live pipeline"}</span>
+                <div className="flex w-full min-w-0 items-center justify-between gap-3 sm:w-auto sm:shrink-0">
+                  <span className={`${currentGlossarySources.length > 0 ? "sv-pill sv-pill-success" : "sv-pill"} min-w-0 max-w-full truncate`}>
+                    {currentGlossarySources.length > 0 ? `${currentGlossarySources.length} active PDF source${currentGlossarySources.length === 1 ? "" : "s"}` : "No PDF sources"}
+                  </span>
+                  <ChevronDown aria-hidden="true" className="text-secondary transition-transform group-open:rotate-180" size={18} />
+                </div>
+              </summary>
+            ) : null}
+
+          <div className={isGlossary ? "mt-3" : "grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]"}>
+            <form onSubmit={onPdfSubmit} className="sv-panel p-5">
+              <div className="mb-5 flex flex-col items-start justify-between gap-3 border-b border-surface-border pb-4 sm:flex-row sm:gap-4">
+                <div>
+                  <h2 className="sv-section-title">{isGlossary ? "PDF source files" : "Source package"}</h2>
+                  <p className="mt-1 text-body-md text-on-surface-variant">{isGlossary ? "Select one or more PDFs containing abbreviation and full-term pairs." : "Select a document batch and attach the metadata used by retrieval filters."}</p>
+                </div>
+                <span className="sv-pill sv-pill-success shrink-0">{pdfDraft.files.length > 0 ? `${pdfDraft.files.length} selected` : isGlossary ? "PDF only" : "Live pipeline"}</span>
               </div>
 
               <label className="sv-field">
-                <span className="sv-label">Document Files</span>
+                <span className="sv-label">{isGlossary ? "Glossary PDF" : "Document Files"}</span>
                 <input
-                  accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png,application/json,.json"
+                  accept={isGlossary ? "application/pdf,.pdf" : "application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png,application/json,.json"}
                   type="file"
                   multiple
                   disabled={uploadPending}
@@ -136,7 +207,7 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
                   }}
                   className="sv-input file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-bold file:text-on-primary"
                 />
-                <small className="text-secondary">Select multiple PDF, DOCX, JPG, PNG, or JSON files, up to 50 MB each. Every file receives its own ingestion job.</small>
+                <small className="text-secondary">{isGlossary ? "Select multiple PDFs up to 50 MB each. Tables and lines such as “AD — Assistant Director” are supported." : "Select multiple PDF, DOCX, JPG, PNG, or JSON files, up to 50 MB each. Every file receives its own ingestion job."}</small>
               </label>
               {pdfDraft.files.length > 0 ? (
                 <ul className="mt-3 grid gap-2" aria-label="Selected documents">
@@ -149,7 +220,7 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
                         type="button"
                         disabled={uploadPending}
                         onClick={() => onPdfDraftChange({ files: pdfDraft.files.filter((candidate) => candidate !== file) })}
-                        className="rounded p-1 text-secondary hover:bg-surface hover:text-on-surface disabled:opacity-50"
+                        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-secondary hover:bg-surface hover:text-on-surface disabled:opacity-50"
                         aria-label={`Remove ${file.name}`}
                       >
                         <X size={15} />
@@ -159,49 +230,63 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
                 </ul>
               ) : null}
               {selectionError ? <InlineMessage tone="warning">{selectionError}</InlineMessage> : null}
-              <div className="mt-5 grid items-start gap-4 md:grid-cols-2">
-                <SelectField disabled={uploadPending} label="Owner Knowledge Space" value={pdfDraft.groupPath} onChange={(value) => onPdfDraftChange({ groupPath: value, sharedGroupPaths: pdfDraft.sharedGroupPaths.filter((path) => path !== value) })} options={["", ...writableSpacePaths]} emptyLabel={groupsQuery.isLoading && canLoadSpaceDirectory ? "Loading spaces" : "Select upload space"} helper="Primary owner space for governance and retrieval filtering." />
-                <ClearanceSelect disabled={uploadPending} value={pdfDraft.clearanceLevel} onChange={(clearanceLevel) => onPdfDraftChange({ clearanceLevel })} options={clearanceOptions} />
-                {canShareUploadAcrossSpaces(currentUser, pdfDraft.groupPath) ? (
-                  <SharedSpacesField
-                    disabled={uploadPending}
-                    onAdd={(path) => onPdfDraftChange({ sharedGroupPaths: [...pdfDraft.sharedGroupPaths, path].sort((a, b) => a.localeCompare(b)) })}
-                    onRemove={(path) => onPdfDraftChange({ sharedGroupPaths: pdfDraft.sharedGroupPaths.filter((value) => value !== path) })}
-                    options={sharedSpaceOptions}
-                    values={pdfDraft.sharedGroupPaths}
-                  />
-                ) : null}
-                <label className="sv-field">
-                  <span className="sv-label">Effective Date <span className="font-normal text-secondary">(optional)</span></span>
-                  <input disabled={uploadPending} type="date" value={pdfDraft.effectiveDate} onChange={(event) => onPdfDraftChange({ effectiveDate: event.target.value })} className="sv-input" />
-                  <small className="text-secondary">Optional start date for time-aware retrieval.</small>
+              {!isGlossary ? (
+                <div className="mt-5 grid items-start gap-4 md:grid-cols-2">
+                  <SelectField disabled={uploadPending} label="Owner Knowledge Space" value={pdfDraft.groupPath} onChange={(value) => onPdfDraftChange({ groupPath: value, sharedGroupPaths: pdfDraft.sharedGroupPaths.filter((path) => path !== value) })} options={["", ...writableSpacePaths]} emptyLabel={groupsQuery.isLoading && canLoadSpaceDirectory ? "Loading spaces" : "Select upload space"} helper="Primary owner space for governance and retrieval filtering." />
+                  <ClearanceSelect disabled={uploadPending} value={pdfDraft.clearanceLevel} onChange={(clearanceLevel) => onPdfDraftChange({ clearanceLevel })} options={clearanceOptions} />
+                  {canShareUploadAcrossSpaces(currentUser, pdfDraft.groupPath) ? (
+                    <SharedSpacesField
+                      disabled={uploadPending}
+                      onAdd={(path) => onPdfDraftChange({ sharedGroupPaths: [...pdfDraft.sharedGroupPaths, path].sort((a, b) => a.localeCompare(b)) })}
+                      onRemove={(path) => onPdfDraftChange({ sharedGroupPaths: pdfDraft.sharedGroupPaths.filter((value) => value !== path) })}
+                      options={sharedSpaceOptions}
+                      values={pdfDraft.sharedGroupPaths}
+                    />
+                  ) : null}
+                  <label className="sv-field">
+                    <span className="sv-label">Effective Date <span className="font-normal text-secondary">(optional)</span></span>
+                    <input disabled={uploadPending} type="date" value={pdfDraft.effectiveDate} onChange={(event) => onPdfDraftChange({ effectiveDate: event.target.value })} className="sv-input" />
+                    <small className="text-secondary">Optional start date for time-aware retrieval.</small>
+                  </label>
+                  <label className="sv-field">
+                    <span className="sv-label">Expiry Date</span>
+                    <input disabled={uploadPending} type="date" value={pdfDraft.expiryDate} onChange={(event) => onPdfDraftChange({ expiryDate: event.target.value })} className="sv-input" />
+                    <small className="text-secondary">Leave blank unless the document should age out of current use.</small>
+                  </label>
+                  <label className="sv-field">
+                    <span className="sv-label">Supersedes</span>
+                    <input disabled={uploadPending || pdfDraft.files.length !== 1} list="supersedes-options" value={pdfDraft.supersedesText} onChange={(event) => onPdfDraftChange({ supersedesText: event.target.value })} placeholder="Comma-separated document IDs" className="sv-input" />
+                    <datalist id="supersedes-options">{writableCurrentDocuments.map((doc) => <option key={doc.id} value={doc.id}>{doc.title}</option>)}</datalist>
+                    <small className="text-secondary">{pdfDraft.files.length === 1 ? "Optional version relationship for the selected document." : "Available when exactly one document is selected."}</small>
+                  </label>
+                </div>
+              ) : null}
+              {isGlossary ? (
+                <label className="sv-field mt-4">
+                  <span className="sv-label">Import action</span>
+                  <select disabled={uploadPending || pdfDraft.files.length > 1} value={pdfDraft.supersedesText} onChange={(event) => onPdfDraftChange({ supersedesText: event.target.value })} className="sv-input">
+                    <option value="">Add as new PDF source</option>
+                    {currentGlossarySources.map((source) => <option key={source.document_id} value={source.document_id}>Replace {source.document_title}</option>)}
+                  </select>
+                  <small className="text-secondary">Replacement is available when one PDF is selected. Other active sources remain unchanged.</small>
                 </label>
-                <label className="sv-field">
-                  <span className="sv-label">Expiry Date</span>
-                  <input disabled={uploadPending} type="date" value={pdfDraft.expiryDate} onChange={(event) => onPdfDraftChange({ expiryDate: event.target.value })} className="sv-input" />
-                  <small className="text-secondary">Leave blank unless the document should age out of current use.</small>
-                </label>
-                <label className="sv-field">
-                  <span className="sv-label">Supersedes</span>
-                  <input disabled={uploadPending || pdfDraft.files.length !== 1} list="supersedes-options" value={pdfDraft.supersedesText} onChange={(event) => onPdfDraftChange({ supersedesText: event.target.value })} placeholder="Comma-separated document IDs" className="sv-input" />
-                  <datalist id="supersedes-options">{writableCurrentDocuments.map((doc) => <option key={doc.id} value={doc.id}>{doc.title}</option>)}</datalist>
-                  <small className="text-secondary">{pdfDraft.files.length === 1 ? "Optional version relationship for the selected document." : "Available when exactly one document is selected."}</small>
-                </label>
-              </div>
+              ) : null}
               <label className="sv-field mt-4">
                 <span className="sv-label">Description</span>
-                <textarea disabled={uploadPending} value={pdfDraft.description} onChange={(event) => onPdfDraftChange({ description: event.target.value })} placeholder="Optional shared context for library display and reviewer notes" className="sv-input min-h-24" />
-                <small className="text-secondary">Shared context appears with the document for reviewers and library users.</small>
+                <textarea disabled={uploadPending} value={pdfDraft.description} onChange={(event) => onPdfDraftChange({ description: event.target.value })} placeholder={isGlossary ? "Optional context about the source or terminology standard" : "Optional shared context for library display and reviewer notes"} className="sv-input min-h-24" />
+                <small className="text-secondary">{isGlossary ? "Optional context for the imported PDF." : "Shared context appears with the document for reviewers and library users."}</small>
               </label>
-              {groupsQuery.isError && canLoadSpaceDirectory ? <InlineMessage tone="error">{errorMessage(groupsQuery.error, "Unable to load writable Knowledge Spaces.")}</InlineMessage> : null}
-              {!groupsQuery.isLoading && writableSpacePaths.length === 0 ? <InlineMessage tone="warning">No writable Knowledge Spaces are available for this account.</InlineMessage> : null}
+              {groupsQuery.isError && canLoadSpaceDirectory ? <InlineMessage tone="error">{errorMessage(groupsQuery.error, isGlossary ? "Unable to prepare PDF storage." : "Unable to load writable Knowledge Spaces.")}</InlineMessage> : null}
+              {!groupsQuery.isLoading && writableSpacePaths.length === 0 ? <InlineMessage tone="warning">{isGlossary ? "PDF import is unavailable until document storage is configured. Direct editing remains available below." : "No writable Knowledge Spaces are available for this account."}</InlineMessage> : null}
               <button type="submit" disabled={uploadPending || pdfDraft.files.length === 0 || !selectedSpaceIsWritable || !selectedSharedSpacesAreValid} className="sv-action-primary mt-5 w-full">
                 {uploadPending ? <Loader2 className="animate-spin" size={18} /> : <CloudUpload size={18} />}
                 {uploadPending
-                  ? "Queueing selected documents"
+                  ? isGlossary ? "Queueing glossary" : "Queueing selected documents"
                   : pdfDraft.files.length === 0
-                    ? "Select documents to upload"
-                    : `Upload ${pdfDraft.files.length} document${pdfDraft.files.length === 1 ? "" : "s"}`}
+                    ? isGlossary ? "Select glossary PDFs" : "Select documents to upload"
+                    : isGlossary
+                      ? pdfDraft.supersedesText ? "Replace PDF source" : `Add ${pdfDraft.files.length} PDF source${pdfDraft.files.length === 1 ? "" : "s"}`
+                      : `Upload ${pdfDraft.files.length} document${pdfDraft.files.length === 1 ? "" : "s"}`}
               </button>
               {batchItems.length > 0 ? (
                 <BatchUploadStatus
@@ -209,16 +294,18 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
                   currentUser={currentUser}
                   graphStatus={graphStatusQuery.data}
                   graphStatusError={graphStatusError}
+                  hideGovernance={isGlossary}
                   items={batchItems}
                   onCancelIngestJob={onCancelIngestJob}
                   onClearUploadJobs={onClearUploadJobs}
                   onRetryIngestJob={(item) => retryMutation.mutate(item)}
+                  onViewActivity={() => onNavigate("ingestion-jobs")}
                   retryingJobId={retryMutation.isPending ? retryMutation.variables?.job?.jobId ?? null : null}
                 />
               ) : null}
             </form>
 
-            <aside className="upload-guidance space-y-4">
+            {!isGlossary ? <aside className="upload-guidance space-y-4">
               <section className="sv-panel p-5 upload-guardrails-panel">
                 <h2 className="sv-section-title">Ingestion guardrails</h2>
                 <div className="mt-4 space-y-3">
@@ -236,8 +323,9 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
                   </div>
                 </div>
               </section>
-            </aside>
+            </aside> : null}
           </div>
+          </IntakeContainer>
         </div>
       </main>
     </PrudentiaWorkspace>
@@ -257,6 +345,7 @@ export function uploadShareTargetPaths(user: AuthUser, ownerGroupPath: string, s
 }
 type Props = {
   batchItems: UploadBatchItemView[]; cancelingJobId: string | null; currentDocuments: Document[]; currentUser: AuthUser;
+  mode?: "documents" | "glossary";
   onCancelIngestJob: (jobId: string) => void; onClearUploadJobs: (itemIds: string[]) => void; onLogout: () => void; onNavigate: (route: RouteId) => void; onPdfDraftChange: (patch: Partial<PdfUploadDraft>) => void;
   onPdfSubmit: (event: FormEvent<HTMLFormElement>) => void; pdfDraft: PdfUploadDraft; selectionError: string | null; uploadPending: boolean;
 };

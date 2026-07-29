@@ -186,6 +186,8 @@ def test_workspace_rag_config(
         json_num_predict=candidate.json_num_predict,
         retrieval_token_budget=candidate.retrieval_token_budget,
         query_planner_enabled=candidate.query_planner_enabled,
+        evidence_gate_policy=candidate.evidence_gate_policy,
+        faithfulness_policy=candidate.faithfulness_policy,
         reranker_model=candidate.reranker_model,
         health=RagConfigHealth(
             status="ok",

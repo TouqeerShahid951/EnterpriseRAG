@@ -12,7 +12,7 @@ from ..ingestion.job_dependencies import get_ingest_job_repository
 from ..ingestion.job_models import IngestJobRecord, IngestJobRepository
 from rag.ingestion.contracts import IngestJobPayload
 from rag.ingestion.delivery.service import IngestDeliveryService
-from rag.ingestion.publication.dependencies import publication_service_for
+from rag.ingestion.publication.dependencies import publication_repository_for
 from rag.ingestion.internal_schemas import (
     InternalJobAttemptRequest,
     InternalJobAttemptResponse,
@@ -24,12 +24,12 @@ from rag.ingestion.internal_schemas import (
     InternalJobStatusRequest,
     InternalParserProvenanceRequest,
 )
-from rag.internal.schemas import InternalMutationResponse, ServiceTokenContext
+from rag.internal.schemas import InternalMutationResponse
 from rag.shared.persistence import PostgresConnectionMixin
 from ..documents.upload.status import progress_for_status_update
 from .service_token_auth import require_service_token
 
-router = APIRouter(tags=["internal-ingest"])
+router = APIRouter(tags=["internal-ingest"], dependencies=[Depends(require_service_token)])
 TERMINAL_STATUSES = {"complete", "failed", "human_review", "cancelled"}
 MAX_INGEST_ATTEMPTS = 3
 
@@ -42,9 +42,7 @@ MAX_INGEST_ATTEMPTS = 3
 async def get_ingest_job_status(
     job_id: str,
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalJobStatusResponse:
-    _ = service
     job = job_repo.get_ingest_job(job_id)
     if job is None:
         raise HTTPException(
@@ -64,9 +62,7 @@ async def update_ingest_job_status(
     payload: InternalJobStatusRequest,
     document_repo: DocumentRepository = Depends(get_document_repository),
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalMutationResponse:
-    _ = service
     current_job = job_repo.get_ingest_job(job_id)
     if current_job is None:
         raise HTTPException(
@@ -140,9 +136,7 @@ async def start_ingest_job_attempt(
     job_id: str,
     payload: InternalJobAttemptRequest,
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalJobAttemptResponse:
-    _ = service
     if payload.delivery_id:
         if payload.run_token is None:
             raise HTTPException(
@@ -197,9 +191,7 @@ async def record_ingest_job_failure(
     payload: InternalJobFailureRequest,
     document_repo: DocumentRepository = Depends(get_document_repository),
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalJobFailureResponse:
-    _ = service
     current = job_repo.get_ingest_job(job_id)
     if current is None:
         raise HTTPException(
@@ -254,7 +246,7 @@ async def record_ingest_job_failure(
         if settings.document_repository == "postgres" and isinstance(
             document_repo, PostgresConnectionMixin
         ):
-            publication_service_for(settings).cancel_building(job_id=job.id)
+            publication_repository_for(settings).cancel_building(job_id=job.id)
         document_repo.append_audit_event(
             event_type="internal.ingest.status",
             actor_id=None,
@@ -285,9 +277,7 @@ async def heartbeat_ingest_job(
     job_id: str,
     payload: InternalJobLeaseRequest,
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalMutationResponse:
-    _ = service
     heartbeat = job_repo.heartbeat_ingest_job(job_id, run_token=payload.run_token)
     if heartbeat.job is None:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Ingestion job was not found."})
@@ -306,9 +296,7 @@ async def append_ingest_job_event(
     payload: InternalJobEventRequest,
     document_repo: DocumentRepository = Depends(get_document_repository),
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalMutationResponse:
-    _ = service
     job = job_repo.get_ingest_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Ingestion job was not found."})
@@ -331,9 +319,7 @@ async def record_ingest_parser_provenance(
     job_id: str,
     payload: InternalParserProvenanceRequest,
     job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalMutationResponse:
-    _ = service
     current_job = job_repo.get_ingest_job(job_id)
     if current_job is None:
         raise HTTPException(status_code=404, detail={"code": "job_not_found", "message": "Ingestion job was not found."})

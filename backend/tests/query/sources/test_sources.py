@@ -7,9 +7,11 @@ from rag.query.sources import (
     PARENT_PROMOTION_MAX_CHARS,
     SourceAnchor,
     build_evidence_hits,
+    dedupe_hits,
     parse_citation_tokens,
     source_citation,
 )
+from rag.query.sources.source_evidence_selection import retrieval_query_slots
 
 
 def hit(point_id: str, score: float, text: str, **payload: object) -> SearchHit:
@@ -430,6 +432,88 @@ class EvidenceBuilderTests(unittest.TestCase):
 
         self.assertEqual(
             [item.payload["chunk_id"] for item in evidence], ["top", "exact"]
+        )
+
+    def test_four_source_budget_preserves_two_reranker_anchors(self) -> None:
+        hits = [
+            hit("anchor", 1.00, "The best matching source."),
+            hit("corroboration", 0.95, "The second-best matching source."),
+            hit(
+                "heuristic-1",
+                0.30,
+                "Row 08 job title from an unrelated table.",
+                chunk_type="table_row",
+            ),
+            hit(
+                "heuristic-2",
+                0.20,
+                "Another row 08 job title from an unrelated table.",
+                chunk_type="table_row",
+            ),
+        ]
+
+        evidence = build_evidence_hits(
+            hits,
+            token_budget=4_000,
+            limit=4,
+            query="What is the job title in row 08?",
+        )
+
+        self.assertEqual(
+            [item.payload["chunk_id"] for item in evidence[:2]],
+            ["anchor", "corroboration"],
+        )
+
+    def test_duplicate_hits_merge_subquery_lineage(self) -> None:
+        evidence = dedupe_hits(
+            [
+                hit(
+                    "shared",
+                    1.0,
+                    "Evidence used by both sides.",
+                    _retrieval_query_slots=[0],
+                ),
+                hit(
+                    "shared",
+                    0.9,
+                    "Evidence used by both sides.",
+                    _retrieval_query_slots=[1],
+                ),
+            ]
+        )
+
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(retrieval_query_slots(evidence[0]), (0, 1))
+
+    def test_final_evidence_reserves_each_available_subquery(self) -> None:
+        evidence = build_evidence_hits(
+            [
+                hit(
+                    "first",
+                    1.0,
+                    "The first comparison side.",
+                    _retrieval_query_slots=[0],
+                ),
+                hit(
+                    "same-side",
+                    0.9,
+                    "More evidence from the first side.",
+                    _retrieval_query_slots=[0],
+                ),
+                hit(
+                    "second",
+                    0.1,
+                    "The second comparison side.",
+                    _retrieval_query_slots=[1],
+                ),
+            ],
+            token_budget=4_000,
+            limit=2,
+        )
+
+        self.assertEqual(
+            [item.payload["chunk_id"] for item in evidence],
+            ["first", "second"],
         )
 
 

@@ -1,0 +1,67 @@
+services:
+  postgres:
+    platform: linux/amd64
+
+  redis:
+    platform: linux/amd64
+
+  minio:
+    platform: linux/amd64
+
+  qdrant:
+    platform: linux/amd64
+
+  neo4j:
+    platform: linux/amd64
+
+  clamav:
+    platform: linux/amd64
+
+  api:
+    platform: linux/amd64
+    build:
+      args:
+        API_BASE_IMAGE: nvidia/cuda:13.0.2-cudnn-runtime-ubuntu22.04
+        RERANKER_RUNTIME: cuda
+    environment:
+      RAG_RERANKER_DEVICE: cuda
+    gpus: all
+
+  query-api:
+    platform: linux/amd64
+    environment:
+      RAG_RERANKER_DEVICE: cuda
+    gpus: all
+
+  artifact-worker:
+    platform: linux/amd64
+    environment:
+      RAG_RERANKER_DEVICE: cuda
+    gpus: all
+
+  artifact-maintenance:
+    platform: linux/amd64
+
+  ingestion-worker:
+    platform: linux/amd64
+
+  graphrag-worker:
+    platform: linux/amd64
+
+  docling-prewarm:
+    platform: linux/amd64
+
+  evaluation-worker:
+    platform: linux/amd64
+    environment:
+      RAG_RERANKER_DEVICE: cuda
+    gpus: all
+
+  folder-scheduler:
+    platform: linux/amd64
+
+  ingest-maintenance:
+    platform: linux/amd64
+
+  frontend:
+    platform: linux/amd64

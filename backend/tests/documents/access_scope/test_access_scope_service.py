@@ -101,7 +101,7 @@ class FakeGraphStore:
 class FakeGraphQueue:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
-        self.messages: list[tuple[str, str, str]] = []
+        self.messages: list[tuple[str, str, str, str | None]] = []
 
     def enqueue_document(
         self,
@@ -109,10 +109,13 @@ class FakeGraphQueue:
         document_id: str,
         job_id: str,
         reason: str,
+        index_generation_id: str | None,
     ) -> None:
         if self.fail:
             raise RuntimeError("queue unavailable")
-        self.messages.append((document_id, job_id, reason))
+        self.messages.append(
+            (document_id, job_id, reason, index_generation_id)
+        )
 
 
 def test_transfer_owner_updates_repository_index_and_audit() -> None:
@@ -191,7 +194,7 @@ def test_owner_transfer_refreshes_graph_with_latest_completed_job() -> None:
 
     assert graph.deleted == [(document.id, "/legal|partition")]
     assert queue.messages == [
-        (document.id, job.id, "documents.owner.transfer")
+        (document.id, job.id, "documents.owner.transfer", None)
     ]
     assert repo.audit_events[-1]["payload"]["action_result"] == "queued"
 
@@ -218,7 +221,7 @@ def test_graph_cleanup_failure_is_warning_and_reindex_still_queues() -> None:
 
     assert graph.deleted
     assert queue.messages == [
-        (document.id, job.id, "documents.owner.transfer")
+        (document.id, job.id, "documents.owner.transfer", None)
     ]
     refresh_events = [
         event

@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Iterable
 from typing import Any
 
 from rag.query.state import QueryContext
@@ -22,97 +21,18 @@ logger.propagate = False
 
 
 def log_query_start(ctx: QueryContext, *, stream: bool) -> None:
-    artifact_request = ctx.get("artifact_request")
     payload = {
         **_context_fields(ctx),
         "event": "rag.query_start",
         "stream": stream,
         "query_hash": _query_hash(ctx["request"].query),
         "query_length": len(ctx["request"].query),
+        "requested_source_mode": ctx["request"].source_mode,
         "selected_group_path": ctx["request"].group_path,
         "document_scope_count": len(ctx["request"].document_ids),
         "visible_group_count": len(ctx["user"].group_paths),
-        "has_artifact_request": "artifact_request" in ctx,
-        "artifact_formats": list(artifact_request.formats) if artifact_request is not None else [],
-        "artifact_needs_clarification": artifact_request.needs_clarification if artifact_request is not None else False,
-        "artifact_objective_hash": _query_hash(artifact_request.content_query) if artifact_request is not None else None,
     }
     _log_info(payload)
-
-
-def log_artifact_plan(ctx: QueryContext) -> None:
-    plan = ctx.get("artifact_plan")
-    if plan is None:
-        return
-    _log_info({
-        **_context_fields(ctx),
-        "event": "rag.artifact_plan",
-        "artifact_type": plan.artifact_type,
-        "formats": list(plan.formats),
-        "operations": list(plan.operations),
-        "task_count": len(plan.tasks),
-        "tasks": [
-            {
-                "operation": task.operation,
-                "retrieval_strategy": task.retrieval_strategy,
-                "coverage_requirement": task.coverage_requirement,
-                "target_section": task.target_section,
-            }
-            for task in plan.tasks
-        ],
-    })
-
-
-def log_artifact_evidence(ctx: QueryContext) -> None:
-    coverage = ctx.get("artifact_coverage")
-    units = ctx.get("artifact_evidence", ())
-    if coverage is None:
-        return
-    _log_info({
-        **_context_fields(ctx),
-        "event": "rag.artifact_evidence",
-        "coverage_status": coverage.status,
-        "evidence_count": coverage.evidence_count,
-        "relevant_evidence_count": coverage.relevant_evidence_count,
-        "documents_searched": coverage.documents_searched,
-        "documents_expected": coverage.documents_expected,
-        "retrieval_iterations": coverage.retrieval_iterations,
-        "warnings": list(coverage.warnings),
-        "content_types": _count_values(unit.content_type for unit in units),
-    })
-
-
-def log_artifact_composition(ctx: QueryContext) -> None:
-    content = ctx.get("artifact_content")
-    plan = ctx.get("artifact_plan")
-    if content is None or plan is None:
-        return
-    _log_info({
-        **_context_fields(ctx),
-        "event": "rag.artifact_composition",
-        "mode": ctx["execution_modes"].get("artifact_composer"),
-        "artifact_type": plan.artifact_type,
-        "operations": list(plan.operations),
-        "section_count": len(content.sections),
-        "claim_count": len(content.claims),
-        "table_count": sum(len(section.tables) for section in content.sections),
-        "table_row_count": sum(len(table.rows) for section in content.sections for table in section.tables),
-        "citation_count": len(content.citations),
-    })
-
-
-def log_artifact_validation(ctx: QueryContext) -> None:
-    validation = ctx.get("artifact_validation")
-    if validation is None:
-        return
-    _log_info({
-        **_context_fields(ctx),
-        "event": "rag.artifact_validation",
-        "passed": validation.passed,
-        "support_score": _round(validation.support_score),
-        "errors": list(validation.errors),
-        "warnings": list(validation.warnings),
-    })
 
 
 def log_route_decision(*, trace_id: str, session_id: str, user_id: str, permission_version: int, plan: RoutePlan) -> None:
@@ -126,9 +46,12 @@ def log_route_decision(*, trace_id: str, session_id: str, user_id: str, permissi
         "query_length": len(plan.original_query),
         "intent": plan.intent,
         "public_intent": plan.public_intent,
-        "secondary_intents": list(plan.secondary_intents),
-        "confidence": round(plan.confidence, 3),
-        "margin": round(plan.margin, 3),
+        "capabilities": list(plan.capabilities),
+        "response_mode": plan.response_mode,
+        "scope": plan.scope,
+        "coverage": plan.coverage,
+        "temporal_scope": plan.temporal_scope,
+        "sub_query_count": len(plan.sub_queries),
         "route_method": plan.route_method,
         "risk_level": plan.risk_level,
         "retrieval_strategy": plan.retrieval_strategy,
@@ -136,16 +59,31 @@ def log_route_decision(*, trace_id: str, session_id: str, user_id: str, permissi
         "chunk_granularity": plan.chunk_granularity,
         "top_k": plan.top_k,
         "filters": plan.filters,
-        "rule_hits": [
-            {"intent": hit.intent, "signal": hit.signal, "weight": hit.weight, "strength": hit.strength}
-            for hit in plan.rule_hits
-        ],
         "penalties": [
             {"intent": penalty.intent, "reason": penalty.reason, "weight": penalty.weight}
             for penalty in plan.penalties
         ],
     }
     _log_info(payload)
+
+
+def log_conversation_resolution(ctx: QueryContext) -> None:
+    resolution = ctx.get("conversation_resolution")
+    if resolution is None:
+        return
+    _log_info(
+        {
+            **_context_fields(ctx),
+            "event": "rag.conversation_resolution",
+            "relation": resolution.relation,
+            "method": resolution.method,
+            "context_turn_count": resolution.context_turn_count,
+            "antecedent_turn_ids": list(resolution.antecedent_turn_ids),
+            "clarification": resolution.relation == "ambiguous",
+            "effective_query_hash": _query_hash(resolution.effective_query),
+            "effective_query_length": len(resolution.effective_query),
+        }
+    )
 
 
 def log_retrieval_summary(ctx: QueryContext, *, stage: str, before_count: int | None = None) -> None:
@@ -168,6 +106,7 @@ def log_verifier_decision(ctx: QueryContext) -> None:
     quality = ctx.get("evidence_quality")
     payload = {
         **_context_fields(ctx),
+        **_source_routing_fields(ctx),
         "event": "rag.verifier_decision",
         "decision": ctx["verifier_decision"],
         "retry_count": ctx["retry_count"],
@@ -205,57 +144,54 @@ def log_faithfulness_result(ctx: QueryContext, *, failed: bool) -> None:
     _log_info(payload)
 
 
-def log_artifact_result(
-    ctx: QueryContext,
-    *,
-    requested: bool,
-    skipped_reason: str | None = None,
-    artifact_count: int = 0,
-    failure_count: int = 0,
-    formats: Iterable[str] = (),
-    failure_details: Iterable[dict[str, str]] = (),
-) -> None:
-    payload = {
-        **_context_fields(ctx),
-        "event": "rag.artifact_result",
-        "requested": requested,
-        "skipped_reason": skipped_reason,
-        "artifact_count": artifact_count,
-        "failure_count": failure_count,
-        "formats": list(formats),
-        "failure_details": list(failure_details),
-    }
-    _log_info(payload)
-
-
 def log_node_timing(ctx: QueryContext, *, node: str, duration_ms: int) -> None:
+    recorded = next(
+        (
+            timing
+            for timing in reversed(ctx["node_timings"])
+            if timing.get("node") == node
+        ),
+        {},
+    )
     payload = {
         **_context_fields(ctx),
+        **_runtime_budget_fields(ctx),
         "event": "rag.node_timing",
         "node": node,
         "duration_ms": max(0, int(duration_ms)),
         "execution_mode": ctx["execution_modes"].get(node),
         "detail": ctx["execution_details"].get(node),
+        "phase_timings_ms": recorded.get("phase_timings_ms", {}),
     }
     _log_info(payload)
 
 
 def log_query_complete(ctx: QueryContext, *, stream: bool) -> None:
     response = ctx.get("response")
+    sufficiency = ctx.get("evidence_sufficiency")
     payload = {
         **_context_fields(ctx),
+        **_source_routing_fields(ctx),
+        **_runtime_budget_fields(ctx),
         "event": "rag.query_complete",
         "stream": stream,
         "latency_ms": response.latency_ms if response is not None else None,
         "intent": response.intent if response is not None else ctx["intent"],
         "source_count": len(response.sources) if response is not None else 0,
         "artifact_count": len(response.artifacts) if response is not None else 0,
+        "answer_status": response.answer_status if response is not None else None,
         "faithfulness_score": _round(response.faithfulness_score) if response is not None else None,
         "faithfulness_status": response.faithfulness_status if response is not None else ctx["faithfulness_status"],
         "degraded": response.degraded if response is not None else ctx["degraded"],
         "degraded_reason": response.degraded_reason if response is not None else ctx["degraded_reason"],
         "conflict_flag": response.conflict_flag if response is not None else ctx["conflict_flag"],
         "retry_count": ctx["retry_count"],
+        "evidence_relevance": sufficiency.relevance if sufficiency is not None else None,
+        "evidence_sufficiency": sufficiency.sufficiency if sufficiency is not None else None,
+        "evidence_action": sufficiency.action if sufficiency is not None else None,
+        "evidence_evaluator_status": (
+            sufficiency.evaluator_status if sufficiency is not None else None
+        ),
         "route_reroute_count": ctx["route_reroute_count"],
         "node_timings": ctx["node_timings"],
         "slowest_nodes": _slowest_nodes(ctx["node_timings"]),
@@ -284,7 +220,10 @@ def log_route_outcome(ctx: QueryContext) -> None:
         return
     response = ctx["response"]
     evidence_quality = ctx.get("evidence_quality")
+    sufficiency = ctx.get("evidence_sufficiency")
     payload = {
+        **_source_routing_fields(ctx),
+        **_runtime_budget_fields(ctx),
         "event": "rag.route_outcome",
         "trace_id": ctx["trace_id"],
         "session_id": ctx["session_id"],
@@ -295,8 +234,12 @@ def log_route_outcome(ctx: QueryContext) -> None:
         "final_intent": plan.intent,
         "public_intent": plan.public_intent,
         "response_intent": response.intent,
-        "confidence": round(plan.confidence, 3),
-        "margin": round(plan.margin, 3),
+        "capabilities": list(plan.capabilities),
+        "response_mode": plan.response_mode,
+        "scope": plan.scope,
+        "coverage": plan.coverage,
+        "temporal_scope": plan.temporal_scope,
+        "sub_query_count": len(plan.sub_queries),
         "route_method": plan.route_method,
         "retrieval_strategy": plan.retrieval_strategy,
         "search_mode": plan.search_mode,
@@ -305,6 +248,7 @@ def log_route_outcome(ctx: QueryContext) -> None:
         "filters": plan.filters,
         "retrieved_hit_count": len(ctx["retrieved_hits"]),
         "evidence_source_count": len(response.sources),
+        "answer_status": response.answer_status,
         "max_retrieval_score": round(max((hit.score for hit in ctx["retrieved_hits"]), default=0.0), 3),
         "max_rerank_score": (
             round(evidence_quality.max_rerank_score, 3)
@@ -323,6 +267,18 @@ def log_route_outcome(ctx: QueryContext) -> None:
         "metadata_hit_count": evidence_quality.metadata_hit_count if evidence_quality is not None else 0,
         "document_class_match_count": (
             evidence_quality.document_class_match_count if evidence_quality is not None else 0
+        ),
+        "evidence_relevance": sufficiency.relevance if sufficiency is not None else None,
+        "evidence_sufficiency": sufficiency.sufficiency if sufficiency is not None else None,
+        "evidence_action": sufficiency.action if sufficiency is not None else None,
+        "evidence_supported_aspect_count": (
+            len(sufficiency.supported_aspects) if sufficiency is not None else 0
+        ),
+        "evidence_missing_aspect_count": (
+            len(sufficiency.missing_aspects) if sufficiency is not None else 0
+        ),
+        "evidence_evaluator_status": (
+            sufficiency.evaluator_status if sufficiency is not None else None
         ),
         "route_reroute_count": ctx["route_reroute_count"],
         "verifier_decision": ctx["verifier_decision"],
@@ -348,6 +304,53 @@ def _context_fields(ctx: QueryContext) -> dict[str, object]:
         "session_id": ctx["session_id"],
         "user_id": ctx["user"].user_id,
         "permission_version": ctx["user"].permission_version,
+    }
+
+
+def _runtime_budget_fields(ctx: QueryContext) -> dict[str, object]:
+    return {
+        "reranker_candidate_limit": ctx.get("reranker_candidate_limit"),
+        "reranker_candidate_count": ctx.get("reranker_candidate_count"),
+        "reranker_input_characters": ctx.get("reranker_input_characters"),
+        "reranker_passage_max_characters": ctx.get(
+            "reranker_passage_max_characters"
+        ),
+        "reranker_batch_count": ctx.get("reranker_batch_count"),
+        "reranker_stop_reason": ctx.get("reranker_stop_reason"),
+        "synthesis_source_limit": ctx.get("synthesis_source_limit"),
+        "synthesis_token_limit": ctx.get("synthesis_token_limit"),
+        "synthesis_context_count": ctx.get("synthesis_context_count"),
+        "synthesis_estimated_prompt_tokens": ctx.get(
+            "synthesis_estimated_prompt_tokens"
+        ),
+        "required_query_slot_count": ctx.get("required_query_slot_count"),
+        "covered_query_slot_count": ctx.get("covered_query_slot_count"),
+    }
+
+
+def _source_routing_fields(ctx: QueryContext) -> dict[str, object]:
+    decision = ctx.get("source_decision")
+    if decision is None:
+        return {
+            "requested_source_mode": ctx["request"].source_mode,
+            "resolved_source_mode": None,
+        }
+    reason = str(getattr(decision, "reason", "") or "")
+    return {
+        "requested_source_mode": getattr(decision, "requested_mode", ctx["request"].source_mode),
+        "resolved_source_mode": getattr(decision, "resolved_mode", None),
+        "source_routing_reason": reason,
+        "source_routing_confidence": _round(getattr(decision, "routing_confidence", None)),
+        "source_router_mode": getattr(decision, "router_mode", None),
+        "preferred_source": getattr(decision, "preferred_source", None),
+        "source_expansion_performed": ":evidence_expansion" in reason,
+        "source_signal_scores": {
+            "structured": getattr(decision, "structured_score", 0),
+            "corpus": getattr(decision, "corpus_score", 0),
+            "source_match": getattr(decision, "source_match_score", 0),
+            "document_match": getattr(decision, "document_match_score", 0),
+        },
+        "live_sql_mode": ctx["execution_modes"].get("live_sql_retriever"),
     }
 
 
@@ -391,15 +394,10 @@ def _rerank_scores(hits: list[SearchHit]) -> list[float]:
     ]
 
 
-def _slowest_nodes(node_timings: list[dict[str, str | int | None]], *, limit: int = 5) -> list[dict[str, str | int | None]]:
+def _slowest_nodes(
+    node_timings: list[dict[str, object]], *, limit: int = 5
+) -> list[dict[str, object]]:
     return sorted(node_timings, key=lambda item: int(item.get("duration_ms") or 0), reverse=True)[:limit]
-
-
-def _count_values(values: Iterable[str]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for value in values:
-        counts[value] = counts.get(value, 0) + 1
-    return counts
 
 
 def _round(value: object, digits: int = 3) -> float | None:

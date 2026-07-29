@@ -1,11 +1,11 @@
-"""LangGraph ingestion graph for native PDF jobs."""
+"""Ordered ingestion workflow for native PDF jobs."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from rag.shared.contracts.abbreviations import ABBREVIATION_GLOSSARY_DOC_TYPE
 
-from ..errors import IngestJobCancelled
 from ..contracts import IngestJobPayload
+from ..errors import IngestJobCancelled
 from .state import IngestDependencies, IngestState
 from .steps import (
     chunk_text,
@@ -15,56 +15,30 @@ from .steps import (
     extract_text,
     generate_metadata,
     mark_processing,
+    stage_abbreviation_glossary,
     upsert_qdrant,
 )
 
 
 def run_ingest_graph(payload: IngestJobPayload, deps: IngestDependencies) -> IngestState:
-    try:
-        from langgraph.graph import END, StateGraph
-    except ImportError as exc:
-        raise RuntimeError("langgraph package is required for ingestion graph execution") from exc
-
-    graph = StateGraph(IngestState)
-    _add_nodes(graph, deps)
-    graph.set_entry_point("mark_processing")
-    _add_edges(graph, end_node=END)
-    return graph.compile().invoke({"payload": payload})
-
-
-def _add_nodes(graph, deps: IngestDependencies) -> None:
-    graph.add_node("mark_processing", _cancellable(mark_processing, deps))
-    graph.add_node("download_file", _cancellable(download_file, deps))
-    graph.add_node("extract_text", _cancellable(extract_text, deps))
-    graph.add_node("generate_metadata", _cancellable(generate_metadata, deps))
-    graph.add_node("chunk_text", _cancellable(chunk_text, deps))
-    graph.add_node("embed_chunks", _cancellable(embed_chunks, deps))
-    graph.add_node("upsert_qdrant", _cancellable(upsert_qdrant, deps))
-    graph.add_node("activate_generation", _cancellable(activate_generation, deps))
-
-
-def _add_edges(graph, *, end_node: str) -> None:
-    graph.add_edge("mark_processing", "download_file")
-    graph.add_edge("download_file", "extract_text")
-    graph.add_edge("extract_text", "generate_metadata")
-    graph.add_edge("generate_metadata", "chunk_text")
-    graph.add_edge("chunk_text", "embed_chunks")
-    graph.add_edge("embed_chunks", "upsert_qdrant")
-    graph.add_edge("upsert_qdrant", "activate_generation")
-    graph.add_edge("activate_generation", end_node)
-
-
-def _cancellable(
-    step: Callable[[IngestState, IngestDependencies], IngestState],
-    deps: IngestDependencies,
-) -> Callable[[IngestState], IngestState]:
-    def run(state: IngestState) -> IngestState:
+    state: IngestState = {"payload": payload}
+    common_steps = (
+        mark_processing,
+        download_file,
+        extract_text,
+        generate_metadata,
+        chunk_text,
+    )
+    publication_steps = (
+        (stage_abbreviation_glossary, activate_generation)
+        if payload.doc_type == ABBREVIATION_GLOSSARY_DOC_TYPE
+        else (embed_chunks, upsert_qdrant, activate_generation)
+    )
+    for step in (*common_steps, *publication_steps):
         _raise_if_cancelled(state, deps)
-        next_state = step(state, deps)
-        _raise_if_cancelled(next_state, deps)
-        return next_state
-
-    return run
+        state = step(state, deps)
+        _raise_if_cancelled(state, deps)
+    return state
 
 
 def _raise_if_cancelled(state: IngestState, deps: IngestDependencies) -> None:

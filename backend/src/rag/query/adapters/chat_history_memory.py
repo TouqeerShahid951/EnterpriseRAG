@@ -6,12 +6,18 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
-from ..chat_history_models import ChatSessionRecord
+from ..chat_history_models import (
+    ChatHistoryRequestConflict,
+    ChatSessionRecord,
+    context_turns_from_payloads,
+)
 
 
 class InMemoryChatHistoryRepository:
     def __init__(self) -> None:
         self._sessions: dict[tuple[str, str, int], ChatSessionRecord] = {}
+        self._request_fingerprints: dict[tuple[str, str, int, str], str | None] = {}
+        self._request_assistant_indexes: dict[tuple[str, str, int, str], int] = {}
 
     def list_sessions_page(
         self,
@@ -56,6 +62,23 @@ class InMemoryChatHistoryRepository:
     def get_session(self, *, session_id: str, user_id: str, permission_version: int) -> ChatSessionRecord | None:
         return self._sessions.get((user_id, session_id, permission_version))
 
+    def load_recent_context_turns(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        permission_version: int,
+        limit: int = 8,
+    ) -> list[dict[str, object]]:
+        session = self.get_session(
+            session_id=session_id,
+            user_id=user_id,
+            permission_version=permission_version,
+        )
+        if session is None:
+            return []
+        return context_turns_from_payloads(session.turns, limit=limit)
+
     def append_completed_turn(
         self,
         *,
@@ -65,10 +88,29 @@ class InMemoryChatHistoryRepository:
         title: str,
         user_turn: dict[str, Any],
         assistant_turn: dict[str, Any],
+        client_request_id: str | None = None,
+        request_fingerprint: str | None = None,
     ) -> ChatSessionRecord:
         key = (user_id, session_id, permission_version)
+        request_key = (
+            (user_id, session_id, permission_version, client_request_id)
+            if client_request_id is not None
+            else None
+        )
         now = datetime.now(UTC)
         current = self._sessions.get(key)
+        if request_key is not None and request_key in self._request_assistant_indexes:
+            if self._request_fingerprints[request_key] != request_fingerprint:
+                raise ChatHistoryRequestConflict(
+                    "client_request_id was already used for a different query request"
+                )
+            if current is None:
+                raise RuntimeError("saved chat request referenced a missing session")
+            turns = list(current.turns)
+            turns[self._request_assistant_indexes[request_key]] = dict(assistant_turn)
+            session = replace(current, turns=tuple(turns), updated_at=now)
+            self._sessions[key] = session
+            return session
         if current is None:
             session = ChatSessionRecord(
                 id=session_id,
@@ -80,12 +122,18 @@ class InMemoryChatHistoryRepository:
                 updated_at=now,
             )
         else:
+            assistant_index = len(current.turns) + 1
             session = replace(
                 current,
                 turns=(*current.turns, dict(user_turn), dict(assistant_turn)),
                 updated_at=now,
             )
+        if current is None:
+            assistant_index = 1
         self._sessions[key] = session
+        if request_key is not None:
+            self._request_fingerprints[request_key] = request_fingerprint
+            self._request_assistant_indexes[request_key] = assistant_index
         return session
 
     def update_assistant_response(
@@ -124,6 +172,13 @@ class InMemoryChatHistoryRepository:
         key = (user_id, session_id, permission_version)
         existed = key in self._sessions
         self._sessions.pop(key, None)
+        for request_key in [
+            candidate
+            for candidate in self._request_fingerprints
+            if candidate[:3] == key
+        ]:
+            self._request_fingerprints.pop(request_key, None)
+            self._request_assistant_indexes.pop(request_key, None)
         return existed
 
 

@@ -318,6 +318,10 @@
   line-height: 1.68;
 }
 
+.rag-evidence-excerpt.is-query-context {
+  white-space: pre-wrap;
+}
+
 .rag-evidence-facts {
   display: grid;
   gap: 0.75rem;

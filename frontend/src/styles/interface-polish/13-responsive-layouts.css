@@ -1,5 +1,5 @@
 /* Keep filters on one usable line at standard desktop widths. */
-@media (min-width: 1440px) {
+@media (min-width: 1280px) {
   .ingest-job-filters {
     grid-template-columns: minmax(16rem, 1.35fr) repeat(5, minmax(8.5rem, 0.8fr));
   }
@@ -80,6 +80,170 @@
   }
 }
 
+/* The document grid needs its card form before the sidebar leaves enough room
+   for all six columns. Keep the pseudo-table headers available to AT. */
+@media (max-width: 1180px) {
+  .ingest-job-table {
+    display: block;
+    min-width: 0;
+  }
+
+  .ingest-job-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .ingest-job-table tbody {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .ingest-job-table .sv-table-row {
+    display: grid;
+    overflow: hidden;
+    border: 1px solid var(--color-surface-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-card);
+  }
+
+  .ingest-job-table .sv-table-row > td {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    grid-template-columns: minmax(7rem, 0.3fr) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+    border: 0;
+    border-bottom: 1px solid var(--color-surface-border);
+    padding: 0.75rem;
+  }
+
+  .ingest-job-table .sv-table-row > td:last-child {
+    border-bottom: 0;
+  }
+
+  .ingest-job-table .sv-table-row > td::before {
+    content: attr(data-label);
+    color: var(--color-secondary);
+    font-size: var(--font-size-ui-micro);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+    text-transform: uppercase;
+  }
+
+  .ingest-job-table .knowledge-row-actions {
+    justify-content: flex-start;
+  }
+
+  .knowledge-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .knowledge-toolbar-controls,
+  .knowledge-toolbar-controls-wide {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .knowledge-toolbar-meta {
+    justify-content: space-between;
+  }
+
+  .knowledge-doc-list-header {
+    position: absolute;
+    display: grid;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .knowledge-doc-row {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0.55rem 0.7rem;
+    padding: 0.85rem;
+  }
+
+  .knowledge-doc-primary,
+  .knowledge-doc-scope,
+  .knowledge-doc-status-stack,
+  .knowledge-doc-effective,
+  .knowledge-doc-actions {
+    grid-column: 2 / -1;
+  }
+
+  .knowledge-document-open {
+    align-items: flex-start;
+  }
+
+  .knowledge-doc-summary {
+    -webkit-line-clamp: 3;
+  }
+
+  .knowledge-doc-status-stack,
+  .knowledge-row-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 1679px) {
+  :is(.knowledge-document-workspace-with-inspector, .knowledge-explorer-shell-with-inspector) .knowledge-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :is(.knowledge-document-workspace-with-inspector, .knowledge-explorer-shell-with-inspector) :is(.knowledge-toolbar-controls, .knowledge-toolbar-controls-wide) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  :is(.knowledge-document-workspace-with-inspector, .knowledge-explorer-shell-with-inspector) .knowledge-toolbar-meta {
+    justify-content: space-between;
+  }
+
+  :is(.knowledge-document-workspace-with-inspector, .knowledge-explorer-shell-with-inspector) .knowledge-doc-list-header {
+    position: absolute;
+    display: grid;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  :is(.knowledge-document-workspace-with-inspector, .knowledge-explorer-shell-with-inspector) .knowledge-doc-row {
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0.55rem 0.7rem;
+    padding: 0.85rem;
+  }
+
+  :is(.knowledge-document-workspace-with-inspector, .knowledge-explorer-shell-with-inspector) :is(.knowledge-doc-primary, .knowledge-doc-scope, .knowledge-doc-status-stack, .knowledge-doc-effective, .knowledge-doc-actions) {
+    grid-column: 2 / -1;
+  }
+
+  :is(.knowledge-document-workspace-with-inspector, .knowledge-explorer-shell-with-inspector) :is(.knowledge-doc-status-stack, .knowledge-row-actions) {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 680px) {
+  .knowledge-toolbar-controls,
+  .knowledge-toolbar-controls-wide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 900px) {
   .rag-chat-page {
     height: calc(100dvh - 3.75rem);
@@ -127,6 +291,90 @@
   }
 }
 
+/* Audit rows need their task-card form throughout the compact workbench range. */
+@media (max-width: 1180px) {
+  :is(.audit-table, .user-management-table) {
+    display: block;
+    min-width: 0;
+  }
+
+  :is(.audit-table, .user-management-table) thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  :is(.audit-table, .user-management-table) tbody {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  :is(.audit-table, .user-management-table) .sv-table-row {
+    display: grid;
+    overflow: hidden;
+    border: 1px solid var(--color-surface-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-card);
+  }
+
+  :is(.audit-table, .user-management-table) .sv-table-row > td {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    grid-template-columns: minmax(8rem, 0.28fr) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+    border: 0;
+    border-bottom: 1px solid var(--color-surface-border);
+    padding: 0.75rem;
+  }
+
+  :is(.audit-table, .user-management-table) .sv-table-row > td:last-child {
+    border-bottom: 0;
+  }
+
+  :is(.audit-table, .user-management-table) .sv-table-row > td::before {
+    content: attr(data-label);
+    color: var(--color-secondary);
+    font-size: var(--font-size-ui-micro);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+    text-transform: uppercase;
+  }
+
+  .audit-detail-row {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    grid-column: 1 / -1;
+    margin-top: -0.75rem;
+  }
+
+  .audit-table .audit-detail-row > td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    padding: 0 0.75rem 0.75rem;
+  }
+
+  .audit-event-button {
+    max-width: none;
+  }
+
+  .user-row-actions {
+    justify-content: flex-start;
+  }
+}
+
 @media (max-width: 760px) {
   .review-clear-strip {
     grid-template-columns: minmax(0, 1fr);
@@ -158,22 +406,29 @@
   }
 
   /* Tables with data-label become readable task cards on phones. */
-  :is(.user-management-table, .ingest-job-table, .audit-table) {
+  :is(.user-management-table, .ingest-job-table, .audit-table, .abbreviation-glossary-table) {
     display: block;
     min-width: 0;
   }
 
-  :is(.user-management-table, .ingest-job-table, .audit-table) thead {
-    display: none;
+  :is(.user-management-table, .ingest-job-table, .audit-table, .abbreviation-glossary-table) thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
-  :is(.user-management-table, .ingest-job-table, .audit-table) tbody {
+  :is(.user-management-table, .ingest-job-table, .audit-table, .abbreviation-glossary-table) tbody {
     display: grid;
     gap: 0.75rem;
     padding: 0.75rem;
   }
 
-  :is(.user-management-table, .ingest-job-table, .audit-table) .sv-table-row {
+  :is(.user-management-table, .ingest-job-table, .audit-table, .abbreviation-glossary-table) .sv-table-row {
     display: grid;
     overflow: hidden;
     border: 1px solid var(--color-surface-border);
@@ -181,7 +436,7 @@
     background: var(--color-surface-card);
   }
 
-  :is(.user-management-table, .ingest-job-table, .audit-table) .sv-table-row > td {
+  :is(.user-management-table, .ingest-job-table, .audit-table, .abbreviation-glossary-table) .sv-table-row > td {
     display: grid;
     width: 100%;
     min-width: 0;
@@ -194,11 +449,11 @@
     padding: 0.75rem;
   }
 
-  :is(.user-management-table, .ingest-job-table, .audit-table) .sv-table-row > td:last-child {
+  :is(.user-management-table, .ingest-job-table, .audit-table, .abbreviation-glossary-table) .sv-table-row > td:last-child {
     border-bottom: 0;
   }
 
-  :is(.user-management-table, .ingest-job-table, .audit-table) .sv-table-row > td::before {
+  :is(.user-management-table, .ingest-job-table, .audit-table, .abbreviation-glossary-table) .sv-table-row > td::before {
     content: attr(data-label);
     color: var(--color-secondary);
     font-size: var(--font-size-ui-micro);
@@ -209,12 +464,18 @@
   }
 
   .audit-detail-row {
-    display: block;
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    grid-column: 1 / -1;
     margin-top: -0.75rem;
   }
 
-  .audit-detail-row > td {
+  .audit-table .audit-detail-row > td {
     display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
     padding: 0 0.75rem 0.75rem;
   }
 

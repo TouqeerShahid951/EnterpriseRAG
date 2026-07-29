@@ -47,6 +47,7 @@ export function ImageReviewWorkspace({
     onSuccess: (response) => {
       void queryClient.invalidateQueries({ queryKey: ["review-queue", "image-batches"] });
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      void queryClient.invalidateQueries({ queryKey: ["documents"] });
       notify({
         title: response.batch_complete ? "Image review complete" : "Image decisions saved",
         description: selectedBatch?.doc_title,
@@ -92,7 +93,7 @@ export function ImageReviewWorkspace({
   const canDecide = Boolean(selectedBatch) && !previewMode && !isMutating;
 
   return (
-    <div className="review-layout review-image-layout">
+    <div className="review-layout review-image-layout" id="review-panel-images" role="tabpanel" aria-labelledby="review-tab-images" tabIndex={0}>
       <section className="sv-card review-image-batch-panel" aria-label="PDF image review batches">
         <div className="review-panel-header">
           <div>

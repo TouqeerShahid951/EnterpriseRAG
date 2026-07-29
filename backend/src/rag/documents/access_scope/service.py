@@ -378,6 +378,7 @@ class DocumentAccessScopeService:
                 document_id=updated_document.id,
                 job_id=job.id,
                 reason="documents.owner.transfer",
+                index_generation_id=updated_document.active_index_generation_id,
             )
         except Exception as exc:  # noqa: BLE001 - refresh remains best effort
             self._document_repo.append_audit_event(

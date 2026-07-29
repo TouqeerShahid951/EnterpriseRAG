@@ -36,6 +36,7 @@ export function PrudentiaChatPage(props: Props) {
   const shouldFollowStreamRef = useRef(true);
   const streamIdentityRef = useRef<string | null>(null);
   const mobileHistoryRef = useRef<HTMLDivElement | null>(null);
+  const mobileEvidenceRef = useRef<HTMLElement | null>(null);
   const streamPositionKey = useMemo(() => chatStreamPositionKey(props.chatTurns), [props.chatTurns]);
   const lastTurnId = props.chatTurns.at(-1)?.id ?? "empty";
   const streamIdentity = `${props.activeSessionId ?? "new"}:${lastTurnId}`;
@@ -54,7 +55,19 @@ export function PrudentiaChatPage(props: Props) {
       if (!scrollNode || !shouldFollowStreamRef.current) return;
       scrollNode.scrollTo({ top: scrollNode.scrollHeight, behavior: "auto" });
     });
-  }, [source?.chunk_id, streamIdentity, streamPositionKey]);
+  }, [streamIdentity, streamPositionKey]);
+
+  useEffect(() => {
+    if (!source || !window.matchMedia("(max-width: 1180px)").matches) return;
+    const frame = window.requestAnimationFrame(() => {
+      const scrollNode = scrollRef.current;
+      const evidenceNode = mobileEvidenceRef.current;
+      if (!scrollNode || !evidenceNode) return;
+      const top = evidenceNode.getBoundingClientRect().top - scrollNode.getBoundingClientRect().top + scrollNode.scrollTop;
+      scrollNode.scrollTo({ top, behavior: "auto" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [source?.chunk_id, source?.doc_id]);
 
   useEffect(() => () => {
     if (scrollFrameRef.current !== null) {
@@ -160,7 +173,7 @@ export function PrudentiaChatPage(props: Props) {
                     selectedSource={props.selectedSource}
                   />
                 )}
-                {source ? <MobileEvidencePanel onClose={() => props.onSelectSource(null)} source={source} sourceCount={sourceCount} sourceNumber={sourceNumber} /> : null}
+                {source ? <MobileEvidencePanel panelRef={mobileEvidenceRef} onClose={() => props.onSelectSource(null)} source={source} sourceCount={sourceCount} sourceNumber={sourceNumber} /> : null}
               </div>
             </div>
             <ChatComposer activeDocuments={activeSpaceDocuments} hasCorpus={hasCorpus} {...props} />

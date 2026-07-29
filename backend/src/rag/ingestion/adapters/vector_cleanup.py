@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..cancellation import DocumentVectorCleanupError
 from ..indexing.qdrant import QdrantClient
-from ..publication.service import IndexPublicationService
+from ..publication.repository import IndexPublicationRepository
 from .http import ServiceRequestError
 
 
@@ -15,9 +15,9 @@ class QdrantBuildingGenerationCleaner:
         base_url: str,
         collection: str,
         timeout_seconds: float,
-        publication_service: IndexPublicationService,
+        publication_repository: IndexPublicationRepository,
     ) -> None:
-        self._publication_service = publication_service
+        self._publication_repository = publication_repository
         self._client = QdrantClient(
             base_url=base_url,
             collection=collection,
@@ -25,7 +25,7 @@ class QdrantBuildingGenerationCleaner:
         )
 
     def delete_building_vectors(self, job_id: str) -> None:
-        generation_id = self._publication_service.cancel_building(job_id=job_id)
+        generation_id = self._publication_repository.cancel_building(job_id=job_id)
         if generation_id is None:
             return
         try:

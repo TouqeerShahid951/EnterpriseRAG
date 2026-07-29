@@ -109,6 +109,47 @@ def searchable_text(hit: SearchHit) -> str:
     return " ".join(parts)
 
 
+def reranker_text(hit: SearchHit, *, max_chars: int) -> str:
+    """Format one bounded passage while keeping chunk evidence ahead of summaries."""
+    if max_chars <= 0:
+        raise ValueError("max_chars must be positive")
+    payload = hit.payload
+    descriptor_parts: list[str] = []
+    for label, field in (
+        ("Title", "doc_title"),
+        ("Section", "section_title"),
+        ("Table", "table_title"),
+        ("Caption", "table_caption"),
+        ("Row", "table_row_label"),
+        ("Type", "doc_type"),
+    ):
+        value = payload.get(field)
+        if isinstance(value, str) and value.strip():
+            descriptor_parts.append(f"{label}: {value.strip()}")
+    section_path = payload.get("section_path")
+    if isinstance(section_path, list):
+        path = " / ".join(str(part).strip() for part in section_path if str(part).strip())
+        if path:
+            descriptor_parts.append(f"Path: {path}")
+    headers = payload.get("table_column_headers")
+    if isinstance(headers, list):
+        header_text = " | ".join(str(header).strip() for header in headers if str(header).strip())
+        if header_text:
+            descriptor_parts.append(f"Columns: {header_text}")
+
+    descriptor_limit = min(320, max_chars // 4)
+    structured_limit = max_chars // 3
+    parts = ["\n".join(descriptor_parts)[:descriptor_limit]]
+    structured = payload.get("structured_search_text")
+    if isinstance(structured, str):
+        parts.append(structured.strip()[:structured_limit])
+    for field in ("text", "summary", "doc_summary"):
+        value = payload.get(field)
+        if isinstance(value, str) and value.strip():
+            parts.append(value.strip())
+    return "\n".join(part for part in parts if part)[:max_chars]
+
+
 def tokens(text: str) -> set[str]:
     return {
         token

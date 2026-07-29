@@ -6,7 +6,6 @@ import {
   LANGUAGE_ROLES,
   LOCAL_INFERENCE_HOST,
   MODEL_STATUS_ROLES,
-  SUPPORTED_RERANKER_MODELS,
   VLLM_LOCAL_PORTS,
   modelOptionsFromDiscovery,
   rerankerOptionsFromCatalog,
@@ -17,7 +16,6 @@ export {
   LANGUAGE_ROLES,
   LOCAL_INFERENCE_HOST,
   MODEL_STATUS_ROLES,
-  SUPPORTED_RERANKER_MODELS,
   modelOptionsFromDiscovery,
   rerankerOptionsFromCatalog,
 };
@@ -50,6 +48,7 @@ export type RagConfigFormState = {
   chat_model: string;
   embed_model: string;
   reasoning_model: string;
+  sql_generation_model: string;
   routing_model: string;
   faithfulness_model: string;
   ingestion_model: string;
@@ -57,9 +56,14 @@ export type RagConfigFormState = {
   reranker_model: string;
   thinking_enabled: boolean;
   query_planner_enabled: boolean;
+  evidence_gate_policy: RagConfig["evidence_gate_policy"];
+  faithfulness_policy: RagConfig["faithfulness_policy"];
   json_num_predict: string;
   retrieval_token_budget: string;
   chat_timeout_seconds: string;
+  routing_timeout_seconds: string;
+  reasoning_timeout_seconds: string;
+  faithfulness_timeout_seconds: string;
   embed_timeout_seconds: string;
 };
 
@@ -124,6 +128,7 @@ export const DEFAULT_RAG_FORM: RagConfigFormState = {
   chat_model: "llama3.1:8b",
   embed_model: DEFAULT_FASTEMBED_MODEL,
   reasoning_model: "",
+  sql_generation_model: "",
   routing_model: "",
   faithfulness_model: "",
   ingestion_model: "",
@@ -131,9 +136,14 @@ export const DEFAULT_RAG_FORM: RagConfigFormState = {
   reranker_model: DEFAULT_RERANKER_MODEL,
   thinking_enabled: false,
   query_planner_enabled: true,
+  evidence_gate_policy: "adaptive",
+  faithfulness_policy: "adaptive",
   json_num_predict: "4096",
   retrieval_token_budget: "12000",
   chat_timeout_seconds: "180",
+  routing_timeout_seconds: "5",
+  reasoning_timeout_seconds: "30",
+  faithfulness_timeout_seconds: "30",
   embed_timeout_seconds: "45",
 };
 
@@ -234,6 +244,7 @@ export function formFromConfig(config: RagConfig): RagConfigFormState {
     chat_model: config.chat_model || DEFAULT_RAG_FORM.chat_model,
     embed_model: config.embed_model || DEFAULT_RAG_FORM.embed_model,
     reasoning_model: config.reasoning_model ?? config.routing_model ?? "",
+    sql_generation_model: config.sql_generation_model ?? "",
     routing_model: config.routing_model ?? "",
     faithfulness_model: config.faithfulness_model ?? "",
     ingestion_model: config.ingestion_model ?? "",
@@ -241,9 +252,20 @@ export function formFromConfig(config: RagConfig): RagConfigFormState {
     reranker_model: config.reranker_model || DEFAULT_RERANKER_MODEL,
     thinking_enabled: Boolean(config.thinking_enabled),
     query_planner_enabled: config.query_planner_enabled ?? true,
+    evidence_gate_policy: config.evidence_gate_policy ?? "adaptive",
+    faithfulness_policy: config.faithfulness_policy ?? "adaptive",
     json_num_predict: String(config.json_num_predict || DEFAULT_RAG_FORM.json_num_predict),
     retrieval_token_budget: String(config.retrieval_token_budget || DEFAULT_RAG_FORM.retrieval_token_budget),
     chat_timeout_seconds: String(config.chat_timeout_seconds || DEFAULT_RAG_FORM.chat_timeout_seconds),
+    routing_timeout_seconds: String(
+      config.routing_timeout_seconds || DEFAULT_RAG_FORM.routing_timeout_seconds
+    ),
+    reasoning_timeout_seconds: String(
+      config.reasoning_timeout_seconds || DEFAULT_RAG_FORM.reasoning_timeout_seconds
+    ),
+    faithfulness_timeout_seconds: String(
+      config.faithfulness_timeout_seconds || DEFAULT_RAG_FORM.faithfulness_timeout_seconds
+    ),
     embed_timeout_seconds: String(config.embed_timeout_seconds || DEFAULT_RAG_FORM.embed_timeout_seconds),
   };
 }
@@ -276,16 +298,22 @@ export function requestFromForm(form: RagConfigFormState): RagConfigRequest {
     chat_model: form.chat_model.trim(),
     embed_model: form.embed_model.trim(),
     reasoning_model: reasoningModel,
+    sql_generation_model: form.sql_generation_model.trim() || null,
     routing_model: form.routing_model.trim() || reasoningModel,
     faithfulness_model: form.faithfulness_model.trim() || null,
     ingestion_model: form.ingestion_model.trim() || null,
     vision_model: form.vision_model.trim() || null,
     thinking_enabled: form.thinking_enabled,
     query_planner_enabled: form.query_planner_enabled,
+    evidence_gate_policy: form.evidence_gate_policy,
+    faithfulness_policy: form.faithfulness_policy,
     json_num_predict: Number(form.json_num_predict),
     retrieval_token_budget: Number(form.retrieval_token_budget),
     reranker_model: form.reranker_model.trim(),
     chat_timeout_seconds: Number(form.chat_timeout_seconds),
+    routing_timeout_seconds: Number(form.routing_timeout_seconds),
+    reasoning_timeout_seconds: Number(form.reasoning_timeout_seconds),
+    faithfulness_timeout_seconds: Number(form.faithfulness_timeout_seconds),
     embed_timeout_seconds: Number(form.embed_timeout_seconds),
   };
 }
@@ -320,6 +348,15 @@ export function canSubmitRagConfig(form: RagConfigFormState): boolean {
       request.retrieval_token_budget <= 200000 &&
       Number.isFinite(request.chat_timeout_seconds) &&
       request.chat_timeout_seconds > 0 &&
+      Number.isFinite(request.routing_timeout_seconds) &&
+      request.routing_timeout_seconds >= 1 &&
+      request.routing_timeout_seconds <= 30 &&
+      Number.isFinite(request.reasoning_timeout_seconds) &&
+      request.reasoning_timeout_seconds >= 1 &&
+      request.reasoning_timeout_seconds <= 300 &&
+      Number.isFinite(request.faithfulness_timeout_seconds) &&
+      request.faithfulness_timeout_seconds >= 1 &&
+      request.faithfulness_timeout_seconds <= 300 &&
       Number.isFinite(request.embed_timeout_seconds) &&
       request.embed_timeout_seconds > 0,
   );
@@ -358,6 +395,7 @@ export function withLanguageRoleProvider(
     [`${role}_host`]: "",
     [`${role}_port`]: role === "vision" && provider === "vllm" ? defaultPortForRole(provider, role) : "",
     [`${role}_model`]: "",
+    sql_generation_model: role === "reasoning" ? "" : form.sql_generation_model,
   };
 }
 
@@ -429,6 +467,7 @@ function clearModelSelections(form: RagConfigFormState): RagConfigFormState {
     chat_model: "",
     embed_model: "",
     reasoning_model: "",
+    sql_generation_model: "",
     routing_model: "",
     faithfulness_model: "",
     ingestion_model: "",

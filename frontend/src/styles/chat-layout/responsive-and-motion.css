@@ -164,6 +164,32 @@
   }
 }
 
+@media (max-width: 480px) {
+  .rag-chat-header {
+    position: relative;
+    display: block;
+  }
+
+  .rag-chat-header > div:first-child {
+    width: 100%;
+  }
+
+  .rag-chat-header :is(.sv-eyebrow, .sv-page-title) {
+    padding-right: 7.25rem;
+  }
+
+  .rag-chat-header .text-body-md {
+    max-width: none;
+    margin-top: 0.4rem;
+  }
+
+  .rag-mobile-history-trigger {
+    position: absolute;
+    top: 0.6rem;
+    right: 1rem;
+  }
+}
+
 @media (max-width: 900px) {
   .rag-chat-page {
     min-height: calc(100dvh - 4rem);

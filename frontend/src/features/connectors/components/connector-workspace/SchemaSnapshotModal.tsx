@@ -1,22 +1,42 @@
-import { FileText } from "lucide-react";
+import { useEffect, useState } from "react";
+import { FileText, Loader2, Sparkles } from "lucide-react";
 
 import { InlineMessage } from "@/components/layout/Common";
 import { Modal } from "@/components/layout/Modal";
+import { ClearanceSelect, SelectField } from "@/features/connectors/components/folder-schedules/FolderSchedulePanels";
 import {
   connectorTypeLabel,
   formatDateTime,
   schemaSnapshotTables,
   type ConnectorSchemaSnapshotViewerState,
 } from "@/features/connectors/utils/connectorPanelUtils";
+import type { ClearanceLevel, ConnectorProfile } from "@/types/api";
+import { errorMessage } from "@/lib/utils/format";
 
-export function SchemaSnapshotModal({ onClose, viewer }: SchemaSnapshotModalProps) {
+export function SchemaSnapshotModal({
+  clearanceOptions,
+  defaultClearanceLevel,
+  isPreparingReview,
+  mutationError,
+  onClose,
+  onPrepareReview,
+  viewer,
+  writableSpacePaths,
+}: SchemaSnapshotModalProps) {
   const snapshot = viewer?.snapshot ?? null;
   const profile = viewer?.profile ?? null;
+  const [groupPath, setGroupPath] = useState("");
+  const [clearanceLevel, setClearanceLevel] = useState<ClearanceLevel>(defaultClearanceLevel);
   const tables = snapshot ? schemaSnapshotTables(snapshot.schema_json) : [];
   const columnCount = tables.reduce((total, table) => total + table.columns.length, 0);
   const relationshipCount = tables.reduce((total, table) => total + table.foreignKeys.length, 0);
   const indexCount = tables.reduce((total, table) => total + table.indexes.length, 0);
   const visibleTables = tables.slice(0, 12);
+
+  useEffect(() => {
+    setGroupPath(writableSpacePaths.length === 1 ? writableSpacePaths[0] ?? "" : "");
+    setClearanceLevel(defaultClearanceLevel);
+  }, [defaultClearanceLevel, snapshot?.id, writableSpacePaths]);
 
   return (
     <Modal
@@ -97,6 +117,41 @@ export function SchemaSnapshotModal({ onClose, viewer }: SchemaSnapshotModalProp
                   {JSON.stringify(snapshot.schema_json, null, 2)}
                 </pre>
               </details>
+
+              <section className="rounded-md border border-surface-border bg-surface-container-low p-3" aria-labelledby="schema-review-setup-title">
+                <p className="sv-label">Next step</p>
+                <h3 id="schema-review-setup-title" className="mt-1 text-body-lg font-extrabold text-on-surface">Prepare an AI-assisted access review</h3>
+                <p className="mt-1 text-body-md text-on-surface-variant">
+                  AI proposes editable descriptions, synonyms, join context, and business rules from schema metadata, one table at a time. It does not inspect row values, approve access, or enable Live DB.
+                </p>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <SelectField
+                    emptyLabel="Select owner space"
+                    helper="The review cannot be prepared until its owner is explicit."
+                    label="Owner Knowledge Space"
+                    onChange={setGroupPath}
+                    options={["", ...writableSpacePaths]}
+                    value={groupPath}
+                  />
+                  <ClearanceSelect onChange={setClearanceLevel} options={clearanceOptions} value={clearanceLevel} />
+                </div>
+                {writableSpacePaths.length === 0 ? <InlineMessage tone="warning">Create a writable Knowledge Space before preparing this review.</InlineMessage> : null}
+                {mutationError ? <InlineMessage tone="error">{errorMessage(mutationError, "Unable to prepare the AI-assisted review.")}</InlineMessage> : null}
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <button type="button" onClick={onClose} className="rounded-md border border-surface-border bg-surface px-3 py-2 text-label-md font-bold text-on-surface hover:border-primary">
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isPreparingReview || !profile || !groupPath}
+                    onClick={() => profile && onPrepareReview(profile, groupPath, clearanceLevel)}
+                    className="sv-action-primary disabled:opacity-50"
+                  >
+                    {isPreparingReview ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
+                    {isPreparingReview ? "Preparing review" : "Prepare AI-assisted review"}
+                  </button>
+                </div>
+              </section>
             </>
           )}
         </section>
@@ -115,8 +170,14 @@ function SchemaSnapshotMetric({ label, value }: SchemaSnapshotMetricProps) {
 }
 
 export type SchemaSnapshotModalProps = {
+  clearanceOptions: ClearanceLevel[];
+  defaultClearanceLevel: ClearanceLevel;
+  isPreparingReview: boolean;
+  mutationError: unknown;
   onClose: () => void;
+  onPrepareReview: (profile: ConnectorProfile, groupPath: string, clearanceLevel: ClearanceLevel) => void;
   viewer: ConnectorSchemaSnapshotViewerState | null;
+  writableSpacePaths: string[];
 };
 
 type SchemaSnapshotMetricProps = {

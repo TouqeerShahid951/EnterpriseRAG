@@ -6,7 +6,11 @@ import json
 from typing import Any
 
 from ...shared.persistence import PostgresConnectionMixin
-from ..chat_history_models import ChatSessionRecord
+from ..chat_history_models import (
+    ChatHistoryRequestConflict,
+    ChatSessionRecord,
+    context_turns_from_payloads,
+)
 
 
 class PostgresChatHistoryRepository(PostgresConnectionMixin):
@@ -91,6 +95,36 @@ class PostgresChatHistoryRepository(PostgresConnectionMixin):
         )
         return session_from_row(row) if row else None
 
+    def load_recent_context_turns(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        permission_version: int,
+        limit: int = 8,
+    ) -> list[dict[str, object]]:
+        if limit <= 0:
+            return []
+        rows = self._execute_all(
+            """
+            WITH recent AS (
+                SELECT turn_index, payload
+                FROM chat_session_turns
+                WHERE session_id = %s
+                  AND user_id = %s
+                  AND permission_version = %s
+                ORDER BY turn_index DESC
+                LIMIT %s
+            )
+            SELECT payload
+            FROM recent
+            ORDER BY turn_index
+            """,
+            (session_id, user_id, permission_version, limit * 2),
+        )
+        payloads = [row["payload"] for row in rows if isinstance(row.get("payload"), dict)]
+        return context_turns_from_payloads(payloads, limit=limit)
+
     def append_completed_turn(
         self,
         *,
@@ -100,6 +134,8 @@ class PostgresChatHistoryRepository(PostgresConnectionMixin):
         title: str,
         user_turn: dict[str, Any],
         assistant_turn: dict[str, Any],
+        client_request_id: str | None = None,
+        request_fingerprint: str | None = None,
     ) -> ChatSessionRecord:
         with self._connect() as conn:
             with conn.transaction():
@@ -107,45 +143,108 @@ class PostgresChatHistoryRepository(PostgresConnectionMixin):
                     """
                     INSERT INTO chat_sessions (id, user_id, permission_version, title)
                     VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (id, user_id, permission_version) DO UPDATE
-                    SET updated_at = NOW()
+                    ON CONFLICT (id, user_id, permission_version) DO NOTHING
                     """,
                     (session_id, user_id, permission_version, title),
                 )
-                row = conn.execute(
+                locked = conn.execute(
                     """
-                    SELECT COALESCE(MAX(turn_index), -1) AS last_index
-                    FROM chat_session_turns
-                    WHERE session_id = %s AND user_id = %s AND permission_version = %s
+                    SELECT 1
+                    FROM chat_sessions
+                    WHERE id = %s AND user_id = %s AND permission_version = %s
+                    FOR UPDATE
                     """,
                     (session_id, user_id, permission_version),
                 ).fetchone()
-                turn_index = int(row["last_index"]) + 1
-                conn.execute(
-                    """
-                    INSERT INTO chat_session_turns (
-                        session_id, user_id, permission_version, turn_index, role, payload
+                if locked is None:
+                    raise RuntimeError("saved chat session could not be locked")
+                existing_rows = []
+                if client_request_id is not None:
+                    existing_rows = conn.execute(
+                        """
+                        SELECT role, request_fingerprint
+                        FROM chat_session_turns
+                        WHERE session_id = %s
+                          AND user_id = %s
+                          AND permission_version = %s
+                          AND client_request_id = %s
+                        ORDER BY turn_index
+                        """,
+                        (
+                            session_id,
+                            user_id,
+                            permission_version,
+                            client_request_id,
+                        ),
+                    ).fetchall()
+                if existing_rows:
+                    if any(
+                        row["request_fingerprint"] != request_fingerprint
+                        for row in existing_rows
+                    ):
+                        raise ChatHistoryRequestConflict(
+                            "client_request_id was already used for a different query request"
+                        )
+                    result = conn.execute(
+                        """
+                        UPDATE chat_session_turns
+                        SET payload = %s::jsonb
+                        WHERE session_id = %s
+                          AND user_id = %s
+                          AND permission_version = %s
+                          AND client_request_id = %s
+                          AND role = 'assistant'
+                        """,
+                        (
+                            json.dumps(assistant_turn),
+                            session_id,
+                            user_id,
+                            permission_version,
+                            client_request_id,
+                        ),
                     )
-                    VALUES (%s, %s, %s, %s, 'user', %s::jsonb),
-                           (%s, %s, %s, %s, 'assistant', %s::jsonb)
-                    """,
-                    (
-                        session_id,
-                        user_id,
-                        permission_version,
-                        turn_index,
-                        json.dumps(user_turn),
-                        session_id,
-                        user_id,
-                        permission_version,
-                        turn_index + 1,
-                        json.dumps(assistant_turn),
-                    ),
-                )
+                    if result.rowcount != 1:
+                        raise RuntimeError("saved chat request had no assistant turn")
+                else:
+                    row = conn.execute(
+                        """
+                        SELECT COALESCE(MAX(turn_index), -1) AS last_index
+                        FROM chat_session_turns
+                        WHERE session_id = %s AND user_id = %s AND permission_version = %s
+                        """,
+                        (session_id, user_id, permission_version),
+                    ).fetchone()
+                    turn_index = int(row["last_index"]) + 1
+                    conn.execute(
+                        """
+                        INSERT INTO chat_session_turns (
+                            session_id, user_id, permission_version, turn_index, role,
+                            payload, client_request_id, request_fingerprint
+                        )
+                        VALUES (%s, %s, %s, %s, 'user', %s::jsonb, %s, %s),
+                               (%s, %s, %s, %s, 'assistant', %s::jsonb, %s, %s)
+                        """,
+                        (
+                            session_id,
+                            user_id,
+                            permission_version,
+                            turn_index,
+                            json.dumps(user_turn),
+                            client_request_id,
+                            request_fingerprint,
+                            session_id,
+                            user_id,
+                            permission_version,
+                            turn_index + 1,
+                            json.dumps(assistant_turn),
+                            client_request_id,
+                            request_fingerprint,
+                        ),
+                    )
                 conn.execute(
                     """
                     UPDATE chat_sessions
-                    SET updated_at = NOW()
+                    SET updated_at = NOW(), revision = revision + 1
                     WHERE id = %s AND user_id = %s AND permission_version = %s
                     """,
                     (session_id, user_id, permission_version),
@@ -227,6 +326,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     permission_version INTEGER NOT NULL,
     title TEXT NOT NULL,
+    revision BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (id, user_id, permission_version),
@@ -245,6 +345,8 @@ CREATE TABLE IF NOT EXISTS chat_session_turns (
     turn_index INTEGER NOT NULL,
     role TEXT NOT NULL,
     payload JSONB NOT NULL,
+    client_request_id TEXT,
+    request_fingerprint TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (session_id, user_id, permission_version, turn_index),
     FOREIGN KEY (session_id, user_id, permission_version)
@@ -255,6 +357,21 @@ CREATE TABLE IF NOT EXISTS chat_session_turns (
     CONSTRAINT chat_session_turns_payload_object CHECK (jsonb_typeof(payload) = 'object')
 );
 
+ALTER TABLE chat_sessions
+    ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 0;
+
+ALTER TABLE chat_session_turns
+    ADD COLUMN IF NOT EXISTS client_request_id TEXT;
+
+ALTER TABLE chat_session_turns
+    ADD COLUMN IF NOT EXISTS request_fingerprint TEXT;
+
 CREATE INDEX IF NOT EXISTS chat_session_turns_session_idx
     ON chat_session_turns (session_id, user_id, permission_version, turn_index);
+
+CREATE UNIQUE INDEX IF NOT EXISTS chat_session_turns_request_role_idx
+    ON chat_session_turns (
+        session_id, user_id, permission_version, client_request_id, role
+    )
+    WHERE client_request_id IS NOT NULL;
 """

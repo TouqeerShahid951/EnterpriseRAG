@@ -1,17 +1,27 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_RAG_FORM,
   endpointsFromForm,
   providerDefaults,
-  ragConfigActionsLocked,
-  ragConfigSourceLabel,
   requestFromForm,
-  stackTemplateFromForm,
+  withLanguageRoleProvider,
   type RagConfigFormState,
-} from "./PrudentiaSettingsPage";
+} from "../models/ragConfigForm";
+import { ragConfigActionsLocked, ragConfigSourceLabel, stackTemplateFromForm } from "../models/settingsLabels";
 import { ollamaForm } from "./settingsTestFixtures";
 
 describe("inference settings helpers", () => {
+  it("defaults semantic judges to adaptive execution", () => {
+    expect(requestFromForm(DEFAULT_RAG_FORM)).toMatchObject({
+      evidence_gate_policy: "adaptive",
+      faithfulness_policy: "adaptive",
+      routing_timeout_seconds: 5,
+      reasoning_timeout_seconds: 30,
+      faithfulness_timeout_seconds: 30,
+    });
+  });
+
   it("normalizes the RAG configuration source for the runtime UI", () => {
     expect(ragConfigSourceLabel("workspace")).toBe("workspace");
     expect(ragConfigSourceLabel("env")).toBe("environment");
@@ -84,6 +94,8 @@ describe("inference settings helpers", () => {
       vision_port: 8006,
       thinking_enabled: false,
       query_planner_enabled: true,
+      evidence_gate_policy: "always",
+      faithfulness_policy: "always",
       json_num_predict: 4096,
       retrieval_token_budget: 12000,
       reranker_model: "jinaai/jina-reranker-v1-turbo-en",
@@ -103,6 +115,19 @@ describe("inference settings helpers", () => {
     expect(request.reranker_model).toBe("BAAI/bge-reranker-base");
   });
 
+  it("maps role-specific timeouts into the saved config request", () => {
+    expect(requestFromForm({
+      ...ollamaForm,
+      routing_timeout_seconds: "7",
+      reasoning_timeout_seconds: "31",
+      faithfulness_timeout_seconds: "29",
+    })).toMatchObject({
+      routing_timeout_seconds: 7,
+      reasoning_timeout_seconds: 31,
+      faithfulness_timeout_seconds: 29,
+    });
+  });
+
   it("maps the query planner switch into the saved config request", () => {
     const request = requestFromForm({
       ...ollamaForm,
@@ -110,6 +135,45 @@ describe("inference settings helpers", () => {
     });
 
     expect(request.query_planner_enabled).toBe(false);
+  });
+
+  it("maps an explicit SQL generation model into the saved config request", () => {
+    const request = requestFromForm({
+      ...ollamaForm,
+      reasoning_model: "reasoning-model",
+      sql_generation_model: "sql-model",
+    });
+
+    expect(request.reasoning_model).toBe("reasoning-model");
+    expect(request.sql_generation_model).toBe("sql-model");
+  });
+
+  it("clears the SQL model when its reasoning service changes", () => {
+    const form = withLanguageRoleProvider(
+      { ...ollamaForm, sql_generation_model: "sql-model" },
+      "reasoning",
+      "vllm",
+    );
+
+    expect(form.sql_generation_model).toBe("");
+  });
+
+  it("maps the faithfulness checker switch into the saved config request", () => {
+    const request = requestFromForm({
+      ...ollamaForm,
+      faithfulness_policy: "never",
+    });
+
+    expect(request.faithfulness_policy).toBe("never");
+  });
+
+  it("maps the Evidence Gate switch into the saved config request", () => {
+    const request = requestFromForm({
+      ...ollamaForm,
+      evidence_gate_policy: "never",
+    });
+
+    expect(request.evidence_gate_policy).toBe("never");
   });
 
   it("uses compose local vLLM ports and keeps embeddings independently configurable", () => {

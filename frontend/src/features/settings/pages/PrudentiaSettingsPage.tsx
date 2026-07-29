@@ -63,31 +63,6 @@ import { RagConfigResetDialog } from "@/features/settings/components/RagConfigRe
 import { ModelsAndRolesPanel } from "@/features/settings/components/ModelsAndRolesPanel";
 import { InferenceServicesPanel } from "@/features/settings/components/VllmDeploymentPanels";
 
-export type { RagConfigFormState } from "@/features/settings/models/ragConfigForm";
-export {
-  SUPPORTED_RERANKER_MODELS,
-  endpointsFromForm,
-  modelOptionsFromDiscovery,
-  providerDefaults,
-  rerankerOptionsFromCatalog,
-  requestFromForm,
-} from "@/features/settings/models/ragConfigForm";
-export type { VllmDeploymentFormState } from "@/features/settings/models/vllmDeploymentForm";
-export { requestFromVllmForm } from "@/features/settings/models/vllmDeploymentForm";
-export {
-  activeStackLabel,
-  activeVisionStatus,
-  discoveryHealthLabel,
-  modelPlaceholderForStatus,
-  pdfImageReviewThresholdLabel,
-  ragConfigActionsLocked,
-  ragConfigSourceLabel,
-  stackTemplateFromForm,
-  thresholdFromPercent,
-  thresholdPercentFromConfig,
-} from "@/features/settings/models/settingsLabels";
-
-
 export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Props) {
   const queryClient = useQueryClient();
   const { notify } = useToast();
@@ -448,7 +423,6 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
             onPdfImageReviewThresholdChange={setPdfImageReviewThreshold}
             onSave={() => saveIngestConfigMutation.mutate({
               worker_concurrency: workerConcurrency,
-              quality_preset: ingestConfigQuery.data?.quality_preset ?? "fast",
               ocr_review_confidence_threshold: thresholdFromPercent(ocrReviewThresholdPercent),
               pdf_image_review_threshold: pdfImageReviewThreshold,
               vision_layout_repair_enabled: visionLayoutRepairEnabled,

@@ -160,11 +160,7 @@ def synthesize_response(
     plan = ctx.get("route_plan")
     prepared = prepare_synthesis_input(ctx, evidence_sources)
     ctx["synthesis_profile"] = prepared.profile
-    artifact_request = ctx.get("artifact_request")
-    if artifact_request is not None and artifact_request.needs_clarification:
-        available_sources = []
-        answer = "What should the file cover? Please include a topic or question, and I can generate the requested file."
-    elif plan is not None and not plan.needs_retrieval:
+    if plan is not None and not plan.needs_retrieval:
         available_sources = []
         answer = "I can only answer questions grounded in the indexed documents."
         ctx["degraded"] = True
@@ -184,22 +180,7 @@ def synthesize_response(
             contexts=prepared.contexts,
             profile=prepared.profile,
         )
-        answer = ensure_answer_has_citation(answer, available_sources)
-        if is_global_abstention(answer):
-            fallback_answer = extractive_fallback_answer(
-                ctx["request"].query, available_sources
-            )
-            if fallback_answer:
-                answer = fallback_answer
-            else:
-                ctx["degraded"] = True
-                ctx["degraded_reason"] = (
-                    ctx["degraded_reason"]
-                    or "Insufficient relevant evidence after retrieval retries"
-                )
-                answer = cited_insufficient_evidence_answer(
-                    ctx["request"].query, available_sources
-                )
+        answer = validate_synthesized_answer(ctx, answer, available_sources)
     elif _scope_requires_clarification(ctx):
         available_sources = []
         answer = (
@@ -253,7 +234,13 @@ def prepare_synthesis_input(
         contexts=contexts,
         sources=sources,
         profile=profile,
-        token_budget=ctx["token_budget"],
+        token_budget=ctx.get("synthesis_token_limit", ctx["token_budget"]),
+    )
+    ctx["synthesis_context_count"] = len(contexts)
+    ctx["synthesis_estimated_prompt_tokens"] = estimate_answer_prompt_tokens(
+        question=question,
+        contexts=contexts,
+        profile=profile,
     )
     return PreparedSynthesis(
         question=question,
@@ -268,11 +255,26 @@ def synthesis_profile_for_plan(plan: RoutePlan | None) -> str:
         return "legacy"
     if not plan.needs_retrieval:
         return "out_of_scope"
-    if plan.intent == "temporal_factual":
-        return "temporal"
-    if plan.intent == "conversational_followup":
-        return "factual_simple"
-    return plan.intent
+    if plan.response_mode == "conflict_analysis":
+        return "conflict_check"
+    if plan.temporal_scope != "current":
+        return "temporal_comparison" if plan.response_mode == "comparison" else "temporal"
+    if plan.response_mode == "comparison":
+        return "comparison"
+    if plan.response_mode == "summary":
+        return "summarization"
+    if plan.response_mode == "procedure":
+        return "procedural"
+    if "document_navigation" in plan.capabilities:
+        return "document_navigation"
+    if (
+        set(plan.capabilities) & {"structured_query", "live_sql"}
+        and plan.coverage == "exhaustive"
+    ):
+        return "aggregation"
+    if set(plan.capabilities) & {"global_graph", "decomposed_search"}:
+        return "multi_hop"
+    return "general_rag" if plan.response_mode == "explanation" else "factual_simple"
 
 
 def source_contexts(sources: list[SourceAnchor]) -> list[str]:
@@ -324,6 +326,17 @@ def _fit_prompt_budget(
     ):
         trimmed_contexts.pop()
         trimmed_sources.pop()
+    estimated_tokens = estimate_answer_prompt_tokens(
+        question=question, contexts=trimmed_contexts, profile=profile
+    )
+    if trimmed_contexts and estimated_tokens > prompt_budget:
+        # ponytail: keep the existing token estimate; use provider tokenizers if measured drift requires it.
+        keep_chars = max(
+            len(source_citation(trimmed_sources[-1])),
+            len(trimmed_contexts[-1])
+            - ((estimated_tokens - prompt_budget + 1) * 4),
+        )
+        trimmed_contexts[-1] = trimmed_contexts[-1][:keep_chars].rstrip()
     return trimmed_contexts, trimmed_sources
 
 
@@ -379,6 +392,29 @@ def ensure_answer_has_citation(answer: str, sources: list[SourceAnchor]) -> str:
             boundary = boundaries[index]
             result += "\n" if "\n" in boundary else " "
     return result.strip()
+
+
+def validate_synthesized_answer(
+    ctx: QueryContext, answer: str, sources: list[SourceAnchor]
+) -> str:
+    answer = ensure_answer_has_citation(answer, sources)
+    if not sources or (
+        _has_substantive_answer(answer) and not is_global_abstention(answer)
+    ):
+        return answer
+    fallback_answer = extractive_fallback_answer(ctx["request"].query, sources)
+    if fallback_answer:
+        return fallback_answer
+    ctx["degraded"] = True
+    ctx["degraded_reason"] = (
+        ctx["degraded_reason"]
+        or "Insufficient relevant evidence after retrieval retries"
+    )
+    return cited_insufficient_evidence_answer(ctx["request"].query, sources)
+
+
+def _has_substantive_answer(answer: str) -> bool:
+    return bool(re.search(r"[A-Za-z0-9]", _CITATION_RE.sub("", answer)))
 
 
 def _append_citation(statement: str, label: str) -> str:
@@ -448,9 +484,9 @@ def _profiled_question(
     if plan is None or not instructions:
         return question
     details = [
-        f"Internal route intent: {plan.intent}.",
-        f"Retrieval strategy: {plan.retrieval_strategy}.",
-        f"Chunk granularity: {plan.chunk_granularity}.",
+        f"Retrieval capabilities: {', '.join(plan.capabilities)}.",
+        f"Response mode: {plan.response_mode}.",
+        f"Scope: {plan.scope}; coverage: {plan.coverage}; temporal scope: {plan.temporal_scope}.",
     ]
     if plan.filters:
         details.append(f"Route filters: {_format_filters(plan.filters)}.")
@@ -674,6 +710,9 @@ def extractive_fallback_answer(
 ) -> str | None:
     if not sources:
         return None
+    structured_answer = _structured_row_fallback_answer(sources)
+    if structured_answer:
+        return structured_answer
     question_terms = _support_terms(question)
     if _asks_for_title(question_terms):
         source = _best_source(question_terms, sources)
@@ -689,6 +728,18 @@ def extractive_fallback_answer(
             sentence, source = match
             return f"{sentence} {source_citation(source)}."
     return None
+
+
+def _structured_row_fallback_answer(sources: list[SourceAnchor]) -> str | None:
+    rows = [
+        f"{'; '.join(f'{field.label}: {field.value}' for field in source.attribution_fields)} "
+        f"{source_citation(source)}."
+        for source in sources
+        if source.attribution_kind == "table_row" and source.attribution_fields
+    ]
+    if len(rows) == 1:
+        return rows[0]
+    return "\n".join(f"- {row}" for row in rows) or None
 
 
 def cited_insufficient_evidence_answer(
@@ -931,12 +982,7 @@ def _answer_status(
     sources: list[SourceAnchor],
     coverage: QueryCoverage,
 ) -> AnswerStatus:
-    artifact_request = ctx.get("artifact_request")
-    if (
-        _scope_requires_clarification(ctx)
-        or artifact_request is not None
-        and artifact_request.needs_clarification
-    ):
+    if _scope_requires_clarification(ctx):
         return "clarification"
     if not sources:
         return "abstained"

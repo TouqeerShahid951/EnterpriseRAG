@@ -4,6 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
+from rag.shared.contracts.abbreviations import ABBREVIATION_GLOSSARY_DOC_TYPE
+
 from ..auth.document_access import can_manage_document_ingestion, can_read_document
 from ..auth.identity_models import UserRecord
 from ..documents.models import DocumentRecord, DocumentRepository
@@ -60,6 +62,12 @@ class DocumentGraphEnrichmentService:
         actor: UserRecord,
     ) -> DocumentGraphEnrichmentResult:
         document = self._managed_document(document_id, actor)
+        if document.doc_type == ABBREVIATION_GLOSSARY_DOC_TYPE:
+            raise DocumentGraphEnrichmentRejected(
+                category="conflict",
+                code="document_not_graph_eligible",
+                message="Abbreviation glossaries use structured query expansion instead of graph enrichment.",
+            )
         if not self._enrichment_enabled():
             raise DocumentGraphEnrichmentRejected(
                 category="conflict",
@@ -84,6 +92,7 @@ class DocumentGraphEnrichmentService:
                 document_id=document.id,
                 job_id=job.id,
                 reason="user_request",
+                index_generation_id=document.active_index_generation_id,
             )
         except Exception as exc:  # noqa: BLE001 - queue adapters vary
             self._document_repo.append_audit_event(

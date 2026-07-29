@@ -22,19 +22,16 @@ from rag.ingestion.review.internal_schemas import (
     ReviewBatchCreateResponse,
     ReviewBatchParsedItemsResponse,
 )
-from rag.internal.schemas import ServiceTokenContext
 from .service_token_auth import require_service_token
 
-router = APIRouter(tags=["internal-review"])
+router = APIRouter(tags=["internal-review"], dependencies=[Depends(require_service_token)])
 
 
 @router.post("/review-batches", response_model=ReviewBatchCreateResponse, summary="Create OCR review batch")
 async def create_review_batch(
     payload: ReviewBatchCreateRequest,
     review_repo: HumanReviewRepository = Depends(get_human_review_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> ReviewBatchCreateResponse:
-    _ = service
     if not payload.review_items:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -54,9 +51,7 @@ async def create_review_batch(
 async def get_review_batch_parsed_items(
     batch_id: str,
     review_repo: HumanReviewRepository = Depends(get_human_review_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> ReviewBatchParsedItemsResponse:
-    _ = service
     batch = review_repo.get_review_batch(batch_id)
     if batch is None:
         raise HTTPException(
@@ -85,9 +80,7 @@ async def get_review_batch_parsed_items(
 async def create_image_review_batch(
     payload: ImageReviewBatchCreateRequest,
     image_review_repo: ImageReviewRepository = Depends(get_image_review_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> ImageReviewBatchCreateResponse:
-    _ = service
     if not payload.candidates:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -111,9 +104,7 @@ async def create_image_review_batch(
 async def get_image_review_approved_keys(
     batch_id: str,
     image_review_repo: ImageReviewRepository = Depends(get_image_review_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> ImageReviewApprovedKeysResponse:
-    _ = service
     batch = image_review_repo.get_image_review_batch(batch_id)
     if batch is None:
         raise HTTPException(
@@ -138,9 +129,7 @@ async def get_image_review_approved_keys(
 async def get_image_review_resume(
     batch_id: str,
     image_review_repo: ImageReviewRepository = Depends(get_image_review_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> ImageReviewResumeResponse:
-    _ = service
     batch = image_review_repo.get_image_review_batch(batch_id)
     if batch is None:
         raise HTTPException(

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArchiveRestore,
@@ -66,6 +66,11 @@ type DocumentInspectorProps = {
 };
 
 export function DocumentInspector({ document, onClearanceChange, onClose, onDocumentAction, onOwnerChange, onSharesChange, onTopicsChange, onUnshare, pending, spaceOptions, user }: DocumentInspectorProps) {
+  const inspectorRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+  const [modalLayout, setModalLayout] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1319px)").matches);
   const detailQuery = useQuery({
     queryKey: ["documents", "detail", document?.id],
     queryFn: () => documentsApi.get(document?.id ?? ""),
@@ -116,6 +121,27 @@ export function DocumentInspector({ document, onClearanceChange, onClose, onDocu
   useEffect(() => {
     setInspectorTab("overview");
   }, [selected?.id]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 1319px)");
+    const updateLayout = () => setModalLayout(mediaQuery.matches);
+    updateLayout();
+    mediaQuery.addEventListener("change", updateLayout);
+    return () => mediaQuery.removeEventListener("change", updateLayout);
+  }, []);
+
+  useEffect(() => {
+    if (!modalLayout || !selected) return;
+    returnFocusRef.current = window.document.activeElement instanceof HTMLElement ? window.document.activeElement : null;
+    window.document.body.classList.add("knowledge-inspector-modal-open");
+    const frame = window.requestAnimationFrame(() => closeRef.current?.focus({ preventScroll: true }));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.document.body.classList.remove("knowledge-inspector-modal-open");
+      returnFocusRef.current?.focus({ preventScroll: true });
+    };
+  }, [modalLayout, selected?.id]);
+
   if (!selected) return null;
   const writable = canModifyDocument(user, selected);
   const canPermanent = canPermanentlyDeleteDocument(user, selected);
@@ -144,14 +170,48 @@ export function DocumentInspector({ document, onClearanceChange, onClose, onDocu
     setShareCandidate("");
   }
 
+  function handleInspectorKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (!modalLayout) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(
+      inspectorRef.current?.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), a[href], select:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+      ) ?? [],
+    ).filter((element) => element.offsetParent !== null);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && window.document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && window.document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   return (
-    <aside className="knowledge-inspector">
+    <>
+      {modalLayout ? <button type="button" className="knowledge-inspector-backdrop" onClick={onClose} aria-label="Close document inspector" /> : null}
+      <aside
+        ref={inspectorRef}
+        className="knowledge-inspector"
+        aria-labelledby={titleId}
+        aria-modal={modalLayout ? true : undefined}
+        onKeyDown={handleInspectorKeyDown}
+        role={modalLayout ? "dialog" : undefined}
+      >
       <div className="knowledge-inspector-header">
         <div>
           <p className="sv-eyebrow">{isDeleted ? "Trash Inspector" : "Document Inspector"}</p>
-          <h2>{selected.title}</h2>
+          <h2 id={titleId}>{selected.title}</h2>
         </div>
-        <button type="button" onClick={onClose} className="knowledge-icon-button" aria-label="Close inspector">
+        <button ref={closeRef} type="button" onClick={onClose} className="knowledge-icon-button" aria-label="Close inspector">
           <X size={16} />
         </button>
       </div>
@@ -375,6 +435,7 @@ export function DocumentInspector({ document, onClearanceChange, onClose, onDocu
           </InspectorSection>
         </div>
       ) : null}
-    </aside>
+      </aside>
+    </>
   );
 }

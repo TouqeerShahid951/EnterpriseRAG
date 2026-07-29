@@ -8,11 +8,10 @@ from ..auth.document_access import can_read_document
 from ..documents.repository import DocumentRepository, get_document_repository
 from ..auth.identity_models import IdentityRepository
 from ..auth.identity_repository import get_identity_repository
-from rag.internal.schemas import ServiceTokenContext
 from .service_token_auth import require_service_token
 
 
-router = APIRouter(tags=["internal-artifact-jobs"])
+router = APIRouter(tags=["internal-artifact-jobs"], dependencies=[Depends(require_service_token)])
 
 
 @router.get("/artifact-jobs/{job_id}/context")
@@ -21,9 +20,7 @@ async def artifact_job_context(
     jobs: ArtifactJobRepository = Depends(get_artifact_job_repository),
     identities: IdentityRepository = Depends(get_identity_repository),
     documents: DocumentRepository = Depends(get_document_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> dict[str, object]:
-    _ = service
     job = jobs.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail={"code": "artifact_job_not_found", "message": "Artifact job was not found."})

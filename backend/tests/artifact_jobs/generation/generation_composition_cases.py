@@ -5,11 +5,11 @@ import json
 from billiard.exceptions import SoftTimeLimitExceeded
 import pytest
 
-from rag.artifact_jobs.generation.composer import (
+from rag.artifact_jobs.execution.bundle_repair import normalize_bundle_evidence_ids
+from rag.artifact_jobs.generation.composition import (
     COMPOSITION_RECORD_TEXT_LIMIT,
     _compose_section,
     compose_document_bundle,
-    normalize_bundle_evidence_ids,
 )
 from rag.artifact_jobs.contracts import (
     ArtifactContentBundle,

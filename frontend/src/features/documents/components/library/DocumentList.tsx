@@ -189,7 +189,7 @@ export function DocumentCompactList({
                         cancellingGraph={Boolean(graphTask && cancellingGraphTaskId === graphTask.taskId)}
                         enriching={enrichingDocumentId === doc.id}
                         graphChip={graphChip}
-                        graphEnabled={Boolean(graphStatus?.enabled && !graphStatus.queue_error && !graphStatus.worker_error && !graphStatusError)}
+                        graphEnabled={Boolean(doc.doc_type !== "abbreviation_glossary" && graphStatus?.enabled && !graphStatus.queue_error && !graphStatus.worker_error && !graphStatusError)}
                         graphTask={graphTask}
                         mode={mode}
                         onAction={onAction}

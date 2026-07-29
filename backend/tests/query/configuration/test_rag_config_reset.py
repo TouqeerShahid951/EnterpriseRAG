@@ -13,6 +13,7 @@ from rag.auth.issued_tokens import create_auth_tokens
 from rag.auth.refresh_sessions import InMemoryRefreshSessionStore, auth_idle_ttl_seconds, get_refresh_session_store
 from rag.core.config import Settings, settings
 from rag.query.adapters.rag_config_memory import InMemoryRagConfigRepository
+from rag.query.adapters import rag_config_postgres
 from rag.query.adapters.rag_config_postgres import PostgresRagConfigRepository
 from rag.query.configuration.mapping import rag_config_response
 from rag.query.configuration.models import ACTIVE_CONFIG_KEY, RagConfigRecord
@@ -24,6 +25,8 @@ def test_saved_workspace_config_takes_precedence_over_environment_until_deleted(
         rag_model_provider="ollama",
         ollama_base_url="http://environment:11434",
         ollama_chat_model="environment-chat",
+        rag_reasoning_timeout_seconds=41,
+        rag_faithfulness_timeout_seconds=39,
     )
     repo = InMemoryRagConfigRepository()
     repo.save_active(_workspace_record())
@@ -32,13 +35,23 @@ def test_saved_workspace_config_takes_precedence_over_environment_until_deleted(
 
     assert saved.source == "workspace"
     assert saved.chat_model == "workspace-chat"
+    assert saved.sql_generation_model == "workspace-sql"
+    assert saved.evidence_gate_policy == "never"
+    assert saved.faithfulness_policy == "never"
+    assert saved.reasoning_timeout_seconds == 31
+    assert saved.faithfulness_timeout_seconds == 29
 
     repo.delete_active()
     fallback = effective_rag_config(config=config, repo=repo)
 
     assert fallback.source == "env"
     assert fallback.chat_model == "environment-chat"
+    assert fallback.sql_generation_model is None
     assert fallback.base_url == "http://environment:11434"
+    assert fallback.evidence_gate_policy == "adaptive"
+    assert fallback.faithfulness_policy == "adaptive"
+    assert fallback.reasoning_timeout_seconds == 41
+    assert fallback.faithfulness_timeout_seconds == 39
 
 
 def test_reset_route_deletes_saved_config_and_returns_environment_fallback() -> None:
@@ -147,6 +160,32 @@ def test_postgres_delete_targets_only_the_active_singleton(monkeypatch) -> None:
     assert params == (ACTIVE_CONFIG_KEY,)
 
 
+def test_postgres_save_persists_ai_gate_policies(monkeypatch) -> None:
+    repo = PostgresRagConfigRepository("postgresql://unused")
+    calls: list[tuple[str, tuple[object, ...]]] = []
+    monkeypatch.setattr(repo, "_ensure_table", lambda: None)
+    monkeypatch.setattr(
+        repo,
+        "_execute_one",
+        lambda query, params: calls.append((query, params)) or {},
+    )
+    monkeypatch.setattr(rag_config_postgres, "record_from_row", lambda row: row)
+
+    repo.save_active(_workspace_record())
+
+    query, params = calls[0]
+    assert "evidence_gate_policy" in query
+    assert "faithfulness_policy" in query
+    assert "routing_timeout_seconds" in query
+    assert "reasoning_timeout_seconds" in query
+    assert "faithfulness_timeout_seconds" in query
+    assert "sql_generation_model" in query
+    assert query.count("%s") == len(params)
+    assert 7 in params
+    assert "never" in params
+    assert "workspace-sql" in params
+
+
 def _admin_client(
     repo: InMemoryRagConfigRepository,
     *,
@@ -191,7 +230,13 @@ def _workspace_record() -> RagConfigRecord:
         embedding_base_url="http://workspace:11434",
         chat_model="workspace-chat",
         embed_model="workspace-embed",
+        sql_generation_model="workspace-sql",
         faithfulness_model=None,
+        evidence_gate_policy="never",
+        faithfulness_policy="never",
         chat_timeout_seconds=30,
+        routing_timeout_seconds=7,
+        reasoning_timeout_seconds=31,
+        faithfulness_timeout_seconds=29,
         embed_timeout_seconds=15,
     )

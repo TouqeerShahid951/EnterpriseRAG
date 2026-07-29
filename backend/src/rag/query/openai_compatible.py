@@ -16,9 +16,10 @@ from rag.shared.thinking import (
 from .cancellation import QueryCancellationToken
 from .http import ServiceRequestError, request_json, stream_sse_json
 from .ollama import (
+    ANSWER_SYSTEM_MESSAGE,
     FAITHFULNESS_NUM_PREDICT,
     REASONING_NUM_PREDICT,
-    ROUTE_VERIFIER_NUM_PREDICT,
+    ROUTE_PLANNER_NUM_PREDICT,
     answer_num_predict_for_profile,
     build_answer_prompt,
 )
@@ -49,6 +50,7 @@ class OpenAICompatibleClient:
         self.ingestion_base_url = ingestion_base_url or base_url
         self.chat_model = chat_model
         self.embed_model = embed_model
+        self.timeout_seconds = timeout_seconds
         self.chat_timeout_seconds = chat_timeout_seconds or timeout_seconds
         self.embed_timeout_seconds = embed_timeout_seconds or timeout_seconds
         self.json_num_predict = json_num_predict
@@ -79,7 +81,7 @@ class OpenAICompatibleClient:
         return self._chat(
             prompt=build_answer_prompt(question=question, contexts=contexts, profile=profile),
             model=self.chat_model,
-            system="You are a concise enterprise RAG assistant.",
+            system=ANSWER_SYSTEM_MESSAGE,
             max_tokens=answer_num_predict_for_profile(profile),
             temperature=0.1,
             json_response=False,
@@ -94,6 +96,7 @@ class OpenAICompatibleClient:
         profile: str | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> Iterator[str]:
+        max_tokens = answer_num_predict_for_profile(profile)
         chunks = stream_sse_json(
             self.base_url,
             _openai_path(self.base_url, "/v1/chat/completions"),
@@ -102,8 +105,8 @@ class OpenAICompatibleClient:
             payload=_chat_payload(
                 model=self.chat_model,
                 prompt=build_answer_prompt(question=question, contexts=contexts, profile=profile),
-                system="You are a concise enterprise RAG assistant.",
-                max_tokens=answer_num_predict_for_profile(profile),
+                system=ANSWER_SYSTEM_MESSAGE,
+                max_tokens=max_tokens,
                 temperature=0.1,
                 stream=True,
                 json_response=False,
@@ -112,7 +115,10 @@ class OpenAICompatibleClient:
             cancellation_token=cancellation_token,
         )
         saw_content = False
-        visible_chunks = (_delta_content(payload) for payload in chunks)
+        visible_chunks = (
+            _delta_content(payload, token_limit=max_tokens)
+            for payload in chunks
+        )
         for content in strip_thinking_chunks(visible_chunks):
             if content:
                 saw_content = True
@@ -125,6 +131,7 @@ class OpenAICompatibleClient:
         *,
         prompt: str,
         model: str | None,
+        json_schema: dict[str, object] | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
         return self._chat(
@@ -135,6 +142,7 @@ class OpenAICompatibleClient:
             max_tokens=min(self.json_num_predict, FAITHFULNESS_NUM_PREDICT),
             temperature=0,
             json_response=True,
+            json_schema=json_schema,
             cancellation_token=cancellation_token,
         )
 
@@ -149,8 +157,8 @@ class OpenAICompatibleClient:
             prompt=prompt,
             model=model or self.chat_model,
             base_url=self.routing_base_url,
-            system="You are a strict RAG intent routing verifier.",
-            max_tokens=ROUTE_VERIFIER_NUM_PREDICT,
+            system="You are a strict typed RAG capability planner.",
+            max_tokens=ROUTE_PLANNER_NUM_PREDICT,
             temperature=0,
             json_response=True,
             cancellation_token=cancellation_token,
@@ -178,6 +186,8 @@ class OpenAICompatibleClient:
         model: str | None,
         system: str,
         max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+        json_schema: dict[str, object] | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
         return self._chat(
@@ -188,6 +198,27 @@ class OpenAICompatibleClient:
             max_tokens=max_tokens or self.json_num_predict,
             temperature=0,
             json_response=True,
+            json_schema=json_schema,
+            cancellation_token=cancellation_token,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def generate_routing_json(
+        self,
+        *,
+        prompt: str,
+        model: str | None,
+        system: str,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+        cancellation_token: QueryCancellationToken | None = None,
+    ) -> str:
+        return self.generate_json(
+            prompt=prompt,
+            model=model,
+            system=system,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
             cancellation_token=cancellation_token,
         )
 
@@ -220,7 +251,9 @@ class OpenAICompatibleClient:
         max_tokens: int,
         temperature: float,
         json_response: bool,
+        json_schema: dict[str, object] | None = None,
         cancellation_token: QueryCancellationToken | None,
+        timeout_seconds: float | None = None,
     ) -> str:
         selected_base_url = base_url or self.base_url
         payload = request_json(
@@ -236,10 +269,12 @@ class OpenAICompatibleClient:
                 temperature=temperature,
                 stream=False,
                 json_response=json_response,
+                json_schema=json_schema,
             ),
-            timeout_seconds=self.chat_timeout_seconds,
+            timeout_seconds=timeout_seconds or self.chat_timeout_seconds,
             cancellation_token=cancellation_token,
         )
+        _raise_if_answer_truncated(payload, token_limit=max_tokens)
         return _message_content(payload)
 
 
@@ -252,6 +287,7 @@ def _chat_payload(
     temperature: float,
     stream: bool,
     json_response: bool,
+    json_schema: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -265,7 +301,18 @@ def _chat_payload(
         **no_thinking_payload_fields(),
     }
     if json_response:
-        payload["response_format"] = {"type": "json_object"}
+        payload["response_format"] = (
+            {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "rag_structured_output",
+                    "strict": True,
+                    "schema": json_schema,
+                },
+            }
+            if json_schema is not None
+            else {"type": "json_object"}
+        )
     return payload
 
 
@@ -280,7 +327,40 @@ def _message_content(payload: dict[str, Any]) -> str:
     raise ServiceRequestError("vllm", "chat response did not include message content", 502)
 
 
-def _delta_content(payload: dict[str, Any]) -> str:
+def _raise_if_answer_truncated(
+    payload: dict[str, Any],
+    *,
+    token_limit: int,
+) -> None:
+    choices = payload.get("choices")
+    finish_reason = (
+        choices[0].get("finish_reason")
+        if isinstance(choices, list)
+        and choices
+        and isinstance(choices[0], dict)
+        else None
+    )
+    usage = payload.get("usage")
+    completion_tokens = (
+        usage.get("completion_tokens")
+        if isinstance(usage, dict)
+        else None
+    )
+    reached_limit = (
+        isinstance(completion_tokens, int)
+        and not isinstance(completion_tokens, bool)
+        and completion_tokens >= token_limit
+    )
+    if finish_reason == "length" or reached_limit:
+        raise ServiceRequestError(
+            "vllm",
+            "chat generation reached its output token limit",
+            502,
+        )
+
+
+def _delta_content(payload: dict[str, Any], *, token_limit: int) -> str:
+    _raise_if_answer_truncated(payload, token_limit=token_limit)
     choices = payload.get("choices")
     if isinstance(choices, list) and choices and isinstance(choices[0], dict):
         delta = choices[0].get("delta")

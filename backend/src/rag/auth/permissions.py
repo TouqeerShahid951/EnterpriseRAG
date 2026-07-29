@@ -147,10 +147,6 @@ def can_manage_target_user(actor: PermissionUser, target: PermissionUser) -> boo
     return can_assign_group_paths(actor, target.group_paths) and can_assign_clearance_level(actor, target.clearance_level)
 
 
-def is_group_path_in_user_scope(user: PermissionUser, group_path: str) -> bool:
-    return has_exact_group_scope(user, group_path)
-
-
 def has_exact_group_scope(user: PermissionUser, group_path: str) -> bool:
     normalized = normalize_group_path(group_path)
     return any(normalize_group_path(scope) == normalized for scope in user.group_paths)

@@ -195,7 +195,6 @@ docker buildx build \
   --file frontend/Dockerfile \
   --tag "agenticrag-frontend:${RELEASE}" \
   --build-arg VITE_API_BASE_URL= \
-  --build-arg VITE_POLLING_INTERVAL_MS=2000 \
   --load \
   frontend
 ```
@@ -317,7 +316,7 @@ At minimum, preserve these values exactly:
 - `REDIS_PASSWORD`, `REDIS_URL`, and `CELERY_BROKER_URL`
 - `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and `MINIO_BUCKET`
 - `NEO4J_USER`, `NEO4J_PASSWORD`, and `NEO4J_DATABASE`
-- `JWT_SECRET_KEY`, `CSRF_SECRET_KEY`, and `SERVICE_TOKEN`
+- `JWT_SECRET_KEY` and `SERVICE_TOKEN`
 - `CONNECTOR_SECRETS_KEY` and `CONNECTOR_SECRETS_KEY_RING`
 - `UPLOAD_STORAGE_BACKEND` and `UPLOAD_STORAGE_DIR`
 - Qdrant collection names and every provider/model setting

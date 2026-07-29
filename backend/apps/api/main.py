@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from rag.audit import routes as audit_routes
+from rag.abbreviations import routes as abbreviation_routes
 from rag.auth import routes as auth_routes
 from rag.artifact_jobs import routes as artifact_routes
 from rag.bootstrap.schema import ensure_postgres_schema
@@ -29,6 +30,8 @@ from rag.ingestion.publication import routes as index_publication_routes
 from rag.ingestion.review import routes as review_routes
 from rag.query import routes as query_routes
 from rag.query.configuration import routes as rag_configuration_routes
+from rag.query.configuration.repository import effective_rag_config
+from rag.query.runtime_warmup import warm_query_fastembed_runtime
 from rag.internal import (
     abac_filter_routes,
     artifact_job_routes as internal_artifact_job_routes,
@@ -60,6 +63,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         password=settings.bootstrap_admin_password,
     )
     try:
+        warm_query_fastembed_runtime(
+            app_settings=settings,
+            rag_config=effective_rag_config(config=settings),
+        )
         yield
     finally:
         close_postgres_pools()
@@ -128,6 +135,7 @@ def create_app() -> FastAPI:
 
     for router in (
         auth_routes.router,
+        abbreviation_routes.router,
         upload_routes.router,
         connector_routes.router,
         folder_schedule_routes.router,
@@ -148,6 +156,7 @@ def create_app() -> FastAPI:
         app.include_router(router, prefix=settings.public_api_prefix)
 
     for router in (
+        abbreviation_routes.internal_router,
         abac_filter_routes.router,
         internal_artifact_job_routes.router,
         claim_routes.router,

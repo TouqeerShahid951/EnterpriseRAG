@@ -78,6 +78,7 @@ class QueryRuntimeAuthorizedCorpusRetriever:
             max_candidates=max_candidates,
             model_name=self._rag_config.reranker_model,
             cache_dir=self._config.rag_reranker_cache_dir,
+            device=self._config.rag_reranker_device,
         )
         return tuple(_retrieved_chunk(hit) for hit in reranked)
 

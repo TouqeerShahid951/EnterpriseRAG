@@ -58,6 +58,7 @@ export function SharedSpacesField({ disabled, onAdd, onRemove, options, values }
       ) : null}
       <div className="knowledge-topic-form">
         <select
+          aria-label="Shared Knowledge Space"
           className="sv-select"
           disabled={disabled || options.length === 0}
           onChange={(event) => setCandidate(event.target.value)}

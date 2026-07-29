@@ -8,6 +8,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from rag.shared.contracts.clearance import clearance_rank, normalize_clearance_level
 from rag.shared.contracts.group_paths import normalize_group_path
+from rag.shared.contracts.abbreviations import preserved_document_type
 
 from ..chunking import TextChunk
 from ..contracts import IngestJobPayload
@@ -43,7 +44,7 @@ def build_qdrant_points(
     normalized_llm_topics = _unique([str(item) for item in llm_topics] if isinstance(llm_topics, list) else [])
     conflicted = set(conflicted_claim_ids or [])
     is_expired = _is_expired(job.expiry_date)
-    indexed_doc_type = _derived_doc_type(metadata) or job.doc_type
+    indexed_doc_type = preserved_document_type(job.doc_type, _derived_doc_type(metadata))
     doc_summary = compact_summary(metadata.get("summary"))
     metadata_confidence = metadata.get("metadata_confidence")
     normalized_confidence = metadata_confidence if isinstance(metadata_confidence, dict) else {}

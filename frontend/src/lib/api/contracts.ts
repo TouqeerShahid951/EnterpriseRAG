@@ -1,4 +1,5 @@
 export * from "./contracts/auth";
+export * from "./contracts/abbreviations";
 export * from "./contracts/ingestion";
 export * from "./contracts/folderIngest";
 export * from "./contracts/connectors";

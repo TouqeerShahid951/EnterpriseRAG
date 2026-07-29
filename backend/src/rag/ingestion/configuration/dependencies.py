@@ -8,7 +8,6 @@ from rag.core.config import Settings, settings
 from rag.ingestion.adapters.configuration_memory import InMemoryIngestConfigRepository
 from rag.ingestion.adapters.configuration_postgres import PostgresIngestConfigRepository
 from .models import IngestConfigRecord, IngestConfigRepository
-from rag.ingestion.quality import normalize_ingestion_quality_preset
 
 
 def effective_ingest_config(
@@ -19,9 +18,6 @@ def effective_ingest_config(
     repository = repo or ingest_config_repository_from_settings(config)
     return repository.get_active() or IngestConfigRecord(
         worker_concurrency=config.ingest_worker_boot_concurrency,
-        quality_preset=normalize_ingestion_quality_preset(
-            config.ingestion_quality_preset
-        ),
         ocr_review_confidence_threshold=config.ocr_review_confidence_threshold,
         pdf_image_review_threshold=config.pdf_image_review_threshold,
         vision_layout_repair_enabled=False,

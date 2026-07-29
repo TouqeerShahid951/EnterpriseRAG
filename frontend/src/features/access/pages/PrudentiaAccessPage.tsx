@@ -399,6 +399,7 @@ export function PrudentiaAccessPage({ currentUser, onAuthChanged, onLogout, onNa
                 <div className="relative min-w-0 flex-1">
                   <KeyRound size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
                   <input
+                    aria-label="Temporary password"
                     autoComplete="new-password"
                     className="sv-input sv-input-with-leading-icon text-code-sm"
                     disabled={resetPasswordMutation.isPending || resetPasswordMutation.isSuccess}

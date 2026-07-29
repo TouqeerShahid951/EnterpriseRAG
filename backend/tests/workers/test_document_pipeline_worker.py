@@ -23,6 +23,9 @@ config = celery_module.config
 IngestDeliveryRetry = import_module(
     "rag.ingestion.execution"
 ).IngestDeliveryRetry
+GraphRAGDeliveryRetry = import_module(
+    "rag.graphrag.task_execution"
+).GraphRAGDeliveryRetry
 
 
 DOCUMENT_PIPELINE_TASKS = {
@@ -371,6 +374,29 @@ def test_graphrag_index_injects_the_partition_rebuild_dispatcher(
         "payload": payload,
         "dispatch_partition_rebuild": tasks._dispatch_partition_rebuild,
     }
+
+
+def test_graphrag_index_translates_retry_request_to_celery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retry = GraphRAGDeliveryRetry(RuntimeError("neo4j unavailable"), countdown=17)
+    monkeypatch.setattr(
+        tasks,
+        "run_document_graph_index",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(retry),
+    )
+    requested: dict[str, object] = {}
+
+    def request_retry(**kwargs: object) -> RuntimeError:
+        requested.update(kwargs)
+        return RuntimeError("retry requested")
+
+    monkeypatch.setattr(tasks.index_document_graphrag, "retry", request_retry)
+
+    with pytest.raises(RuntimeError, match="retry requested"):
+        tasks.index_document_graphrag.run({"doc_id": "doc-1"})
+
+    assert requested == {"exc": retry.cause, "countdown": 17}
 
 
 def test_partition_rebuild_dispatch_preserves_queue_and_countdown(

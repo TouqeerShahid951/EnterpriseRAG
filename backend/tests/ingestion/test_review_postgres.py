@@ -67,6 +67,10 @@ def test_postgres_human_and_image_review_lifecycles() -> None:
     )
 
     try:
+        assert [
+            item.id
+            for item in document_repo.list_documents_by_ids((document.id,))
+        ] == [document.id]
         human_job = job_repo.create_ingest_job(
             doc_id=document.id,
             status="human_review",
@@ -84,6 +88,7 @@ def test_postgres_human_and_image_review_lifecycles() -> None:
             ],
         )
         human_items = human_repo.list_review_items_for_batch(human_batch.id)
+        assert human_repo.list_pending_human_review_document_ids() == (document.id,)
         first = human_repo.approve_review_item(
             human_items[0].id,
             corrected_text="First corrected",
@@ -102,6 +107,7 @@ def test_postgres_human_and_image_review_lifecycles() -> None:
             item.corrected_text
             for item in human_repo.list_review_items_for_batch(human_batch.id)
         ] == ["First corrected", "Second corrected"]
+        assert human_repo.list_pending_human_review_document_ids() == ()
 
         image_job = human_job
         image_batch = image_repo.create_image_review_batch(
@@ -132,6 +138,7 @@ def test_postgres_human_and_image_review_lifecycles() -> None:
             ],
         )
         image_candidates = image_repo.list_image_review_candidates_for_batch(image_batch.id)
+        assert image_repo.list_pending_image_review_document_ids() == (document.id,)
         recommended_candidate = next(
             candidate
             for candidate in image_candidates
@@ -154,6 +161,44 @@ def test_postgres_human_and_image_review_lifecycles() -> None:
         assert image_repo.get_image_review_approved_keys(image_batch.id) == [
             "recommended-key"
         ]
+        assert image_repo.list_pending_image_review_document_ids() == ()
+
+        cancelled_job = job_repo.create_ingest_job(
+            doc_id=document.id,
+            status="human_review",
+            progress_pct=35,
+            origin="upload",
+        )
+        cancelled_batch = image_repo.create_image_review_batch(
+            job_id=cancelled_job.id,
+            doc_id=document.id,
+            parsed_items=[],
+            resume_payload={"job_id": cancelled_job.id, "doc_id": document.id},
+            candidates=[
+                {
+                    "candidate_key": "cancelled-key",
+                    "filename": "cancelled.png",
+                    "object_path": "memory://cancelled.png",
+                    "content_hash": "cancelled-hash",
+                }
+            ],
+        )
+
+        cancellation = job_repo.cancel_ingest_job(
+            cancelled_job.id,
+            allowed_statuses=frozenset({"human_review"}),
+        )
+
+        assert cancellation.changed is True
+        assert cancellation.review_items_closed == 1
+        assert image_repo.get_image_review_batch(cancelled_batch.id).status == "rejected"  # type: ignore[union-attr]
+        assert [
+            candidate.status
+            for candidate in image_repo.list_image_review_candidates_for_batch(
+                cancelled_batch.id
+            )
+        ] == ["skipped"]
+        assert image_repo.list_pending_image_review_document_ids() == ()
     finally:
         with document_repo._connect() as conn:
             with conn.transaction():

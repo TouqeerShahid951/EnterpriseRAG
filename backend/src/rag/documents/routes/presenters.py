@@ -7,7 +7,11 @@ from rag.documents.schemas import (
     DocumentClaim,
     DocumentCrossReference,
     DocumentEntity,
+    DocumentOverviewAttentionItem,
+    DocumentOverviewResponse,
+    DocumentOverviewSpace,
 )
+from ..models import DocumentOverviewSnapshot
 from ..repository import DocumentRecord
 
 
@@ -71,6 +75,45 @@ def document_shares_to_schema(document: DocumentRecord) -> DocumentSharesRespons
         shared_group_paths=list(document.shared_group_paths),
         access_group_paths=list(document.access_group_paths),
         governance_owner=document.governance_owner,
+    )
+
+
+def document_overview_to_schema(
+    overview: DocumentOverviewSnapshot,
+) -> DocumentOverviewResponse:
+    return DocumentOverviewResponse(
+        library_documents=overview.library_documents,
+        current_versions=overview.current_versions,
+        indexed_current=overview.indexed_current,
+        processing_current=overview.processing_current,
+        review_current=overview.review_current,
+        failed_current=overview.failed_current,
+        unknown_current=overview.unknown_current,
+        needs_attention=overview.needs_attention,
+        superseded_versions=overview.superseded_versions,
+        expiring_soon_current=overview.expiring_soon_current,
+        trash=overview.trash,
+        attention_documents=[
+            DocumentOverviewAttentionItem(
+                id=document.id,
+                title=document.title or document.source_id,
+                group_path=document.group_path,
+                ingest_status=document.ingest_status,
+            )
+            for document in overview.attention_documents
+        ],
+        spaces=[
+            DocumentOverviewSpace(
+                group_path=space.group_path,
+                library_documents=space.library_documents,
+                current_versions=space.current_versions,
+                processing_current=space.processing_current,
+                review_current=space.review_current,
+                failed_current=space.failed_current,
+                unknown_current=space.unknown_current,
+            )
+            for space in overview.spaces
+        ],
     )
 
 

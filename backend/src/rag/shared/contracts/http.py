@@ -18,12 +18,7 @@ class ErrorResponse(ContractModel):
     error: ErrorDetail
 
 
-class StubResponse(ContractModel):
-    status: Literal["not_implemented"] = "not_implemented"
-    detail: str = "Route contract is reserved for Milestone 0."
-
-
 class HealthResponse(ContractModel):
-    status: Literal["ok", "unavailable", "scaffold"]
+    status: Literal["ok", "unavailable"]
     ready: bool
     detail: str | None = None

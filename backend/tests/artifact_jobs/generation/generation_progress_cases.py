@@ -5,7 +5,7 @@ from rag.artifact_jobs.adapters.generated_memory import (
 )
 from rag.artifact_jobs.adapters.job_memory import InMemoryArtifactJobRepository
 from rag.artifact_jobs.adapters.storage import LocalGeneratedArtifactStorage
-from rag.artifact_jobs.generation.composer import compose_document_bundle
+from rag.artifact_jobs.generation.composition import compose_document_bundle
 from rag.artifact_jobs.execution import ArtifactJobExecutor
 from rag.core.config import Settings
 

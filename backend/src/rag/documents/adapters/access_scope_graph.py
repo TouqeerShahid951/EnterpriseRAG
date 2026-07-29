@@ -54,11 +54,13 @@ class GraphRAGDocumentIndexQueue:
         document_id: str,
         job_id: str,
         reason: str,
+        index_generation_id: str | None,
     ) -> None:
         self._queue.enqueue_document_index(
             GraphRAGDocumentIndexMessage(
                 doc_id=document_id,
                 job_id=job_id,
                 reason=reason,
+                index_generation_id=index_generation_id,
             )
         )

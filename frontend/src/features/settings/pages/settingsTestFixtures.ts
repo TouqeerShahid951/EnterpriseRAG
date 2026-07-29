@@ -1,4 +1,4 @@
-import type { RagConfigFormState } from "./PrudentiaSettingsPage";
+import type { RagConfigFormState } from "../models/ragConfigForm";
 
 export const ollamaForm: RagConfigFormState = {
   provider: "ollama",
@@ -26,6 +26,7 @@ export const ollamaForm: RagConfigFormState = {
   chat_model: "llama3.1:8b",
   embed_model: "nomic-embed-text:latest",
   reasoning_model: "",
+  sql_generation_model: "",
   routing_model: "",
   faithfulness_model: "",
   ingestion_model: "",
@@ -33,8 +34,13 @@ export const ollamaForm: RagConfigFormState = {
   reranker_model: "jinaai/jina-reranker-v1-turbo-en",
   thinking_enabled: true,
   query_planner_enabled: true,
+  evidence_gate_policy: "always",
+  faithfulness_policy: "always",
   json_num_predict: "4096",
   retrieval_token_budget: "12000",
   chat_timeout_seconds: "180",
+  routing_timeout_seconds: "5",
+  reasoning_timeout_seconds: "30",
+  faithfulness_timeout_seconds: "30",
   embed_timeout_seconds: "45",
 };

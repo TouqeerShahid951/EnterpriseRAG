@@ -103,6 +103,9 @@ export function QueryTrackerResults({ model }: { model: QueryTrackerResultsViewM
                   <span>{formatDurationMs(timing.duration_ms)}</span>
                   <strong>{timing.node}</strong>
                   <small>{timing.execution_mode ?? "mode unavailable"}{timing.detail ? ` / ${timing.detail}` : ""}</small>
+                  {Object.entries(timing.phase_timings_ms ?? {}).map(([phase, durationMs]) => (
+                    <small key={phase}>{phase.split("_").join(" ")} / {formatDurationMs(durationMs)}</small>
+                  ))}
                 </div>
               ))}
             </div>

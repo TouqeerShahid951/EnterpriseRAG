@@ -15,11 +15,8 @@ interface IngestWorkerState {
   active_jobs: number;
 }
 
-export type IngestionQualityPreset = "fast" | "balanced" | "high_accuracy";
-
 export interface IngestConfig {
   worker_concurrency: number;
-  quality_preset: IngestionQualityPreset;
   ocr_review_confidence_threshold: number;
   pdf_image_review_threshold: number;
   vision_layout_repair_enabled: boolean;
@@ -43,6 +40,8 @@ export interface VllmServiceDeploymentLimits {
 }
 
 export type VllmDeploymentService = "text" | "embeddings" | "vision";
+export type EvidenceGatePolicy = "adaptive" | "always" | "never";
+export type FaithfulnessPolicy = "adaptive" | "always" | "never";
 
 export interface VllmDeploymentConfig {
   source: string;
@@ -86,6 +85,7 @@ export interface RagConfig {
   chat_model: string;
   embed_model: string;
   reasoning_model: string | null;
+  sql_generation_model: string | null;
   routing_model: string | null;
   faithfulness_model: string | null;
   ingestion_model: string | null;
@@ -94,8 +94,13 @@ export interface RagConfig {
   json_num_predict: number;
   retrieval_token_budget: number;
   query_planner_enabled: boolean;
+  evidence_gate_policy: EvidenceGatePolicy;
+  faithfulness_policy: FaithfulnessPolicy;
   reranker_model: string;
   chat_timeout_seconds: number;
+  routing_timeout_seconds: number;
+  reasoning_timeout_seconds: number;
+  faithfulness_timeout_seconds: number;
   embed_timeout_seconds: number;
   health: RagConfigHealth;
 }
@@ -126,6 +131,8 @@ export interface RagConfigTestResult {
   json_num_predict: number;
   retrieval_token_budget: number;
   query_planner_enabled: boolean;
+  evidence_gate_policy: EvidenceGatePolicy;
+  faithfulness_policy: FaithfulnessPolicy;
   reranker_model: string;
   health: RagConfigHealth;
 }

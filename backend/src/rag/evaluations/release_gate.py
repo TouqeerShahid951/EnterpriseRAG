@@ -106,6 +106,11 @@ def _evaluate_run(
     exhaustive_anchor_total = exhaustive_anchor_matched = 0
     exhaustive_anchor_unavailable = False
     reranker_candidates = reranker_scored = 0
+    ranking_case_count = 0
+    pre_top_ten_total = pre_top_ten_matched = 0
+    post_top_ten_total = post_top_ten_matched = 0
+    pre_reciprocal_rank_total = 0.0
+    post_reciprocal_rank_total = 0.0
 
     for case_id in sorted(expected_ids & set(results) & set(dataset_cases)):
         result = results[case_id]
@@ -170,6 +175,32 @@ def _evaluate_run(
         ):
             if candidates is None:
                 failures.add(f"{case_prefix}:metric_unavailable:{stage_name}")
+
+        latest_pre_candidates = _latest_trace_candidates(trace, "rerank_input")
+        latest_reranked = _latest_trace_candidates(trace, "reranked")
+        _, ranking_obligation_total = _location_obligations(gold, [])
+        if (
+            ranking_obligation_total
+            and latest_pre_candidates is not None
+            and latest_reranked is not None
+        ):
+            pre_matched, pre_total = _location_obligations(
+                gold, latest_pre_candidates[:10]
+            )
+            post_matched, post_total = _location_obligations(
+                gold, latest_reranked[:10]
+            )
+            ranking_case_count += 1
+            pre_top_ten_matched += pre_matched
+            pre_top_ten_total += pre_total
+            post_top_ten_matched += post_matched
+            post_top_ten_total += post_total
+            pre_reciprocal_rank_total += _reciprocal_rank_at_10(
+                gold, latest_pre_candidates
+            )
+            post_reciprocal_rank_total += _reciprocal_rank_at_10(
+                gold, latest_reranked
+            )
 
         if pre_candidates is not None:
             matched, total = _location_obligations(gold, pre_candidates)
@@ -272,6 +303,22 @@ def _evaluate_run(
             faithfulness_passed, faithfulness_required
         ),
         "reranker_scored_rate": _rate(reranker_scored, reranker_candidates),
+        "pre_rerank_recall_at_10": _rate(
+            pre_top_ten_matched, pre_top_ten_total
+        ),
+        "post_rerank_recall_at_10": _rate(
+            post_top_ten_matched, post_top_ten_total
+        ),
+        "pre_rerank_mrr_at_10": (
+            pre_reciprocal_rank_total / ranking_case_count
+            if ranking_case_count
+            else None
+        ),
+        "post_rerank_mrr_at_10": (
+            post_reciprocal_rank_total / ranking_case_count
+            if ranking_case_count
+            else None
+        ),
         "ordinary_p95_ms": _nearest_rank_p95(ordinary_latencies),
         "special_route_p95_ms": _nearest_rank_p95(special_latencies),
     }
@@ -327,6 +374,16 @@ def _apply_thresholds(
             failures.add(f"{prefix}:metric_unavailable:{name}")
         elif value < minimum:
             failures.add(f"{prefix}:threshold_failed:{name}")
+    for pre_name, post_name in (
+        ("pre_rerank_recall_at_10", "post_rerank_recall_at_10"),
+        ("pre_rerank_mrr_at_10", "post_rerank_mrr_at_10"),
+    ):
+        pre_value = metrics.get(pre_name)
+        post_value = metrics.get(post_name)
+        if pre_value is None or post_value is None:
+            failures.add(f"{prefix}:metric_unavailable:{post_name}")
+        elif post_value < pre_value:
+            failures.add(f"{prefix}:threshold_failed:{post_name}")
     exhaustive_recall = metrics.get("final_exhaustive_anchor_recall")
     if exhaustive_required and exhaustive_recall is None:
         failures.add(
@@ -471,6 +528,22 @@ def _max_attempt_size(raw: object, stage_name: str) -> int:
     )
 
 
+def _latest_trace_candidates(
+    raw: object, stage_name: str
+) -> list[dict[str, Any]] | None:
+    if not isinstance(raw, list):
+        return None
+    latest: list[dict[str, Any]] | None = None
+    for stage in raw:
+        if not isinstance(stage, Mapping) or stage.get("name") != stage_name:
+            continue
+        candidates = stage.get("candidates")
+        if not isinstance(candidates, list):
+            continue
+        latest = [dict(item) for item in candidates if isinstance(item, Mapping)]
+    return latest
+
+
 def _location_obligations(
     gold: dict[str, Any], candidates: list[dict[str, Any]]
 ) -> tuple[int, int]:
@@ -532,6 +605,16 @@ def _candidate_matches(
         and _covers_page(row, page)
         for row in rows
     )
+
+
+def _reciprocal_rank_at_10(
+    gold: dict[str, Any], candidates: list[dict[str, Any]]
+) -> float:
+    for rank, candidate in enumerate(candidates[:10], start=1):
+        matched, _ = _location_obligations(gold, [candidate])
+        if matched:
+            return 1 / rank
+    return 0.0
 
 
 def _gold_anchor_total(raw_spans: object) -> int | None:

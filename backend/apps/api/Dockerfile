@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 
+ARG API_BASE_IMAGE=python:3.12-slim
 FROM ghcr.io/astral-sh/uv:0.11.12 AS uv
-FROM python:3.12-slim
+FROM ${API_BASE_IMAGE}
 
 COPY --from=uv /uv /uvx /bin/
 
@@ -11,6 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/app:/app/src \
     PATH=/opt/venv/bin:$PATH \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON=3.12 \
     UV_LINK_MODE=copy \
     UV_HTTP_TIMEOUT=120 \
     UV_HTTP_RETRIES=5
@@ -20,6 +22,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock /app/
 
 ARG PREWARM_FASTEMBED=false
+ARG RERANKER_RUNTIME=cpu
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
@@ -35,8 +38,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         fonts-dejavu \
         libgssapi-krb5-2 \
     && . /etc/os-release \
-    && debian_version="${VERSION_ID%%.*}" \
-    && curl -fSL -o packages-microsoft-prod.deb "https://packages.microsoft.com/config/debian/${debian_version}/packages-microsoft-prod.deb" \
+    && case "$ID" in \
+        debian) microsoft_release="${VERSION_ID%%.*}" ;; \
+        ubuntu) microsoft_release="$VERSION_ID" ;; \
+        *) echo "Unsupported base distribution: $ID" >&2; exit 2 ;; \
+    esac \
+    && curl -fSL -o packages-microsoft-prod.deb "https://packages.microsoft.com/config/${ID}/${microsoft_release}/packages-microsoft-prod.deb" \
     && dpkg -i packages-microsoft-prod.deb \
     && rm packages-microsoft-prod.deb \
     && apt-get update \
@@ -48,7 +55,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && mkdir -p /models/fastembed /models/huggingface /work
 
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    uv sync --locked --no-dev --no-install-project
+    case "$RERANKER_RUNTIME" in \
+        cpu) reranker_extra=cpu ;; \
+        cuda) reranker_extra=gpu ;; \
+        *) echo "RERANKER_RUNTIME must be cpu or cuda" >&2; exit 2 ;; \
+    esac \
+    && UV_PYTHON_INSTALL_DIR=/opt/uv/python \
+        uv sync --locked --no-dev --no-install-project --extra "$reranker_extra"
 
 COPY src /app/src
 COPY apps/__init__.py /app/apps/__init__.py

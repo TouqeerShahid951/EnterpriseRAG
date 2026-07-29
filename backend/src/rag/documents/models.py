@@ -62,6 +62,34 @@ class DocumentRecord:
 
 
 @dataclass(frozen=True)
+class DocumentOverviewSpaceRecord:
+    group_path: str
+    library_documents: int
+    current_versions: int
+    processing_current: int
+    review_current: int
+    failed_current: int
+    unknown_current: int
+
+
+@dataclass(frozen=True)
+class DocumentOverviewSnapshot:
+    library_documents: int = 0
+    current_versions: int = 0
+    indexed_current: int = 0
+    processing_current: int = 0
+    review_current: int = 0
+    failed_current: int = 0
+    unknown_current: int = 0
+    needs_attention: int = 0
+    superseded_versions: int = 0
+    expiring_soon_current: int = 0
+    trash: int = 0
+    attention_documents: tuple[DocumentRecord, ...] = ()
+    spaces: tuple[DocumentOverviewSpaceRecord, ...] = ()
+
+
+@dataclass(frozen=True)
 class DocumentEntityRecord:
     doc_id: str
     text: str
@@ -101,6 +129,9 @@ class DocumentImageAssetRecord:
 class DocumentRepository(Protocol):
     def create_document(self, **kwargs: Any) -> DocumentRecord: ...
     def list_documents(self, *, state: Literal["active", "deleted"] = "active") -> list[DocumentRecord]: ...
+    def list_documents_by_ids(
+        self, document_ids: tuple[str, ...]
+    ) -> list[DocumentRecord]: ...
     def count_documents_by_owner_group(
         self,
         *,
@@ -108,6 +139,15 @@ class DocumentRepository(Protocol):
         clearance_levels: tuple[ClearanceLevel, ...],
         group_paths: tuple[str, ...] | None,
     ) -> dict[str, int]: ...
+    def summarize_document_overview(
+        self,
+        *,
+        clearance_levels: tuple[ClearanceLevel, ...],
+        group_paths: tuple[str, ...] | None,
+        expiring_from: date,
+        expiring_to: date,
+        attention_limit: int,
+    ) -> DocumentOverviewSnapshot: ...
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None: ...
     def replace_document_shares(
         self,

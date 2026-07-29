@@ -144,6 +144,12 @@ def _deterministic_preference(
     db_bias: int,
     corpus_bias: int,
 ) -> _SourcePreference:
+    if document_match_score >= 2 and source_match_score == 0:
+        return _SourcePreference(
+            "corpus",
+            0.90,
+            f"strong_document_match={document_match_score},source_match=0",
+        )
     db_score = source_match_score + (structured_score * 2) + db_bias
     doc_score = document_match_score + (corpus_score * 2) + corpus_bias
     margin = db_score - doc_score
@@ -181,25 +187,6 @@ def _conversation_source_bias(turns: list[dict[str, object]]) -> tuple[int, int]
             elif doc_id:
                 corpus_bias += 1
     return db_bias, corpus_bias
-
-
-def _looks_like_followup(query: str) -> bool:
-    normalized = _normalize(query)
-    tokens = normalized.split()
-    if len(tokens) <= 4 and tokens:
-        return True
-    return any(
-        phrase in f" {normalized} "
-        for phrase in (
-            " what about ",
-            " and ",
-            " those ",
-            " them ",
-            " it ",
-            " same ",
-            " also ",
-        )
-    )
 
 
 def _tokens(value: str) -> list[str]:

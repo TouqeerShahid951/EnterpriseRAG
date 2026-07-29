@@ -132,7 +132,6 @@
 .sv-select:focus,
 .sv-textarea:focus {
   border-color: color-mix(in srgb, var(--color-primary) 62%, var(--color-surface-border));
-  outline: none;
   background: var(--color-surface-container-low);
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--color-on-surface) 5%, transparent),

@@ -78,6 +78,7 @@ export function PrudentiaIngestionJobsPage({ onLogout, onNavigate, user }: Props
       void queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["upload"] });
       void queryClient.invalidateQueries({ queryKey: ["documents"] });
+      void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
     },
   });
   const reingestMutation = useMutation({
@@ -187,7 +188,6 @@ export function PrudentiaIngestionJobsPage({ onLogout, onNavigate, user }: Props
           <section className="sv-panel overflow-hidden">
             <div className="knowledge-job-metrics" aria-label="Ingestion job summary">
               <JobMetric label="Active" loading={summaryQuery.isLoading} value={summary?.active ?? 0} />
-              <JobMetric label="Attention" loading={summaryQuery.isLoading} value={summary?.needs_attention ?? 0} />
               <JobMetric label="Needs Review" loading={summaryQuery.isLoading} value={summary?.status_counts.human_review ?? 0} />
               <JobMetric label="Failed Runs" loading={summaryQuery.isLoading} value={summary?.status_counts.failed ?? 0} />
               <JobMetric label="Indexed" loading={summaryQuery.isLoading} value={summary?.status_counts.complete ?? 0} tone="success" />

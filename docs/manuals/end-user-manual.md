@@ -1,6 +1,6 @@
 # Prudentia AI End User Manual
 
-Last updated: 2026-07-07
+Last updated: 2026-07-18
 
 This manual explains how to use the Prudentia AI web application after it is
 running. It is written for Chat Members, Document Contributors, Audit Viewers,
@@ -182,7 +182,7 @@ The sidebar is organized into four areas:
 | Area | Pages you may see | Purpose |
 | --- | --- | --- |
 | Operate | System Overview, Query Intelligence, Ingestion Health | Ask questions and monitor system state. |
-| Corpus | Add Files, Folder Sources, Database Connectors, Activity, Document Library | Add, inspect, govern, and track source material. |
+| Corpus | Add Files, Abbreviation Glossary, Folder Sources, Database Connectors, Activity, Document Library | Add, inspect, govern, and track source material. |
 | Evaluate | Review Queue, RAG Evaluation | Resolve review holds or inspect evaluation quality where permitted. |
 | Govern | System Audit, User Management, Runtime Settings | Administrative and governance pages. |
 
@@ -211,7 +211,7 @@ filtered by Knowledge Space and clearance level.
 
 | Mode | Use it when |
 | --- | --- |
-| Auto | You want Prudentia to choose documents, live data, or both. |
+| Auto | You want Prudentia to search the most likely source first and expand only when its evidence is weak or empty. |
 | Documents | The answer must come from indexed files only. |
 | Live DB | The answer should come from approved live SQL data only. |
 | Hybrid | The answer needs both document context and live database facts. |
@@ -222,9 +222,26 @@ filtered by Knowledge Space and clearance level.
    evidence, and drafts the answer.
 7. Inspect the citations before relying on the answer.
 
+The composer starts in **Auto** whenever you start or load a conversation. A
+manual source choice applies to the active conversation; it is not reused as a
+global preference in another conversation.
+
 Good questions name the policy, date, person, contract, report, section, or
-comparison you need. Start a new chat when switching topics so earlier context
-does not confuse the new question.
+comparison you need. Within one conversation, you may ask follow-ups such as
+**Why?**, **What about contractors?**, or **Compare that with the previous
+policy**. Prudentia resolves a clear follow-up against recent turns, then runs a
+fresh permission-filtered retrieval. If the reference is ambiguous, it asks a
+clarifying question without searching. A self-contained new topic does not
+inherit the previous topic's source preference.
+
+Conversation context is limited to the current saved chat; it is not carried to
+another chat. Deleting a chat removes its transcript from future query context.
+
+If an administrator has defined an abbreviation, you may ask with either its
+short form or full definition. For example, `AD` and `Assistant Director` are
+matched in both directions without changing the question shown in your chat.
+When the definition came from an imported PDF, its citation identifies the
+source PDF and page; the glossary PDF itself is not searched as corpus content.
 
 ## 8. Scope a Question To Specific Documents
 
@@ -257,6 +274,7 @@ Completed conversations appear in the chat history rail.
 - Use **New chat** when changing topics.
 - Reopen a saved chat to continue a related task.
 - Delete old chats that are no longer useful.
+- Reply normally when Prudentia asks which earlier topic or answer you meant.
 - Generated files appear as download links when a generation job completes.
 - If the generation job asks clarification questions, answer them in the job
   panel before retrying or continuing.
@@ -286,20 +304,12 @@ Upload steps:
 2. Select one or more supported files.
 3. Choose the writable Knowledge Space.
 4. Choose the clearance level. You cannot upload above your own clearance.
-5. Choose an ingestion profile:
-
-| Profile | Use it when |
-| --- | --- |
-| Fast | The file is mostly native text and speed matters most. |
-| Balanced | The file has mixed layouts or moderate complexity. |
-| High accuracy | The file contains scans, complex tables, or layout-sensitive content. |
-
-6. Enable **GraphRAG** only when the document should participate in
+5. Enable **GraphRAG** only when the document should participate in
    relationship, theme, risk, trend, or corpus-level analysis.
-7. Optionally add effective date, expiry date, description, and supersedes IDs.
+6. Optionally add effective date, expiry date, description, and supersedes IDs.
    Supersedes IDs are for single-file replacements.
-8. Select **Upload documents**.
-9. Watch **Recent upload jobs** for progress and warnings.
+7. Select **Upload documents**.
+8. Watch **Recent upload jobs** for progress and warnings.
 
 If an upload is rejected, check the file type, size, Knowledge Space, clearance,
 and whether virus scanning is healthy.
@@ -334,6 +344,19 @@ The Document Library may include:
 - **Documents**: searchable table of visible documents.
 - **Trash**: soft-deleted documents that authorized users can restore or delete.
 
+Overview and Knowledge Spaces share one access-filtered document snapshot.
+Library documents includes visible, non-deleted current and superseded records.
+Current, Indexed, Processing, and Needs attention count each current document
+once. Needs attention includes failed, unknown, and human-review documents, but
+not cancelled documents. Upload validation failures that did not create a
+document stay on the Upload page and are not library issues.
+
+Retrying a failed document moves that same document into Processing; it does not
+add another issue. If the retry fails again, the document returns as one issue.
+Uploading a different document does not clear an existing failed document. When
+a replacement succeeds, the replaced record moves from Current to Superseded;
+until then the old current version remains in place.
+
 Open a document to inspect metadata, summary, topics, entities, cross
 references, extracted claims, version history, and download links. Available
 actions depend on your role and access.
@@ -342,6 +365,13 @@ actions depend on your role and access.
 
 If **Review Queue** appears in your sidebar, you can resolve OCR/extraction
 blocks and PDF image-analysis holds before affected documents continue.
+
+Its badge counts distinct documents with pending review work that you can
+resolve, not individual blocks or images. A document remains counted after you
+open it or make a partial decision. It leaves the count when no pending review
+work remains, including after the final approval, rejection, skip decision, or
+job cancellation. **Activity** has no badge because it is a job history and
+status view.
 
 For OCR blocks:
 

@@ -1,22 +1,20 @@
 from functools import lru_cache
-from typing import Literal
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from rag.shared.contracts.rag_defaults import (
-    DEFAULT_DEFER_FAITHFULNESS,
     DEFAULT_EMBEDDING_MODEL_ID,
     DEFAULT_EMBEDDING_PROVIDER,
     DEFAULT_EMBEDDINGS_BASE_URL,
+    DEFAULT_EVIDENCE_GATE_POLICY,
     DEFAULT_FAITHFULNESS_MODEL,
     DEFAULT_FAITHFULNESS_POLICY,
-    DEFAULT_FAITHFULNESS_THRESHOLD,
+    DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS,
     DEFAULT_FASTEMBED_CACHE_DIR,
     DEFAULT_FASTEMBED_DENSE_MODEL,
     DEFAULT_GRAPHRAG_ENABLED,
     DEFAULT_HYBRID_DISAGREEMENT_DETECTOR_ENABLED,
-    DEFAULT_INTENT_ROUTER_VERSION,
     DEFAULT_JSON_NUM_PREDICT,
     DEFAULT_MODEL_PROVIDER,
     DEFAULT_OLLAMA_BASE_URL,
@@ -29,21 +27,25 @@ from rag.shared.contracts.rag_defaults import (
     DEFAULT_QUERY_REWRITE_LLM_ENABLED,
     DEFAULT_RAG_HTTP_TIMEOUT_SECONDS,
     DEFAULT_RERANKER_MAX_CANDIDATES,
+    DEFAULT_RERANKER_DEVICE,
     DEFAULT_RERANKER_MODEL,
+    DEFAULT_RERANKER_TIMEOUT_SECONDS,
     DEFAULT_REASONING_MODEL,
+    DEFAULT_REASONING_TIMEOUT_SECONDS,
     DEFAULT_RETRIEVAL_MAX_RETRIES,
     DEFAULT_RETRIEVAL_TOKEN_BUDGET,
-    DEFAULT_ROUTE_LLM_VERIFIER_ENABLED,
-    DEFAULT_ROUTE_LLM_VERIFIER_MODEL,
-    DEFAULT_SOURCE_ROUTER_LLM_ENABLED,
-    DEFAULT_SOURCE_ROUTER_LLM_MIN_CONFIDENCE,
+    DEFAULT_ROUTING_MODEL,
+    DEFAULT_ROUTING_TIMEOUT_SECONDS,
     DEFAULT_SPARSE_MODEL,
     DEFAULT_TOP_K,
     DEFAULT_VLLM_BASE_URL,
     DEFAULT_VLLM_CHAT_MODEL,
     DEFAULT_VLLM_VISION_MODEL_ID,
     EmbeddingProvider,
+    EvidenceGatePolicy,
+    FaithfulnessPolicy,
     InferenceProvider,
+    RerankerDevice,
 )
 from rag.shared.contracts.task_names import (
     DEFAULT_ARTIFACT_TASK_NAME,
@@ -78,7 +80,6 @@ class Settings(BaseSettings):
         "http://localhost:5173,"
         "http://127.0.0.1:5173"
     )
-    service_token_header: str = "X-Service-Token"
     service_token: str = "replace-with-local-service-token"
     deployment_controller_url: str = "http://deployment-controller:8080"
     deployment_controller_token: str = "replace-with-local-deployment-controller-token"
@@ -147,6 +148,15 @@ class Settings(BaseSettings):
     rag_ollama_embed_timeout_seconds: float = Field(
         default=DEFAULT_OLLAMA_EMBED_TIMEOUT_SECONDS, gt=0
     )
+    rag_routing_timeout_seconds: float = Field(
+        default=DEFAULT_ROUTING_TIMEOUT_SECONDS, ge=1.0, le=30.0
+    )
+    rag_reasoning_timeout_seconds: float = Field(
+        default=DEFAULT_REASONING_TIMEOUT_SECONDS, ge=1.0, le=300.0
+    )
+    rag_faithfulness_timeout_seconds: float = Field(
+        default=DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS, ge=1.0, le=300.0
+    )
     rag_json_num_predict: int = Field(
         default=DEFAULT_JSON_NUM_PREDICT, ge=256, le=32768
     )
@@ -184,35 +194,27 @@ class Settings(BaseSettings):
     rag_sparse_cache_dir: str | None = DEFAULT_FASTEMBED_CACHE_DIR
     rag_reranker_model: str = DEFAULT_RERANKER_MODEL
     rag_reranker_cache_dir: str | None = DEFAULT_FASTEMBED_CACHE_DIR
+    rag_reranker_device: RerankerDevice = DEFAULT_RERANKER_DEVICE
     rag_reranker_max_candidates: int = Field(
         default=DEFAULT_RERANKER_MAX_CANDIDATES, ge=1, le=512
+    )
+    rag_reranker_timeout_seconds: float = Field(
+        default=DEFAULT_RERANKER_TIMEOUT_SECONDS, gt=0, le=300
     )
     rag_retrieval_max_retries: int = Field(
         default=DEFAULT_RETRIEVAL_MAX_RETRIES, ge=0, le=3
     )
     rag_query_planner_enabled: bool = DEFAULT_QUERY_PLANNER_ENABLED
     rag_query_rewrite_llm_enabled: bool = DEFAULT_QUERY_REWRITE_LLM_ENABLED
+    rag_evidence_gate_policy: EvidenceGatePolicy = DEFAULT_EVIDENCE_GATE_POLICY
     rag_faithfulness_model: str | None = DEFAULT_FAITHFULNESS_MODEL
-    rag_faithfulness_policy: str = DEFAULT_FAITHFULNESS_POLICY
-    rag_defer_faithfulness: bool = DEFAULT_DEFER_FAITHFULNESS
-    rag_faithfulness_threshold: float = Field(
-        default=DEFAULT_FAITHFULNESS_THRESHOLD, ge=0.0, le=1.0
-    )
-    rag_source_router_llm_enabled: bool = DEFAULT_SOURCE_ROUTER_LLM_ENABLED
-    rag_source_router_llm_min_confidence: float = Field(
-        default=DEFAULT_SOURCE_ROUTER_LLM_MIN_CONFIDENCE,
-        ge=0.0,
-        le=1.0,
-    )
+    rag_faithfulness_policy: FaithfulnessPolicy = DEFAULT_FAITHFULNESS_POLICY
     rag_hybrid_disagreement_detector_enabled: bool = (
         DEFAULT_HYBRID_DISAGREEMENT_DETECTOR_ENABLED
     )
-    rag_intent_router_version: str = DEFAULT_INTENT_ROUTER_VERSION
-    rag_route_llm_verifier_enabled: bool = DEFAULT_ROUTE_LLM_VERIFIER_ENABLED
-    rag_route_llm_verifier_model: str | None = DEFAULT_ROUTE_LLM_VERIFIER_MODEL
+    rag_routing_model: str | None = DEFAULT_ROUTING_MODEL
     rag_reasoning_model: str | None = DEFAULT_REASONING_MODEL
     rag_ingestion_model: str | None = None
-    artifact_pipeline_version: Literal["v1", "v2"] = "v2"
     artifact_queue_backend: str = "celery"
     artifact_queue_name: str = "artifact:jobs"
     # This is a compatibility identifier for queued messages, not an import path.
@@ -229,7 +231,6 @@ class Settings(BaseSettings):
     evaluation_task_name: str = DEFAULT_EVALUATION_TASK_NAME
     evaluation_retention_days: int = Field(default=30, ge=1, le=365)
     evaluation_worker_timeout_seconds: float = Field(default=3600.0, ge=30.0)
-    evaluation_diagnostic_top_k: int = Field(default=10, ge=1, le=100)
     evaluation_answer_llm_verifier_enabled: bool = True
     evaluation_answer_llm_verifier_model: str | None = None
     application_image_digest: str | None = None
@@ -255,7 +256,6 @@ class Settings(BaseSettings):
         DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME
     )
     ingest_worker_boot_concurrency: int = Field(default=1, ge=1, le=10)
-    ingestion_quality_preset: str = "fast"
     ocr_review_confidence_threshold: float = Field(default=0.9, ge=0.0, le=1.0)
     pdf_image_review_threshold: int = Field(default=64, ge=0, le=10000)
     ingest_maintenance_interval_seconds: int = Field(default=30, ge=5)
@@ -267,7 +267,6 @@ class Settings(BaseSettings):
     connector_live_sql_max_rows: int = Field(default=100, ge=1, le=10000)
     connector_live_sql_timeout_seconds: int = Field(default=15, ge=1, le=300)
     connector_live_sql_max_scopes: int = Field(default=5, ge=1, le=50)
-    connector_live_sql_max_schedules: int = Field(default=5, ge=1, le=50)
     connector_live_sql_max_repair_attempts: int = Field(default=2, ge=0, le=5)
     connector_live_sql_result_verifier_enabled: bool = True
     connector_live_sql_verifier_sample_rows: int = Field(default=5, ge=0, le=20)

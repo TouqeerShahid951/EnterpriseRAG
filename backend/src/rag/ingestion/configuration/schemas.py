@@ -1,16 +1,10 @@
 from datetime import datetime
-from typing import Literal
-
 from pydantic import Field
 
 from rag.shared.contracts.http import ContractModel
 
-IngestionQualityPreset = Literal["fast", "balanced", "high_accuracy"]
-
-
 class IngestConfigRequest(ContractModel):
     worker_concurrency: int = Field(..., ge=1, le=10)
-    quality_preset: IngestionQualityPreset = "fast"
     ocr_review_confidence_threshold: float = Field(..., ge=0.0, le=1.0)
     pdf_image_review_threshold: int = Field(..., ge=0, le=10000)
     vision_layout_repair_enabled: bool = False
@@ -25,7 +19,6 @@ class IngestWorkerState(ContractModel):
 
 class IngestConfigResponse(ContractModel):
     worker_concurrency: int
-    quality_preset: IngestionQualityPreset
     ocr_review_confidence_threshold: float
     pdf_image_review_threshold: int
     vision_layout_repair_enabled: bool
@@ -42,7 +35,6 @@ class IngestConfigResponse(ContractModel):
 
 class IngestRuntimeConfigResponse(ContractModel):
     worker_concurrency: int
-    quality_preset: IngestionQualityPreset
     ocr_review_confidence_threshold: float
     pdf_image_review_threshold: int
     vision_layout_repair_enabled: bool

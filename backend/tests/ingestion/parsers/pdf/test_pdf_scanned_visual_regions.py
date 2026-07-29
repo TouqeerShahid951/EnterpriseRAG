@@ -6,12 +6,12 @@ from types import SimpleNamespace
 import pytest
 
 from rag.ingestion.parsers import document as document_module
-from rag.ingestion.parsers import images as images_module
 from rag.ingestion.parsers.document import parse_document
 from rag.ingestion.parsers.models import (
     ParsedImageAsset,
     ParsedPdfItem,
 )
+from rag.ingestion.parsers.pdf.visual_region_detection import scanned_visual_regions_for_page
 
 from .pdf_scanned_test_support import cue_text_bbox, ocr_text_bbox, scanned_page_pdf
 from .pdf_vision_test_support import (
@@ -43,14 +43,8 @@ def test_scanned_visual_region_prefers_layout_picture_bbox(
             assert alpha is False
             return FakePixmap()
 
-    monkeypatch.setattr(
-        images_module,
-        "prepare_page_layout",
-        lambda _page: [[100, 200, 420, 500, "picture"]],
-    )
-
     regions, tiny_count, ambiguous, cue_count, small_count = (
-        images_module._scanned_visual_regions_for_page(
+        scanned_visual_regions_for_page(
             FakePage(),
             [ocr_text_bbox()],
             visual_cue_bboxes=[],
@@ -58,6 +52,9 @@ def test_scanned_visual_region_prefers_layout_picture_bbox(
             min_area_ratio=0.03,
             max_regions=-1,
             text_mask_padding_px=8,
+            prepare_page_layout_fn=lambda _page: [
+                [100, 200, 420, 500, "picture"]
+            ],
         )
     )
 

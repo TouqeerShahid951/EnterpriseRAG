@@ -8,6 +8,7 @@ from uuid import uuid4
 from billiard.exceptions import SoftTimeLimitExceeded
 
 from rag.graphrag.task_execution import (
+    GraphRAGDeliveryRetry,
     run_document_graph_index,
     run_partition_rebuild,
 )
@@ -48,55 +49,27 @@ def _run_ingest_delivery(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
         )
 
 
-def _ingest_document(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
-    return _run_ingest_delivery(task, payload)
-
-
-def _reextract_document_metadata(
-    task: Any,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    return _run_ingest_delivery(task, payload)
-
-
-def _reextract_document_topics(
-    task: Any,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    return _run_ingest_delivery(task, payload)
-
-
-def _reextract_document_claims(
-    task: Any,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    return _run_ingest_delivery(task, payload)
-
-
-def _reextract_document_type(
-    task: Any,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    return _run_ingest_delivery(task, payload)
-
-
 def _index_document_graphrag(
     task: Any,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    del task
-    return run_document_graph_index(
-        payload,
-        dispatch_partition_rebuild=_dispatch_partition_rebuild,
-    )
+    try:
+        return run_document_graph_index(
+            payload,
+            dispatch_partition_rebuild=_dispatch_partition_rebuild,
+        )
+    except GraphRAGDeliveryRetry as retry:
+        raise task.retry(exc=retry.cause, countdown=retry.countdown)
 
 
 def _rebuild_graphrag_partition(
     task: Any,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    del task
-    return run_partition_rebuild(payload)
+    try:
+        return run_partition_rebuild(payload)
+    except GraphRAGDeliveryRetry as retry:
+        raise task.retry(exc=retry.cause, countdown=retry.countdown)
 
 
 def _dispatch_partition_rebuild(
@@ -135,23 +108,23 @@ def _register_compatible_task(
 ingest_document = _register_compatible_task(
     config.ingest_task_name,
     DEFAULT_INGEST_TASK_NAME,
-    _ingest_document,
+    _run_ingest_delivery,
 )
 reextract_document_metadata = _register_task(
     REEXTRACT_DOCUMENT_METADATA_TASK_NAME,
-    _reextract_document_metadata,
+    _run_ingest_delivery,
 )
 reextract_document_topics = _register_task(
     REEXTRACT_DOCUMENT_TOPICS_TASK_NAME,
-    _reextract_document_topics,
+    _run_ingest_delivery,
 )
 reextract_document_claims = _register_task(
     REEXTRACT_DOCUMENT_CLAIMS_TASK_NAME,
-    _reextract_document_claims,
+    _run_ingest_delivery,
 )
 reextract_document_type = _register_task(
     REEXTRACT_DOCUMENT_TYPE_TASK_NAME,
-    _reextract_document_type,
+    _run_ingest_delivery,
 )
 index_document_graphrag = _register_compatible_task(
     config.graphrag_index_task_name,

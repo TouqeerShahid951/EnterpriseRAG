@@ -4,7 +4,6 @@ interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string;
   readonly VITE_AUTH_IDLE_TIMEOUT_MINUTES?: string;
   readonly VITE_AUTH_IDLE_WARNING_SECONDS?: string;
-  readonly VITE_POLLING_INTERVAL_MS?: string;
 }
 
 interface ImportMeta {

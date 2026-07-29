@@ -3,16 +3,36 @@ import { CheckCircle2, Loader2, RefreshCw, ScanSearch, Upload } from "lucide-rea
 import { Skeleton } from "@/components/layout/Common";
 import type { RouteId } from "@/routes/routes";
 
-export function ReviewQueueClearState({ onNavigate, onRefresh, refreshing }: { onNavigate: (route: RouteId) => void; onRefresh: () => void; refreshing: boolean }) {
+export function ReviewQueueClearState({ kind, onNavigate, onRefresh, refreshing }: ReviewQueueClearStateProps) {
+  const content = kind === "images"
+    ? {
+        ariaLabel: "PDF image review queue is clear",
+        description: "Large image-analysis batches will pause here so reviewers can choose which images are analyzed or skipped.",
+        nextSource: "PDF image batches",
+        title: "No PDF images need review",
+      }
+    : {
+        ariaLabel: "OCR review queue is clear",
+        description: "Low-confidence extraction blocks will appear here before affected documents continue into the searchable library.",
+        nextSource: "OCR confidence checks",
+        title: "No OCR blocks need review",
+      };
   return (
-    <section className="review-clear-state" aria-label="OCR review queue is clear">
+    <section
+      className="review-clear-state"
+      id={`review-panel-${kind === "images" ? "images" : "ocr"}`}
+      role="tabpanel"
+      aria-label={content.ariaLabel}
+      aria-labelledby={`review-tab-${kind === "images" ? "images" : "ocr"}`}
+      tabIndex={0}
+    >
       <div className="review-clear-symbol">
         <CheckCircle2 aria-hidden="true" size={30} />
       </div>
       <div className="review-clear-copy">
         <p className="sv-eyebrow">Queue clear</p>
-        <h2>No OCR blocks need review</h2>
-        <p>Low-confidence extraction blocks will appear here before affected documents continue into the searchable library.</p>
+        <h2>{content.title}</h2>
+        <p>{content.description}</p>
       </div>
       <div className="review-clear-actions">
         <button type="button" onClick={onRefresh} disabled={refreshing} className="sv-action-primary">
@@ -31,45 +51,18 @@ export function ReviewQueueClearState({ onNavigate, onRefresh, refreshing }: { o
       <div className="review-clear-strip" aria-label="Review status">
         <ReviewClearFact label="Status" value="Ready" />
         <ReviewClearFact label="Indexing hold" value="None" />
-        <ReviewClearFact label="Next queue source" value="OCR confidence checks" />
+        <ReviewClearFact label="Next queue source" value={content.nextSource} />
       </div>
     </section>
   );
 }
 
-export function ReviewImageClearState({ onNavigate, onRefresh, refreshing }: { onNavigate: (route: RouteId) => void; onRefresh: () => void; refreshing: boolean }) {
-  return (
-    <section className="review-clear-state" aria-label="PDF image review queue is clear">
-      <div className="review-clear-symbol">
-        <CheckCircle2 aria-hidden="true" size={30} />
-      </div>
-      <div className="review-clear-copy">
-        <p className="sv-eyebrow">Queue clear</p>
-        <h2>No PDF images need review</h2>
-        <p>Large image-analysis batches will pause here so reviewers can choose which images are analyzed or skipped.</p>
-      </div>
-      <div className="review-clear-actions">
-        <button type="button" onClick={onRefresh} disabled={refreshing} className="sv-action-primary">
-          {refreshing ? <Loader2 aria-hidden="true" className="animate-spin" size={16} /> : <RefreshCw aria-hidden="true" size={16} />}
-          Refresh queue
-        </button>
-        <button type="button" onClick={() => onNavigate("upload")} className="sv-action-secondary">
-          <Upload aria-hidden="true" size={16} />
-          Add documents
-        </button>
-        <button type="button" onClick={() => onNavigate("document-overview")} className="sv-action-secondary">
-          <ScanSearch aria-hidden="true" size={16} />
-          Open library
-        </button>
-      </div>
-      <div className="review-clear-strip" aria-label="Review status">
-        <ReviewClearFact label="Status" value="Ready" />
-        <ReviewClearFact label="Indexing hold" value="None" />
-        <ReviewClearFact label="Next queue source" value="PDF image batches" />
-      </div>
-    </section>
-  );
-}
+type ReviewQueueClearStateProps = {
+  kind: "images" | "ocr";
+  onNavigate: (route: RouteId) => void;
+  onRefresh: () => void;
+  refreshing: boolean;
+};
 
 function ReviewClearFact({ label, value }: { label: string; value: string }) {
   return (

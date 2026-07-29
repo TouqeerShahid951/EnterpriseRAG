@@ -24,13 +24,16 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
             INSERT INTO workspace_rag_config (
                 config_key, provider, embedding_provider, reasoning_provider, routing_provider, faithfulness_provider,
                 ingestion_provider, vision_provider, base_url, embedding_base_url, reasoning_base_url, routing_base_url,
-                faithfulness_base_url, ingestion_base_url, vision_base_url, chat_model, embed_model, reasoning_model, routing_model,
+                faithfulness_base_url, ingestion_base_url, vision_base_url, chat_model, embed_model, reasoning_model,
+                sql_generation_model, routing_model,
                 faithfulness_model, ingestion_model, vision_model, thinking_enabled, json_num_predict, retrieval_token_budget,
-                query_planner_enabled, reranker_model, chat_timeout_seconds, embed_timeout_seconds, health_status,
+                query_planner_enabled, evidence_gate_policy, faithfulness_policy, reranker_model,
+                chat_timeout_seconds, routing_timeout_seconds, reasoning_timeout_seconds,
+                faithfulness_timeout_seconds, embed_timeout_seconds, health_status,
                 health_message, embedding_dimension, chat_latency_ms, embed_latency_ms,
                 last_checked_at, updated_by, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::uuid, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::uuid, %s)
             ON CONFLICT (config_key) DO UPDATE SET
                 provider = EXCLUDED.provider,
                 embedding_provider = EXCLUDED.embedding_provider,
@@ -49,6 +52,7 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                 chat_model = EXCLUDED.chat_model,
                 embed_model = EXCLUDED.embed_model,
                 reasoning_model = EXCLUDED.reasoning_model,
+                sql_generation_model = EXCLUDED.sql_generation_model,
                 routing_model = EXCLUDED.routing_model,
                 faithfulness_model = EXCLUDED.faithfulness_model,
                 ingestion_model = EXCLUDED.ingestion_model,
@@ -57,8 +61,13 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                 json_num_predict = EXCLUDED.json_num_predict,
                 retrieval_token_budget = EXCLUDED.retrieval_token_budget,
                 query_planner_enabled = EXCLUDED.query_planner_enabled,
+                evidence_gate_policy = EXCLUDED.evidence_gate_policy,
+                faithfulness_policy = EXCLUDED.faithfulness_policy,
                 reranker_model = EXCLUDED.reranker_model,
                 chat_timeout_seconds = EXCLUDED.chat_timeout_seconds,
+                routing_timeout_seconds = EXCLUDED.routing_timeout_seconds,
+                reasoning_timeout_seconds = EXCLUDED.reasoning_timeout_seconds,
+                faithfulness_timeout_seconds = EXCLUDED.faithfulness_timeout_seconds,
                 embed_timeout_seconds = EXCLUDED.embed_timeout_seconds,
                 health_status = EXCLUDED.health_status,
                 health_message = EXCLUDED.health_message,
@@ -89,6 +98,7 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                 saved.chat_model,
                 saved.embed_model,
                 saved.reasoning_model,
+                saved.sql_generation_model,
                 saved.routing_model,
                 saved.faithfulness_model,
                 saved.ingestion_model,
@@ -97,8 +107,13 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                 saved.json_num_predict,
                 saved.retrieval_token_budget,
                 saved.query_planner_enabled,
+                saved.evidence_gate_policy,
+                saved.faithfulness_policy,
                 saved.reranker_model,
                 saved.chat_timeout_seconds,
+                saved.routing_timeout_seconds,
+                saved.reasoning_timeout_seconds,
+                saved.faithfulness_timeout_seconds,
                 saved.embed_timeout_seconds,
                 saved.health_status,
                 saved.health_message,
@@ -142,6 +157,7 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                     chat_model TEXT NOT NULL,
                     embed_model TEXT NOT NULL,
                     reasoning_model TEXT NULL,
+                    sql_generation_model TEXT NULL,
                     routing_model TEXT NULL,
                     faithfulness_model TEXT NULL,
                     ingestion_model TEXT NULL,
@@ -150,8 +166,13 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                     json_num_predict INTEGER NOT NULL DEFAULT 4096,
                     retrieval_token_budget INTEGER NOT NULL DEFAULT 12000,
                     query_planner_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                    evidence_gate_policy TEXT NOT NULL DEFAULT 'adaptive',
+                    faithfulness_policy TEXT NOT NULL DEFAULT 'adaptive',
                     reranker_model TEXT NOT NULL DEFAULT 'jinaai/jina-reranker-v1-turbo-en',
                     chat_timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 180,
+                    routing_timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 5,
+                    reasoning_timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 30,
+                    faithfulness_timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 30,
                     embed_timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 45,
                     health_status TEXT NOT NULL DEFAULT 'unknown',
                     health_message TEXT NOT NULL DEFAULT 'Not checked.',
@@ -180,11 +201,26 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                     CONSTRAINT workspace_rag_config_timeouts_positive CHECK (
                         chat_timeout_seconds > 0 AND embed_timeout_seconds > 0
                     ),
+                    CONSTRAINT workspace_rag_config_routing_timeout_range CHECK (
+                        routing_timeout_seconds BETWEEN 1 AND 30
+                    ),
+                    CONSTRAINT workspace_rag_config_reasoning_timeout_range CHECK (
+                        reasoning_timeout_seconds BETWEEN 1 AND 300
+                    ),
+                    CONSTRAINT workspace_rag_config_faithfulness_timeout_range CHECK (
+                        faithfulness_timeout_seconds BETWEEN 1 AND 300
+                    ),
                     CONSTRAINT workspace_rag_config_json_num_predict_range CHECK (
                         json_num_predict BETWEEN 256 AND 32768
                     ),
                     CONSTRAINT workspace_rag_config_retrieval_token_budget_range CHECK (
                         retrieval_token_budget BETWEEN 1000 AND 200000
+                    ),
+                    CONSTRAINT workspace_rag_config_faithfulness_policy_known CHECK (
+                        faithfulness_policy IN ('adaptive', 'always', 'never')
+                    ),
+                    CONSTRAINT workspace_rag_config_evidence_gate_policy_known CHECK (
+                        evidence_gate_policy IN ('adaptive', 'always', 'never')
                     ),
                     CONSTRAINT workspace_rag_config_reranker_model_not_blank CHECK (length(btrim(reranker_model)) > 0),
                     CONSTRAINT workspace_rag_config_embedding_dimension_positive CHECK (
@@ -194,6 +230,7 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                 """
             )
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS reasoning_model TEXT NULL")
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS sql_generation_model TEXT NULL")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'ollama'")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS embedding_provider TEXT NULL")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS embedding_base_url TEXT NULL")
@@ -237,5 +274,76 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS json_num_predict INTEGER NOT NULL DEFAULT 4096")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS retrieval_token_budget INTEGER NOT NULL DEFAULT 12000")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS query_planner_enabled BOOLEAN NOT NULL DEFAULT TRUE")
+            conn.execute(
+                "ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS "
+                "routing_timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 5 "
+                "CHECK (routing_timeout_seconds BETWEEN 1 AND 30)"
+            )
+            conn.execute(
+                "ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS "
+                "reasoning_timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 30 "
+                "CHECK (reasoning_timeout_seconds BETWEEN 1 AND 300)"
+            )
+            conn.execute(
+                "ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS "
+                "faithfulness_timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 30 "
+                "CHECK (faithfulness_timeout_seconds BETWEEN 1 AND 300)"
+            )
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS evidence_gate_policy TEXT NOT NULL DEFAULT 'adaptive' CHECK (evidence_gate_policy IN ('adaptive', 'always', 'never'))")
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS faithfulness_policy TEXT NOT NULL DEFAULT 'adaptive' CHECK (faithfulness_policy IN ('adaptive', 'always', 'never'))")
+            conn.execute(
+                """
+                DO $$
+                DECLARE existing_constraint TEXT;
+                BEGIN
+                    SELECT conname INTO existing_constraint
+                    FROM pg_constraint
+                    WHERE conrelid = 'workspace_rag_config'::regclass
+                      AND conname IN (
+                          'workspace_rag_config_evidence_gate_policy_check',
+                          'workspace_rag_config_evidence_gate_policy_known'
+                      )
+                      AND pg_get_constraintdef(oid) NOT LIKE '%adaptive%'
+                    LIMIT 1;
+                    IF existing_constraint IS NOT NULL THEN
+                        EXECUTE format(
+                            'ALTER TABLE workspace_rag_config DROP CONSTRAINT %I',
+                            existing_constraint
+                        );
+                        ALTER TABLE workspace_rag_config
+                            ADD CONSTRAINT workspace_rag_config_evidence_gate_policy_known
+                            CHECK (evidence_gate_policy IN ('adaptive', 'always', 'never'));
+                    END IF;
+                END $$
+                """
+            )
+            conn.execute("ALTER TABLE workspace_rag_config ALTER COLUMN evidence_gate_policy SET DEFAULT 'adaptive'")
+            conn.execute(
+                """
+                DO $$
+                DECLARE existing_constraint TEXT;
+                BEGIN
+                    SELECT conname INTO existing_constraint
+                    FROM pg_constraint
+                    WHERE conrelid = 'workspace_rag_config'::regclass
+                      AND conname IN (
+                          'workspace_rag_config_faithfulness_policy_check',
+                          'workspace_rag_config_faithfulness_policy_known'
+                      )
+                      AND pg_get_constraintdef(oid) NOT LIKE '%adaptive%'
+                    LIMIT 1;
+                    IF existing_constraint IS NOT NULL THEN
+                        EXECUTE format(
+                            'ALTER TABLE workspace_rag_config DROP CONSTRAINT %I',
+                            existing_constraint
+                        );
+                        ALTER TABLE workspace_rag_config
+                            ADD CONSTRAINT workspace_rag_config_faithfulness_policy_known
+                            CHECK (faithfulness_policy IN ('adaptive', 'always', 'never'));
+                    END IF;
+                END $$
+                """
+            )
+            conn.execute("ALTER TABLE workspace_rag_config ALTER COLUMN faithfulness_policy SET DEFAULT 'adaptive'")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS reranker_model TEXT NOT NULL DEFAULT 'jinaai/jina-reranker-v1-turbo-en'")
             conn.execute("UPDATE workspace_rag_config SET reasoning_model = routing_model WHERE reasoning_model IS NULL AND routing_model IS NOT NULL")

@@ -9,7 +9,6 @@ from rag.connectors.adapters.sql_server import (
 from rag.connectors.registry import (
     PostgresConnector,
     SqlServerConnector,
-    UnsupportedConnector,
     _add_foreign_key_rows,
     _add_index_rows,
     _add_primary_key_rows,
@@ -27,7 +26,12 @@ def test_connector_registry_exposes_sql_server_and_postgres() -> None:
 
     assert isinstance(registry.get("sql_server"), SqlServerConnector)
     assert isinstance(registry.get("postgres"), PostgresConnector)
-    assert isinstance(registry.get("mysql"), UnsupportedConnector)
+    try:
+        registry.get("mysql")
+    except ValueError as exc:
+        assert str(exc) == "Unsupported connector type: mysql"
+    else:
+        raise AssertionError("unsupported connector type was accepted")
 
 
 def test_connector_registry_preserves_adapter_compatibility_imports() -> None:

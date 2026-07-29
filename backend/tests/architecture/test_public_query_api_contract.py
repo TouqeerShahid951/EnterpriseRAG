@@ -295,7 +295,15 @@ EXPECTED_SCHEMAS: dict[str, SchemaContract] = {
         frozenset({"reason"}),
     ),
     "QueryNodeTiming": (
-        frozenset({"node", "duration_ms", "execution_mode", "detail"}),
+        frozenset(
+            {
+                "node",
+                "duration_ms",
+                "execution_mode",
+                "detail",
+                "phase_timings_ms",
+            }
+        ),
         frozenset({"node", "duration_ms"}),
     ),
 }

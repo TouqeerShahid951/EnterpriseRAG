@@ -25,9 +25,6 @@ import { NewRunScreen } from "@/features/evaluations/components/EvaluationRunLau
 import { RunsScreen } from "@/features/evaluations/components/EvaluationRuns";
 
 
-export { resolveEvaluationDatasetId } from "@/features/evaluations/utils/evaluationPageUtils";
-
-
 export function PrudentiaRagEvaluationsPage({ activeSpacePath, currentDocuments, documents, documentsLoading, onActiveSpaceChange, onLogout, onNavigate, user }: Props) {
   const queryClient = useQueryClient();
   const { notify } = useToast();

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { GeneratedArtifact } from "@/types/api";
-import { ArtifactDownloads } from "./AssistantZipTurn";
+import { ArtifactDownloads } from "./AssistantArtifactJob";
 
 const artifact: GeneratedArtifact = {
   id: "artifact-1",

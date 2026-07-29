@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from rag.shared.contracts.abbreviations import ABBREVIATION_GLOSSARY_DOC_TYPE
 from rag.documents.upload.service import (
     UploadDocument,
     UploadDocumentCommand,
@@ -270,6 +271,95 @@ def test_upload_service_keeps_queued_job_when_queue_is_unavailable() -> None:
     assert queue.messages == []
     assert len(document_repo.list_documents()) == 1
     assert document_repo.audit_events[-1]["event_type"] == "upload.queued"
+
+
+def test_abbreviation_glossary_upload_requires_an_admin_and_a_pdf() -> None:
+    document_repo, identity_repo, contributor = _context()
+    service = _service(
+        document_repo,
+        identity_repo,
+        queue=FakeQueue(),
+        storage=FakeStorage(),
+    )
+    glossary_command = replace(
+        _command(contributor),
+        doc_type=ABBREVIATION_GLOSSARY_DOC_TYPE,
+        clearance_level="NATO_UNCLASSIFIED",
+    )
+
+    with pytest.raises(UploadRejected) as exc_info:
+        service.execute(glossary_command)
+    assert exc_info.value.code == "abbreviation_glossary_admin_required"
+
+    admin = replace(contributor, account_type="system_admin")
+    with pytest.raises(UploadRejected) as exc_info:
+        service.execute(
+            replace(glossary_command, actor=admin, shared_group_paths=("/ops",))
+        )
+    assert exc_info.value.code == "abbreviation_glossary_scope_not_allowed"
+
+    with pytest.raises(UploadRejected) as exc_info:
+        service.execute(
+            replace(
+                glossary_command,
+                actor=admin,
+                content=b"{}",
+                filename="glossary.json",
+                declared_content_type="application/json",
+            )
+        )
+    assert exc_info.value.code == "abbreviation_glossary_pdf_required"
+
+
+def test_abbreviation_glossary_can_add_or_replace_one_pdf_source() -> None:
+    document_repo, identity_repo, contributor = _context()
+    admin = replace(contributor, account_type="system_admin")
+    current = document_repo.create_document(
+        title="Current glossary.pdf",
+        source_id="upload:current-glossary",
+        group_path="/legal",
+        clearance_level="NATO_RESTRICTED",
+        doc_type=ABBREVIATION_GLOSSARY_DOC_TYPE,
+        effective_date=None,
+        expiry_date=None,
+        description=None,
+        uploaded_by=admin.id,
+        file_path="memory://current-glossary.pdf",
+        content_hash="current-glossary-hash",
+        pending_supersedes=[],
+        ingest_status="complete",
+    )
+    queue = FakeQueue()
+    service = _service(
+        document_repo,
+        identity_repo,
+        queue=queue,
+        storage=FakeStorage(),
+    )
+    command = replace(
+        _command(admin),
+        doc_type=ABBREVIATION_GLOSSARY_DOC_TYPE,
+        clearance_level="NATO_UNCLASSIFIED",
+    )
+
+    added = service.execute(command)
+    added_job = document_repo.get_ingest_job(added.job_id)
+    assert added_job is not None
+    assert queue.messages[0].supersedes == []
+
+    result = service.execute(
+        replace(
+            command,
+            content=b"%PDF-1.7\nreplacement glossary\n%%EOF",
+            filename="replacement-glossary.pdf",
+            supersedes=(current.id,),
+        )
+    )
+
+    job = document_repo.get_ingest_job(result.job_id)
+    assert job is not None
+    assert queue.messages[1].doc_type == ABBREVIATION_GLOSSARY_DOC_TYPE
+    assert queue.messages[1].supersedes == [current.id]
 
 
 def _service(

@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronUp, Search, TextSearch } from "lucide-react";
 
 import type { EvidenceField, EvidenceWindow, HighlightRange, SourceAnchor } from "@/types/api";
+import { isLiveDatabaseSource, isManagedAbbreviationSource } from "@/features/chat/utils/sourceEvidence";
 import { HighlightedExcerpt } from "./HighlightedExcerpt";
 
 export function EvidenceWindows({ source }: { source: SourceAnchor }) {
   const [expanded, setExpanded] = useState(false);
   const windows = source.evidence_windows;
   const isLegacy = windows === undefined && source.attribution_status === undefined;
+  const liveDatabase = isLiveDatabaseSource(source) || isManagedAbbreviationSource(source);
 
   useEffect(() => {
     setExpanded(false);
@@ -40,19 +42,23 @@ export function EvidenceWindows({ source }: { source: SourceAnchor }) {
       {hasFocusedWindows ? (
         <div className="rag-evidence-window-list">
           {windows?.map((window) => (
-            <EvidenceWindowView key={`${window.claim_id}-${window.source_start}-${window.support_status}`} window={window} />
+            <EvidenceWindowView
+              key={`${window.claim_id}-${window.source_start}-${window.support_status}`}
+              liveDatabase={liveDatabase}
+              window={window}
+            />
           ))}
         </div>
       ) : (
-        <RetrievedContext source={source} expanded={expanded} />
+        <RetrievedContext source={source} expanded={expanded} liveDatabase={liveDatabase} />
       )}
 
       {expanded && hasFocusedWindows ? (
-        <div className="rag-evidence-context" aria-label="Surrounding source context">
+        <div className="rag-evidence-context" aria-label={liveDatabase ? "Query context" : "Surrounding source context"}>
           <div className="rag-evidence-section-heading">
-            <span>Surrounding source context</span>
+            <span>{liveDatabase ? "Query context" : "Surrounding source context"}</span>
           </div>
-          <div className="rag-evidence-excerpt">
+          <div className={`rag-evidence-excerpt ${liveDatabase ? "is-query-context" : ""}`}>
             <HighlightedExcerpt excerpt={source.excerpt} ranges={verifiedQuoteRanges} />
           </div>
         </div>
@@ -66,22 +72,29 @@ export function EvidenceWindows({ source }: { source: SourceAnchor }) {
           onClick={() => setExpanded((value) => !value)}
         >
           {expanded ? <ChevronUp aria-hidden="true" size={15} /> : <ChevronDown aria-hidden="true" size={15} />}
-          {expanded ? "Show focused evidence" : "Show surrounding context"}
+          {expanded ? "Show focused evidence" : liveDatabase ? "Show query context" : "Show surrounding context"}
         </button>
       ) : null}
     </section>
   );
 }
 
-function EvidenceWindowView({ window }: { window: EvidenceWindow }) {
+function EvidenceWindowView({ liveDatabase, window }: { liveDatabase: boolean; window: EvidenceWindow }) {
   const verified = window.support_status === "verified";
   const StatusIcon = verified ? CheckCircle2 : Search;
+  const statusLabel = liveDatabase
+    ? verified
+      ? "Claim supported by returned row"
+      : "Relevant returned row, not verified"
+    : verified
+      ? "Verified supporting passage"
+      : "Likely relevant passage, not verified";
   return (
     <article className={`rag-evidence-window ${verified ? "is-verified" : "is-fallback"}`}>
       <div className="rag-evidence-window-status">
         <span>
           <StatusIcon aria-hidden="true" size={14} />
-          {verified ? "Verified supporting passage" : "Likely relevant passage, not verified"}
+          {statusLabel}
         </span>
       </div>
       <div className="rag-evidence-claim">
@@ -127,7 +140,15 @@ function EvidenceTable({
   );
 }
 
-function RetrievedContext({ expanded, source }: { expanded: boolean; source: SourceAnchor }) {
+function RetrievedContext({
+  expanded,
+  liveDatabase,
+  source,
+}: {
+  expanded: boolean;
+  liveDatabase: boolean;
+  source: SourceAnchor;
+}) {
   const pending = source.attribution_status === "pending";
   const unavailable = source.attribution_status === "unavailable";
   const preview = expanded ? source.excerpt : contextPreview(source.excerpt);
@@ -136,10 +157,10 @@ function RetrievedContext({ expanded, source }: { expanded: boolean; source: Sou
       <div className="rag-evidence-section-heading">
         <span>
           <TextSearch aria-hidden="true" size={14} />
-          Retrieved context
+          {liveDatabase ? "Query context" : "Retrieved context"}
         </span>
       </div>
-      <p className="rag-evidence-excerpt">
+      <p className={`rag-evidence-excerpt ${liveDatabase ? "is-query-context" : ""}`}>
         {preview}
         {!expanded && preview.length < source.excerpt.length ? <span aria-hidden="true"> ...</span> : null}
       </p>

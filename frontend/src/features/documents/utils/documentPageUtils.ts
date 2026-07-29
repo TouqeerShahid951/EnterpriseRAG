@@ -5,9 +5,7 @@ import {
   isGlobalAdmin,
   isGroupPathInUserScope,
 } from "@/lib/auth/authz";
-import { isUploadTerminalStatus } from "@/features/upload/state/uploadJobProgress";
-import type { Document, DocumentIngestStatus, User as AuthUser } from "@/types/api";
-import type { UploadBatchItemView } from "@/types/chat";
+import type { Document, DocumentIngestStatus, DocumentOverviewSpace, User as AuthUser } from "@/types/api";
 import { errorMessage } from "@/lib/utils/format";
 import { isDocumentInSpace, type GroupOption } from "@/lib/utils/groups";
 
@@ -73,21 +71,20 @@ export function uniqueTopicValues(values: string[]): string[] {
   return topics;
 }
 
-export function isProcessingIngestStatus(status: DocumentIngestStatus) {
+function isProcessingIngestStatus(status: DocumentIngestStatus) {
   return status === "queued" || status === "scheduled" || status === "processing";
 }
 
-export function buildSpaceOverviewRows(spaces: GroupOption[], documents: Document[], uploadJobs: UploadBatchItemView[]): SpaceOverviewRow[] {
+export function buildSpaceOverviewRows(spaces: GroupOption[], overviewSpaces: DocumentOverviewSpace[]): SpaceOverviewRow[] {
   return spaces.map((space) => {
-    const scopedDocuments = documents.filter((doc) => isDocumentVisibleInSpace(doc, space.path));
-    const scopedJobs = uploadJobs.filter((job) => isDocumentInSpace(job.groupPath, space.path));
+    const scoped = overviewSpaces.filter((row) => isDocumentInSpace(row.group_path, space.path));
     return {
-      currentCount: scopedDocuments.filter((doc) => doc.is_current).length,
-      documentsCount: scopedDocuments.length,
-      failedCount: scopedDocuments.filter((doc) => doc.ingest_status === "failed").length + scopedJobs.filter(isFailedUploadJob).length,
-      processingCount: scopedDocuments.filter((doc) => isProcessingIngestStatus(doc.ingest_status)).length + scopedJobs.filter(isActiveUploadJob).length,
-      reviewCount: scopedDocuments.filter((doc) => doc.ingest_status === "human_review").length + scopedJobs.filter((job) => job.job?.status === "human_review").length,
-      unknownCount: scopedDocuments.filter((doc) => doc.ingest_status === "unknown").length,
+      currentCount: scoped.reduce((total, row) => total + row.current_versions, 0),
+      documentsCount: scoped.reduce((total, row) => total + row.library_documents, 0),
+      failedCount: scoped.reduce((total, row) => total + row.failed_current, 0),
+      processingCount: scoped.reduce((total, row) => total + row.processing_current, 0),
+      reviewCount: scoped.reduce((total, row) => total + row.review_current, 0),
+      unknownCount: scoped.reduce((total, row) => total + row.unknown_current, 0),
       space,
     };
   });
@@ -130,7 +127,7 @@ export function sortedSpaceOverviewRows(rows: SpaceOverviewRow[]) {
 }
 
 export function spaceAttentionCount(row: SpaceOverviewRow) {
-  return row.processingCount + row.reviewCount + row.failedCount + row.unknownCount;
+  return row.reviewCount + row.failedCount + row.unknownCount;
 }
 
 export function spaceHealth(row: SpaceOverviewRow): { label: string; tone: "active" | "danger" | "success" | "warning" } {
@@ -311,16 +308,6 @@ function matchesIngestStatus(status: DocumentIngestStatus, filter: DocumentInges
   if (filter === "active") return status !== "complete";
   if (filter === "processing") return isProcessingIngestStatus(status);
   return status === filter;
-}
-
-function isActiveUploadJob(item: UploadBatchItemView) {
-  if (item.requestState === "uploading") return true;
-  if (item.requestState === "failed") return false;
-  return !isUploadTerminalStatus(item.job?.status);
-}
-
-function isFailedUploadJob(item: UploadBatchItemView) {
-  return item.requestState === "failed" || item.job?.status === "failed";
 }
 
 function documentAccessPaths(document: Document) {

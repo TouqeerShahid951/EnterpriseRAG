@@ -55,4 +55,5 @@ class DocumentGraphIndexQueue(Protocol):
         document_id: str,
         job_id: str,
         reason: str,
+        index_generation_id: str | None,
     ) -> None: ...

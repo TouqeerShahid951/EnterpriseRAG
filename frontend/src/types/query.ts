@@ -133,6 +133,7 @@ export interface QueryNodeTiming {
   duration_ms: number;
   execution_mode: string | null;
   detail: string | null;
+  phase_timings_ms?: Record<string, number>;
 }
 
 type AnswerStatus = "complete" | "partial" | "clarification" | "abstained";

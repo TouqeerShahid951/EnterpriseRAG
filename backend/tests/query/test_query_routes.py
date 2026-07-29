@@ -275,33 +275,7 @@ def test_get_chat_session_scopes_lookup_to_permission_version() -> None:
     ]
 
 
-def test_completed_query_is_saved_under_current_permission_version() -> None:
-    user = _user(permission_version=7)
-    repo = RecordingHistoryRepository()
-    service = RecordingRagService(response=_response(answer="Grounded answer"))
-    client = _execution_client(service=service, user=user, history_repo=repo)
-
-    response = client.post(
-        "/query",
-        json={"query": "  What is the policy?  ", "group_path": "/ops"},
-        **_csrf_request(),
-    )
-
-    assert response.status_code == 200
-    saved = repo.get_session(
-        session_id="session-1", user_id=user.id, permission_version=7
-    )
-    assert saved is not None
-    assert saved.title == "What is the policy?"
-    assert [turn["role"] for turn in saved.turns] == ["user", "assistant"]
-    assert saved.turns[0]["content"] == "What is the policy?"
-    assert saved.turns[1]["response"]["answer"] == "Grounded answer"
-    assert saved.turns[1]["groupPath"] == "/ops"
-
-
-def test_stream_done_and_verified_events_persist_the_final_response() -> None:
-    user = _user(permission_version=7)
-    repo = RecordingHistoryRepository()
+def test_stream_route_forwards_service_owned_done_and_verified_events() -> None:
     done = _response(answer="Initial answer")
     verified = _response(answer="Verified answer")
     service = RecordingRagService(
@@ -310,7 +284,7 @@ def test_stream_done_and_verified_events_persist_the_final_response() -> None:
             QueryStreamEvent(event="verified", data=verified.model_dump(mode="json")),
         )
     )
-    client = _execution_client(service=service, user=user, history_repo=repo)
+    client = _execution_client(service=service)
 
     response = client.post(
         "/query/stream",
@@ -321,11 +295,6 @@ def test_stream_done_and_verified_events_persist_the_final_response() -> None:
     assert response.status_code == 200
     assert "event: done" in response.text
     assert "event: verified" in response.text
-    saved = repo.get_session(
-        session_id="session-1", user_id=user.id, permission_version=7
-    )
-    assert saved is not None
-    assert saved.turns[1]["response"]["answer"] == "Verified answer"
 
 
 def test_stream_maps_service_failure_to_an_sse_error() -> None:
@@ -358,7 +327,6 @@ def test_stream_disconnect_cancels_and_closes_the_query_iterator() -> None:
             request,  # type: ignore[arg-type]
             user=user,
             identity_repo=StubIdentityRepository(),  # type: ignore[arg-type]
-            chat_history_repo=RecordingHistoryRepository(),
             schedule_repo=InMemoryFolderScheduleRepository(),
             connector_profile_repo=InMemoryConnectorProfileRepository(),
             rag_service=service,  # type: ignore[arg-type]

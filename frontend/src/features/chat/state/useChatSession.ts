@@ -6,7 +6,6 @@ import type { QuerySourceMode, RAGResponse, SourceAnchor, User } from "@/types/a
 import type { QueryRunVariables, SavedChatSession, SavedChatSessionSummary } from "@/types/chat";
 import { errorMessage } from "@/lib/utils/format";
 import { createId } from "@/lib/utils/ids";
-import { readStoredString, writeStoredString } from "@/lib/utils/uiPreferences";
 import {
   compactSessionTitle,
   createUserTurn,
@@ -35,15 +34,7 @@ import {
 import { runStreamingQuery } from "@/features/chat/state/chatStreaming";
 
 
-export { applyStreamEvent };
-
-export { mergeSavedSessionsWithLocal, updateChatSessionTurns };
-export type { ChatSessionTurnCache };
-
-
 const CHAT_HISTORY_PAGE_SIZE = 30;
-const CHAT_SOURCE_MODE_STORAGE_KEY = "Prudentia-chat-source-mode";
-const QUERY_SOURCE_MODES: QuerySourceMode[] = ["auto", "corpus_only", "db_only", "hybrid"];
 export type ActiveGeneration = { assistantTurnId: string; sessionId: string };
 
 export function useChatSession(currentUser: User | null, historyEnabled = true) {
@@ -58,7 +49,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
   const [localSessionSummaries, setLocalSessionSummaries] = useState<SavedChatSessionSummary[]>([]);
   const [scopedDocumentIds, setScopedDocumentIds] = useState<string[]>([]);
   const [selectedSource, setSelectedSource] = useState<SourceAnchor | null>(null);
-  const [sourceMode, setSourceModeState] = useState<QuerySourceMode>(readStoredSourceMode);
+  const [sourceMode, setSourceModeState] = useState<QuerySourceMode>("auto");
   const [selectedQuerySourceId, setSelectedQuerySourceIdState] = useState("");
   const [activeSpacePath, setActiveSpacePath] = useState<string | null>(() => defaultSpacePath(currentUser));
   const chatHistoryQueryKey = useMemo(
@@ -132,6 +123,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
       setSessionTurnsById((cache) => ({ ...cache, [session.id]: session.turns }));
       setScopedDocumentIds([]);
       setSelectedSource(null);
+      setSourceModeState("auto");
       setSelectedQuerySourceIdState("");
       setQuestion("");
     },
@@ -169,6 +161,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
     setLocalSessionSummaries([]);
     setScopedDocumentIds([]);
     setSelectedSource(null);
+    setSourceModeState("auto");
     setSelectedQuerySourceIdState("");
     setQuestion("");
     setActiveSpacePath(defaultActiveSpacePath);
@@ -212,6 +205,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
     setActiveSessionId(null);
     setScopedDocumentIds([]);
     setSelectedSource(null);
+    setSourceModeState("auto");
     setSelectedQuerySourceIdState("");
     setQuestion("");
   }
@@ -315,6 +309,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
       setActiveSessionId(sessionId);
       setScopedDocumentIds([]);
       setSelectedSource(null);
+      setSourceModeState("auto");
       setSelectedQuerySourceIdState("");
       setQuestion("");
       return;
@@ -357,7 +352,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
       request: {
         query: turn.question,
         session_id: activeSessionId,
-        client_request_id: createId("query"),
+        client_request_id: assistantTurnId,
         group_path: retrySpacePath,
         document_ids: turn.documentIds?.length ? turn.documentIds : undefined,
         source_mode: turn.sourceMode ?? "auto",
@@ -380,7 +375,6 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
 
   function changeSourceMode(nextMode: QuerySourceMode) {
     setSourceModeState(nextMode);
-    writeStoredString(CHAT_SOURCE_MODE_STORAGE_KEY, nextMode);
     if (nextMode === "db_only") {
       setScopedDocumentIds([]);
     }
@@ -481,10 +475,6 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
     setQuestion,
     setSelectedSource,
   };
-}
-
-function readStoredSourceMode(): QuerySourceMode {
-  return readStoredString(CHAT_SOURCE_MODE_STORAGE_KEY, { allowed: QUERY_SOURCE_MODES, fallback: "auto" });
 }
 
 function defaultSpacePath(user: User | null): string | null {

@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from rag.core.config import Settings
 from rag.query.cancellation import call_with_optional_cancellation
 from rag.query.qdrant import QdrantClient, SearchHit
 from rag.query.retrieval.retrieval_hits import _optional_int
 from rag.query.retrieval.retrieval_structured import (
-    _artifact_requires_structured_rows,
-    _has_structured_evidence,
     _has_table_evidence,
-    _has_table_row_lookup_signal,
 )
 from rag.query.routing.routing_models import RoutePlan
 from rag.query.sources import dedupe_hits
 from rag.query.sparse import embed_sparse_text
+from rag.query.state import QueryContext, timed_retrieval_phase
 from rag.query.retrieval.temporal import target_date_for_query
 
 
@@ -53,18 +53,6 @@ def merge_route_protected_hits(
     return apply_route_retrieval_policy(dedupe_hits([*ranked_hits, *protected]), plan)
 
 
-def merge_artifact_protected_hits(
-    *,
-    original_hits: list[SearchHit],
-    ranked_hits: list[SearchHit],
-    artifact_plan: object | None,
-) -> list[SearchHit]:
-    if not _artifact_requires_structured_rows(artifact_plan):
-        return ranked_hits
-    structured = [hit for hit in original_hits if _has_structured_evidence(hit)]
-    return dedupe_hits([*ranked_hits, *structured])
-
-
 def route_protected_hits(hits: list[SearchHit], plan: RoutePlan) -> list[SearchHit]:
     if plan.use_structured_query or plan.search_mode == "structured_first":
         return [hit for hit in hits if _has_table_evidence(hit)]
@@ -87,10 +75,7 @@ def _target_date_from_plan(plan: object, query: str) -> str | None:
 
 
 def _search_limit_multiplier(plan: RoutePlan | None, query: str = "") -> int:
-    multiplier = _base_search_limit_multiplier(plan)
-    if _has_table_row_lookup_signal(query):
-        multiplier = max(multiplier, 16)
-    return multiplier
+    return _base_search_limit_multiplier(plan)
 
 
 def _base_search_limit_multiplier(plan: RoutePlan | None) -> int:
@@ -262,29 +247,43 @@ def _search_query(
     config: Settings,
     qdrant: QdrantClient,
     cancellation_token=None,
+    ctx: QueryContext | None = None,
 ) -> list[SearchHit]:
+    vector_timer = (
+        timed_retrieval_phase(ctx, "vector_search")
+        if ctx is not None
+        else nullcontext()
+    )
     if not hasattr(qdrant, "hybrid_search"):
-        return call_with_optional_cancellation(
-            qdrant.search,
-            cancellation_token,
-            dense_vector,
-            limit=limit,
-            qdrant_filter=qdrant_filter,
+        with vector_timer:
+            return call_with_optional_cancellation(
+                qdrant.search,
+                cancellation_token,
+                dense_vector,
+                limit=limit,
+                qdrant_filter=qdrant_filter,
+            )
+    if cancellation_token is not None:
+        cancellation_token.raise_if_cancelled()
+    embedding_timer = (
+        timed_retrieval_phase(ctx, "embeddings")
+        if ctx is not None
+        else nullcontext()
+    )
+    with embedding_timer:
+        sparse_vector = embed_sparse_text(
+            query,
+            model_name=config.rag_sparse_model,
+            cache_dir=config.rag_sparse_cache_dir,
         )
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
-    sparse_vector = embed_sparse_text(
-        query,
-        model_name=config.rag_sparse_model,
-        cache_dir=config.rag_sparse_cache_dir,
-    )
-    if cancellation_token is not None:
-        cancellation_token.raise_if_cancelled()
-    return call_with_optional_cancellation(
-        qdrant.hybrid_search,
-        cancellation_token,
-        dense_vector=dense_vector,
-        sparse_vector=sparse_vector.as_qdrant(),
-        limit=limit,
-        qdrant_filter=qdrant_filter,
-    )
+    with vector_timer:
+        return call_with_optional_cancellation(
+            qdrant.hybrid_search,
+            cancellation_token,
+            dense_vector=dense_vector,
+            sparse_vector=sparse_vector.as_qdrant(),
+            limit=limit,
+            qdrant_filter=qdrant_filter,
+        )

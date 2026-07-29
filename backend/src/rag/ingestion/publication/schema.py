@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 
-INGEST_PUBLICATION_SCHEMA_VERSION = 1
+INGEST_PUBLICATION_SCHEMA_VERSION = 2
 
 _MIGRATION_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS ingest_publication_schema_migrations (
@@ -41,8 +41,8 @@ CREATE TABLE IF NOT EXISTS document_index_generations (
     CONSTRAINT document_index_generations_state_known CHECK (
         state IN ('building', 'verified', 'active', 'retiring', 'retired', 'failed')
     ),
-    CONSTRAINT document_index_generations_expected_count_positive CHECK (expected_point_count > 0),
-    CONSTRAINT document_index_generations_vector_dimension_positive CHECK (vector_dimension > 0),
+    CONSTRAINT document_index_generations_expected_count_nonnegative CHECK (expected_point_count >= 0),
+    CONSTRAINT document_index_generations_vector_dimension_nonnegative CHECK (vector_dimension >= 0),
     CONSTRAINT document_index_generations_input_hash_format CHECK (input_hash ~ '^[0-9a-f]{64}$'),
     CONSTRAINT document_index_generations_configuration_digest_format CHECK (
         configuration_digest ~ '^[0-9a-f]{64}$'
@@ -55,6 +55,33 @@ CREATE TABLE IF NOT EXISTS document_index_generations (
     ),
     CONSTRAINT document_index_generations_id_document_unique UNIQUE (id, document_id)
 );
+
+ALTER TABLE document_index_generations
+    DROP CONSTRAINT IF EXISTS document_index_generations_expected_count_positive;
+ALTER TABLE document_index_generations
+    DROP CONSTRAINT IF EXISTS document_index_generations_vector_dimension_positive;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'document_index_generations'::regclass
+          AND conname = 'document_index_generations_expected_count_nonnegative'
+    ) THEN
+        ALTER TABLE document_index_generations
+            ADD CONSTRAINT document_index_generations_expected_count_nonnegative
+            CHECK (expected_point_count >= 0);
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'document_index_generations'::regclass
+          AND conname = 'document_index_generations_vector_dimension_nonnegative'
+    ) THEN
+        ALTER TABLE document_index_generations
+            ADD CONSTRAINT document_index_generations_vector_dimension_nonnegative
+            CHECK (vector_dimension >= 0);
+    END IF;
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS document_index_generations_one_active_per_document_uidx
     ON document_index_generations (document_id)

@@ -55,7 +55,7 @@ export function CatalogAccessPanel({
       <div className="grid gap-2 border-t border-surface-border pt-3">
         <span className="sv-label">Shared Spaces</span>
         <div className="flex gap-2">
-          <select value={shareCandidate} onChange={(event) => onShareCandidateChange(event.target.value)} className="sv-select min-w-0 flex-1">
+          <select aria-label="Shared Knowledge Space" value={shareCandidate} onChange={(event) => onShareCandidateChange(event.target.value)} className="sv-select min-w-0 flex-1">
             <option value="">Select space</option>
             {shareOptions.map((path) => <option key={path} value={path}>{path}</option>)}
           </select>

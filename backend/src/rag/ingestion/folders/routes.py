@@ -57,18 +57,19 @@ from .schemas import (
     MinioPrefixScheduleCreateRequest,
     RecurrenceWindow,
 )
-from .service import (
-    cancel_schedule,
-    create_local_folder_schedule,
-    create_minio_prefix_schedule,
-    create_snapshot_schedule,
-    pause_schedule,
+from .schedule_access import (
     require_schedule_admin,
     require_visible_schedule,
-    reschedule_schedule,
-    resume_schedule,
     visible_schedules,
 )
+from .schedule_lifecycle import (
+    cancel_schedule,
+    pause_schedule,
+    reschedule_schedule,
+    resume_schedule,
+)
+from .snapshot_schedules import create_snapshot_schedule
+from .source_schedules import create_local_folder_schedule, create_minio_prefix_schedule
 from rag.ingestion.folders.sources import LocalFolderSource, list_local_folder_directories
 from ..job_dependencies import get_ingest_job_repository
 from ..job_models import IngestJobRepository

@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Any, Literal
 
 from ...audit.adapters.postgres import audit_event_from_row
 from ...auth.abac import normalize_group_path
 from ...shared.persistence import PostgresConnectionMixin
 from ...shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
+from rag.shared.contracts.abbreviations import ABBREVIATION_GLOSSARY_DOC_TYPE
 from ..models import (
     AuditEventRecord,
     DocumentCrossReferenceRecord,
     DocumentEntityRecord,
     DocumentImageAssetRecord,
+    DocumentOverviewSnapshot,
+    DocumentOverviewSpaceRecord,
     DocumentRecord,
 )
 
@@ -70,6 +74,27 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
         )
         return [document_from_row(row) for row in rows]
 
+    def list_documents_by_ids(
+        self, document_ids: tuple[str, ...]
+    ) -> list[DocumentRecord]:
+        if not document_ids:
+            return []
+        rows = self._execute_all(
+            """
+            SELECT d.*, COALESCE(shares.shared_group_paths, '[]'::jsonb) AS shared_group_paths
+            FROM documents d
+            LEFT JOIN (
+                SELECT document_id, jsonb_agg(group_path ORDER BY group_path) AS shared_group_paths
+                FROM document_shares
+                GROUP BY document_id
+            ) shares ON shares.document_id = d.id
+            WHERE d.id = ANY(%s::uuid[]) AND d.deleted_at IS NULL
+            ORDER BY d.created_at DESC
+            """,
+            (list(document_ids),),
+        )
+        return [document_from_row(row) for row in rows]
+
     def count_documents_by_owner_group(
         self,
         *,
@@ -112,6 +137,155 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
             str(row["group_path"]): int(row["document_count"])
             for row in rows
         }
+
+    def summarize_document_overview(
+        self,
+        *,
+        clearance_levels: tuple[ClearanceLevel, ...],
+        group_paths: tuple[str, ...] | None,
+        expiring_from: date,
+        expiring_to: date,
+        attention_limit: int,
+    ) -> DocumentOverviewSnapshot:
+        access_sql, access_params = _document_overview_access_sql(
+            clearance_levels=clearance_levels,
+            group_paths=group_paths,
+        )
+        space_path_clause = ""
+        space_path_params: tuple[Any, ...] = ()
+        if group_paths is not None:
+            space_path_clause = "AND visible_space.group_path = ANY(%s::text[])"
+            space_path_params = (
+                [normalize_group_path(path) for path in group_paths],
+            )
+        with self._connect() as conn:
+            with conn.transaction():
+                counts = conn.execute(
+                    f"""
+                    SELECT
+                        COUNT(*) FILTER (WHERE d.deleted_at IS NULL)::bigint AS library_documents,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                        )::bigint AS current_versions,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.ingest_status = 'complete'
+                        )::bigint AS indexed_current,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.ingest_status IN ('scheduled', 'queued', 'processing')
+                        )::bigint AS processing_current,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.ingest_status = 'human_review'
+                        )::bigint AS review_current,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.ingest_status = 'failed'
+                        )::bigint AS failed_current,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.ingest_status = 'unknown'
+                        )::bigint AS unknown_current,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.ingest_status IN ('failed', 'human_review', 'unknown')
+                        )::bigint AS needs_attention,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND NOT d.is_current
+                        )::bigint AS superseded_versions,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.expiry_date >= %s AND d.expiry_date <= %s
+                        )::bigint AS expiring_soon_current,
+                        COUNT(*) FILTER (WHERE d.deleted_at IS NOT NULL)::bigint AS trash
+                    FROM documents d
+                    WHERE {access_sql}
+                    """,
+                    (expiring_from, expiring_to, *access_params),
+                ).fetchone()
+                attention_rows = conn.execute(
+                    f"""
+                    SELECT d.*
+                    FROM documents d
+                    WHERE {access_sql}
+                      AND d.deleted_at IS NULL
+                      AND d.is_current
+                      AND d.ingest_status IN ('failed', 'human_review', 'unknown')
+                    ORDER BY COALESCE(d.updated_at, d.created_at) DESC NULLS LAST, d.id
+                    LIMIT %s
+                    """,
+                    (*access_params, attention_limit),
+                ).fetchall()
+                space_rows = conn.execute(
+                    f"""
+                    SELECT
+                        visible_space.group_path,
+                        COUNT(*) FILTER (WHERE d.deleted_at IS NULL)::bigint AS library_documents,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                        )::bigint AS current_versions,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.ingest_status IN ('scheduled', 'queued', 'processing')
+                        )::bigint AS processing_current,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.ingest_status = 'human_review'
+                        )::bigint AS review_current,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.ingest_status = 'failed'
+                        )::bigint AS failed_current,
+                        COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.ingest_status = 'unknown'
+                        )::bigint AS unknown_current
+                    FROM documents d
+                    CROSS JOIN LATERAL (
+                        SELECT d.group_path
+                        UNION
+                        SELECT share.group_path
+                        FROM document_shares share
+                        WHERE share.document_id = d.id
+                    ) visible_space
+                    WHERE {access_sql}
+                      {space_path_clause}
+                    GROUP BY visible_space.group_path
+                    HAVING COUNT(*) FILTER (WHERE d.deleted_at IS NULL) > 0
+                    ORDER BY visible_space.group_path
+                    """,
+                    (*access_params, *space_path_params),
+                ).fetchall()
+        values = counts or {}
+        return DocumentOverviewSnapshot(
+            library_documents=int(values.get("library_documents", 0)),
+            current_versions=int(values.get("current_versions", 0)),
+            indexed_current=int(values.get("indexed_current", 0)),
+            processing_current=int(values.get("processing_current", 0)),
+            review_current=int(values.get("review_current", 0)),
+            failed_current=int(values.get("failed_current", 0)),
+            unknown_current=int(values.get("unknown_current", 0)),
+            needs_attention=int(values.get("needs_attention", 0)),
+            superseded_versions=int(values.get("superseded_versions", 0)),
+            expiring_soon_current=int(values.get("expiring_soon_current", 0)),
+            trash=int(values.get("trash", 0)),
+            attention_documents=tuple(
+                document_from_row(row) for row in attention_rows
+            ),
+            spaces=tuple(
+                DocumentOverviewSpaceRecord(
+                    group_path=str(row["group_path"]),
+                    library_documents=int(row["library_documents"]),
+                    current_versions=int(row["current_versions"]),
+                    processing_current=int(row["processing_current"]),
+                    review_current=int(row["review_current"]),
+                    failed_current=int(row["failed_current"]),
+                    unknown_current=int(row["unknown_current"]),
+                )
+                for row in space_rows
+            ),
+        )
 
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None:
         deleted_clause = "" if include_deleted else "AND d.deleted_at IS NULL"
@@ -256,7 +430,7 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                         language = %s,
                         topics = %s::jsonb,
                         llm_topics = %s::jsonb,
-                        doc_type = COALESCE(%s, doc_type),
+                        doc_type = CASE WHEN doc_type = %s THEN doc_type ELSE COALESCE(%s, doc_type) END,
                         auto_doc_type = %s,
                         extracted_dates = %s::jsonb,
                         metadata_flags = %s::jsonb,
@@ -269,6 +443,7 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                         language,
                         json.dumps(_unique_text(topics)),
                         json.dumps(_unique_text(llm_topics)),
+                        ABBREVIATION_GLOSSARY_DOC_TYPE,
                         doc_type,
                         auto_doc_type,
                         json.dumps(extracted_dates),
@@ -637,3 +812,29 @@ def _unique_text(values: list[str]) -> list[str]:
             seen.add(key)
             normalized.append(text)
     return normalized
+
+
+def _document_overview_access_sql(
+    *,
+    clearance_levels: tuple[ClearanceLevel, ...],
+    group_paths: tuple[str, ...] | None,
+) -> tuple[str, tuple[Any, ...]]:
+    clauses = ["d.clearance_level = ANY(%s::text[])"]
+    parameters: tuple[Any, ...] = (list(clearance_levels),)
+    if group_paths is not None:
+        normalized_groups = [normalize_group_path(path) for path in group_paths]
+        clauses.append(
+            """
+            (
+                d.group_path = ANY(%s::text[])
+                OR EXISTS (
+                    SELECT 1
+                    FROM document_shares share
+                    WHERE share.document_id = d.id
+                      AND share.group_path = ANY(%s::text[])
+                )
+            )
+            """
+        )
+        parameters += (normalized_groups, normalized_groups)
+    return " AND ".join(f"({clause})" for clause in clauses), parameters

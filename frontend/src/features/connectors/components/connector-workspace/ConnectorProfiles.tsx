@@ -1,4 +1,4 @@
-import { CheckCircle2, Loader2, MoreHorizontal, Pencil, Search, Sparkles, Trash2 } from "lucide-react";
+import { CheckCircle2, Database, Loader2, MoreHorizontal, Pencil, Search, Trash2 } from "lucide-react";
 
 import { InlineMessage } from "@/components/layout/Common";
 import { ConnectorEmptyState, ConnectorStatusPill } from "@/features/connectors/components/connector-workspace/ConnectorPrimitives";
@@ -15,6 +15,7 @@ import {
   connectorTypeLabel,
   formatDateTime,
   latestConnectorCatalog,
+  nextConnectorAction,
   profileEndpointSummary,
   profileHealthLabel,
   profileHealthPillClass,
@@ -26,7 +27,7 @@ import {
 export { ConnectorProfileEditor, ConnectorProfilePanel } from "@/features/connectors/components/connector-workspace/ConnectorProfileForms";
 
 
-export function ConnectorProfileCards({ catalogsByProfile = {}, emptyMessage, isLoading, onCreateAiDraft, onDeleteProfile, onEditProfile, onOpenCatalog, onProfileAction, pendingActionId, pendingActionType, pendingAiDraftProfileId, pendingDeleteProfileId, profiles, writableSpacePaths }: ConnectorProfileCardsProps) {
+export function ConnectorProfileCards({ catalogsByProfile = {}, emptyMessage, isLoading, onDeleteProfile, onEditProfile, onOpenCatalog, onProfileAction, onViewLiveAccess, pendingActionId, pendingActionType, pendingDeleteProfileId, profiles }: ConnectorProfileCardsProps) {
   if (isLoading) return <p className="mt-3 text-body-md text-secondary">Loading database connections.</p>;
   if (profiles.length === 0) {
     return emptyMessage ? (
@@ -50,20 +51,20 @@ export function ConnectorProfileCards({ catalogsByProfile = {}, emptyMessage, is
             const currentCatalog = latestConnectorCatalog(catalogsByProfile[profile.id] ?? []);
             return (
               <tr key={profile.id} className="sv-table-row">
-                <td className="align-top">
+                <td className="align-top" data-label="Connection">
                   <div className="connector-identity-cell">
                     <strong className="block text-on-surface">{profile.name}</strong>
                     <span className="text-label-md font-bold text-on-surface-variant">{connectorTypeLabel(profile.connector_type)}</span>
                     <small className="text-secondary">{profileEndpointSummary(profile)}</small>
                   </div>
                 </td>
-                <td className="align-top">
+                <td className="align-top" data-label="Health">
                   <div className="connector-status-stack">
                     <ConnectorStatusPill className={profileHealthPillClass(profile)} label={profileHealthLabel(profile)} minWidth="7.25rem" />
                     <small className={profile.last_test_status === "failed" ? "block text-error-red" : "block text-secondary"}>{profileTestDetail(profile)}</small>
                   </div>
                 </td>
-                <td className="align-top">
+                <td className="align-top" data-label="Schema Review">
                   {currentCatalog ? (
                     <ConnectorSchemaProgress catalog={currentCatalog} />
                   ) : (
@@ -73,26 +74,24 @@ export function ConnectorProfileCards({ catalogsByProfile = {}, emptyMessage, is
                     </div>
                   )}
                 </td>
-                <td className="align-top">
+                <td className="align-top" data-label="Live DB">
                   <div className="connector-status-stack">
                     <ConnectorStatusPill className={catalogAccessPillClass(currentCatalog?.status ?? "draft")} label={catalogAccessStateLabel(currentCatalog?.status ?? "draft")} minWidth="7.25rem" />
                     <small className="block text-secondary">{catalogAccessStateHint(currentCatalog?.status ?? "draft")}</small>
                   </div>
                 </td>
-                <td className="connector-actions-cell align-top">
+                <td className="connector-actions-cell align-top" data-label="Actions">
                   <ConnectorRowActions
                     catalog={currentCatalog}
-                    onCreateAiDraft={onCreateAiDraft}
                     onDeleteProfile={onDeleteProfile}
                     onEditProfile={onEditProfile}
                     onOpenCatalog={onOpenCatalog}
                     onProfileAction={onProfileAction}
+                    onViewLiveAccess={onViewLiveAccess}
                     pendingActionId={pendingActionId}
                     pendingActionType={pendingActionType}
-                    pendingAiDraftProfileId={pendingAiDraftProfileId}
                     pendingDeleteProfileId={pendingDeleteProfileId}
                     profile={profile}
-                    writableSpacePaths={writableSpacePaths}
                   />
                 </td>
               </tr>
@@ -136,32 +135,46 @@ function ConnectorSchemaProgress({ catalog }: { catalog: ConnectorSchemaCatalog 
 
 function ConnectorRowActions({
   catalog,
-  onCreateAiDraft,
   onDeleteProfile,
   onEditProfile,
   onOpenCatalog,
   onProfileAction,
+  onViewLiveAccess,
   pendingActionId,
   pendingActionType,
-  pendingAiDraftProfileId,
   pendingDeleteProfileId,
   profile,
-  writableSpacePaths,
 }: ConnectorRowActionsProps) {
+  const nextAction = nextConnectorAction(profile, catalog);
   const profileActionPending = pendingActionId === profile.id;
-  const primaryPending = pendingAiDraftProfileId === profile.id;
-  const primaryDisabled = pendingAiDraftProfileId !== null || (!catalog && writableSpacePaths.length === 0);
-  const primaryLabel = primaryPending ? "Preparing" : catalog ? "Review" : "Prepare Review";
+  const primaryPending = profileActionPending && (
+    (nextAction === "test" && pendingActionType === "test")
+    || (nextAction === "read_schema" && pendingActionType === "introspect")
+  );
+  const primaryLabel = primaryPending
+    ? nextAction === "test" ? "Testing" : "Reading schema"
+    : nextAction === "test" ? "Test Connection"
+      : nextAction === "read_schema" ? "Read Schema"
+        : nextAction === "live" ? "View Live Access"
+          : "Review Access";
+
+  function runPrimaryAction() {
+    if (nextAction === "test") return onProfileAction("test", profile.id);
+    if (nextAction === "read_schema") return onProfileAction("introspect", profile.id);
+    if (nextAction === "live") return onViewLiveAccess(profile);
+    if (catalog) onOpenCatalog(profile, catalog);
+  }
 
   return (
     <div className="connector-row-actions">
       <button
         type="button"
-        disabled={primaryDisabled}
-        onClick={() => catalog ? onOpenCatalog(profile, catalog) : onCreateAiDraft(profile)}
+        id={`connector-primary-action-${profile.id}`}
+        disabled={profileActionPending}
+        onClick={runPrimaryAction}
         className="sv-action-secondary connector-row-primary-action"
       >
-        {primaryPending ? <Loader2 className="animate-spin" size={14} /> : catalog ? <CheckCircle2 size={14} /> : <Sparkles size={14} />}
+        {primaryPending ? <Loader2 className="animate-spin" size={14} /> : nextAction === "read_schema" ? <Search size={14} /> : nextAction === "live" ? <Database size={14} /> : <CheckCircle2 size={14} />}
         {primaryLabel}
       </button>
       <details className="connector-row-menu">
@@ -177,7 +190,12 @@ function ConnectorRowActions({
             {profileActionPending && pendingActionType === "test" ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
             {profileActionPending && pendingActionType === "test" ? "Testing" : "Test"}
           </button>
-          <button type="button" disabled={profileActionPending} onClick={() => onProfileAction("introspect", profile.id)}>
+          <button
+            type="button"
+            disabled={profileActionPending || profile.last_test_status !== "ok"}
+            onClick={() => onProfileAction("introspect", profile.id)}
+            title={profile.last_test_status === "ok" ? undefined : "Test the connection successfully before reading its schema."}
+          >
             {profileActionPending && pendingActionType === "introspect" ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />}
             {profileActionPending && pendingActionType === "introspect" ? "Reading" : "Read Schema"}
           </button>
@@ -191,7 +209,7 @@ function ConnectorRowActions({
   );
 }
 
-export function ConnectorCatalogReadiness({ catalogsByProfile, connectorProfiles, isError, isLoading, onCreateAiDraft, onOpenCatalog, pendingAiDraftProfileId, writableSpacePaths }: ConnectorCatalogReadinessProps) {
+export function ConnectorCatalogReadiness({ catalogsByProfile, connectorProfiles, isError, isLoading, onOpenCatalog, onProfileAction, pendingActionId, pendingActionType }: ConnectorCatalogReadinessProps) {
   const rows = connectorProfiles.map((profile) => {
     const current = latestConnectorCatalog(catalogsByProfile[profile.id] ?? []);
     return { catalog: current, profile };
@@ -213,8 +231,8 @@ export function ConnectorCatalogReadiness({ catalogsByProfile, connectorProfiles
         />
       ) : null}
       {!isLoading && connectorProfiles.length > 0 ? (
-        <div className="sv-table-wrap">
-          <table className="sv-table">
+        <div className="sv-table-wrap connector-secondary-table-wrap">
+          <table className="sv-table connector-secondary-table">
             <thead>
               <tr>
                 <th>Connection</th>
@@ -228,30 +246,37 @@ export function ConnectorCatalogReadiness({ catalogsByProfile, connectorProfiles
             <tbody>
               {rows.map(({ catalog, profile }) => (
                 <tr key={profile.id} className="sv-table-row">
-                  <td>
+                  <td data-label="Connection">
                     <strong className="block text-on-surface">{profile.name}</strong>
                     <small className="text-secondary">{connectorTypeLabel(profile.connector_type)}</small>
                   </td>
-                  <td>
+                  <td data-label="Review State">
                     {catalog ? (
                       <ConnectorStatusPill className={catalogReviewPillClass(catalog.status)} label={catalogReviewLabel(catalog.status)} />
                     ) : (
                       <ConnectorStatusPill className="sv-pill sv-pill-warning" label="Needs review" />
                     )}
                   </td>
-                  <td>{catalog ? connectorSchemaAccessSummary(catalog) : "No schema review prepared"}</td>
-                  <td>{catalog ? `${catalogScopeSummary(catalog)} - ${clearanceLevelLabel(catalog.clearance_level as ClearanceLevel)}` : "Choose owner space during review"}</td>
-                  <td>{catalog ? formatDateTime(catalog.updated_at ?? catalog.created_at) : "Not prepared"}</td>
-                  <td>
+                  <td data-label="Allowed Schema">{catalog ? connectorSchemaAccessSummary(catalog) : "No schema review prepared"}</td>
+                  <td data-label="Access Scope">{catalog ? `${catalogScopeSummary(catalog)} - ${clearanceLevelLabel(catalog.clearance_level as ClearanceLevel)}` : "Choose owner space during review"}</td>
+                  <td data-label="Updated">{catalog ? formatDateTime(catalog.updated_at ?? catalog.created_at) : "Not prepared"}</td>
+                  <td data-label="Actions">
                     {catalog ? (
                       <button type="button" onClick={() => onOpenCatalog(profile, catalog)} className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-on-surface hover:border-primary">
                         Review Access
                       </button>
                     ) : (
-                      <button type="button" disabled={pendingAiDraftProfileId !== null || writableSpacePaths.length === 0} onClick={() => onCreateAiDraft(profile)} className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-on-surface hover:border-primary disabled:opacity-50">
+                      <button
+                        type="button"
+                        disabled={pendingActionId === profile.id}
+                        onClick={() => onProfileAction(profile.last_test_status === "ok" ? "introspect" : "test", profile.id)}
+                        className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-on-surface hover:border-primary disabled:opacity-50"
+                      >
                         <span className="inline-flex items-center gap-1">
-                          {pendingAiDraftProfileId === profile.id ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
-                          {pendingAiDraftProfileId === profile.id ? "Preparing" : "Prepare Review"}
+                          {pendingActionId === profile.id ? <Loader2 className="animate-spin" size={14} /> : profile.last_test_status === "ok" ? <Search size={14} /> : <CheckCircle2 size={14} />}
+                          {pendingActionId === profile.id
+                            ? pendingActionType === "test" ? "Testing" : "Reading schema"
+                            : profile.last_test_status === "ok" ? "Read Schema" : "Test Connection"}
                         </span>
                       </button>
                     )}
@@ -260,7 +285,7 @@ export function ConnectorCatalogReadiness({ catalogsByProfile, connectorProfiles
               ))}
             </tbody>
           </table>
-          {reviewCount === 0 ? <p className="mt-3 text-label-md text-secondary">No reviews are prepared yet. Use Prepare Review on the connection that should be available to Live DB.</p> : null}
+          {reviewCount === 0 ? <p className="mt-3 text-label-md text-secondary">No reviews are prepared yet. Test a connection, then read its schema to start the guided review.</p> : null}
         </div>
       ) : null}
     </section>
@@ -271,32 +296,28 @@ export type ConnectorProfileCardsProps = {
   catalogsByProfile?: Record<string, ConnectorSchemaCatalog[]>;
   emptyMessage: string;
   isLoading: boolean;
-  onCreateAiDraft: (profile: ConnectorProfile) => void;
   onDeleteProfile: (profile: ConnectorProfile) => void;
   onEditProfile: (profile: ConnectorProfile) => void;
   onOpenCatalog: (profile: ConnectorProfile, catalog: ConnectorSchemaCatalog) => void;
   onProfileAction: (action: "test" | "introspect", id: string) => void;
-  pendingAiDraftProfileId: string | null;
+  onViewLiveAccess: (profile: ConnectorProfile) => void;
   pendingDeleteProfileId: string | null;
   pendingActionId: string | null;
   pendingActionType: "test" | "introspect" | null;
   profiles: ConnectorProfile[];
-  writableSpacePaths: string[];
 };
 
 type ConnectorRowActionsProps = {
   catalog: ConnectorSchemaCatalog | null;
-  onCreateAiDraft: (profile: ConnectorProfile) => void;
   onDeleteProfile: (profile: ConnectorProfile) => void;
   onEditProfile: (profile: ConnectorProfile) => void;
   onOpenCatalog: (profile: ConnectorProfile, catalog: ConnectorSchemaCatalog) => void;
   onProfileAction: (action: "test" | "introspect", id: string) => void;
+  onViewLiveAccess: (profile: ConnectorProfile) => void;
   pendingActionId: string | null;
   pendingActionType: "test" | "introspect" | null;
-  pendingAiDraftProfileId: string | null;
   pendingDeleteProfileId: string | null;
   profile: ConnectorProfile;
-  writableSpacePaths: string[];
 };
 
 export type ConnectorCatalogReadinessProps = {
@@ -304,8 +325,8 @@ export type ConnectorCatalogReadinessProps = {
   connectorProfiles: ConnectorProfile[];
   isError: boolean;
   isLoading: boolean;
-  onCreateAiDraft: (profile: ConnectorProfile) => void;
   onOpenCatalog: (profile: ConnectorProfile, catalog: ConnectorSchemaCatalog) => void;
-  pendingAiDraftProfileId: string | null;
-  writableSpacePaths: string[];
+  onProfileAction: (action: "test" | "introspect", id: string) => void;
+  pendingActionId: string | null;
+  pendingActionType: "test" | "introspect" | null;
 };

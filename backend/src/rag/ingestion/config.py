@@ -25,11 +25,6 @@ from rag.shared.contracts.task_names import (
     validate_document_pipeline_task_names,
 )
 
-from .quality import (
-    DEFAULT_INGESTION_QUALITY_PRESET,
-    normalize_ingestion_quality_preset,
-)
-
 TRUE_VALUES = {"1", "true", "yes", "on", "y"}
 FALSE_VALUES = {"0", "false", "no", "off", "n"}
 SUPPORTED_MODEL_PROVIDERS = frozenset(SUPPORTED_WORKER_MODEL_PROVIDERS)
@@ -143,12 +138,12 @@ class WorkerConfig:
     minio: MinioConfig
     qdrant: QdrantConfig
     vision: VisionConfig
-    ingestion_quality_preset: str = DEFAULT_INGESTION_QUALITY_PRESET
     ingest_task_name: str = DEFAULT_INGEST_TASK_NAME
     graphrag_index_task_name: str = DEFAULT_GRAPHRAG_INDEX_TASK_NAME
     graphrag_partition_rebuild_task_name: str = (
         DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME
     )
+    graphrag_max_llm_community_summaries: int = 64
 
     @classmethod
     def from_env(cls) -> "WorkerConfig":
@@ -219,6 +214,12 @@ class WorkerConfig:
                 minimum=1,
                 maximum=16,
             ),
+            graphrag_max_llm_community_summaries=_bounded_int(
+                "GRAPHRAG_MAX_LLM_COMMUNITY_SUMMARIES",
+                64,
+                minimum=0,
+                maximum=10000,
+            ),
             graphrag_summarize_after_document=parse_bool(
                 os.getenv("GRAPHRAG_SUMMARIZE_AFTER_DOCUMENT"), False
             ),
@@ -287,9 +288,6 @@ class WorkerConfig:
                 1,
                 minimum=1,
                 maximum=10,
-            ),
-            ingestion_quality_preset=normalize_ingestion_quality_preset(
-                os.getenv("INGESTION_QUALITY_PRESET", DEFAULT_INGESTION_QUALITY_PRESET)
             ),
             weak_page_threshold=_bounded_int("PDF_WEAK_PAGE_THRESHOLD", 5, minimum=0),
             full_doc_weak_page_ratio=_bounded_float(

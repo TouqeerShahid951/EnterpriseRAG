@@ -1,0 +1,2 @@
+"""Governed abbreviation glossary capability."""
+

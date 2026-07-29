@@ -14,6 +14,18 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
+.knowledge-inspector-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  border: 0;
+  background: oklch(0.05 0.012 285 / 0.72);
+}
+
+body.knowledge-inspector-modal-open {
+  overflow: hidden;
+}
+
 .knowledge-bulk-toolbar strong {
   color: var(--color-on-surface);
   font-size: 0.9rem;

@@ -21,7 +21,6 @@ from rag.ingestion.review.dependencies import (
     human_review_repository_for,
     image_review_repository_for,
 )
-from rag.internal.schemas import ServiceTokenContext
 
 
 def test_memory_review_providers_reuse_document_repository_instance() -> None:
@@ -59,14 +58,12 @@ def test_postgres_review_row_mappers_are_feature_owned() -> None:
 
 def test_approved_keys_internal_contract_is_preserved() -> None:
     repo, batch_id, approved_candidate_id = _image_review_repository()
-    service = ServiceTokenContext(service_name="ingestion-worker")
 
     with pytest.raises(HTTPException) as pending_error:
         asyncio.run(
             get_image_review_approved_keys(
                 batch_id,
                 image_review_repo=repo,
-                service=service,
             )
         )
     assert pending_error.value.status_code == 409
@@ -83,7 +80,6 @@ def test_approved_keys_internal_contract_is_preserved() -> None:
         get_image_review_approved_keys(
             batch_id,
             image_review_repo=repo,
-            service=service,
         )
     )
     assert response.candidate_keys == ["approved-key"]
@@ -93,7 +89,6 @@ def test_approved_keys_internal_contract_is_preserved() -> None:
             get_image_review_approved_keys(
                 str(uuid4()),
                 image_review_repo=repo,
-                service=service,
             )
         )
     assert missing_error.value.status_code == 404

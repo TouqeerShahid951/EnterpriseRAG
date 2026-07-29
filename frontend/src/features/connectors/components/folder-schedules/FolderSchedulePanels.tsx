@@ -45,7 +45,7 @@ export function FolderSnapshotReview({ label, onClear, onRemove, selection }: Fo
           </p>
           <p className="mt-1 text-label-md text-secondary">Snapshot ready for review. Re-browse this folder later to stage a newer copy.</p>
         </div>
-        <button type="button" onClick={onClear} className="rounded-md border border-surface-border bg-surface-container-low px-3 py-2 text-label-md font-bold text-on-surface hover:border-primary">
+        <button type="button" onClick={onClear} className="min-h-11 rounded-md border border-surface-border bg-surface-container-low px-3 py-2 text-label-md font-bold text-on-surface hover:border-primary">
           Clear folder
         </button>
       </div>
@@ -90,18 +90,18 @@ function SnapshotMetric({ label, value }: { label: string; value: string }) {
 
 function FolderSnapshotFileRow({ entry, onRemove }: FolderSnapshotFileRowProps) {
   return (
-    <li className="flex items-center gap-3 border-b border-surface-border px-3 py-2 last:border-b-0">
+    <li className="folder-snapshot-file-row flex items-center gap-3 border-b border-surface-border px-3 py-2 last:border-b-0">
       <FileText className="shrink-0 text-primary" size={16} />
-      <span className="min-w-0 flex-1">
+      <span className="folder-snapshot-file-copy min-w-0 flex-1">
         <strong className="block truncate text-body-md text-on-surface">{entry.file.name}</strong>
         <small className="block truncate text-secondary">{entry.relativePath}</small>
       </span>
-      <span className="shrink-0 text-label-md text-secondary">{formatFileSize(entry.file.size)}</span>
-      <span className={entry.supported ? "sv-pill sv-pill-success shrink-0" : "sv-pill shrink-0"}>{entry.supported ? "Supported" : "Skipped"}</span>
+      <span className="folder-snapshot-file-size shrink-0 text-label-md text-secondary">{formatFileSize(entry.file.size)}</span>
+      <span className={`${entry.supported ? "sv-pill sv-pill-success" : "sv-pill"} folder-snapshot-file-status shrink-0`}>{entry.supported ? "Supported" : "Skipped"}</span>
       <button
         type="button"
         onClick={() => onRemove(entry.file)}
-        className="rounded p-2 text-secondary hover:bg-surface-container-low hover:text-on-surface"
+        className="folder-snapshot-file-remove inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-secondary hover:bg-surface-container-low hover:text-on-surface"
         aria-label={`Remove ${entry.file.name}`}
       >
         <X size={15} />
@@ -165,7 +165,7 @@ function ScheduleCard({ onAction, pendingAction, schedule }: ScheduleCardProps) 
             {sourceTypeLabel(schedule)} · {schedule.group_path} · {clearanceLevelLabel(schedule.clearance_level)} · {schedule.schedule_type === "recurring" ? "Recurring window" : "One-time start"}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {canPause ? <IconAction disabled={pendingAction} label="Pause" icon={<PauseCircle size={15} />} onClick={() => onAction("pause")} /> : null}
           {canResume ? <IconAction disabled={pendingAction} label="Resume" icon={<PlayCircle size={15} />} onClick={() => onAction("resume")} /> : null}
           {canCancel ? <IconAction disabled={pendingAction} label="Cancel" icon={<Ban size={15} />} onClick={() => onAction("cancel")} /> : null}
@@ -240,7 +240,7 @@ function StatusText({ status }: { status: string }) {
 
 function IconAction({ disabled, icon, label, onClick }: IconActionProps) {
   return (
-    <button type="button" disabled={disabled} onClick={onClick} className="rounded-md border border-surface-border bg-surface px-2 py-1 text-label-md font-bold text-on-surface hover:border-primary disabled:opacity-50">
+    <button type="button" disabled={disabled} onClick={onClick} className="min-h-11 rounded-md border border-surface-border bg-surface px-3 py-2 text-label-md font-bold text-on-surface hover:border-primary disabled:opacity-50">
       <span className="inline-flex items-center gap-1">{icon}{label}</span>
     </button>
   );

@@ -121,6 +121,8 @@ class HumanReviewRepository(Protocol):
 
     def list_review_items_for_batch(self, batch_id: str) -> list[ReviewItemRecord]: ...
 
+    def list_pending_human_review_document_ids(self) -> tuple[str, ...]: ...
+
     def approve_review_item(
         self,
         item_id: str,
@@ -156,6 +158,8 @@ class ImageReviewRepository(Protocol):
         *,
         status: str = "pending",
     ) -> list[ImageReviewBatchRecord]: ...
+
+    def list_pending_image_review_document_ids(self) -> tuple[str, ...]: ...
 
     def list_image_review_candidates_for_batch(
         self,

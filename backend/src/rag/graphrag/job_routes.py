@@ -41,7 +41,6 @@ from .monitoring import (
     inspect_graphrag_status,
     observe_queue_length,
     observe_queued_tasks,
-    parse_queued_graphrag_task,
     snapshot_graphrag_worker,
 )
 from .monitoring_dependencies import get_graphrag_queue_monitor
@@ -279,20 +278,6 @@ def _redis_queued_graphrag_tasks(
             limit=limit,
         )
     ]
-
-
-def _graphrag_queued_task_from_redis_item(
-    raw_item: object,
-) -> GraphRAGQueuedTask | None:
-    task = parse_queued_graphrag_task(raw_item)
-    if task is None:
-        return None
-    return GraphRAGQueuedTask(
-        task_id=task.task_id,
-        task_name=task.task_name,
-        job_id=task.job_id,
-        document_id=task.document_id,
-    )
 
 
 def _graphrag_active_task_response(

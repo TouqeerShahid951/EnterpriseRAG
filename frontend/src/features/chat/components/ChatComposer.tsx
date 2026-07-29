@@ -3,13 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AtSign, Database, FileText, Layers3, Loader2, Paperclip, Search, Send, Square, X } from "lucide-react";
 import { ingestJobsApi, queryApi, uploadApi } from "@/lib/api/contracts";
 import { canUploadToSpace } from "@/lib/auth/authz";
-import { buildChatUploadRequest } from "@/features/chat/state/chatUpload";
 import { ComposerUploadProgress } from "@/features/chat/components/ComposerUploadProgress";
 import {
   activeMentionQuery,
   composerPlaceholder,
   failedComposerUploadJob,
-  isSupportedDocumentFile,
   localComposerUploadJob,
   mentionSuggestionsForDocuments,
   removeActiveMention,
@@ -17,9 +15,8 @@ import {
 import { isUploadTerminalStatus, toUploadJobView } from "@/features/upload/state/uploadJobProgress";
 import type { Props } from "@/features/chat/types/chatPageTypes";
 import type { Document, QuerySource, QuerySourceMode } from "@/types/api";
+import { DOCUMENT_UPLOAD_MAX_BYTES, isSupportedDocumentFile } from "@/lib/utils/documentUpload";
 import { errorMessage } from "@/lib/utils/format";
-
-const CHAT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
 export function ChatComposer({
   addScopedDocument,
@@ -75,7 +72,7 @@ export function ChatComposer({
     );
   const uploadMutation = useMutation({
     mutationFn: ({ file, groupPath }: ChatUploadVariables) =>
-      uploadApi.document(buildChatUploadRequest(file, groupPath)),
+      uploadApi.document({ file, group_path: groupPath }),
     onMutate: ({ file, groupPath }) => {
       setUploadJob({ fileName: file.name, jobId: null, space: groupPath, errorMessage: null });
     },
@@ -142,7 +139,7 @@ export function ChatComposer({
       setUploadJob({ fileName: file.name, jobId: null, space: uploadSpace, errorMessage: "Only PDF, DOCX, JPG, PNG, and JSON files can be uploaded from chat." });
       return;
     }
-    if (file.size > CHAT_UPLOAD_MAX_BYTES) {
+    if (file.size > DOCUMENT_UPLOAD_MAX_BYTES) {
       setUploadJob({ fileName: file.name, jobId: null, space: uploadSpace, errorMessage: `${file.name} exceeds the 50 MB upload limit.` });
       return;
     }
@@ -249,12 +246,12 @@ export function ChatComposer({
             space={uploadJob.space}
           />
         ) : null}
-        <p className="mt-2 text-center text-[10px] font-semibold uppercase text-secondary">
+        <p className="rag-composer-hint">
           {pendingElsewhere
             ? "A response is generating in another chat. You can keep browsing, then send when it finishes."
             : sourceMode === "db_only"
-              ? "Live DB source selected."
-              : `${canUploadActiveSpace ? "Paperclip uploads PDF, DOCX, JPG, PNG, or JSON files up to 50 MB into the active Knowledge Space. " : ""}@ tags narrow the retrieval scope.`}
+              ? "Live database source selected."
+              : `${canUploadActiveSpace ? "Upload PDF, DOCX, JPG, PNG, or JSON up to 50 MB. " : ""}Use @ to narrow retrieval.`}
         </p>
       </div>
     </form>
@@ -286,7 +283,7 @@ function ComposerSourceControls({
   ];
   return (
     <div className="rag-composer-source-row">
-      <div className="rag-composer-source-segments" aria-label="Query source mode">
+      <div className="rag-composer-source-segments" role="group" aria-label="Query source mode">
         {modes.map(({ mode, label, icon: Icon }) => (
           <button
             key={mode}

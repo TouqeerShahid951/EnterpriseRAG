@@ -77,14 +77,9 @@ def _should_expand_structured_rows(query: str) -> bool:
 def _should_use_structured_path(
     query: str, hits: list[SearchHit], plan: RoutePlan | None
 ) -> bool:
+    _ = plan
     if not hits:
         return False
-    if (
-        plan is not None
-        and plan.use_structured_query
-        and _should_expand_structured_rows(query)
-    ):
-        return True
     structured_hits = [hit for hit in hits if _has_structured_evidence(hit)]
     if not structured_hits:
         return False
@@ -93,10 +88,6 @@ def _should_use_structured_path(
     return any(
         _structured_field_match_score(query, hit) > 0 for hit in structured_hits[:12]
     )
-
-
-def _artifact_requires_structured_rows(artifact_plan: object | None) -> bool:
-    return getattr(artifact_plan, "primary_operation", None) in {"enumerate", "extract"}
 
 
 def expand_structured_table_rows(

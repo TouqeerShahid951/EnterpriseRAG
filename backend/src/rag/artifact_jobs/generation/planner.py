@@ -222,7 +222,7 @@ def _clarification_plan() -> DocumentPlan:
 def _should_use_llm_plan(job: ArtifactJobRecord, *, topic: str) -> bool:
     lowered = job.original_request.lower()
     padded = f" {lowered} "
-    if job.clarifications or job.conversation_context:
+    if job.clarifications:
         return True
     if len(job.requested_formats) > 1:
         return True
@@ -362,6 +362,13 @@ def _requests_exhaustive_rows(lowered_request: str) -> bool:
 
 
 def _resolve_topic(job: ArtifactJobRecord) -> str:
+    for item in reversed(job.conversation_context):
+        resolved_query = item.get("resolved_query")
+        if isinstance(resolved_query, str) and (
+            resolved_topic := _extract_topic(resolved_query)
+        ):
+            return resolved_topic
+
     request_topic = _extract_topic(job.original_request)
     if request_topic:
         return request_topic

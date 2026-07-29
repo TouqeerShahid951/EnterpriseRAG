@@ -203,6 +203,7 @@ def test_document_pipeline_task_adapter_has_only_composition_dependencies() -> N
             "billiard.exceptions",
             "billiard.exceptions.SoftTimeLimitExceeded",
             "rag.graphrag.task_execution",
+            "rag.graphrag.task_execution.GraphRAGDeliveryRetry",
             "rag.graphrag.task_execution.run_document_graph_index",
             "rag.graphrag.task_execution.run_partition_rebuild",
             "rag.ingestion.execution",

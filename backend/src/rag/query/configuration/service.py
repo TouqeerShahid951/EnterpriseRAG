@@ -18,6 +18,19 @@ from .models import RagConfigRecord
 from rag.query.reranker import rank_passages
 
 
+_STRUCTURED_OUTPUT_PROBE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "status": {
+            "type": "string",
+            "enum": ["ok"],
+        }
+    },
+    "required": ["status"],
+}
+
+
 @dataclass(frozen=True)
 class RagConfigValidationResult:
     available_models: list[str]
@@ -75,10 +88,34 @@ def validate_rag_config(
         )
     _reranker_probe(config_record, app_config=app_config)
     chat_models, embedding_models, role_models = list_runtime_models(config_record)
+    reasoning_model = config_record.effective_reasoning_model or config_record.chat_model
+    sql_generation_model = (
+        config_record.effective_sql_generation_model or config_record.chat_model
+    )
+    faithfulness_model = config_record.faithfulness_model or config_record.chat_model
+    answer_verifier_model = (
+        app_config.evaluation_answer_llm_verifier_model
+        if getattr(app_config, "evaluation_answer_llm_verifier_enabled", False)
+        else None
+    )
     _require_model(config_record, "chat", config_record.chat_model, chat_models)
-    _require_model(config_record, "reasoning", config_record.effective_reasoning_model, role_models.get("reasoning", chat_models))
+    _require_model(config_record, "reasoning", reasoning_model, role_models.get("reasoning", chat_models))
+    if sql_generation_model != reasoning_model:
+        _require_model(
+            config_record,
+            "reasoning",
+            sql_generation_model,
+            role_models.get("reasoning", chat_models),
+        )
+    if answer_verifier_model and answer_verifier_model != reasoning_model:
+        _require_model(
+            config_record,
+            "reasoning",
+            answer_verifier_model,
+            role_models.get("reasoning", chat_models),
+        )
     _require_model(config_record, "routing", config_record.routing_model, role_models.get("routing", chat_models))
-    _require_model(config_record, "faithfulness", config_record.faithfulness_model, role_models.get("faithfulness", chat_models))
+    _require_model(config_record, "faithfulness", faithfulness_model, role_models.get("faithfulness", chat_models))
     _require_model(config_record, "ingestion", config_record.ingestion_model, role_models.get("ingestion", chat_models))
     _require_model(config_record, "vision", config_record.vision_model, role_models.get("vision", chat_models))
     if config_record.embed_model not in embedding_models:
@@ -90,9 +127,13 @@ def validate_rag_config(
 
     chat_started = perf_counter()
     _chat_probe(config_record)
-    _role_probe(config_record, "reasoning", config_record.effective_reasoning_model)
+    _role_probe(config_record, "reasoning", reasoning_model)
+    if sql_generation_model != reasoning_model:
+        _role_probe(config_record, "reasoning", sql_generation_model)
+    if answer_verifier_model and answer_verifier_model != reasoning_model:
+        _role_probe(config_record, "reasoning", answer_verifier_model)
     _role_probe(config_record, "routing", config_record.routing_model)
-    _role_probe(config_record, "faithfulness", config_record.faithfulness_model)
+    _role_probe(config_record, "faithfulness", faithfulness_model)
     _role_probe(config_record, "ingestion", config_record.ingestion_model)
     chat_latency_ms = max(0, round((perf_counter() - chat_started) * 1000))
     embed_started = perf_counter()
@@ -148,15 +189,21 @@ def checked_record(
         embed_model=config_record.embed_model,
         faithfulness_model=config_record.faithfulness_model,
         chat_timeout_seconds=config_record.chat_timeout_seconds,
+        routing_timeout_seconds=config_record.routing_timeout_seconds,
+        reasoning_timeout_seconds=config_record.reasoning_timeout_seconds,
+        faithfulness_timeout_seconds=config_record.faithfulness_timeout_seconds,
         embed_timeout_seconds=config_record.embed_timeout_seconds,
         thinking_enabled=config_record.thinking_enabled,
         reasoning_model=config_record.reasoning_model,
+        sql_generation_model=config_record.sql_generation_model,
         routing_model=config_record.routing_model,
         ingestion_model=config_record.ingestion_model,
         vision_model=config_record.vision_model,
         json_num_predict=config_record.json_num_predict,
         retrieval_token_budget=config_record.retrieval_token_budget,
         query_planner_enabled=config_record.query_planner_enabled,
+        evidence_gate_policy=config_record.evidence_gate_policy,
+        faithfulness_policy=config_record.faithfulness_policy,
         reranker_model=config_record.reranker_model,
         health_status="ok",
         health_message=(
@@ -182,6 +229,7 @@ def _reranker_probe(
             ["reranker inference health check"],
             model_name=config_record.reranker_model,
             cache_dir=app_config.rag_reranker_cache_dir,
+            device=app_config.rag_reranker_device,
         )
         if len(ranking) != 1 or ranking[0][0] != 0:
             raise RuntimeError("reranker probe returned an unexpected result")
@@ -328,11 +376,24 @@ def _role_probe(config_record: RagConfigRecord, role: str, model: str | None) ->
         return
     provider = config_record.role_provider(role)
     base_url = _role_base_urls(config_record)[role]
+    structured_output = role in {"reasoning", "faithfulness"}
     try:
         if provider == "vllm":
-            _openai_chat_probe(config_record, base_url=base_url, model=model, service=f"vllm_{role}")
+            _openai_chat_probe(
+                config_record,
+                base_url=base_url,
+                model=model,
+                service=f"vllm_{role}",
+                structured_output=structured_output,
+            )
         else:
-            _ollama_chat_probe(config_record, base_url=base_url, model=model, service=f"ollama_{role}")
+            _ollama_chat_probe(
+                config_record,
+                base_url=base_url,
+                model=model,
+                service=f"ollama_{role}",
+                structured_output=structured_output,
+            )
     except RagConfigValidationError as exc:
         raise RagConfigValidationError(
             code=f"{provider}_{role}_chat_failed",
@@ -492,6 +553,7 @@ def _ollama_chat_probe(
     base_url: str | None = None,
     model: str | None = None,
     service: str = "ollama",
+    structured_output: bool = False,
 ) -> None:
     selected_base_url = base_url or config_record.base_url
     selected_model = model or config_record.chat_model
@@ -506,7 +568,17 @@ def _ollama_chat_probe(
             {"role": "user", "content": 'Return {"status":"ok"}.'},
         ],
     }
-    if not is_ollama_cloud_model(selected_model):
+    if structured_output and is_ollama_cloud_model(selected_model):
+        raise RagConfigValidationError(
+            code=f"{service}_structured_output_unsupported",
+            message=(
+                f"Model {selected_model!r} cannot be used for {service}: "
+                "Ollama Cloud does not support schema-constrained output."
+            ),
+        )
+    if structured_output:
+        request_payload["format"] = _STRUCTURED_OUTPUT_PROBE_SCHEMA
+    elif not is_ollama_cloud_model(selected_model):
         request_payload["format"] = "json"
     try:
         payload = request_json(
@@ -537,6 +609,7 @@ def _openai_chat_probe(
     base_url: str | None = None,
     model: str | None = None,
     service: str = "vllm",
+    structured_output: bool = False,
 ) -> None:
     selected_base_url = base_url or config_record.base_url
     selected_model = model or config_record.chat_model
@@ -551,7 +624,18 @@ def _openai_chat_probe(
                 "stream": False,
                 "temperature": 0,
                 "max_tokens": 16,
-                "response_format": {"type": "json_object"},
+                "response_format": (
+                    {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "rag_structured_output_probe",
+                            "strict": True,
+                            "schema": _STRUCTURED_OUTPUT_PROBE_SCHEMA,
+                        },
+                    }
+                    if structured_output
+                    else {"type": "json_object"}
+                ),
                 "messages": [
                     {"role": "system", "content": "You are a health check endpoint. Return JSON only."},
                     {"role": "user", "content": 'Return {"status":"ok"}.'},

@@ -27,12 +27,10 @@ from rag.internal.ingest_status_routes import (
     record_ingest_job_failure,
     start_ingest_job_attempt,
 )
-from rag.internal.schemas import ServiceTokenContext
 
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
-SERVICE_CONTEXT = ServiceTokenContext(service_name="ingestion-worker")
 
 
 class RecordingQueue:
@@ -239,7 +237,6 @@ def test_delayed_legacy_payload_cannot_claim_an_active_delivery() -> None:
             job_id,
             InternalJobAttemptRequest(run_token="legacy-worker"),
             job_repo=repo,
-            service=SERVICE_CONTEXT,
         )
     )
 
@@ -552,7 +549,6 @@ def test_internal_failure_records_retry_with_a_fresh_delivery_id() -> None:
                 delivery_id=delivery_id,
             ),
             job_repo=repo,
-            service=SERVICE_CONTEXT,
         )
     )
     failure = asyncio.run(
@@ -566,7 +562,6 @@ def test_internal_failure_records_retry_with_a_fresh_delivery_id() -> None:
             ),
             document_repo=repo,
             job_repo=repo,
-            service=SERVICE_CONTEXT,
         )
     )
     retry_claim = delivery_service.claim_due(
@@ -609,7 +604,6 @@ def test_internal_failure_rejects_invalid_retry_messages_before_mutation() -> No
                     ),
                     document_repo=repo,
                     job_repo=repo,
-                    service=SERVICE_CONTEXT,
                 )
             )
         assert exc_info.value.status_code == 422
@@ -640,7 +634,6 @@ def test_internal_failure_rejects_stale_run_token_without_counting_failure() -> 
                 ),
                 document_repo=repo,
                 job_repo=repo,
-                service=SERVICE_CONTEXT,
             )
         )
 

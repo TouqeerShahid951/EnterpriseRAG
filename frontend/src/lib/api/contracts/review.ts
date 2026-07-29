@@ -3,6 +3,7 @@ import type {
   ImageReviewQueueResponse,
   ReviewDecisionResponse,
   ReviewItem,
+  ReviewQueueSummary,
 } from "@/types/api";
 import { getConfiguredBaseUrl, normalizeBaseUrl } from "../url";
 import { apiClient } from "./apiClient";
@@ -16,6 +17,7 @@ export interface ImageReviewDecisionRequest {
 
 export const reviewApi = {
   list: () => apiClient.get<{ items: ReviewItem[]; total: number }>("/api/v1/review-queue"),
+  summary: () => apiClient.get<ReviewQueueSummary>("/api/v1/review-queue/summary"),
   listImageBatches: () => apiClient.get<ImageReviewQueueResponse>("/api/v1/review-queue/image-batches"),
   decideImageBatch: (batchId: string, request: ImageReviewDecisionRequest) =>
     apiClient.postJson<ImageReviewDecisionResponse>(`/api/v1/review-queue/image-batches/${encodeURIComponent(batchId)}/decisions`, request),

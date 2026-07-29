@@ -19,6 +19,7 @@ describe("account type route access", () => {
     expect(canAccessRoute(user, "access")).toBe(true);
     expect(canAccessRoute(user, "review")).toBe(true);
     expect(canAccessRoute(user, "upload")).toBe(true);
+    expect(canAccessRoute(user, "abbreviation-glossary")).toBe(true);
     expect(canAccessRoute(user, "document-overview")).toBe(true);
     expect(canAccessRoute(user, "document-trash")).toBe(true);
     expect(canAccessRoute(user, "ingestion-health")).toBe(true);
@@ -34,6 +35,7 @@ describe("account type route access", () => {
     expect(canAccessRoute(user, "access")).toBe(true);
     expect(canAccessRoute(user, "review")).toBe(true);
     expect(canAccessRoute(user, "upload")).toBe(true);
+    expect(canAccessRoute(user, "abbreviation-glossary")).toBe(true);
     expect(canAccessRoute(user, "document-overview")).toBe(true);
     expect(canAccessRoute(user, "document-trash")).toBe(true);
     expect(canAccessRoute(user, "ingestion-health")).toBe(true);
@@ -43,9 +45,9 @@ describe("account type route access", () => {
 
   it.each([
     ["user_manager", ["access"], ["chat", "upload", "settings", "review", "document-overview", "documents", "document-trash", "ingestion-health", "ingestion-jobs"]],
-    ["space_admin", ["access", "chat", "upload", "review", "document-overview", "knowledge-spaces", "documents", "document-trash", "document-extraction", "database-connectors", "ingestion-health", "ingestion-jobs"], ["settings"]],
-    ["contributor", ["chat", "upload", "review", "document-overview", "knowledge-spaces", "documents", "document-trash", "ingestion-health", "ingestion-jobs"], ["access", "settings", "document-extraction", "database-connectors"]],
-    ["reviewer", ["upload", "review", "ingestion-health", "ingestion-jobs"], ["access", "chat", "settings", "document-overview", "knowledge-spaces", "documents", "document-trash", "document-extraction", "database-connectors"]],
+    ["space_admin", ["access", "chat", "upload", "review", "document-overview", "knowledge-spaces", "documents", "document-trash", "document-extraction", "database-connectors", "ingestion-health", "ingestion-jobs"], ["settings", "abbreviation-glossary"]],
+    ["contributor", ["chat", "upload", "review", "document-overview", "knowledge-spaces", "documents", "document-trash", "ingestion-health", "ingestion-jobs"], ["access", "settings", "abbreviation-glossary", "document-extraction", "database-connectors"]],
+    ["reviewer", ["upload", "review", "ingestion-health", "ingestion-jobs"], ["access", "chat", "settings", "abbreviation-glossary", "document-overview", "knowledge-spaces", "documents", "document-trash", "document-extraction", "database-connectors"]],
     ["auditor", ["activity-log", "document-overview", "knowledge-spaces", "documents", "document-trash", "ingestion-health", "ingestion-jobs"], ["chat", "upload", "review", "settings", "document-extraction", "database-connectors"]],
     ["member", ["chat", "document-overview", "knowledge-spaces", "documents", "document-trash", "ingestion-health", "ingestion-jobs"], ["access", "settings", "upload", "review", "document-extraction", "database-connectors"]],
   ] as [AccountType, RouteId[], RouteId[]][])("applies scoped route access for %s", (accountType, allowed, denied) => {
@@ -92,6 +94,7 @@ describe("account type route access", () => {
 
   it("redirects legacy Knowledge Space tabs to focused routes", () => {
     expect(routeFromLocation("/document-intake/connectors", "")).toBe("database-connectors");
+    expect(routeFromLocation("/document-intake/abbreviation-glossary", "")).toBe("abbreviation-glossary");
     expect(routeFromLocation("/knowledge-spaces", "?tab=documents")).toBe("documents");
     expect(routeFromLocation("/knowledge-spaces", "?tab=trash")).toBe("document-trash");
     expect(routeFromLocation("/knowledge-spaces", "?tab=jobs")).toBe("ingestion-jobs");
@@ -132,6 +135,7 @@ describe("account type route access", () => {
     const systemAdminNavigation = visibleNavigation(makeUser("system_admin"));
 
     expect(contributorIntake?.children?.map((child) => child.route)).toEqual(["upload", "ingestion-jobs"]);
+    expect(contributorIntake?.children?.find((child) => child.route === "ingestion-jobs")?.badge).toBeUndefined();
     expect(contributorLibrary?.children?.map((child) => child.route)).toEqual(["document-overview", "documents", "knowledge-spaces", "document-trash"]);
     expect(contributorReview?.badge).toBe("review");
     expect(spaceAdminIntake?.children?.map((child) => child.route)).toEqual(["upload", "document-extraction", "database-connectors", "ingestion-jobs"]);
@@ -148,6 +152,7 @@ describe("account type route access", () => {
     expect(systemAdminNavigation.some((item) => item.id === "users")).toBe(true);
     expect(navigationGroupForRoute("ingestion-jobs")).toBe("document-intake");
     expect(navigationGroupForRoute("database-connectors")).toBe("document-intake");
+    expect(navigationGroupForRoute("abbreviation-glossary")).toBe("document-intake");
     expect(navigationGroupForRoute("document-overview")).toBe("document-library");
     expect(navigationGroupForRoute("documents")).toBe("document-library");
     expect(navigationGroupForRoute("document-trash")).toBe("document-library");

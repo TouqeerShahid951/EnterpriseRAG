@@ -241,43 +241,6 @@ def _retry_or_fail(
     }
 
 
-def _update_job_best_effort(
-    backend: BackendInternalClient,
-    *,
-    job_id: str,
-    status: str,
-    progress_pct: int,
-    stage_progress: dict[str, object] | None = None,
-    error_code: str | None = None,
-    error_message_safe: str | None = None,
-    warnings: list[str] | None = None,
-    run_token: str | None = None,
-) -> bool:
-    try:
-        backend.update_job(
-            job_id=job_id,
-            status=status,
-            progress_pct=progress_pct,
-            stage_progress=stage_progress,
-            error_code=error_code,
-            error_message_safe=error_message_safe,
-            warnings=warnings,
-            run_token=run_token,
-        )
-    except ServiceRequestError as exc:
-        if _is_lease_lost(exc):
-            raise
-        logger.warning(
-            "ingestion job update failed job_id=%s status=%s service=%s",
-            job_id,
-            status,
-            exc.service,
-            exc_info=True,
-        )
-        return False
-    return True
-
-
 def _mark_failed_or_lease_lost(
     backend: BackendInternalClient,
     *,
@@ -425,7 +388,7 @@ def _build_dependencies(
     inference_config = backend.get_rag_config()
     ingest_config = backend.get_ingest_config()
     parser_tuning = parser_tuning_for_quality_preset(
-        quality_preset or ingest_config.quality_preset or config.ingestion_quality_preset,
+        quality_preset,
         weak_page_threshold=config.weak_page_threshold,
         full_doc_weak_page_ratio=config.full_doc_weak_page_ratio,
         layered_docling_max_pages=config.layered_docling_max_pages,

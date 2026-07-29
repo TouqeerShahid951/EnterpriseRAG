@@ -34,8 +34,8 @@ export function ConnectorLiveAccessPanel({ catalogsByProfile, connectorProfiles,
         />
       ) : null}
       {!isLoading && enabled.length > 0 ? (
-        <div className="sv-table-wrap">
-          <table className="sv-table">
+        <div className="sv-table-wrap connector-secondary-table-wrap">
+          <table className="sv-table connector-secondary-table">
             <thead>
               <tr>
                 <th>Connection</th>
@@ -48,14 +48,14 @@ export function ConnectorLiveAccessPanel({ catalogsByProfile, connectorProfiles,
             <tbody>
               {enabled.map(({ catalog, profile }) => (
                 <tr key={catalog.id} className="sv-table-row">
-                  <td>
+                  <td data-label="Connection">
                     <strong className="block text-on-surface">{profile.name}</strong>
                     <small className="text-secondary">{connectorTypeLabel(profile.connector_type)}</small>
                   </td>
-                  <td>{connectorSchemaAccessSummary(catalog)}</td>
-                  <td>{catalogScopeSummary(catalog)}</td>
-                  <td>{clearanceLevelLabel(catalog.clearance_level as ClearanceLevel)}</td>
-                  <td>
+                  <td data-label="Allowed Schema">{connectorSchemaAccessSummary(catalog)}</td>
+                  <td data-label="Knowledge Spaces">{catalogScopeSummary(catalog)}</td>
+                  <td data-label="Clearance">{clearanceLevelLabel(catalog.clearance_level as ClearanceLevel)}</td>
+                  <td data-label="Actions">
                     <button type="button" onClick={() => onOpenCatalog(profile, catalog)} className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-on-surface hover:border-primary">
                       Review Access
                     </button>
@@ -86,8 +86,8 @@ export function ConnectorDiagnosticsPanel({ catalogsByProfile, connectorProfiles
         />
       ) : null}
       {!isLoading && connectorProfiles.length > 0 ? (
-        <div className="sv-table-wrap">
-          <table className="sv-table">
+        <div className="sv-table-wrap connector-secondary-table-wrap">
+          <table className="sv-table connector-secondary-table">
             <thead>
               <tr>
                 <th>Connection</th>
@@ -102,17 +102,17 @@ export function ConnectorDiagnosticsPanel({ catalogsByProfile, connectorProfiles
                 const currentCatalog = latestConnectorCatalog(catalogsByProfile[profile.id] ?? []);
                 return (
                   <tr key={profile.id} className="sv-table-row">
-                    <td>
+                    <td data-label="Connection">
                       <strong className="block text-on-surface">{profile.name}</strong>
                       <small className="text-secondary">{connectorTypeLabel(profile.connector_type)}</small>
                     </td>
-                    <td>
+                    <td data-label="Last Test">
                       <ConnectorStatusPill className={profileHealthPillClass(profile)} label={profileHealthLabel(profile)} />
                       <small className={profile.last_test_status === "failed" ? "mt-1 block text-error-red" : "mt-1 block text-secondary"}>{profileTestDetail(profile)}</small>
                     </td>
-                    <td>{currentCatalog ? catalogName(currentCatalog, profile) : "No review prepared"}</td>
-                    <td>{currentCatalog ? formatDateTime(currentCatalog.updated_at ?? currentCatalog.created_at) : "No schema review"}</td>
-                    <td>
+                    <td data-label="Current Review">{currentCatalog ? catalogName(currentCatalog, profile) : "No review prepared"}</td>
+                    <td data-label="Latest Update">{currentCatalog ? formatDateTime(currentCatalog.updated_at ?? currentCatalog.created_at) : "No schema review"}</td>
+                    <td data-label="Actions">
                       <span className="flex flex-wrap gap-2">
                         <button type="button" disabled={pendingActionId === profile.id} onClick={() => onProfileAction("test", profile.id)} className="rounded-md border border-surface-border px-2 py-1 text-label-md font-bold text-on-surface hover:border-primary disabled:opacity-50">
                           {pendingActionId === profile.id && pendingActionType === "test" ? "Testing" : "Test"}

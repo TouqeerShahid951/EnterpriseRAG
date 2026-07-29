@@ -16,6 +16,7 @@ import {
   useDocumentInventory,
 } from "@/features/documents/state/useDocumentInventory";
 import { usePdfUpload } from "@/features/upload/state/usePdfUpload";
+import { ABBREVIATION_GLOSSARY_DOC_TYPE } from "@/features/upload/state/pdfUploadBatch";
 import { readStoredBoolean, writeStoredBoolean } from "@/lib/utils/uiPreferences";
 import type { DocumentGroupCount, User as AuthUser } from "@/types/api";
 import { isDocumentInSpace, userSpacesFromPaths } from "@/lib/utils/groups";
@@ -23,15 +24,13 @@ import "@/styles.css";
 
 const THEME_STORAGE_KEY = "Prudentia-theme-light";
 const DOCUMENT_INVENTORY_ROUTES = new Set<RouteId>([
+  "abbreviation-glossary",
   "chat",
-  "document-overview",
   "evaluations",
-  "overview",
   "upload",
 ]);
 const UPLOAD_JOB_ROUTES = new Set<RouteId>([
-  "document-overview",
-  "knowledge-spaces",
+  "abbreviation-glossary",
   "upload",
 ]);
 
@@ -39,10 +38,9 @@ const PrudentiaAccountPage = lazy(() => import("@/features/auth/pages/PrudentiaA
 const PrudentiaAccessPage = lazy(() => import("@/features/access/pages/PrudentiaAccessPage").then((module) => ({ default: module.PrudentiaAccessPage })));
 const PrudentiaAuditPage = lazy(() => import("@/features/audit/pages/PrudentiaAuditPage").then((module) => ({ default: module.PrudentiaAuditPage })));
 const PrudentiaChatPage = lazy(() => import("@/features/chat/pages/PrudentiaChatPage").then((module) => ({ default: module.PrudentiaChatPage })));
-const PrudentiaDatabaseConnectorsPage = lazy(() => import("@/features/connectors/pages/PrudentiaDatabaseConnectorsPage").then((module) => ({ default: module.PrudentiaDatabaseConnectorsPage })));
+const PrudentiaSourceManagementPage = lazy(() => import("@/features/connectors/pages/PrudentiaSourceManagementPage").then((module) => ({ default: module.PrudentiaSourceManagementPage })));
 const PrudentiaDocumentOverviewPage = lazy(() => import("@/features/documents/pages/PrudentiaDocumentOverviewPage").then((module) => ({ default: module.PrudentiaDocumentOverviewPage })));
 const PrudentiaDocumentsPage = lazy(() => import("@/features/documents/pages/PrudentiaDocumentsPage").then((module) => ({ default: module.PrudentiaDocumentsPage })));
-const PrudentiaFolderSourcesPage = lazy(() => import("@/features/documents/pages/PrudentiaFolderSourcesPage").then((module) => ({ default: module.PrudentiaFolderSourcesPage })));
 const PrudentiaIngestionHealthPage = lazy(() => import("@/features/ingestion/pages/PrudentiaIngestionHealthPage").then((module) => ({ default: module.PrudentiaIngestionHealthPage })));
 const PrudentiaIngestionJobsPage = lazy(() => import("@/features/ingestion/pages/PrudentiaIngestionJobsPage").then((module) => ({ default: module.PrudentiaIngestionJobsPage })));
 const PrudentiaOverviewPage = lazy(() => import("@/features/overview/pages/PrudentiaPlannedPage").then((module) => ({ default: module.PrudentiaOverviewPage })));
@@ -60,7 +58,11 @@ function App() {
   const chat = useChatSession(auth.currentUser, resolvedRoute === "chat");
   const inventory = useDocumentInventory(auth.currentUser, DOCUMENT_INVENTORY_ROUTES.has(resolvedRoute));
   const documentSummary = useDocumentCatalogSummary(auth.currentUser, resolvedRoute !== "source-viewer");
-  const pdfUpload = usePdfUpload(auth.currentUser, UPLOAD_JOB_ROUTES.has(resolvedRoute));
+  const pdfUpload = usePdfUpload(
+    auth.currentUser,
+    UPLOAD_JOB_ROUTES.has(resolvedRoute),
+    resolvedRoute === "abbreviation-glossary" ? ABBREVIATION_GLOSSARY_DOC_TYPE : null,
+  );
   const sidebarSpaceOptions = useMemo(
     () => knowledgeSpaceOptions(auth.currentUser, documentSummary.groups),
     [auth.currentUser, documentSummary.groups],
@@ -236,13 +238,13 @@ function App() {
             user={user}
           />
         ) : null}
-        {resolvedRoute === "knowledge-spaces" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} view="spaces" /> : null}
-        {resolvedRoute === "document-overview" ? <PrudentiaDocumentOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} uploadJobs={pdfUpload.batchItems} user={user} /> : null}
+        {resolvedRoute === "knowledge-spaces" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="spaces" /> : null}
+        {resolvedRoute === "document-overview" ? <PrudentiaDocumentOverviewPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
         {resolvedRoute === "documents" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="documents" /> : null}
         {resolvedRoute === "document-trash" ? <PrudentiaDocumentsPage onLogout={handleLogout} onNavigate={navigate} user={user} view="trash" /> : null}
-        {resolvedRoute === "upload" ? <PrudentiaUploadPage batchItems={pdfUpload.batchItems} cancelingJobId={pdfUpload.cancelingJobId} currentDocuments={inventory.documents} currentUser={user} onCancelIngestJob={pdfUpload.cancelJob} onClearUploadJobs={pdfUpload.clearUploadJobs} onLogout={handleLogout} onNavigate={navigate} onPdfDraftChange={pdfUpload.updatePdfDraft} onPdfSubmit={pdfUpload.onPdfSubmit} pdfDraft={pdfUpload.pdfDraft} selectionError={pdfUpload.selectionError} uploadPending={pdfUpload.uploadMutation.isPending} /> : null}
-        {resolvedRoute === "document-extraction" ? <PrudentiaFolderSourcesPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
-        {resolvedRoute === "database-connectors" ? <PrudentiaDatabaseConnectorsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {resolvedRoute === "upload" || resolvedRoute === "abbreviation-glossary" ? <PrudentiaUploadPage batchItems={pdfUpload.batchItems} cancelingJobId={pdfUpload.cancelingJobId} currentDocuments={inventory.documents} currentUser={user} mode={resolvedRoute === "abbreviation-glossary" ? "glossary" : "documents"} onCancelIngestJob={pdfUpload.cancelJob} onClearUploadJobs={pdfUpload.clearUploadJobs} onLogout={handleLogout} onNavigate={navigate} onPdfDraftChange={pdfUpload.updatePdfDraft} onPdfSubmit={pdfUpload.onPdfSubmit} pdfDraft={pdfUpload.pdfDraft} selectionError={pdfUpload.selectionError} uploadPending={pdfUpload.uploadMutation.isPending} /> : null}
+        {resolvedRoute === "document-extraction" ? <PrudentiaSourceManagementPage onLogout={handleLogout} onNavigate={navigate} user={user} variant="folder_sources" /> : null}
+        {resolvedRoute === "database-connectors" ? <PrudentiaSourceManagementPage onLogout={handleLogout} onNavigate={navigate} user={user} variant="database_connectors" /> : null}
         {resolvedRoute === "ingestion-jobs" ? <PrudentiaIngestionJobsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
         {resolvedRoute === "ingestion-health" ? <PrudentiaIngestionHealthPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
         {resolvedRoute === "review" ? <PrudentiaReviewQueuePage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
@@ -250,7 +252,7 @@ function App() {
         {resolvedRoute === "account" ? <PrudentiaAccountPage currentUser={user} isLoggingOut={auth.logoutMutation.isPending} onAuthChanged={auth.authChanged} onLogout={handleLogout} onNavigate={navigate} /> : null}
         {resolvedRoute === "settings" ? <PrudentiaSettingsPage currentUser={user} onLogout={handleLogout} onNavigate={navigate} /> : null}
 
-        {resolvedRoute === "overview" ? <PrudentiaOverviewPage documents={inventory.documents} documentsLoading={inventory.documentsQuery.isLoading} onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {resolvedRoute === "overview" ? <PrudentiaOverviewPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
         {resolvedRoute === "activity-log" ? <PrudentiaAuditPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
         {resolvedRoute === "evaluations" ? (
           <PrudentiaRagEvaluationsPage

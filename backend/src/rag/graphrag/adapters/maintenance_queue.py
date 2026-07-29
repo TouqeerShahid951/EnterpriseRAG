@@ -64,15 +64,16 @@ class CeleryGraphRAGMaintenanceQueue:
 
     def enqueue_document_index(self, message: GraphRAGDocumentIndexMessage) -> None:
         try:
+            payload = {
+                "doc_id": message.doc_id,
+                "job_id": message.job_id,
+                "reason": message.reason,
+            }
+            if message.index_generation_id:
+                payload["index_generation_id"] = message.index_generation_id
             self._app.send_task(
                 self._index_task_name,
-                args=[
-                    {
-                        "doc_id": message.doc_id,
-                        "job_id": message.job_id,
-                        "reason": message.reason,
-                    }
-                ],
+                args=[payload],
                 queue=self._queue_name,
             )
         except Exception as exc:

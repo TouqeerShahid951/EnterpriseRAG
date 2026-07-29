@@ -54,7 +54,6 @@ from rag.query.retrieval.retrieval_policy import (
     add_expiry_scope,
     add_stale_scope,
     apply_route_retrieval_policy,
-    merge_artifact_protected_hits,
     merge_route_protected_hits,
     not_expired_condition,
     not_stale_condition,
@@ -76,7 +75,6 @@ from rag.query.retrieval.retrieval_recall import (
 from rag.query.retrieval.retrieval_budget import exhaustive_retrieval_deadline
 from rag.query.retrieval.retrieval_structured import (
     _annotate_structured_hits,
-    _artifact_requires_structured_rows,
     _has_structured_evidence,
     _has_table_evidence,
     _has_table_row_lookup_signal,
@@ -90,8 +88,11 @@ from rag.query.retrieval.retrieval_structured import (
     expand_structured_table_rows,
 )
 from rag.query.sources import dedupe_hits
-from rag.query.sources.source_evidence_selection import _dedupe_keys
-from rag.query.state import QueryContext, scoped_user_context
+from rag.query.sources.source_evidence_selection import (
+    _dedupe_keys,
+    with_retrieval_query_slot,
+)
+from rag.query.state import QueryContext, scoped_user_context, timed_retrieval_phase
 from rag.query.retrieval.temporal import add_effective_date_scope
 
 _DOCUMENT_SCOPE_SCAN_LIMIT = 5000
@@ -99,7 +100,6 @@ _DOCUMENT_SCOPE_SCAN_LIMIT = 5000
 __all__ = [
     "_annotate_recall_hits",
     "_annotate_structured_hits",
-    "_artifact_requires_structured_rows",
     "_base_search_limit_multiplier",
     "_definition_cue_near_target",
     "_definition_target",
@@ -155,7 +155,6 @@ __all__ = [
     "add_stale_scope",
     "apply_route_retrieval_policy",
     "expand_structured_table_rows",
-    "merge_artifact_protected_hits",
     "merge_route_protected_hits",
     "not_expired_condition",
     "not_stale_condition",
@@ -178,7 +177,6 @@ def retrieve_candidates(
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
     plan = ctx.get("route_plan")
-    artifact_plan = ctx.get("artifact_plan")
     active_query = (
         ctx["query_rewritten"][-1]
         if ctx["query_rewritten"]
@@ -186,8 +184,6 @@ def retrieve_candidates(
     )
     top_k = plan.top_k if plan else config.rag_top_k
     search_limit = top_k * _search_limit_multiplier(plan, active_query)
-    if _artifact_requires_structured_rows(artifact_plan):
-        search_limit = max(search_limit, top_k * 16)
     qdrant_filter = add_effective_date_scope(
         build_abac_filter(
             scoped_user_context(ctx), is_current_only=ctx["is_current_only"]
@@ -200,25 +196,30 @@ def retrieve_candidates(
     if not getattr(config, "connector_include_stale_in_retrieval", False):
         qdrant_filter = add_stale_scope(qdrant_filter)
     qdrant_filter = add_document_scope(qdrant_filter, ctx["request"].document_ids)
-    for query in ctx["sub_queries"] or [active_query]:
+    for query_slot, query in enumerate(ctx["sub_queries"] or [active_query]):
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
-        dense_vector = call_with_optional_cancellation(
-            ollama.embed, cancellation_token, query
-        )
-        if not call_with_optional_cancellation(
-            qdrant.prepare_for_query, cancellation_token, len(dense_vector)
-        ):
+        with timed_retrieval_phase(ctx, "embeddings"):
+            dense_vector = call_with_optional_cancellation(
+                ollama.embed, cancellation_token, query
+            )
+        with timed_retrieval_phase(ctx, "vector_search"):
+            prepared = call_with_optional_cancellation(
+                qdrant.prepare_for_query, cancellation_token, len(dense_vector)
+            )
+        if not prepared:
             continue
         hits.extend(
-            _search_query(
-                query,
-                dense_vector=dense_vector,
-                limit=search_limit,
-                qdrant_filter=qdrant_filter,
-                config=config,
-                qdrant=qdrant,
-                cancellation_token=cancellation_token,
+            with_retrieval_query_slot(hit, query_slot)
+            for hit in _search_query(
+                    query,
+                    dense_vector=dense_vector,
+                    limit=search_limit,
+                    qdrant_filter=qdrant_filter,
+                    config=config,
+                    qdrant=qdrant,
+                    cancellation_token=cancellation_token,
+                    ctx=ctx,
             )
         )
     ranked = prioritize_language(dedupe_hits(hits), query_language(active_query))
@@ -226,16 +227,15 @@ def retrieve_candidates(
     ranked = apply_route_retrieval_policy(ranked, plan)
     ranked = _annotate_structured_hits(ranked, origin="direct")
     exhaustive_scoped_doc_ids: set[str] | None = None
-    if _artifact_requires_structured_rows(artifact_plan) or _should_use_structured_path(
-        active_query, ranked, plan
-    ):
+    if _should_use_structured_path(active_query, ranked, plan):
         ranked = _promote_structured_matches(ranked, active_query)
-        ranked = expand_structured_table_rows(
-            ranked,
-            qdrant=qdrant,
-            qdrant_filter=qdrant_filter,
-            cancellation_token=cancellation_token,
-        )
+        with timed_retrieval_phase(ctx, "table_expansion"):
+            ranked = expand_structured_table_rows(
+                ranked,
+                qdrant=qdrant,
+                qdrant_filter=qdrant_filter,
+                cancellation_token=cancellation_token,
+            )
     should_expand_document_scope = _should_expand_document_scope(
         active_query,
         plan,
@@ -358,22 +358,6 @@ def retrieve_candidates(
                 "required_obligations": [],
                 "covered_obligations": [],
             }
-    if (
-        _artifact_requires_structured_rows(artifact_plan)
-        and ctx["request"].document_ids
-        and hasattr(qdrant, "retrieve_document_chunks")
-    ):
-        scoped_chunks = call_with_optional_cancellation(
-            qdrant.retrieve_document_chunks,
-            cancellation_token,
-            document_ids=ctx["request"].document_ids,
-            qdrant_filter=qdrant_filter,
-            structured_only=True,
-            limit=2000,
-        )
-        ranked = dedupe_hits(
-            [*ranked, *_annotate_structured_hits(scoped_chunks, origin="scope_scan")]
-        )
     recall_queries = _recall_expansion_queries(active_query, ranked)
     if recall_queries and exhaustive_scoped_doc_ids != set():
         recall_hits: list[SearchHit] = []
@@ -389,9 +373,10 @@ def retrieve_candidates(
         for recall_query in recall_queries:
             if cancellation_token is not None:
                 cancellation_token.raise_if_cancelled()
-            dense_vector = call_with_optional_cancellation(
-                ollama.embed, cancellation_token, recall_query
-            )
+            with timed_retrieval_phase(ctx, "embeddings"):
+                dense_vector = call_with_optional_cancellation(
+                    ollama.embed, cancellation_token, recall_query
+                )
             recall_hits.extend(
                 _annotate_recall_hits(
                     _search_query(
@@ -402,6 +387,7 @@ def retrieve_candidates(
                         config=config,
                         qdrant=qdrant,
                         cancellation_token=cancellation_token,
+                        ctx=ctx,
                     ),
                     recall_query=recall_query,
                 )

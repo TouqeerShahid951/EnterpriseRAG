@@ -7,7 +7,14 @@ from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
 from rag.core.config import Settings, settings
-from rag.shared.contracts.rag_defaults import DEFAULT_MODEL_PROVIDER
+from rag.shared.contracts.rag_defaults import (
+    DEFAULT_EVIDENCE_GATE_POLICY,
+    DEFAULT_FAITHFULNESS_POLICY,
+    DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS,
+    DEFAULT_MODEL_PROVIDER,
+    DEFAULT_REASONING_TIMEOUT_SECONDS,
+    DEFAULT_ROUTING_TIMEOUT_SECONDS,
+)
 from .models import (
     DEFAULT_OLLAMA_PORT,
     DEFAULT_VLLM_PORT,
@@ -126,15 +133,20 @@ def env_rag_config(config: Settings = settings) -> RagConfigRecord:
         embed_model=embed_model,
         faithfulness_model=config.rag_faithfulness_model,
         chat_timeout_seconds=config.rag_ollama_chat_timeout_seconds,
+        routing_timeout_seconds=config.rag_routing_timeout_seconds,
+        reasoning_timeout_seconds=config.rag_reasoning_timeout_seconds,
+        faithfulness_timeout_seconds=config.rag_faithfulness_timeout_seconds,
         embed_timeout_seconds=config.rag_ollama_embed_timeout_seconds,
         thinking_enabled=config.ollama_thinking_enabled,
-        reasoning_model=config.rag_reasoning_model or config.rag_route_llm_verifier_model,
-        routing_model=config.rag_route_llm_verifier_model,
+        reasoning_model=config.rag_reasoning_model or config.rag_routing_model,
+        routing_model=config.rag_routing_model,
         ingestion_model=config.rag_ingestion_model,
         vision_model=vision_model or None,
         json_num_predict=config.rag_json_num_predict,
         retrieval_token_budget=config.rag_retrieval_token_budget,
         query_planner_enabled=config.rag_query_planner_enabled,
+        evidence_gate_policy=config.rag_evidence_gate_policy,
+        faithfulness_policy=config.rag_faithfulness_policy,
         reranker_model=config.rag_reranker_model,
         health_status="unknown",
         health_message="Using deployment environment defaults.",
@@ -163,9 +175,24 @@ def record_from_row(row: dict[str, object]) -> RagConfigRecord:
         embed_model=str(row["embed_model"]),
         faithfulness_model=str(row["faithfulness_model"]).strip() if row.get("faithfulness_model") else None,
         chat_timeout_seconds=float(row["chat_timeout_seconds"]),
+        routing_timeout_seconds=float(
+            row.get("routing_timeout_seconds") or DEFAULT_ROUTING_TIMEOUT_SECONDS
+        ),
+        reasoning_timeout_seconds=float(
+            row.get("reasoning_timeout_seconds") or DEFAULT_REASONING_TIMEOUT_SECONDS
+        ),
+        faithfulness_timeout_seconds=float(
+            row.get("faithfulness_timeout_seconds")
+            or DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS
+        ),
         embed_timeout_seconds=float(row["embed_timeout_seconds"]),
         thinking_enabled=bool(row.get("thinking_enabled", False)),
         reasoning_model=str(row["reasoning_model"]).strip() if row.get("reasoning_model") else None,
+        sql_generation_model=(
+            str(row["sql_generation_model"]).strip()
+            if row.get("sql_generation_model")
+            else None
+        ),
         routing_model=str(row["routing_model"]).strip() if row.get("routing_model") else None,
         ingestion_model=str(row["ingestion_model"]).strip() if row.get("ingestion_model") else None,
         vision_model=str(row["vision_model"]).strip() if row.get("vision_model") else None,
@@ -173,6 +200,12 @@ def record_from_row(row: dict[str, object]) -> RagConfigRecord:
         retrieval_token_budget=int(row.get("retrieval_token_budget") or 12000),
         query_planner_enabled=bool(
             row["query_planner_enabled"] if row.get("query_planner_enabled") is not None else True
+        ),
+        evidence_gate_policy=str(
+            row.get("evidence_gate_policy") or DEFAULT_EVIDENCE_GATE_POLICY
+        ),
+        faithfulness_policy=str(
+            row.get("faithfulness_policy") or DEFAULT_FAITHFULNESS_POLICY
         ),
         reranker_model=str(row["reranker_model"]).strip() if row.get("reranker_model") else settings.rag_reranker_model,
         health_status=str(row["health_status"]),
@@ -206,15 +239,21 @@ def with_updated_at(config: RagConfigRecord) -> RagConfigRecord:
         embed_model=config.embed_model,
         faithfulness_model=config.faithfulness_model,
         chat_timeout_seconds=config.chat_timeout_seconds,
+        routing_timeout_seconds=config.routing_timeout_seconds,
+        reasoning_timeout_seconds=config.reasoning_timeout_seconds,
+        faithfulness_timeout_seconds=config.faithfulness_timeout_seconds,
         embed_timeout_seconds=config.embed_timeout_seconds,
         thinking_enabled=config.thinking_enabled,
         reasoning_model=config.reasoning_model,
+        sql_generation_model=config.sql_generation_model,
         routing_model=config.routing_model,
         ingestion_model=config.ingestion_model,
         vision_model=config.vision_model,
         json_num_predict=config.json_num_predict,
         retrieval_token_budget=config.retrieval_token_budget,
         query_planner_enabled=config.query_planner_enabled,
+        evidence_gate_policy=config.evidence_gate_policy,
+        faithfulness_policy=config.faithfulness_policy,
         reranker_model=config.reranker_model,
         health_status=config.health_status,
         health_message=config.health_message,

@@ -4,6 +4,7 @@ from rag.auth.context import UserContext
 from rag.query.nodes import QueryNodes
 from rag.query.qdrant import SearchHit
 from rag.query.routing.routing_models import RoutePlan
+from rag.query.sources.source_resolution import SourceDecision
 from rag.query.state import initial_state
 from rag.query.schemas import QueryRequest
 
@@ -67,7 +68,7 @@ def test_verifier_does_not_prune_passing_aggregation_evidence() -> None:
     assert result["evidence_quality"].in_scope_doc_ids == frozenset({"fir-1", "fir-2"})
 
 
-def test_verifier_keeps_weak_hits_for_degraded_synthesis() -> None:
+def test_verifier_passes_weak_hits_to_the_semantic_evidence_gate() -> None:
     ctx = initial_state(
         trace_id="trace",
         session_id="session",
@@ -93,9 +94,70 @@ def test_verifier_keeps_weak_hits_for_degraded_synthesis() -> None:
 
     result = QueryNodes.verifier(object.__new__(QueryNodes), ctx)
 
-    assert result["verifier_decision"] == "degrade"
-    assert result["degraded"] is True
+    assert result["verifier_decision"] == "pass"
+    assert result["degraded"] is False
     assert [item.payload["chunk_id"] for item in result["retrieved_hits"]] == ["report:page"]
+
+
+def test_verifier_defers_weak_auto_primary_route_to_semantic_gate() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="employee count at end of year"),
+        user=UserContext(user_id="user", email="user@example.com", group_paths=("/admin",)),
+        started=perf_counter(),
+    )
+    ctx["source_decision"] = SourceDecision(
+        requested_mode="auto",
+        resolved_mode="corpus_first",
+        semantic_query=ctx["request"].query,
+        explicit=False,
+        reason="auto_corpus_first_corpus_preferred",
+        preferred_source="corpus",
+        routing_confidence=0.9,
+    )
+    primary_hit = hit(
+        "report:page",
+        doc_id="report",
+        doc_title="Report.pdf",
+        text="Unrelated but authorized page text.",
+    )
+    ctx["retrieved_hits"] = [primary_hit]
+
+    result = QueryNodes.verifier(object.__new__(QueryNodes), ctx)
+
+    assert result["verifier_decision"] == "pass"
+    assert result["retry_count"] == 0
+    assert result["retrieved_hits"] == [primary_hit]
+    assert "source_primary_hits" not in result
+    assert result["source_decision"].resolved_mode == "corpus_first"
+
+
+def test_verifier_does_not_repeat_an_exhausted_explicit_database_route() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="Count cases", source_mode="db_only"),
+        user=UserContext(user_id="user", email="user@example.com", group_paths=("/admin",)),
+        started=perf_counter(),
+    )
+    ctx["source_decision"] = SourceDecision(
+        requested_mode="db_only",
+        resolved_mode="db_only",
+        semantic_query=ctx["request"].query,
+        explicit=True,
+        reason="composer_selected_database",
+        preferred_source="database",
+        routing_confidence=1.0,
+    )
+    ctx["execution_modes"]["live_sql_retriever"] = "fallback"
+
+    result = QueryNodes.verifier(object.__new__(QueryNodes), ctx)
+
+    assert result["verifier_decision"] == "degrade"
+    assert result["degraded_reason"] == "explicit_source_no_answer"
+    assert result["retry_count"] == 0
+    assert result["query_rewritten"] == []
 
 
 def test_evidence_builder_keeps_aggregation_rows_exact() -> None:

@@ -2,6 +2,7 @@ from uuid import uuid4
 
 import pytest
 
+from rag.shared.contracts.abbreviations import ABBREVIATION_GLOSSARY_DOC_TYPE
 from rag.auth.identity_models import UserRecord
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.graphrag.document_enrichment_service import (
@@ -13,7 +14,7 @@ from rag.graphrag.document_enrichment_service import (
 class FakeQueue:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
-        self.messages: list[tuple[str, str, str]] = []
+        self.messages: list[tuple[str, str, str, str | None]] = []
 
     def enqueue(
         self,
@@ -21,10 +22,13 @@ class FakeQueue:
         document_id: str,
         job_id: str,
         reason: str,
+        index_generation_id: str | None,
     ) -> None:
         if self.fail:
             raise RuntimeError("broker unavailable")
-        self.messages.append((document_id, job_id, reason))
+        self.messages.append(
+            (document_id, job_id, reason, index_generation_id)
+        )
 
 
 def test_graph_enrichment_queues_completed_document_and_audits() -> None:
@@ -33,7 +37,7 @@ def test_graph_enrichment_queues_completed_document_and_audits() -> None:
     result = service.enqueue(document.id, actor=user)
 
     assert result.job_id == job.id
-    assert queue.messages == [(document.id, job.id, "user_request")]
+    assert queue.messages == [(document.id, job.id, "user_request", None)]
     assert repo.audit_events[-1]["event_type"] == (
         "documents.graph_enrichment.queued"
     )
@@ -63,7 +67,24 @@ def test_graph_enrichment_rejects_disabled_workspace_before_queue() -> None:
     assert queue.messages == []
 
 
-def _fixture(*, enabled: bool = True, queue_fail: bool = False):
+def test_graph_enrichment_rejects_abbreviation_glossary() -> None:
+    service, _repo, queue, user, document, _ = _fixture(
+        doc_type=ABBREVIATION_GLOSSARY_DOC_TYPE
+    )
+
+    with pytest.raises(DocumentGraphEnrichmentRejected) as exc_info:
+        service.enqueue(document.id, actor=user)
+
+    assert exc_info.value.code == "document_not_graph_eligible"
+    assert queue.messages == []
+
+
+def _fixture(
+    *,
+    enabled: bool = True,
+    queue_fail: bool = False,
+    doc_type: str | None = None,
+):
     repo = InMemoryDocumentRepository()
     user = _user()
     document = repo.create_document(
@@ -71,7 +92,7 @@ def _fixture(*, enabled: bool = True, queue_fail: bool = False):
         source_id=f"upload:{uuid4()}",
         group_path="/ops",
         clearance_level="NATO_RESTRICTED",
-        doc_type=None,
+        doc_type=doc_type,
         effective_date=None,
         expiry_date=None,
         description=None,

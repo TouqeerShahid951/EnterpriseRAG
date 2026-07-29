@@ -125,6 +125,17 @@ class PostgresImageReviewRepository(PostgresConnectionMixin):
         )
         return [image_review_batch_from_row(row) for row in rows]
 
+    def list_pending_image_review_document_ids(self) -> tuple[str, ...]:
+        rows = self._execute_all(
+            """
+            SELECT DISTINCT doc_id::text AS doc_id
+            FROM image_review_batches
+            WHERE status = 'pending'
+            ORDER BY doc_id::text
+            """
+        )
+        return tuple(str(row["doc_id"]) for row in rows)
+
     def list_image_review_candidates_for_batch(
         self,
         batch_id: str,

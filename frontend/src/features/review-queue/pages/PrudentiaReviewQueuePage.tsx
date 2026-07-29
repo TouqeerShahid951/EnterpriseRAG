@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, ImageIcon, Loader2, RefreshCw } from "lucide-react";
 
@@ -8,9 +8,8 @@ import { PrudentiaWorkspace } from "@/components/layout/PrudentiaWorkspace";
 import type { RouteId } from "@/routes/routes";
 import type { User as AuthUser } from "@/types/api";
 import { errorMessage } from "@/lib/utils/format";
-import { groupReviewItemsByDocument } from "@/features/review-queue/utils/reviewQueueUtils";
+import { groupReviewItemsByDocument, reviewDocumentCount } from "@/features/review-queue/utils/reviewQueueUtils";
 import {
-  ReviewImageClearState,
   ReviewQueueClearState,
   ReviewSummaryMetric,
 } from "@/features/review-queue/components/ReviewQueuePrimitives";
@@ -19,13 +18,11 @@ import { ReviewCorrectionPanel, ReviewDocumentPreview, ReviewQueuePanel } from "
 import { devReviewPreviewItems } from "@/features/review-queue/utils/reviewQueuePreview";
 
 
-export { confidencePercent, groupReviewItemsByDocument, reviewRegionFromItem } from "@/features/review-queue/utils/reviewQueueUtils";
-
-
 export function PrudentiaReviewQueuePage({ onLogout, onNavigate, user }: Props) {
   const [activeTab, setActiveTab] = useState<ReviewTab>("ocr");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const reviewQuery = useQuery({ queryKey: ["review-queue"], queryFn: reviewApi.list, retry: false });
+  const summaryQuery = useQuery({ queryKey: ["review-queue", "summary"], queryFn: reviewApi.summary, retry: false });
   const imageReviewQuery = useQuery({ queryKey: ["review-queue", "image-batches"], queryFn: reviewApi.listImageBatches, retry: false });
   const previewItems = useMemo(() => devReviewPreviewItems(), []);
   const previewMode = previewItems !== null;
@@ -33,12 +30,17 @@ export function PrudentiaReviewQueuePage({ onLogout, onNavigate, user }: Props) 
   const imageBatches = imageReviewQuery.data?.batches ?? [];
   const imageCandidateTotal = imageReviewQuery.data?.candidate_total ?? imageBatches.reduce((total, batch) => total + batch.candidates.length, 0);
   const groups = useMemo(() => groupReviewItemsByDocument(items), [items]);
+  const detailedDocumentCount = reviewDocumentCount(items, imageBatches);
+  const pendingDocumentCount = previewMode
+    ? detailedDocumentCount
+    : summaryQuery.data?.pending_document_count ?? detailedDocumentCount;
   const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null;
   const ocrQueueIsClear = !previewMode && !reviewQuery.isLoading && !reviewQuery.isError && items.length === 0;
   const imageQueueIsClear = !imageReviewQuery.isLoading && !imageReviewQuery.isError && imageBatches.length === 0;
   const handleRefresh = () => {
     if (previewMode) return;
     void reviewQuery.refetch();
+    void summaryQuery.refetch();
     void imageReviewQuery.refetch();
   };
 
@@ -56,6 +58,25 @@ export function PrudentiaReviewQueuePage({ onLogout, onNavigate, user }: Props) 
     setSelectedId(nextItem?.id ?? null);
   }
 
+  function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    const tabs = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("[role='tab']") ?? []);
+    const currentIndex = tabs.indexOf(event.currentTarget);
+    if (currentIndex < 0) return;
+    const nextIndex = event.key === "ArrowRight"
+      ? (currentIndex + 1) % tabs.length
+      : event.key === "ArrowLeft"
+        ? (currentIndex - 1 + tabs.length) % tabs.length
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? tabs.length - 1
+            : null;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    tabs[nextIndex].focus();
+    tabs[nextIndex].click();
+  }
+
   return (
     <PrudentiaWorkspace activeRoute="review" onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page review-workspace" id="main-content">
@@ -70,22 +91,22 @@ export function PrudentiaReviewQueuePage({ onLogout, onNavigate, user }: Props) 
               <div className="review-summary" aria-label="Review queue summary">
                 <ReviewSummaryMetric label="Pending blocks" value={String(items.length)} loading={!previewMode && reviewQuery.isLoading} />
                 <ReviewSummaryMetric label="Image candidates" value={String(imageCandidateTotal)} loading={imageReviewQuery.isLoading} />
-                <ReviewSummaryMetric label="Documents" value={String(groups.length + imageBatches.length)} loading={(!previewMode && reviewQuery.isLoading) || imageReviewQuery.isLoading} />
+                <ReviewSummaryMetric label="Documents" value={String(pendingDocumentCount)} loading={!previewMode && summaryQuery.isLoading} />
               </div>
-              <button type="button" onClick={handleRefresh} disabled={previewMode || reviewQuery.isFetching || imageReviewQuery.isFetching} className="sv-action-secondary review-refresh-action">
-                {!previewMode && (reviewQuery.isFetching || imageReviewQuery.isFetching) ? <Loader2 aria-hidden="true" className="animate-spin" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
+              <button type="button" onClick={handleRefresh} disabled={previewMode || reviewQuery.isFetching || summaryQuery.isFetching || imageReviewQuery.isFetching} className="sv-action-secondary review-refresh-action">
+                {!previewMode && (reviewQuery.isFetching || summaryQuery.isFetching || imageReviewQuery.isFetching) ? <Loader2 aria-hidden="true" className="animate-spin" size={15} /> : <RefreshCw aria-hidden="true" size={15} />}
                 Refresh
               </button>
             </div>
           </header>
 
           <div className="review-tabs" role="tablist" aria-label="Review queue type">
-            <button type="button" role="tab" aria-selected={activeTab === "ocr"} onClick={() => setActiveTab("ocr")}>
+            <button type="button" role="tab" id="review-tab-ocr" aria-controls="review-panel-ocr" aria-selected={activeTab === "ocr"} onClick={() => setActiveTab("ocr")} onKeyDown={handleTabKeyDown}>
               <FileText aria-hidden="true" size={15} />
               OCR blocks
               <span>{items.length}</span>
             </button>
-            <button type="button" role="tab" aria-selected={activeTab === "images"} onClick={() => setActiveTab("images")}>
+            <button type="button" role="tab" id="review-tab-images" aria-controls="review-panel-images" aria-selected={activeTab === "images"} onClick={() => setActiveTab("images")} onKeyDown={handleTabKeyDown}>
               <ImageIcon aria-hidden="true" size={15} />
               PDF images
               <span>{imageCandidateTotal}</span>
@@ -94,14 +115,15 @@ export function PrudentiaReviewQueuePage({ onLogout, onNavigate, user }: Props) 
 
           {previewMode ? <InlineMessage tone="warning">Preview mode: sample review items are shown without changing the database.</InlineMessage> : null}
           {!previewMode && reviewQuery.isError ? <InlineMessage tone="error">{errorMessage(reviewQuery.error, "Unable to load review queue.")}</InlineMessage> : null}
+          {!previewMode && summaryQuery.isError ? <InlineMessage tone="warning">{errorMessage(summaryQuery.error, "Unable to load the review document count.")}</InlineMessage> : null}
           {imageReviewQuery.isError ? <InlineMessage tone="error">{errorMessage(imageReviewQuery.error, "Unable to load PDF image review queue.")}</InlineMessage> : null}
 
           {activeTab === "ocr" && ocrQueueIsClear ? (
-            <ReviewQueueClearState onNavigate={onNavigate} onRefresh={handleRefresh} refreshing={reviewQuery.isFetching} />
+            <ReviewQueueClearState kind="ocr" onNavigate={onNavigate} onRefresh={handleRefresh} refreshing={reviewQuery.isFetching} />
           ) : null}
 
           {activeTab === "ocr" && !ocrQueueIsClear ? (
-            <div className="review-layout">
+            <div className="review-layout" id="review-panel-ocr" role="tabpanel" aria-labelledby="review-tab-ocr" tabIndex={0}>
               <ReviewQueuePanel
                 groups={groups}
                 isLoading={!previewMode && reviewQuery.isLoading}
@@ -114,7 +136,7 @@ export function PrudentiaReviewQueuePage({ onLogout, onNavigate, user }: Props) 
           ) : null}
 
           {activeTab === "images" && imageQueueIsClear ? (
-            <ReviewImageClearState onNavigate={onNavigate} onRefresh={handleRefresh} refreshing={imageReviewQuery.isFetching} />
+            <ReviewQueueClearState kind="images" onNavigate={onNavigate} onRefresh={handleRefresh} refreshing={imageReviewQuery.isFetching} />
           ) : null}
 
           {activeTab === "images" && !imageQueueIsClear ? (

@@ -27,15 +27,15 @@ from rag.ingestion.parsers.images.sources import (
     pdf_image_source_kind_and_flags,
 )
 from rag.ingestion.parsers.models import BBox, ParsedPdfItem
-from rag.ingestion.parsers.pdf.visual_regions import (
+from rag.ingestion.parsers.pdf.visual_page_selection import (
     domain_visual_cue_pages_for_items,
     increment,
     parsed_text_bboxes_by_page,
     parsed_text_chars_by_page,
-    scanned_visual_regions_for_page,
     visual_cue_bboxes_by_page,
-    visual_region_sources_from_regions,
 )
+from rag.ingestion.parsers.pdf.visual_region_detection import scanned_visual_regions_for_page
+from rag.ingestion.parsers.pdf.visual_source_mapping import visual_region_sources_from_regions
 
 PDF_IMAGE_WEAK_TEXT_CHARS = 120
 PDF_IMAGE_FULL_PAGE_AREA_RATIO = 0.75

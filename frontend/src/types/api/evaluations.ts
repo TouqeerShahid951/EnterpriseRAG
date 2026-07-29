@@ -1,4 +1,5 @@
 import type { ISODateString } from "./common";
+import type { QueryNodeTiming } from "../query";
 
 export type EvaluationRunStatus = "queued" | "running" | "complete" | "partial" | "failed" | "cancelled";
 
@@ -86,7 +87,7 @@ export interface EvaluationCaseResult {
   sources: Record<string, unknown>[];
   diagnostic: Record<string, unknown>;
   trace_id: string | null;
-  node_timings: Record<string, unknown>[];
+  node_timings: QueryNodeTiming[];
   faithfulness_score: number | null;
   faithfulness_status: string | null;
   unfounded_claims: string[];

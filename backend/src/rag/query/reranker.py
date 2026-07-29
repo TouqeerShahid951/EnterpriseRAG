@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from functools import lru_cache
 from time import monotonic
 from typing import Any
 
-from rag.shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL
+from rag.shared.contracts.reranker_models import (
+    DEFAULT_RERANKER_MODEL,
+    reranker_passage_max_chars,
+)
+from rag.shared.contracts.rag_defaults import RerankerDevice
 from rag.shared.runtime_offline import apply_runtime_offline_defaults
 
 from .cancellation import QueryCancellationToken, QueryCancelled
@@ -45,18 +50,22 @@ from .reranking.text import (
     hit_page as _hit_page,
     normalized_text as _normalized_phrase,
     payload_str as _payload_str,
+    reranker_text as _reranker_text,
     searchable_text as _searchable_text,
     unique_hits as _unique_hits,
 )
 from rag.query.retrieval.retrieval_budget import EXHAUSTIVE_RETRIEVAL_BUDGET_SECONDS
 
 _LOG = logging.getLogger(__name__)
+_POINT_BATCH_SIZE = 8
 _EXHAUSTIVE_BATCH_SIZE = 32
 _EXHAUSTIVE_WAVE_SIZE = 512
 _REPRESENTATIVE_TEXT_MAX_CHARS = 1024
 _EXHAUSTIVE_CHILD_TEXT_MAX_CHARS = 1024
 _PAGE_WINDOW_SIZE = 4
 _ORDINAL_WINDOW_SIZE = 8
+_CPU_EXECUTION_PROVIDER = "CPUExecutionProvider"
+_CUDA_EXECUTION_PROVIDER = "CUDAExecutionProvider"
 
 
 def rerank_hits(
@@ -67,6 +76,7 @@ def rerank_hits(
     max_candidates: int | None = None,
     model_name: str = DEFAULT_RERANKER_MODEL,
     cache_dir: str | None = "/models/fastembed",
+    device: RerankerDevice = "auto",
     exhaustive: bool = False,
     deadline: float | None = None,
     cancellation_token: QueryCancellationToken | None = None,
@@ -79,6 +89,7 @@ def rerank_hits(
             max_candidates=max_candidates,
             model_name=model_name,
             cache_dir=cache_dir,
+            device=device,
             exhaustive=exhaustive,
             deadline=deadline,
             cancellation_token=cancellation_token,
@@ -94,6 +105,7 @@ def rerank_hits_with_result(
     max_candidates: int | None = None,
     model_name: str = DEFAULT_RERANKER_MODEL,
     cache_dir: str | None = "/models/fastembed",
+    device: RerankerDevice = "auto",
     exhaustive: bool = False,
     deadline: float | None = None,
     cancellation_token: QueryCancellationToken | None = None,
@@ -109,6 +121,7 @@ def rerank_hits_with_result(
         max_candidates=max_candidates,
         model_name=model_name,
         cache_dir=cache_dir,
+        device=device,
         exhaustive=exhaustive,
         deadline=deadline,
         cancellation_token=cancellation_token,
@@ -121,12 +134,13 @@ def rank_passages(
     *,
     model_name: str = DEFAULT_RERANKER_MODEL,
     cache_dir: str | None = "/models/fastembed",
+    device: RerankerDevice = "auto",
 ) -> list[tuple[int, float]]:
     if not model_name:
         raise ValueError("cross-encoder reranker model name is required")
     if not passages:
         return []
-    model = _load_cross_encoder(model_name, cache_dir)
+    model = _load_cross_encoder(model_name, cache_dir, device)
     scores = [float(score) for score in model.rerank(query, passages)]
     if len(scores) != len(passages):
         raise RuntimeError("cross-encoder reranker returned an unexpected score count")
@@ -141,6 +155,7 @@ def _cross_encoder_rerank(
     max_candidates: int | None,
     model_name: str,
     cache_dir: str | None,
+    device: RerankerDevice,
     exhaustive: bool,
     deadline: float | None,
     cancellation_token: QueryCancellationToken | None,
@@ -158,18 +173,51 @@ def _cross_encoder_rerank(
             max_candidates=max_candidates,
             model_name=model_name,
             cache_dir=cache_dir,
+            device=device,
             deadline=deadline,
             cancellation_token=cancellation_token,
         )
     hits = _limit_rerank_candidates(query, hits, max_candidates=max_candidates)
+    passage_max_chars = reranker_passage_max_chars(model_name)
+    passages = [
+        _reranker_text(hit, max_chars=passage_max_chars) for hit in hits
+    ]
     try:
-        model = _load_cross_encoder(model_name, cache_dir)
-        scores = model.rerank(query, [_searchable_text(hit) for hit in hits])
-        score_values = [float(score) for score in scores]
-        if len(score_values) != len(hits):
-            raise RuntimeError(
-                "cross-encoder reranker returned an unexpected score count"
+        model = _load_cross_encoder(model_name, cache_dir, device)
+        score_values, batch_count, stop_reason = _score_point_passages(
+            model,
+            query,
+            passages,
+            deadline=deadline,
+            cancellation_token=cancellation_token,
+        )
+        scored_hits = hits[: len(score_values)]
+        ranked_scored = _rank_scored_hits(
+            query, scored_hits, score_values, top_k=len(scored_hits)
+        )
+        if stop_reason is None:
+            ranked_candidates = tuple(ranked_scored)
+        else:
+            fallback = _fallback_rank_hits(
+                query,
+                hits[len(score_values) :],
+                top_k=len(hits) - len(score_values),
+                error=TimeoutError(stop_reason),
             )
+            ranked_candidates = tuple((*ranked_scored, *fallback))
+        return RerankResult(
+            candidates=tuple(hits),
+            ranked_hits=ranked_candidates[:top_k],
+            ranked_candidates=ranked_candidates,
+            stop_reason=stop_reason,
+            candidate_wave_count=batch_count,
+            input_character_count=sum(
+                len(passage) for passage in passages[: len(score_values)]
+            ),
+            passage_max_chars=passage_max_chars,
+        )
+    except QueryCancelled:
+        raise
     except Exception as exc:
         _LOG.warning(
             "cross-encoder reranker failed; falling back to retrieval policy",
@@ -180,14 +228,42 @@ def _cross_encoder_rerank(
             },
             exc_info=True,
         )
+        ranked_candidates = tuple(
+            _fallback_rank_hits(query, hits, top_k=len(hits), error=exc)
+        )
         return RerankResult(
             candidates=tuple(hits),
-            ranked_hits=tuple(_fallback_rank_hits(query, hits, top_k=top_k, error=exc)),
+            ranked_hits=ranked_candidates[:top_k],
+            ranked_candidates=ranked_candidates,
+            input_character_count=sum(len(passage) for passage in passages),
+            passage_max_chars=passage_max_chars,
         )
-    return RerankResult(
-        candidates=tuple(hits),
-        ranked_hits=tuple(_rank_scored_hits(query, hits, score_values, top_k=top_k)),
-    )
+
+
+def _score_point_passages(
+    model: Any,
+    query: str,
+    passages: list[str],
+    *,
+    deadline: float | None,
+    cancellation_token: QueryCancellationToken | None,
+) -> tuple[list[float], int, str | None]:
+    scores: list[float] = []
+    batch_count = 0
+    for start in range(0, len(passages), _POINT_BATCH_SIZE):
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
+        if deadline is not None and monotonic() >= deadline:
+            return scores, batch_count, "deadline_exceeded"
+        batch = passages[start : start + _POINT_BATCH_SIZE]
+        batch_scores = [float(score) for score in model.rerank(query, batch)]
+        if len(batch_scores) != len(batch):
+            raise RuntimeError(
+                "cross-encoder reranker returned an unexpected score count"
+            )
+        scores.extend(batch_scores)
+        batch_count += 1
+    return scores, batch_count, None
 
 
 def _exhaustive_cross_encoder_rerank(
@@ -198,6 +274,7 @@ def _exhaustive_cross_encoder_rerank(
     max_candidates: int | None,
     model_name: str,
     cache_dir: str | None,
+    device: RerankerDevice,
     deadline: float | None,
     cancellation_token: QueryCancellationToken | None,
 ) -> RerankResult:
@@ -236,7 +313,7 @@ def _exhaustive_cross_encoder_rerank(
             candidate_coverage_status="partial",
         )
     try:
-        model = _load_cross_encoder(model_name, cache_dir)
+        model = _load_cross_encoder(model_name, cache_dir, device)
         scoring = _score_exhaustive_hierarchy(
             model,
             query,
@@ -346,9 +423,7 @@ def _score_exhaustive_hierarchy(
         exclusive_scope_unit_keys=set(scope.exclusive_scope_unit_keys),
     )
     qualifying_units = [
-        scored
-        for scored in selected_units
-        if scored.unit.key in coverage_unit_keys
+        scored for scored in selected_units if scored.unit.key in coverage_unit_keys
     ]
     candidates = _expanded_exhaustive_candidates(
         query,
@@ -788,8 +863,12 @@ def _select_exhaustive_units(
     return selected, len(selected) == len(ranked_units)
 
 
-@lru_cache(maxsize=4)
-def _load_cross_encoder(model_name: str, cache_dir: str | None) -> Any:
+@lru_cache(maxsize=8)
+def _load_cross_encoder(
+    model_name: str,
+    cache_dir: str | None,
+    device: RerankerDevice,
+) -> Any:
     apply_runtime_offline_defaults()
     try:
         from fastembed.rerank.cross_encoder import TextCrossEncoder
@@ -798,4 +877,38 @@ def _load_cross_encoder(model_name: str, cache_dir: str | None) -> Any:
             "FastEmbed cross-encoder reranker requires optional dependency "
             "`fastembed`; install backend dependencies before running RAG queries"
         ) from exc
-    return TextCrossEncoder(model_name=model_name, cache_dir=cache_dir)
+    return TextCrossEncoder(
+        model_name=model_name,
+        cache_dir=cache_dir,
+        providers=list(_reranker_execution_providers(device)),
+    )
+
+
+def _reranker_execution_providers(
+    device: RerankerDevice,
+    available: Collection[str] | None = None,
+) -> tuple[str, ...]:
+    if available is None:
+        try:
+            import onnxruntime
+        except ImportError as exc:
+            raise RuntimeError("ONNX Runtime is required for reranking") from exc
+        available = onnxruntime.get_available_providers()
+    available_set = set(available)
+    if device == "cuda":
+        if _CUDA_EXECUTION_PROVIDER not in available_set:
+            raise RuntimeError(
+                "CUDA reranking was requested, but CUDAExecutionProvider is unavailable; "
+                "build with RERANKER_RUNTIME=cuda and start with the NVIDIA GPU Compose override"
+            )
+        return (_CUDA_EXECUTION_PROVIDER,)
+    if device == "auto" and _CUDA_EXECUTION_PROVIDER in available_set:
+        fallback = (
+            (_CPU_EXECUTION_PROVIDER,)
+            if _CPU_EXECUTION_PROVIDER in available_set
+            else ()
+        )
+        return (_CUDA_EXECUTION_PROVIDER, *fallback)
+    if _CPU_EXECUTION_PROVIDER not in available_set:
+        raise RuntimeError("CPUExecutionProvider is unavailable for reranking")
+    return (_CPU_EXECUTION_PROVIDER,)

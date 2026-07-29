@@ -93,6 +93,17 @@ class PostgresHumanReviewRepository(PostgresConnectionMixin):
         )
         return [review_item_from_row(row) for row in rows]
 
+    def list_pending_human_review_document_ids(self) -> tuple[str, ...]:
+        rows = self._execute_all(
+            """
+            SELECT DISTINCT doc_id::text AS doc_id
+            FROM human_review_batches
+            WHERE status = 'pending'
+            ORDER BY doc_id::text
+            """
+        )
+        return tuple(str(row["doc_id"]) for row in rows)
+
     def approve_review_item(
         self,
         item_id: str,

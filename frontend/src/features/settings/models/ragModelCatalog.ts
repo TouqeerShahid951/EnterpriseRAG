@@ -20,7 +20,7 @@ export const MODEL_STATUS_ROLES: Array<{ key: EndpointRole; label: string }> = [
 
 export const DEFAULT_FASTEMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5-Q";
 
-export const SUPPORTED_RERANKER_MODELS = [
+const SUPPORTED_RERANKER_MODELS = [
   "jinaai/jina-reranker-v1-turbo-en",
   "jinaai/jina-reranker-v1-tiny-en",
   "BAAI/bge-reranker-base",
@@ -38,6 +38,7 @@ export function modelOptionsFromDiscovery(result: RagModelDiscoveryResult | unde
     chat,
     embedding: result?.embedding_models ?? [],
     reasoning,
+    sqlGeneration: reasoning,
     routing: result?.routing_models ?? reasoning,
     faithfulness: result?.faithfulness_models ?? chat,
     ingestion: result?.ingestion_models ?? chat,

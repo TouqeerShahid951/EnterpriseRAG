@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PdfUploadDraft } from "@/types/chat";
-import { mergeDocumentFiles, toUploadRequests, validateDocumentFiles } from "./pdfUploadBatch";
+import { ABBREVIATION_GLOSSARY_DOC_TYPE, mergeDocumentFiles, toUploadRequests, validateDocumentFiles, validateGlossaryPdfFiles } from "./pdfUploadBatch";
 
 describe("PDF upload batches", () => {
   it("creates one backend request per selected document with shared metadata", () => {
@@ -65,6 +65,30 @@ describe("PDF upload batches", () => {
     });
 
     expect(requests[0]?.effective_date).toBeNull();
+  });
+
+  it("creates typed glossary requests for multiple PDFs and rejects non-PDF files", () => {
+    const pdf = new File(["%PDF-1.7"], "glossary.pdf", { type: "application/pdf" });
+    const docx = new File(["docx"], "glossary.docx", {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    const draft: PdfUploadDraft = {
+      files: [pdf, new File(["%PDF-1.7"], "operations.pdf", { type: "application/pdf" })],
+      groupPath: "/legal",
+      sharedGroupPaths: [],
+      clearanceLevel: "NATO_RESTRICTED",
+      effectiveDate: "",
+      expiryDate: "",
+      description: "Authoritative abbreviations",
+      supersedesText: "current-glossary-id",
+    };
+
+    const requests = toUploadRequests(draft, ABBREVIATION_GLOSSARY_DOC_TYPE);
+    expect(requests).toHaveLength(2);
+    expect(requests.every((request) => request.doc_type === ABBREVIATION_GLOSSARY_DOC_TYPE)).toBe(true);
+    expect(requests.every((request) => request.supersedes?.length === 0)).toBe(true);
+    expect(validateGlossaryPdfFiles([docx]).accepted).toEqual([]);
+    expect(validateGlossaryPdfFiles(draft.files).accepted).toEqual(draft.files);
   });
 
   it("deduplicates selections and rejects unsupported or oversized files", () => {

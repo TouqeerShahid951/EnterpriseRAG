@@ -1,7 +1,8 @@
 import type { UploadDocumentRequest } from "@/lib/api/contracts";
+import { DOCUMENT_UPLOAD_MAX_BYTES, isSupportedDocumentFile } from "@/lib/utils/documentUpload";
 import type { PdfUploadDraft } from "@/types/chat";
 
-const DOCUMENT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+export const ABBREVIATION_GLOSSARY_DOC_TYPE = "abbreviation_glossary";
 
 export interface DocumentFileValidation {
   accepted: File[];
@@ -39,7 +40,17 @@ export function validateDocumentFiles(files: File[]): DocumentFileValidation {
   return { accepted, rejectedMessages };
 }
 
-export function toUploadRequests(draft: PdfUploadDraft): UploadDocumentRequest[] {
+export function validateGlossaryPdfFiles(files: File[]): DocumentFileValidation {
+  const validation = validateDocumentFiles(files);
+  const accepted: File[] = [];
+  for (const file of validation.accepted) {
+    if (isPdfFile(file)) accepted.push(file);
+    else validation.rejectedMessages.push(`${file.name} is not a PDF.`);
+  }
+  return { accepted, rejectedMessages: validation.rejectedMessages };
+}
+
+export function toUploadRequests(draft: PdfUploadDraft, docType?: string | null): UploadDocumentRequest[] {
   const supersedes = draft.files.length === 1
     ? draft.supersedesText
         .split(/[,\n]/)
@@ -57,6 +68,7 @@ export function toUploadRequests(draft: PdfUploadDraft): UploadDocumentRequest[]
     effective_date: draft.effectiveDate || null,
     expiry_date: draft.expiryDate || null,
     description: draft.description.trim() || null,
+    ...(docType ? { doc_type: docType } : {}),
     supersedes,
   }));
 }
@@ -68,21 +80,8 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function isSupportedDocumentFile(file: File): boolean {
-  const name = file.name.toLowerCase();
-  return (
-    file.type === "application/pdf"
-    || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    || file.type === "image/jpeg"
-    || file.type === "image/png"
-    || file.type === "application/json"
-    || name.endsWith(".pdf")
-    || name.endsWith(".docx")
-    || name.endsWith(".jpg")
-    || name.endsWith(".jpeg")
-    || name.endsWith(".png")
-    || name.endsWith(".json")
-  );
+function isPdfFile(file: File): boolean {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
 function fileKey(file: File): string {

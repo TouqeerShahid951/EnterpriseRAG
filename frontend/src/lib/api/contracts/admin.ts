@@ -3,7 +3,6 @@ import type {
   ClearanceLevel,
   Group,
   IngestConfig,
-  IngestionQualityPreset,
   RagConfig,
   RagConfigTestResult,
   RagModelDiscoveryResult,
@@ -12,6 +11,8 @@ import type {
   VllmDeploymentConfig,
   VllmDeploymentService,
   VllmServiceDeploymentLimits,
+  EvidenceGatePolicy,
+  FaithfulnessPolicy,
 } from "@/types/api";
 import type { SavedChatSessionPage } from "@/types/chat";
 import { apiClient } from "./apiClient";
@@ -88,6 +89,7 @@ export interface RagConfigRequest {
   chat_model: string;
   embed_model: string;
   reasoning_model?: string | null;
+  sql_generation_model?: string | null;
   routing_model?: string | null;
   faithfulness_model?: string | null;
   ingestion_model?: string | null;
@@ -96,14 +98,18 @@ export interface RagConfigRequest {
   json_num_predict: number;
   retrieval_token_budget: number;
   query_planner_enabled: boolean;
+  evidence_gate_policy: EvidenceGatePolicy;
+  faithfulness_policy: FaithfulnessPolicy;
   reranker_model: string;
   chat_timeout_seconds: number;
+  routing_timeout_seconds: number;
+  reasoning_timeout_seconds: number;
+  faithfulness_timeout_seconds: number;
   embed_timeout_seconds: number;
 }
 
 export interface IngestConfigRequest {
   worker_concurrency: number;
-  quality_preset: IngestionQualityPreset;
   ocr_review_confidence_threshold: number;
   pdf_image_review_threshold: number;
   vision_layout_repair_enabled: boolean;

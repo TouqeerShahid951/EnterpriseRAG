@@ -1,7 +1,9 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ReviewItem } from "@/types/api";
-import { confidencePercent, groupReviewItemsByDocument, reviewRegionFromItem } from "./PrudentiaReviewQueuePage";
+import { ReviewQueueClearState } from "../components/ReviewQueuePrimitives";
+import { confidencePercent, groupReviewItemsByDocument, reviewDocumentCount, reviewRegionFromItem } from "../utils/reviewQueueUtils";
 
 const baseItem: ReviewItem = {
   id: "review-1",
@@ -22,6 +24,15 @@ const baseItem: ReviewItem = {
   status: "pending",
   updated_at: null,
 };
+
+it("keeps clear-state copy specific to each review queue", () => {
+  const props = { onNavigate: () => undefined, onRefresh: () => undefined, refreshing: false };
+  const ocr = renderToStaticMarkup(<ReviewQueueClearState {...props} kind="ocr" />);
+  const images = renderToStaticMarkup(<ReviewQueueClearState {...props} kind="images" />);
+
+  expect(ocr).toContain("No OCR blocks need review");
+  expect(images).toContain("No PDF images need review");
+});
 
 describe("review queue helpers", () => {
   it("converts a review item into a document highlight region", () => {
@@ -50,6 +61,13 @@ describe("review queue helpers", () => {
     expect(groups[0].docTitle).toBe("Scanned policy.pdf");
     expect(groups[0].items.map((item) => item.id)).toEqual(["review-1", "review-2"]);
     expect(groups[1].docTitle).toBe("Scanned manual.pdf");
+  });
+
+  it("counts a document once across OCR and image review", () => {
+    expect(reviewDocumentCount(
+      [baseItem, { ...baseItem, id: "review-2" }],
+      [{ doc_id: "doc-1" }, { doc_id: "doc-2" }],
+    )).toBe(2);
   });
 
   it("normalizes confidence for meter display", () => {

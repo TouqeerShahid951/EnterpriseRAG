@@ -17,10 +17,8 @@ from rag.ingestion.folders.adapters.memory import (
 from rag.ingestion.folders.adapters.sources import LocalFileSystemSource
 from rag.ingestion.folders.config import FolderIngestionConfig
 from rag.ingestion.folders.errors import FolderIngestionRejected
-from rag.ingestion.folders.service import (
-    create_local_folder_schedule,
-    create_snapshot_schedule,
-)
+from rag.ingestion.folders.snapshot_schedules import create_snapshot_schedule
+from rag.ingestion.folders.source_schedules import create_local_folder_schedule
 
 
 PDF_CONTENT = b"%PDF-1.7\nfolder schedule service\n%%EOF"

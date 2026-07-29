@@ -18,6 +18,7 @@ class _Settings:
     rag_http_timeout_seconds = 45
     rag_dense_cache_dir = "/models/fastembed"
     rag_reranker_cache_dir = "/models/fastembed"
+    rag_reranker_device = "auto"
 
 
 def test_fastembed_embedding_provider_uses_local_model_catalog(monkeypatch) -> None:
@@ -71,6 +72,7 @@ def test_fastembed_embedding_provider_uses_local_model_catalog(monkeypatch) -> N
             {
                 "model_name": "jinaai/jina-reranker-v1-turbo-en",
                 "cache_dir": "/models/fastembed",
+                "device": "auto",
             },
         )
     ]

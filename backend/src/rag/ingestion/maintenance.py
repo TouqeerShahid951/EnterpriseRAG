@@ -20,8 +20,8 @@ from rag.shared.persistence import PostgresConnectionMixin
 from .adapters.http import ServiceRequestError
 from .delivery.service import IngestDeliveryService, dispatch_pending_deliveries
 from .indexing.qdrant import QdrantClient
-from .publication.dependencies import publication_service_for
-from .publication.service import IndexPublicationService
+from .publication.dependencies import publication_repository_for
+from .publication.repository import IndexPublicationRepository
 from .queue import IngestQueue, get_ingest_queue
 from .recovery import (
     IngestRecoveryError,
@@ -170,18 +170,18 @@ def _retire_failed_generation(document_repo: DocumentRepository, job_id: str) ->
     if settings.document_repository == "postgres" and isinstance(
         document_repo, PostgresConnectionMixin
     ):
-        publication_service_for(settings).cancel_building(job_id=job_id)
+        publication_repository_for(settings).cancel_building(job_id=job_id)
 
 
 def retire_index_generations(
     *,
-    publication: IndexPublicationService | None = None,
+    publication: IndexPublicationRepository | None = None,
     qdrant: QdrantClient | None = None,
 ) -> int:
     """Delete index generations that have already been replaced in PostgreSQL."""
     if publication is None and settings.document_repository != "postgres":
         return 0
-    publication = publication or publication_service_for(settings)
+    publication = publication or publication_repository_for(settings)
     generations = publication.list_retiring(limit=20)
     if not generations:
         return 0

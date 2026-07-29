@@ -78,7 +78,6 @@ class IngestRuntimeConfig:
     worker_concurrency: int
     ocr_review_confidence_threshold: float
     pdf_image_review_threshold: int = 64
-    quality_preset: str = "fast"
     vision_layout_repair_enabled: bool = False
     graph_enrichment_enabled: bool = False
     source: str = "workspace"
@@ -362,6 +361,28 @@ class BackendInternalClient:
             timeout_seconds=self.timeout_seconds,
         )
 
+    def replace_abbreviation_glossary(
+        self,
+        *,
+        document_id: str,
+        entries: list[tuple[str, str]],
+    ) -> None:
+        request_json(
+            self.base_url,
+            "/internal/abbreviation-glossaries/import",
+            service="backend",
+            method="POST",
+            payload={
+                "document_id": document_id,
+                "entries": [
+                    {"abbreviation": abbreviation, "expansion": expansion}
+                    for abbreviation, expansion in entries
+                ],
+            },
+            headers={"X-Service-Token": self.service_token},
+            timeout_seconds=self.timeout_seconds,
+        )
+
     def replace_document_image_assets(self, *, doc_id: str, job_id: str, assets: list[dict[str, Any]]) -> None:
         request_json(
             self.base_url,
@@ -387,6 +408,7 @@ class BackendInternalClient:
         claims: list[dict[str, Any]],
         supersedes: list[str],
         warnings: list[str],
+        abbreviation_entries: list[dict[str, Any]] | None = None,
     ) -> None:
         self._index_generation_transition(
             job_id=job_id,
@@ -403,6 +425,7 @@ class BackendInternalClient:
                 "claims": claims,
                 "supersedes": supersedes,
                 "warnings": warnings,
+                "abbreviation_entries": abbreviation_entries or [],
             },
         )
 
@@ -561,7 +584,6 @@ class BackendInternalClient:
         )
         return IngestRuntimeConfig(
             worker_concurrency=int(payload.get("worker_concurrency", 1)),
-            quality_preset=str(payload.get("quality_preset") or "fast"),
             ocr_review_confidence_threshold=float(payload["ocr_review_confidence_threshold"]),
             pdf_image_review_threshold=int(payload.get("pdf_image_review_threshold", 64)),
             vision_layout_repair_enabled=bool(payload.get("vision_layout_repair_enabled", False)),

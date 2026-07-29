@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from rag.graphrag.indexing import GraphRAGIndexingService, GraphRAGRuntimeConfig, config_from_mapping
 from rag.graphrag.models import ChunkRecord, GraphCommunity, SourceRef
+from rag.graphrag.qdrant import QdrantGraphRAGClient
 
 
 def _config(
@@ -9,6 +10,7 @@ def _config(
     summarize_after_document: bool = True,
     max_chunks_per_doc: int = 0,
     min_chunk_chars: int = 80,
+    max_llm_community_summaries: int = 64,
 ) -> GraphRAGRuntimeConfig:
     return GraphRAGRuntimeConfig(
         enabled=True,
@@ -24,6 +26,7 @@ def _config(
         summarize_after_document=summarize_after_document,
         max_chunks_per_doc=max_chunks_per_doc,
         min_chunk_chars=min_chunk_chars,
+        max_llm_community_summaries=max_llm_community_summaries,
     )
 
 
@@ -59,7 +62,13 @@ class FakeStore:
 
 
 class FakeQdrant:
-    def retrieve_document_chunks(self, doc_id: str):
+    def retrieve_document_chunks(
+        self,
+        doc_id: str,
+        *,
+        index_generation_id: str | None = None,
+    ):
+        self.index_generation_id = index_generation_id
         return [
             ChunkRecord(
                 doc_id=doc_id,
@@ -86,7 +95,12 @@ class FakeQdrant:
 
 
 class FakeCandidateQdrant:
-    def retrieve_document_chunks(self, doc_id: str):
+    def retrieve_document_chunks(
+        self,
+        doc_id: str,
+        *,
+        index_generation_id: str | None = None,
+    ):
         return [
             ChunkRecord(
                 doc_id=doc_id,
@@ -170,6 +184,36 @@ class FakeRedis:
         return True
 
 
+class PagingQdrant(QdrantGraphRAGClient):
+    def __init__(self) -> None:
+        super().__init__(
+            base_url="http://qdrant:6333",
+            documents_collection="documents",
+            community_collection="communities",
+            timeout_seconds=1,
+        )
+        self.payloads: list[dict[str, object]] = []
+
+    def _request(self, method, path, payload):
+        self.payloads.append(payload)
+        chunk_number = len(self.payloads)
+        return {
+            "result": {
+                "points": [
+                    {
+                        "payload": {
+                            "doc_id": "doc-1",
+                            "chunk_id": f"chunk-{chunk_number}",
+                            "text": "Graph evidence.",
+                            "is_current": True,
+                        }
+                    }
+                ],
+                "next_page_offset": "page-2" if chunk_number == 1 else None,
+            }
+        }
+
+
 def test_config_from_mapping_reads_graphrag_concurrency() -> None:
     config = config_from_mapping(
         SimpleNamespace(
@@ -183,6 +227,7 @@ def test_config_from_mapping_reads_graphrag_concurrency() -> None:
             http_timeout_seconds=90,
             graphrag_extraction_concurrency=4,
             graphrag_summary_concurrency=3,
+            graphrag_max_llm_community_summaries=5,
             graphrag_summarize_after_document=False,
             graphrag_max_chunks_per_doc=123,
             graphrag_min_chunk_chars=40,
@@ -193,11 +238,28 @@ def test_config_from_mapping_reads_graphrag_concurrency() -> None:
 
     assert config.extraction_concurrency == 4
     assert config.summary_concurrency == 3
+    assert config.max_llm_community_summaries == 5
     assert config.summarize_after_document is False
     assert config.max_chunks_per_doc == 123
     assert config.min_chunk_chars == 40
     assert config.redis_url == "redis://redis:6379/0"
     assert config.extraction_checkpoint_ttl_seconds == 120
+
+
+def test_community_summaries_bound_llm_fanout_without_dropping_communities() -> None:
+    inference = CountingInference()
+    service = GraphRAGIndexingService(
+        config=_config(max_llm_community_summaries=1),
+        inference=inference,
+        store=FakeStore(),  # type: ignore[arg-type]
+        qdrant=FakeQdrant(),  # type: ignore[arg-type]
+    )
+    communities = FakeStore().communities_for_partition("/ops|clearance:1") * 3
+
+    summaries = service._summarize_communities(communities)
+
+    assert len(summaries) == 3
+    assert inference.generate_calls == 1
 
 
 def test_index_document_returns_phase_timings() -> None:
@@ -222,6 +284,38 @@ def test_index_document_returns_phase_timings() -> None:
         "replace_qdrant_summaries",
     }.issubset(result.phase_timings_ms)
     assert all(isinstance(value, int) and value >= 0 for value in result.phase_timings_ms.values())
+
+
+def test_index_document_uses_requested_generation() -> None:
+    qdrant = FakeQdrant()
+
+    GraphRAGIndexingService(
+        config=_config(summarize_after_document=False),
+        inference=FakeInference(),
+        store=FakeStore(),  # type: ignore[arg-type]
+        qdrant=qdrant,  # type: ignore[arg-type]
+    ).index_document("doc-1", index_generation_id="generation-1")
+
+    assert qdrant.index_generation_id == "generation-1"
+
+
+def test_qdrant_document_chunks_are_generation_filtered_and_paginated() -> None:
+    qdrant = PagingQdrant()
+
+    chunks = qdrant.retrieve_document_chunks(
+        "doc-1",
+        index_generation_id="generation-1",
+    )
+
+    assert [chunk.chunk_id for chunk in chunks] == ["chunk-1", "chunk-2"]
+    assert qdrant.payloads[1]["offset"] == "page-2"
+    conditions = qdrant.payloads[0]["filter"]["must"]  # type: ignore[index]
+    assert {condition["key"] for condition in conditions} == {
+        "doc_id",
+        "is_current",
+        "index_generation_id",
+        "generation_published",
+    }
 
 
 def test_index_document_can_defer_partition_summary_rebuild() -> None:

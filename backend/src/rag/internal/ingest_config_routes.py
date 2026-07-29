@@ -7,10 +7,9 @@ from fastapi import APIRouter, Depends
 from ..ingestion.configuration import IngestConfigRepository
 from ..ingestion.configuration.dependencies import effective_ingest_config, get_ingest_config_repository
 from rag.ingestion.configuration.schemas import IngestRuntimeConfigResponse
-from rag.internal.schemas import ServiceTokenContext
 from .service_token_auth import require_service_token
 
-router = APIRouter(tags=["internal-ingest-config"])
+router = APIRouter(tags=["internal-ingest-config"], dependencies=[Depends(require_service_token)])
 
 
 @router.get(
@@ -20,13 +19,10 @@ router = APIRouter(tags=["internal-ingest-config"])
 )
 async def get_internal_ingest_config(
     repo: IngestConfigRepository = Depends(get_ingest_config_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> IngestRuntimeConfigResponse:
-    _ = service
     config = effective_ingest_config(repo=repo)
     return IngestRuntimeConfigResponse(
         worker_concurrency=config.worker_concurrency,
-        quality_preset=config.quality_preset,
         ocr_review_confidence_threshold=config.ocr_review_confidence_threshold,
         pdf_image_review_threshold=config.pdf_image_review_threshold,
         vision_layout_repair_enabled=config.vision_layout_repair_enabled,

@@ -40,6 +40,7 @@ def _record_from_request(payload: RagConfigRequest) -> RagConfigRecord:
         )
     faithfulness_model = payload.faithfulness_model.strip() if payload.faithfulness_model else None
     reasoning_model = payload.reasoning_model.strip() if payload.reasoning_model else None
+    sql_generation_model = payload.sql_generation_model.strip() if payload.sql_generation_model else None
     routing_model = payload.routing_model.strip() if payload.routing_model else None
     ingestion_model = payload.ingestion_model.strip() if payload.ingestion_model else None
     vision_model = payload.vision_model.strip() if payload.vision_model else None
@@ -113,15 +114,21 @@ def _record_from_request(payload: RagConfigRequest) -> RagConfigRecord:
         embed_model=embed_model,
         faithfulness_model=faithfulness_model or None,
         chat_timeout_seconds=payload.chat_timeout_seconds,
+        routing_timeout_seconds=payload.routing_timeout_seconds,
+        reasoning_timeout_seconds=payload.reasoning_timeout_seconds,
+        faithfulness_timeout_seconds=payload.faithfulness_timeout_seconds,
         embed_timeout_seconds=payload.embed_timeout_seconds,
         thinking_enabled=payload.thinking_enabled,
         reasoning_model=reasoning_model or routing_model or None,
+        sql_generation_model=sql_generation_model,
         routing_model=routing_model or None,
         ingestion_model=ingestion_model or None,
         vision_model=vision_model or None,
         json_num_predict=payload.json_num_predict,
         retrieval_token_budget=payload.retrieval_token_budget,
         query_planner_enabled=payload.query_planner_enabled,
+        evidence_gate_policy=payload.evidence_gate_policy,
+        faithfulness_policy=payload.faithfulness_policy,
         reranker_model=reranker_model,
     )
 
@@ -211,6 +218,7 @@ def _record_from_discovery_request(payload: RagModelDiscoveryRequest) -> RagConf
         embed_model=DEFAULT_FASTEMBED_DENSE_MODEL if embedding_provider == "fastembed" else "",
         faithfulness_model=None,
         chat_timeout_seconds=payload.timeout_seconds,
+        routing_timeout_seconds=settings.rag_routing_timeout_seconds,
         embed_timeout_seconds=payload.timeout_seconds,
         thinking_enabled=False,
         reasoning_model=None,
@@ -219,6 +227,8 @@ def _record_from_discovery_request(payload: RagModelDiscoveryRequest) -> RagConf
         vision_model=None,
         json_num_predict=settings.rag_json_num_predict,
         retrieval_token_budget=settings.rag_retrieval_token_budget,
+        evidence_gate_policy=settings.rag_evidence_gate_policy,
+        faithfulness_policy=settings.rag_faithfulness_policy,
     )
 
 

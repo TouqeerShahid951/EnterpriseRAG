@@ -1,6 +1,15 @@
 from datetime import datetime
 from pydantic import Field
 
+from rag.shared.contracts.rag_defaults import (
+    DEFAULT_EVIDENCE_GATE_POLICY,
+    DEFAULT_FAITHFULNESS_POLICY,
+    DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS,
+    DEFAULT_REASONING_TIMEOUT_SECONDS,
+    DEFAULT_ROUTING_TIMEOUT_SECONDS,
+    EvidenceGatePolicy,
+    FaithfulnessPolicy,
+)
 from rag.shared.contracts.reranker_models import DEFAULT_RERANKER_MODEL
 from rag.shared.contracts.http import ContractModel
 
@@ -30,6 +39,7 @@ class RagConfigRequest(ContractModel):
     chat_model: str = Field(..., min_length=1)
     embed_model: str = Field(..., min_length=1)
     reasoning_model: str | None = None
+    sql_generation_model: str | None = None
     routing_model: str | None = None
     faithfulness_model: str | None = None
     ingestion_model: str | None = None
@@ -38,8 +48,19 @@ class RagConfigRequest(ContractModel):
     json_num_predict: int = Field(default=4096, ge=256, le=32768)
     retrieval_token_budget: int = Field(default=12000, ge=1000, le=200000)
     query_planner_enabled: bool = True
+    evidence_gate_policy: EvidenceGatePolicy = DEFAULT_EVIDENCE_GATE_POLICY
+    faithfulness_policy: FaithfulnessPolicy = DEFAULT_FAITHFULNESS_POLICY
     reranker_model: str = Field(default=DEFAULT_RERANKER_MODEL, min_length=1)
     chat_timeout_seconds: float = Field(default=180.0, gt=0)
+    routing_timeout_seconds: float = Field(
+        default=DEFAULT_ROUTING_TIMEOUT_SECONDS, ge=1.0, le=30.0
+    )
+    reasoning_timeout_seconds: float = Field(
+        default=DEFAULT_REASONING_TIMEOUT_SECONDS, ge=1.0, le=300.0
+    )
+    faithfulness_timeout_seconds: float = Field(
+        default=DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS, ge=1.0, le=300.0
+    )
     embed_timeout_seconds: float = Field(default=45.0, gt=0)
 
 
@@ -119,6 +140,7 @@ class RagConfigResponse(ContractModel):
     chat_model: str
     embed_model: str
     reasoning_model: str | None = None
+    sql_generation_model: str | None = None
     routing_model: str | None = None
     faithfulness_model: str | None = None
     ingestion_model: str | None = None
@@ -127,8 +149,19 @@ class RagConfigResponse(ContractModel):
     json_num_predict: int
     retrieval_token_budget: int
     query_planner_enabled: bool
+    evidence_gate_policy: EvidenceGatePolicy = DEFAULT_EVIDENCE_GATE_POLICY
+    faithfulness_policy: FaithfulnessPolicy = DEFAULT_FAITHFULNESS_POLICY
     reranker_model: str
     chat_timeout_seconds: float
+    routing_timeout_seconds: float = Field(
+        default=DEFAULT_ROUTING_TIMEOUT_SECONDS, ge=1.0, le=30.0
+    )
+    reasoning_timeout_seconds: float = Field(
+        default=DEFAULT_REASONING_TIMEOUT_SECONDS, ge=1.0, le=300.0
+    )
+    faithfulness_timeout_seconds: float = Field(
+        default=DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS, ge=1.0, le=300.0
+    )
     embed_timeout_seconds: float
     health: RagConfigHealth
 
@@ -160,6 +193,8 @@ class RagConfigTestResponse(ContractModel):
     json_num_predict: int
     retrieval_token_budget: int
     query_planner_enabled: bool
+    evidence_gate_policy: EvidenceGatePolicy = DEFAULT_EVIDENCE_GATE_POLICY
+    faithfulness_policy: FaithfulnessPolicy = DEFAULT_FAITHFULNESS_POLICY
     reranker_model: str
     health: RagConfigHealth
 

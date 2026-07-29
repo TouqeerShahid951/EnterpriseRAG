@@ -36,6 +36,7 @@ class InferenceClient(Protocol):
         *,
         prompt: str,
         model: str | None,
+        json_schema: dict[str, object] | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str: ...
 
@@ -78,6 +79,19 @@ class InferenceClient(Protocol):
         model: str | None,
         system: str,
         max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+        json_schema: dict[str, object] | None = None,
+        cancellation_token: QueryCancellationToken | None = None,
+    ) -> str: ...
+
+    def generate_routing_json(
+        self,
+        *,
+        prompt: str,
+        model: str | None,
+        system: str,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str: ...
 
@@ -151,11 +165,19 @@ class RoleRoutedInferenceClient:
         *,
         prompt: str,
         model: str | None,
+        json_schema: dict[str, object] | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
+        if json_schema is None:
+            return self.faithfulness_client.judge_faithfulness(
+                prompt=prompt,
+                model=model,
+                cancellation_token=cancellation_token,
+            )
         return self.faithfulness_client.judge_faithfulness(
             prompt=prompt,
             model=model,
+            json_schema=json_schema,
             cancellation_token=cancellation_token,
         )
 
@@ -206,13 +228,70 @@ class RoleRoutedInferenceClient:
         model: str | None,
         system: str,
         max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+        json_schema: dict[str, object] | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
+        if json_schema is not None:
+            if timeout_seconds is None:
+                return self.reasoning_client.generate_json(
+                    prompt=prompt,
+                    model=model,
+                    system=system,
+                    max_tokens=max_tokens,
+                    json_schema=json_schema,
+                    cancellation_token=cancellation_token,
+                )
+            return self.reasoning_client.generate_json(
+                prompt=prompt,
+                model=model,
+                system=system,
+                max_tokens=max_tokens,
+                timeout_seconds=timeout_seconds,
+                json_schema=json_schema,
+                cancellation_token=cancellation_token,
+            )
+        if timeout_seconds is None:
+            return self.reasoning_client.generate_json(
+                prompt=prompt,
+                model=model,
+                system=system,
+                max_tokens=max_tokens,
+                cancellation_token=cancellation_token,
+            )
         return self.reasoning_client.generate_json(
             prompt=prompt,
             model=model,
             system=system,
             max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+            cancellation_token=cancellation_token,
+        )
+
+    def generate_routing_json(
+        self,
+        *,
+        prompt: str,
+        model: str | None,
+        system: str,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+        cancellation_token: QueryCancellationToken | None = None,
+    ) -> str:
+        if timeout_seconds is None:
+            return self.routing_client.generate_json(
+                prompt=prompt,
+                model=model,
+                system=system,
+                max_tokens=max_tokens,
+                cancellation_token=cancellation_token,
+            )
+        return self.routing_client.generate_json(
+            prompt=prompt,
+            model=model,
+            system=system,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
             cancellation_token=cancellation_token,
         )
 
@@ -240,6 +319,11 @@ def _build_language_client_for_role(config: RagConfigRecord, role: str, *, setti
     provider = config.provider if role == "chat" else config.role_provider(role)
     base_url = config.base_url if role == "chat" else config._role_base_url(role)
     model = _role_model(config, role)
+    role_timeout_seconds = {
+        "reasoning": config.reasoning_timeout_seconds,
+        "routing": config.routing_timeout_seconds,
+        "faithfulness": config.faithfulness_timeout_seconds,
+    }.get(role, config.chat_timeout_seconds)
     return _build_provider_client(
         provider=provider,
         base_url=base_url,
@@ -247,6 +331,7 @@ def _build_language_client_for_role(config: RagConfigRecord, role: str, *, setti
         embed_model=config.embed_model,
         config=config,
         settings=settings,
+        chat_timeout_seconds=role_timeout_seconds,
     )
 
 
@@ -258,6 +343,7 @@ def _build_provider_client(
     embed_model: str,
     config: RagConfigRecord,
     settings: Settings,
+    chat_timeout_seconds: float | None = None,
 ) -> InferenceClient:
     if provider == "vllm":
         from .openai_compatible import OpenAICompatibleClient
@@ -272,7 +358,7 @@ def _build_provider_client(
             chat_model=chat_model,
             embed_model=embed_model,
             timeout_seconds=settings.rag_http_timeout_seconds,
-            chat_timeout_seconds=config.chat_timeout_seconds,
+            chat_timeout_seconds=chat_timeout_seconds or config.chat_timeout_seconds,
             embed_timeout_seconds=config.embed_timeout_seconds,
             json_num_predict=config.json_num_predict,
         )
@@ -284,7 +370,7 @@ def _build_provider_client(
         chat_model=chat_model,
         embed_model=embed_model,
         timeout_seconds=settings.rag_http_timeout_seconds,
-        chat_timeout_seconds=config.chat_timeout_seconds,
+        chat_timeout_seconds=chat_timeout_seconds or config.chat_timeout_seconds,
         embed_timeout_seconds=config.embed_timeout_seconds,
         thinking_enabled=config.thinking_enabled,
         json_num_predict=config.json_num_predict,

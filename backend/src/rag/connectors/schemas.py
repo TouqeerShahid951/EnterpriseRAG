@@ -13,15 +13,6 @@ from rag.shared.contracts.http import ContractModel
 ConnectorType = Literal[
     "sql_server",
     "postgres",
-    "mysql",
-    "mariadb",
-    "mongodb",
-    "oracle",
-    "opensearch",
-    "elasticsearch",
-    "redis",
-    "cassandra",
-    "fake",
 ]
 
 

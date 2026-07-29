@@ -92,6 +92,7 @@ def test_query_nodes_capture_candidate_fate_across_retrieval_waves() -> None:
         original_query="alpha",
         resolved_query="alpha",
         intent="aggregation",
+        capabilities=("general_search", "structured_query"),
         public_intent="aggregation",
         use_structured_query=True,
         search_mode="structured_first",
@@ -122,7 +123,7 @@ def test_query_nodes_capture_candidate_fate_across_retrieval_waves() -> None:
     assert len(latest["retrieved"].candidates) == 3
     assert len(latest["rerank_input"].candidates) == 2
     assert len(latest["reranked"].candidates) == 1
-    assert len(latest["post_policy"].candidates) == 3
+    assert len(latest["post_policy"].candidates) == 1
     assert len(latest["final_evidence"].candidates) == 1
     assert "text" not in latest["retrieved"].candidates[0].to_row()
 
@@ -223,6 +224,9 @@ def test_samsung_style_exhaustive_hits_reach_final_evidence() -> None:
         original_query=ctx["request"].query,
         resolved_query=ctx["request"].query,
         intent="aggregation",
+        capabilities=("general_search", "structured_query", "document_search"),
+        scope="corpus",
+        coverage="exhaustive",
         public_intent="aggregation",
         use_structured_query=True,
         search_mode="structured_first",
@@ -304,6 +308,9 @@ def test_exhaustive_budget_loss_is_reported_as_partial() -> None:
         original_query=ctx["request"].query,
         resolved_query=ctx["request"].query,
         intent="aggregation",
+        capabilities=("general_search", "document_search"),
+        scope="document",
+        coverage="exhaustive",
         public_intent="aggregation",
         chunk_granularity="section",
         top_k=2,

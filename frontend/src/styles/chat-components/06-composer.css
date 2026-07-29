@@ -80,6 +80,15 @@
   margin-bottom: 0.55rem;
 }
 
+.rag-composer-hint {
+  margin-top: 0.5rem;
+  color: var(--color-secondary);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.45;
+  text-align: center;
+}
+
 .rag-composer-source-segments {
   display: inline-flex;
   min-width: 0;
@@ -246,4 +255,3 @@
   flex: 0 0 auto;
   color: var(--color-warning-amber);
 }
-

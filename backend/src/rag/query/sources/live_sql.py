@@ -23,7 +23,7 @@ from rag.query.cancellation import QueryCancelled, cancellation_token_from_conte
 from rag.query.qdrant import SearchHit
 from rag.query.routing.routing_models import RoutePlan
 from rag.query.sources.source_resolution import selected_source_target
-from rag.query.state import QueryContext, scoped_user_context
+from rag.query.state import QueryContext, scoped_user_context, timed_retrieval_phase
 
 _ACTIVE_CATALOG_STATUSES = {"approved"}
 _SQL_CONNECTOR_TYPES = {"postgres", "sql_server", "fake"}
@@ -68,6 +68,7 @@ def retrieve_live_sql_hits(
     config: Settings,
     llm: object,
     reasoning_model: str | None = None,
+    sql_generation_model: str | None = None,
     schedule_repo: FolderScheduleRepository | None = None,
     connector_profile_repo: ConnectorProfileRepository | None = None,
     connector_registry: ConnectorRegistry | None = None,
@@ -78,7 +79,7 @@ def retrieve_live_sql_hits(
         return LiveSqlRetrievalResult([], "skipped", "document_scope")
     plan = ctx.get("route_plan")
     if not _should_run_live_sql(plan, ctx.get("source_decision")):
-        return LiveSqlRetrievalResult([], "skipped", "non_structured_route")
+        return LiveSqlRetrievalResult([], "skipped", "live_sql_not_selected")
 
     _ = schedule_repo
     connector_profile_repo = connector_profile_repo or get_connector_profile_repository()
@@ -89,7 +90,7 @@ def retrieve_live_sql_hits(
     failures: list[str] = []
     attempted_scopes = 0
     repair_count = 0
-    max_scopes = max(1, int(getattr(config, "connector_live_sql_max_scopes", getattr(config, "connector_live_sql_max_schedules", 5))))
+    max_scopes = max(1, int(getattr(config, "connector_live_sql_max_scopes", 5)))
     max_repair_attempts = _max_repair_attempts(config)
     result_verifier_enabled = bool(getattr(config, "connector_live_sql_result_verifier_enabled", True))
     selected_source = selected_source_target(ctx.get("source_decision"))  # type: ignore[arg-type]
@@ -138,7 +139,7 @@ def retrieve_live_sql_hits(
                     catalog=catalog,
                     profile=profile,
                     connector_type=connector_type,
-                    reasoning_model=reasoning_model,
+                    sql_generation_model=sql_generation_model or reasoning_model,
                     row_limit=row_limit,
                     cancellation_token=token,
                     repair_feedback=feedback,
@@ -264,10 +265,15 @@ def live_catalog_query_hits(
 
 
 def _should_run_live_sql(plan: RoutePlan | None, source_decision: object | None = None) -> bool:
-    if plan and (plan.use_structured_query or plan.search_mode == "structured_first"):
-        return True
     mode = str(getattr(source_decision, "resolved_mode", "") or "")
-    return mode in {"db_only", "db_first", "hybrid"}
+    if mode == "corpus_only":
+        return False
+    if bool(getattr(source_decision, "explicit", False)) and mode in {
+        "db_only",
+        "hybrid",
+    }:
+        return True
+    return plan is not None and "live_sql" in plan.capabilities
 
 
 def _eligible_catalogs(
@@ -335,11 +341,15 @@ def _run_with_sql_repair(
         generated_sql: str | None = None
         live_query: str | None = None
         try:
-            generated_sql = generate_sql(feedback)
-            live_query = validate_sql(generated_sql)
-            result = execute_sql(live_query)
+            with timed_retrieval_phase(ctx, "sql_generation"):
+                generated_sql = generate_sql(feedback)
+            with timed_retrieval_phase(ctx, "sql_verification"):
+                live_query = validate_sql(generated_sql)
+            with timed_retrieval_phase(ctx, "sql_execution"):
+                result = execute_sql(live_query)
             if verify_result is not None:
-                verification = verify_result(live_query, result)
+                with timed_retrieval_phase(ctx, "sql_verification"):
+                    verification = verify_result(live_query, result)
                 if verification is not None and not verification.accepted:
                     raise _LiveSqlResultVerificationError(_verification_error_message(verification))
             _log_live_sql_attempt(
@@ -399,7 +409,7 @@ def _generate_catalog_live_sql(
     catalog: ConnectorSchemaCatalogRecord,
     profile: ConnectorProfileRecord,
     connector_type: str,
-    reasoning_model: str | None,
+    sql_generation_model: str | None,
     row_limit: int,
     cancellation_token: object | None,
     repair_feedback: _RepairFeedback | None = None,
@@ -416,7 +426,7 @@ def _generate_catalog_live_sql(
             row_limit=row_limit,
             repair_feedback=repair_feedback,
         ),
-        model=reasoning_model,
+        model=sql_generation_model,
         system="You generate safe read-only SQL for approved enterprise connector database scopes.",
         cancellation_token=cancellation_token,
     )

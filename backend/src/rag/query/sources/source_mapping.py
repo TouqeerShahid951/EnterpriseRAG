@@ -55,6 +55,10 @@ def source_from_hit(hit: SearchHit, *, query: str = "") -> SourceAnchor:
     page = optional_int(payload.get("page"))
     page_start = optional_int(payload.get("page_start")) or page
     page_end = optional_int(payload.get("page_end")) or page_start
+    structured_kind = str(payload.get("structured_kind", ""))
+    is_live_database = str(payload.get("source_type", "")).startswith(
+        "connector_live_sql"
+    )
     return SourceAnchor(
         doc_id=str(payload.get("doc_id", hit.point_id)),
         doc_title=str(payload.get("doc_title", "Untitled")),
@@ -69,7 +73,8 @@ def source_from_hit(hit: SearchHit, *, query: str = "") -> SourceAnchor:
         highlight_ranges=build_highlights(query, excerpt) if query else [],
         source_regions=source_regions_from_payload(payload),
         attribution_kind="table_row"
-        if str(payload.get("structured_kind", "")) == "table_row"
+        if structured_kind == "table_row"
+        or (is_live_database and structured_kind == "kv_record")
         else "text",
         attribution_table_title=optional_str(payload.get("table_title")) or "",
         attribution_fields=structured_fields_from_payload(payload),

@@ -8,12 +8,12 @@ from rag.documents.internal_schemas import (
     DocumentMetadataSaveRequest,
     InternalSupersedeRequest,
 )
-from rag.internal.schemas import InternalMutationResponse, ServiceTokenContext
+from rag.internal.schemas import InternalMutationResponse
 from rag.documents.dependencies import get_document_image_asset_storage
 from rag.documents.image_asset_storage import DocumentImageAssetStorage
 from .service_token_auth import require_service_token
 
-router = APIRouter(tags=["internal-docs"])
+router = APIRouter(tags=["internal-docs"], dependencies=[Depends(require_service_token)])
 
 
 @router.post(
@@ -25,9 +25,7 @@ async def supersede_documents_internal(
     new_doc_id: str,
     payload: InternalSupersedeRequest,
     document_repo: DocumentRepository = Depends(get_document_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalMutationResponse:
-    _ = service
     try:
         updated = document_repo.mark_superseded(new_doc_id=new_doc_id, old_doc_ids=payload.supersedes)
     except ValueError as exc:
@@ -55,9 +53,7 @@ async def save_document_metadata_internal(
     doc_id: str,
     payload: DocumentMetadataSaveRequest,
     document_repo: DocumentRepository = Depends(get_document_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> InternalMutationResponse:
-    _ = service
     metadata_flags = _metadata_flags_with_v2(payload)
     document = document_repo.save_document_metadata(
         document_id=doc_id,
@@ -132,9 +128,7 @@ async def replace_document_image_assets_internal(
     payload: DocumentImageAssetsReplaceRequest,
     document_repo: DocumentRepository = Depends(get_document_repository),
     image_storage: DocumentImageAssetStorage = Depends(get_document_image_asset_storage),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> DocumentImageAssetsReplaceResponse:
-    _ = service
     previous_assets = document_repo.list_document_image_assets(doc_id)
     try:
         saved = document_repo.replace_document_image_assets(

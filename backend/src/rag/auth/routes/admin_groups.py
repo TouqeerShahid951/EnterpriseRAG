@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import JSONResponse
 
-from rag.auth.dependencies import require_admin_user, require_csrf, require_current_user
+from rag.auth.dependencies import require_csrf, require_current_user
 from rag.auth.permissions import can_manage_spaces, can_manage_users
 from rag.auth.refresh_sessions import RefreshSessionStore, get_refresh_session_store
 from rag.auth.identity_models import IdentityRepository, UserRecord
 from rag.auth.identity_repository import get_identity_repository
 from rag.auth.schemas.admin import Group, GroupCreateRequest, GroupDeleteRequest, GroupListResponse, GroupUpdateRequest
-from rag.shared.contracts.http import ErrorResponse, StubResponse
+from rag.shared.contracts.http import ErrorResponse
 from .admin_common import group_to_schema, require_can_manage_group, visible_groups_for_user
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -124,19 +123,3 @@ def delete_group(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "group_not_found", "message": "Group was not found."})
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@router.post(
-    "/groups/import",
-    responses={status.HTTP_501_NOT_IMPLEMENTED: {"model": StubResponse}},
-    summary="Import a group tree after preview",
-)
-def import_groups(payload: dict, user: UserRecord = Depends(require_admin_user)):
-    _ = user
-    _ = payload
-    return JSONResponse(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        content=StubResponse(
-            detail="Group import is reserved for Milestone 2."
-        ).model_dump(),
-    )

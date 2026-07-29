@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 
+import { RuntimeAdvancedSettings } from "../components/RuntimeSettingsFields";
+import { InferenceRoleMatrix } from "../components/InferenceRoleMatrix";
+import { modelOptionsFromDiscovery } from "../models/ragModelCatalog";
 import {
   pdfImageReviewThresholdLabel,
-  requestFromVllmForm,
   thresholdFromPercent,
   thresholdPercentFromConfig,
-} from "./PrudentiaSettingsPage";
+} from "../models/settingsLabels";
+import { requestFromVllmForm } from "../models/vllmDeploymentForm";
+import { ollamaForm } from "./settingsTestFixtures";
 
 describe("inference settings helpers", () => {
   it("converts OCR review threshold between config fraction and UI percent", () => {
@@ -17,6 +22,66 @@ describe("inference settings helpers", () => {
   it("labels the PDF image review threshold, including disabled review", () => {
     expect(pdfImageReviewThresholdLabel(64)).toBe("Above 64 images");
     expect(pdfImageReviewThresholdLabel(0)).toBe("Off");
+  });
+
+  it("renders an accessible adaptive faithfulness policy", () => {
+    const markup = renderToStaticMarkup(
+      <RuntimeAdvancedSettings form={ollamaForm} onChange={() => undefined} />,
+    );
+
+    expect(markup).toContain("Faithfulness checker");
+    expect(markup).toContain('aria-label="Faithfulness checker policy"');
+    expect(markup).toContain("local reranker");
+  });
+
+  it("renders an accessible adaptive Evidence Gate policy", () => {
+    const markup = renderToStaticMarkup(
+      <RuntimeAdvancedSettings form={ollamaForm} onChange={() => undefined} />,
+    );
+
+    expect(markup).toContain("Evidence Gate");
+    expect(markup).toContain('aria-label="Evidence Gate policy"');
+    expect(markup).toContain("low-risk factual lookups");
+  });
+
+  it("renders dedicated language-role timeout controls", () => {
+    const markup = renderToStaticMarkup(
+      <RuntimeAdvancedSettings form={ollamaForm} onChange={() => undefined} />,
+    );
+
+    expect(markup).toContain("Router timeout");
+    expect(markup).toContain("Reasoning timeout");
+    expect(markup).toContain("Faithfulness timeout");
+    expect(markup).toContain('max="30"');
+    expect(markup).toContain('max="300"');
+  });
+
+  it("renders an accessible SQL generation model choice", () => {
+    const modelOptions = modelOptionsFromDiscovery({
+      provider: "ollama",
+      embedding_provider: "ollama",
+      base_url: "http://ollama:11434",
+      embedding_base_url: "http://ollama:11434",
+      chat_models: ["answer-model", "sql-model"],
+      embedding_models: ["embedding-model"],
+    });
+    const markup = renderToStaticMarkup(
+      <InferenceRoleMatrix
+        canFetchModels
+        form={ollamaForm}
+        modelOptions={modelOptions}
+        modelsLoading={false}
+        modelSelectDisabled={false}
+        modelStatuses={{}}
+        rerankerModelOptions={["jinaai/jina-reranker-v1-turbo-en"]}
+        rerankerPlaceholder="Choose reranker"
+        rerankerSelectDisabled={false}
+        onChange={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="SQL generation model"');
+    expect(markup).toContain("Use reasoning model");
   });
 
   it("targets one vLLM service when applying launch limits", () => {

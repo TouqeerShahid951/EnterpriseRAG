@@ -1,4 +1,4 @@
-"""Download or verify FastEmbed dense, sparse, and reranker models."""
+"""Download or verify local query models used by the FastEmbed runtime."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from rag.shared.contracts.rag_defaults import (
 )
 from rag.shared.contracts.reranker_models import SUPPORTED_RERANKER_MODELS
 from rag.shared.runtime_offline import apply_runtime_offline_defaults
+from rag.query.answering.entailment import prewarm_entailment_model
 
 DEFAULT_FASTEMBED_CACHE_PATH = Path(DEFAULT_FASTEMBED_CACHE_DIR)
 
@@ -36,6 +37,7 @@ def prewarm_fastembed_models(
     _load_sparse_model(sparse_model, sparse_cache_dir)
     for reranker_model in reranker_models:
         _load_reranker_model(reranker_model, reranker_cache_dir)
+    prewarm_entailment_model(reranker_cache_dir)
 
 
 def _load_dense_model(model_name: str, cache_dir: Path) -> Any:
@@ -157,7 +159,7 @@ def main() -> None:
         "all supported rerankers" if args.all_rerankers else ", ".join(reranker_models)
     )
     print(
-        "FastEmbed dense/sparse/reranker models "
+        "Local dense/sparse/reranker/entailment models "
         f"{action}: dense={args.dense_model} in {args.dense_cache_dir}; "
         f"sparse={args.sparse_model} in {args.sparse_cache_dir}; rerankers={reranker_label} in {args.reranker_cache_dir}"
     )

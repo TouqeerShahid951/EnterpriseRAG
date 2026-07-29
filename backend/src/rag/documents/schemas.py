@@ -75,3 +75,38 @@ class DocumentGroupCount(ContractModel):
 class DocumentCatalogSummary(ContractModel):
     groups: list[DocumentGroupCount] = Field(default_factory=list)
     total: int = Field(..., ge=0)
+
+
+class DocumentOverviewAttentionItem(ContractModel):
+    id: str
+    title: str
+    group_path: str
+    ingest_status: UploadJobState | Literal["unknown"]
+
+
+class DocumentOverviewSpace(ContractModel):
+    group_path: str
+    library_documents: int = Field(..., ge=0)
+    current_versions: int = Field(..., ge=0)
+    processing_current: int = Field(..., ge=0)
+    review_current: int = Field(..., ge=0)
+    failed_current: int = Field(..., ge=0)
+    unknown_current: int = Field(..., ge=0)
+
+
+class DocumentOverviewResponse(ContractModel):
+    library_documents: int = Field(..., ge=0)
+    current_versions: int = Field(..., ge=0)
+    indexed_current: int = Field(..., ge=0)
+    processing_current: int = Field(..., ge=0)
+    review_current: int = Field(..., ge=0)
+    failed_current: int = Field(..., ge=0)
+    unknown_current: int = Field(..., ge=0)
+    needs_attention: int = Field(..., ge=0)
+    superseded_versions: int = Field(..., ge=0)
+    expiring_soon_current: int = Field(..., ge=0)
+    trash: int = Field(..., ge=0)
+    attention_documents: list[DocumentOverviewAttentionItem] = Field(
+        default_factory=list
+    )
+    spaces: list[DocumentOverviewSpace] = Field(default_factory=list)

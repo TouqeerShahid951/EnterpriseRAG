@@ -1,5 +1,5 @@
 import type { GraphRAGStatus, JobStatus, ParserProvenance, UploadJobStageProgress, UploadJobState, UploadJobStep } from "@/types/api";
-import type { UploadJobView } from "@/types/chat";
+import type { UploadBatchItemView, UploadJobView } from "@/types/chat";
 
 const uploadTerminalStatuses: ReadonlySet<UploadJobState> = new Set(["complete", "failed", "human_review", "cancelled"]);
 const uploadCancellableStatuses: ReadonlySet<UploadJobState> = new Set(["scheduled", "queued", "processing", "human_review"]);
@@ -26,6 +26,13 @@ export function isUploadTerminalStatus(status: UploadJobState | null | undefined
 
 export function isUploadCancellableStatus(status: UploadJobState | null | undefined): boolean {
   return Boolean(status && uploadCancellableStatuses.has(status));
+}
+
+export function uploadItemNeedsAttention(item: UploadBatchItemView): boolean {
+  return item.requestState === "failed"
+    || item.job?.status === "failed"
+    || item.job?.status === "human_review"
+    || (item.job?.status === "complete" && item.job.warnings.length > 0);
 }
 
 export function toUploadJobView(jobId: string, status: JobStatus | undefined): UploadJobView {

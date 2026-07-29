@@ -5,7 +5,7 @@ import { InlineMessage } from "@/components/layout/Common";
 import { Modal } from "@/components/layout/Modal";
 import { ConnectorProfileSetup } from "@/features/connectors/components/connector-workspace/ConnectorWorkspace";
 import { SchemaSnapshotModal } from "@/features/connectors/components/connector-workspace/SchemaSnapshotModal";
-import type { ConnectorProfile } from "@/types/api";
+import type { ClearanceLevel, ConnectorProfile } from "@/types/api";
 import type {
   ConnectorProfileDraft,
   ConnectorSchemaSnapshotViewerState,
@@ -13,7 +13,9 @@ import type {
 
 type Props = {
   createError: unknown;
+  clearanceOptions: ClearanceLevel[];
   creating: boolean;
+  defaultClearanceLevel: ClearanceLevel;
   deletePending: boolean;
   deleteProfile: ConnectorProfile | null;
   pendingActionId: string | null;
@@ -21,8 +23,11 @@ type Props = {
   profileDraft: ConnectorProfileDraft;
   profileError: string | null;
   profilesLoading: boolean;
+  reviewCreationError: unknown;
+  reviewCreating: boolean;
   schemaViewer: ConnectorSchemaSnapshotViewerState | null;
   setupOpen: boolean;
+  writableSpacePaths: string[];
   onCloseDelete: () => void;
   onCloseSchemaViewer: () => void;
   onCloseSetup: () => void;
@@ -30,11 +35,14 @@ type Props = {
   onProfileAction: (action: "test" | "introspect", id: string) => void;
   onProfileChange: (patch: Partial<ConnectorProfileDraft>) => void;
   onProfileSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onPrepareReview: (profile: ConnectorProfile, groupPath: string, clearanceLevel: ClearanceLevel) => void;
 };
 
 export function ConnectorManagementModals({
   createError,
+  clearanceOptions,
   creating,
+  defaultClearanceLevel,
   deletePending,
   deleteProfile,
   pendingActionId,
@@ -42,8 +50,11 @@ export function ConnectorManagementModals({
   profileDraft,
   profileError,
   profilesLoading,
+  reviewCreationError,
+  reviewCreating,
   schemaViewer,
   setupOpen,
+  writableSpacePaths,
   onCloseDelete,
   onCloseSchemaViewer,
   onCloseSetup,
@@ -51,10 +62,20 @@ export function ConnectorManagementModals({
   onProfileAction,
   onProfileChange,
   onProfileSubmit,
+  onPrepareReview,
 }: Props) {
   return (
     <>
-      <SchemaSnapshotModal onClose={onCloseSchemaViewer} viewer={schemaViewer} />
+      <SchemaSnapshotModal
+        clearanceOptions={clearanceOptions}
+        defaultClearanceLevel={defaultClearanceLevel}
+        isPreparingReview={reviewCreating}
+        mutationError={reviewCreationError}
+        onClose={onCloseSchemaViewer}
+        onPrepareReview={onPrepareReview}
+        viewer={schemaViewer}
+        writableSpacePaths={writableSpacePaths}
+      />
       <Modal
         description="Save encrypted read-only credentials, then read the schema and review what Live DB may use."
         icon={<KeyRound size={18} />}

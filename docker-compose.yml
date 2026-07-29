@@ -2,30 +2,24 @@ name: agenticrag
 
 x-backend-env: &backend-env
   AIRGAP_RUNTIME_OFFLINE: ${AIRGAP_RUNTIME_OFFLINE:-1}
-  API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:8000}
-  API_PUBLIC_URL: ${API_PUBLIC_URL:-}
   AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
   AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
-  AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://api:8000}
   BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}
   BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://api:8000}
-  BACKEND_PUBLIC_URL: ${BACKEND_PUBLIC_URL:-}
   BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@prudentia.ai}
   BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Platform Administrator}
   BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-12345678}
   CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://:agenticrag-local-redis-password@redis:6379/0}
-  CHAT_SERVICE_URL: ${CHAT_SERVICE_URL:-http://api:8000}
   CLAMAV_HOST: ${CLAMAV_HOST:-clamav}
   CLAMAV_PORT: ${CLAMAV_PORT:-3310}
   CLAMAV_SCAN_ENABLED: ${CLAMAV_SCAN_ENABLED:-true}
   CSRF_COOKIE_NAME: ${CSRF_COOKIE_NAME:-csrf_token}
-  CSRF_SECRET_KEY: ${CSRF_SECRET_KEY:-replace-with-local-csrf-secret}
   CONNECTOR_SECRETS_KEY: ${CONNECTOR_SECRETS_KEY:-replace-with-local-connector-secrets-key}
   CONNECTOR_SECRETS_KEY_RING: ${CONNECTOR_SECRETS_KEY_RING:-}
   CONNECTOR_LIVE_SQL_ENABLED: ${CONNECTOR_LIVE_SQL_ENABLED:-true}
   CONNECTOR_LIVE_SQL_MAX_ROWS: ${CONNECTOR_LIVE_SQL_MAX_ROWS:-100}
   CONNECTOR_LIVE_SQL_TIMEOUT_SECONDS: ${CONNECTOR_LIVE_SQL_TIMEOUT_SECONDS:-15}
-  CONNECTOR_LIVE_SQL_MAX_SCHEDULES: ${CONNECTOR_LIVE_SQL_MAX_SCHEDULES:-5}
+  CONNECTOR_LIVE_SQL_MAX_SCOPES: ${CONNECTOR_LIVE_SQL_MAX_SCOPES:-5}
   CONNECTOR_LIVE_SQL_MAX_REPAIR_ATTEMPTS: ${CONNECTOR_LIVE_SQL_MAX_REPAIR_ATTEMPTS:-2}
   CONNECTOR_LIVE_SQL_RESULT_VERIFIER_ENABLED: ${CONNECTOR_LIVE_SQL_RESULT_VERIFIER_ENABLED:-true}
   CONNECTOR_LIVE_SQL_VERIFIER_SAMPLE_ROWS: ${CONNECTOR_LIVE_SQL_VERIFIER_SAMPLE_ROWS:-5}
@@ -43,13 +37,13 @@ x-backend-env: &backend-env
   EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-http://vllm-embeddings:8000/v1}
   ENABLE_MOCK_MODELS:
   FOLDER_SOURCES_ROOT: ${FOLDER_SOURCES_ROOT:-/folder-sources}
-  FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:-}
   GRAPHRAG_COMMUNITY_COLLECTION:
   GRAPHRAG_ENABLED:
   GRAPHRAG_EXTRACTION_CONCURRENCY:
   GRAPHRAG_EXTRACTION_CHECKPOINT_TTL_SECONDS:
   GRAPHRAG_INDEX_TASK_NAME:
   GRAPHRAG_MAX_CHUNKS_PER_DOC:
+  GRAPHRAG_MAX_LLM_COMMUNITY_SUMMARIES:
   GRAPHRAG_MIN_CHUNK_CHARS:
   GRAPHRAG_PARTITION_REBUILD_TASK_NAME:
   GRAPHRAG_PARTITION_REBUILD_DELAY_SECONDS:
@@ -87,7 +81,7 @@ x-backend-env: &backend-env
   QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
   RAG_FAITHFULNESS_MODEL:
   RAG_FAITHFULNESS_POLICY:
-  RAG_FAITHFULNESS_THRESHOLD:
+  RAG_EVIDENCE_GATE_POLICY:
   RAG_EMBEDDING_PROVIDER:
   RAG_FASTEMBED_MODEL:
   RAG_DENSE_CACHE_DIR: ${RAG_DENSE_CACHE_DIR:-/models/fastembed}
@@ -104,28 +98,28 @@ x-backend-env: &backend-env
   RAG_QUERY_REWRITE_LLM_ENABLED:
   RAG_OLLAMA_CHAT_TIMEOUT_SECONDS:
   RAG_OLLAMA_EMBED_TIMEOUT_SECONDS:
+  RAG_REASONING_TIMEOUT_SECONDS:
   RAG_REASONING_MODEL:
   RAG_REASONING_PROVIDER:
   RAG_REASONING_BASE_URL:
   RAG_RETRIEVAL_MAX_RETRIES:
   RAG_RETRIEVAL_TOKEN_BUDGET:
-  RAG_ROUTE_LLM_VERIFIER_ENABLED:
-  RAG_ROUTE_LLM_VERIFIER_MODEL:
+  RAG_ROUTING_MODEL:
   RAG_ROUTING_PROVIDER:
   RAG_ROUTING_BASE_URL:
+  RAG_ROUTING_TIMEOUT_SECONDS:
   RAG_FAITHFULNESS_PROVIDER:
   RAG_FAITHFULNESS_BASE_URL:
-  RAG_DEFER_FAITHFULNESS:
+  RAG_FAITHFULNESS_TIMEOUT_SECONDS:
   RAG_HYBRID_DISAGREEMENT_DETECTOR_ENABLED:
-  RAG_INTENT_ROUTER_VERSION:
-  RAG_SOURCE_ROUTER_LLM_ENABLED:
-  RAG_SOURCE_ROUTER_LLM_MIN_CONFIDENCE:
   RAG_TOP_K:
   RAG_VISION_PROVIDER:
   RAG_VISION_BASE_URL:
   RAG_VISION_MODEL:
   RAG_RERANKER_CACHE_DIR: ${RAG_RERANKER_CACHE_DIR:-/models/fastembed}
+  RAG_RERANKER_DEVICE:
   RAG_RERANKER_MAX_CANDIDATES:
+  RAG_RERANKER_TIMEOUT_SECONDS:
   RAG_RERANKER_MODEL:
   RAG_SPARSE_CACHE_DIR: ${RAG_SPARSE_CACHE_DIR:-/models/fastembed}
   RAG_SPARSE_MODEL:
@@ -151,13 +145,11 @@ x-backend-env: &backend-env
   VLLM_INGESTION_BASE_URL: ${VLLM_INGESTION_BASE_URL:-http://vllm-text:8000/v1}
   VLLM_REASONING_BASE_URL: ${VLLM_REASONING_BASE_URL:-http://vllm-text:8000/v1}
   VLLM_ROUTING_BASE_URL: ${VLLM_ROUTING_BASE_URL:-http://vllm-text:8000/v1}
-  VLLM_SMALL_BASE_URL: ${VLLM_SMALL_BASE_URL:-http://mock-vllm-small:8000/v1}
   VLLM_TEXT_GPU_MEMORY_UTILIZATION: ${VLLM_TEXT_GPU_MEMORY_UTILIZATION:-0.12}
   VLLM_TEXT_KV_CACHE_MEMORY_BYTES: ${VLLM_TEXT_KV_CACHE_MEMORY_BYTES:-2G}
   VLLM_TEXT_MAX_MODEL_LEN: ${VLLM_TEXT_MAX_MODEL_LEN:-4096}
   VLLM_TEXT_MAX_NUM_BATCHED_TOKENS: ${VLLM_TEXT_MAX_NUM_BATCHED_TOKENS:-4096}
   VLLM_TEXT_MAX_NUM_SEQS: ${VLLM_TEXT_MAX_NUM_SEQS:-1}
-  VLLM_PRIMARY_BASE_URL: ${VLLM_PRIMARY_BASE_URL:-http://mock-vllm-primary:8000/v1}
   VLLM_VISION_BASE_URL: ${VLLM_VISION_BASE_URL:-http://vllm-vision:8000/v1}
   VLLM_VISION_MODEL_ID:
   VLLM_VISION_GPU_MEMORY_UTILIZATION: ${VLLM_VISION_GPU_MEMORY_UTILIZATION:-0.10}
@@ -191,7 +183,6 @@ x-artifact-env: &artifact-env
   ARTIFACT_COMPOSER_TIMEOUT_SECONDS: ${ARTIFACT_COMPOSER_TIMEOUT_SECONDS:-60}
   ARTIFACT_LIBREOFFICE_REQUIRED: ${ARTIFACT_LIBREOFFICE_REQUIRED:-false}
   ARTIFACT_MAINTENANCE_INTERVAL_SECONDS: ${ARTIFACT_MAINTENANCE_INTERVAL_SECONDS:-300}
-  ARTIFACT_PIPELINE_VERSION: ${ARTIFACT_PIPELINE_VERSION:-v2}
   ARTIFACT_QUEUE_BACKEND: ${ARTIFACT_QUEUE_BACKEND:-celery}
   ARTIFACT_QUEUE_NAME: ${ARTIFACT_QUEUE_NAME:-artifact:jobs}
   ARTIFACT_RERANKER_MAX_CANDIDATES: ${ARTIFACT_RERANKER_MAX_CANDIDATES:-8}
@@ -215,8 +206,28 @@ services:
       timeout: 5s
       retries: 5
 
+  connector-demo-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: ["connector-demo"]
+    # ponytail: fixed credentials are confined to this opt-in fixture with no host port.
+    environment:
+      POSTGRES_DB: connector_demo
+      POSTGRES_USER: connector_demo_admin
+      POSTGRES_PASSWORD: connector-demo-admin
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./deploy/connector-demo/init.sql:/docker-entrypoint-initdb.d/10-demo.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=connector-demo-readonly psql -h 127.0.0.1 -U connector_reader -d connector_demo -tAc \"SELECT current_setting('default_transaction_read_only') = 'on' AND EXISTS (SELECT 1 FROM commerce.orders)\" | grep -qx t"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 10
+
   redis:
-    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    image: redis:7.4.9-alpine
     restart: unless-stopped
     entrypoint: ["sh", "/usr/local/bin/redis-recovery-entrypoint.sh"]
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-agenticrag-local-redis-password}"]
@@ -233,7 +244,7 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    image: minio/minio:RELEASE.2024-07-16T23-46-41Z
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
@@ -277,7 +288,7 @@ services:
     volumes:
       - neo4j-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${NEO4J_AUTH#*/}\" \"RETURN 1\""]
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/7687'"]
       interval: 10s
       timeout: 10s
       start_period: 30s
@@ -479,11 +490,10 @@ services:
       dockerfile: apps/api/Dockerfile
       args:
         PREWARM_FASTEMBED: ${PREWARM_FASTEMBED:-false}
+        RERANKER_RUNTIME: ${RERANKER_RUNTIME:-cpu}
     environment:
       <<: [*backend-env, *artifact-env]
       ACCESS_COOKIE_NAME: ${ACCESS_COOKIE_NAME:-agenticrag_access_token}
-      ADMIN_SERVICE_URL: ${ADMIN_SERVICE_URL:-http://api:8000}
-      EVALUATION_DIAGNOSTIC_TOP_K: ${EVALUATION_DIAGNOSTIC_TOP_K:-10}
       EVALUATION_QUEUE_BACKEND: ${EVALUATION_QUEUE_BACKEND:-celery}
       EVALUATION_QUEUE_NAME: ${EVALUATION_QUEUE_NAME:-evaluation:jobs}
       EVALUATION_RETENTION_DAYS: ${EVALUATION_RETENTION_DAYS:-30}
@@ -494,9 +504,7 @@ services:
       INGEST_QUEUE_BACKEND: ${INGEST_QUEUE_BACKEND:-celery}
       INGEST_QUEUE_NAME: ${INGEST_QUEUE_NAME:-ingest:jobs}
       INGEST_TASK_NAME: ${INGEST_TASK_NAME:-apps.ingestion.tasks.ingest_document}
-      PORT: 8000
       REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-agenticrag_refresh_token}
-      SERVICE_NAME: api
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:
@@ -517,7 +525,7 @@ services:
       clamav:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/ready\", timeout=8)'"]
+      test: ["CMD-SHELL", "timeout --foreground -k 1s 9s python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/ready\", timeout=8)'"]
       interval: 10s
       timeout: 10s
       start_period: 5s
@@ -530,8 +538,6 @@ services:
     environment:
       <<: [*backend-env, *artifact-env]
       ACCESS_COOKIE_NAME: ${ACCESS_COOKIE_NAME:-agenticrag_access_token}
-      ADMIN_SERVICE_URL: ${ADMIN_SERVICE_URL:-http://api:8000}
-      EVALUATION_DIAGNOSTIC_TOP_K: ${EVALUATION_DIAGNOSTIC_TOP_K:-10}
       EVALUATION_QUEUE_BACKEND: ${EVALUATION_QUEUE_BACKEND:-celery}
       EVALUATION_QUEUE_NAME: ${EVALUATION_QUEUE_NAME:-evaluation:jobs}
       EVALUATION_RETENTION_DAYS: ${EVALUATION_RETENTION_DAYS:-30}
@@ -542,9 +548,7 @@ services:
       INGEST_QUEUE_BACKEND: ${INGEST_QUEUE_BACKEND:-celery}
       INGEST_QUEUE_NAME: ${INGEST_QUEUE_NAME:-ingest:jobs}
       INGEST_TASK_NAME: ${INGEST_TASK_NAME:-apps.ingestion.tasks.ingest_document}
-      PORT: 8000
       REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-agenticrag_refresh_token}
-      SERVICE_NAME: query-api
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:
@@ -567,7 +571,7 @@ services:
       clamav:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/ready\", timeout=8)'"]
+      test: ["CMD-SHELL", "timeout --foreground -k 1s 9s python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health/ready\", timeout=8)'"]
       interval: 10s
       timeout: 10s
       start_period: 5s
@@ -578,15 +582,13 @@ services:
     restart: unless-stopped
     command: ["celery", "-A", "apps.workers.artifact.celery_app", "worker", "--loglevel=INFO", "--queues=${ARTIFACT_QUEUE_NAME:-artifact:jobs}"]
     healthcheck:
-      test: ["CMD-SHELL", "celery -A apps.workers.artifact.celery_app inspect ping --destination=celery@$${HOSTNAME} --timeout=2 >/dev/null"]
+      test: ["CMD-SHELL", "kill -0 1"]
       interval: 10s
       timeout: 5s
       start_period: 10s
       retries: 5
     environment:
       <<: [*backend-env, *artifact-env]
-      SERVICE_KIND: artifact-generation-worker-celery
-      SERVICE_NAME: artifact-worker
     volumes:
       - *fastembed-cache-volume
       - local-upload-data:${UPLOAD_STORAGE_DIR:-/var/lib/agenticrag/uploads}
@@ -616,8 +618,6 @@ services:
       retries: 5
     environment:
       <<: [*backend-env, *artifact-env]
-      SERVICE_KIND: artifact-maintenance
-      SERVICE_NAME: artifact-maintenance
     volumes:
       - local-upload-data:${UPLOAD_STORAGE_DIR:-/var/lib/agenticrag/uploads}
     extra_hosts:
@@ -649,7 +649,6 @@ services:
       INGEST_QUEUE_NAME: ${INGEST_QUEUE_NAME:-ingest:jobs}
       INGEST_TASK_NAME: ${INGEST_TASK_NAME:-apps.ingestion.tasks.ingest_document}
       INGEST_STALE_AFTER_SECONDS:
-      INGESTION_QUALITY_PRESET:
       GRAPHRAG_QUEUE_NAME: ${GRAPHRAG_QUEUE_NAME:-graphrag:jobs}
       INGEST_TASK_SOFT_TIME_LIMIT_SECONDS:
       INGEST_TASK_TIME_LIMIT_SECONDS:
@@ -680,8 +679,6 @@ services:
       RAG_CHUNK_OVERLAP_TOKENS:
       RAG_CHUNK_TARGET_TOKENS:
       RAG_PARENT_MAX_TOKENS:
-      SERVICE_KIND: rag-ingestion-worker-celery
-      SERVICE_NAME: ingestion-worker
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:
@@ -701,7 +698,7 @@ services:
       neo4j:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "celery -A apps.workers.document_pipeline.celery_app inspect ping --destination=ingestion-worker@$${HOSTNAME} --timeout=2 >/dev/null && python -m rag.shared.model_cache_health --fastembed --docling"]
+      test: ["CMD-SHELL", "kill -0 1 && timeout --foreground -k 1s 4s python -m rag.shared.model_cache_health --fastembed --docling"]
       interval: 10s
       timeout: 5s
       start_period: 10s
@@ -716,8 +713,6 @@ services:
       INGEST_TASK_SOFT_TIME_LIMIT_SECONDS: ${GRAPHRAG_TASK_SOFT_TIME_LIMIT_SECONDS:-3600}
       INGEST_TASK_TIME_LIMIT_SECONDS: ${GRAPHRAG_TASK_TIME_LIMIT_SECONDS:-3900}
       INGEST_WORKER_BOOT_CONCURRENCY: ${GRAPHRAG_WORKER_BOOT_CONCURRENCY:-1}
-      SERVICE_KIND: rag-graphrag-worker-celery
-      SERVICE_NAME: graphrag-worker
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:
@@ -735,7 +730,7 @@ services:
       neo4j:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "celery -A apps.workers.document_pipeline.celery_app inspect ping --destination=graphrag-worker@$${HOSTNAME} --timeout=2 >/dev/null && python -m rag.shared.model_cache_health --fastembed"]
+      test: ["CMD-SHELL", "kill -0 1 && timeout --foreground -k 1s 4s python -m rag.shared.model_cache_health --fastembed"]
       interval: 10s
       timeout: 5s
       start_period: 10s
@@ -764,23 +759,19 @@ services:
     restart: unless-stopped
     command: ["celery", "-A", "apps.workers.evaluation.celery_app", "worker", "--loglevel=INFO", "--queues=${EVALUATION_QUEUE_NAME:-evaluation:jobs}"]
     healthcheck:
-      test: ["CMD-SHELL", "celery -A apps.workers.evaluation.celery_app inspect ping --destination=celery@$${HOSTNAME} --timeout=2 >/dev/null"]
+      test: ["CMD-SHELL", "kill -0 1"]
       interval: 10s
       timeout: 5s
       start_period: 10s
       retries: 5
     environment:
       <<: *backend-env
-      EVALUATION_DIAGNOSTIC_TOP_K: ${EVALUATION_DIAGNOSTIC_TOP_K:-10}
       EVALUATION_QUEUE_NAME: ${EVALUATION_QUEUE_NAME:-evaluation:jobs}
       EVALUATION_RETENTION_DAYS: ${EVALUATION_RETENTION_DAYS:-30}
       EVALUATION_TASK_NAME: ${EVALUATION_TASK_NAME:-rag.evaluations.tasks.run_evaluation}
       EVALUATION_WORKER_TIMEOUT_SECONDS: ${EVALUATION_WORKER_TIMEOUT_SECONDS:-3600}
-      RAG_DEFER_FAITHFULNESS: ${RAG_DEFER_FAITHFULNESS:-true}
       RAG_SESSION_PREFIX: ${RAG_SESSION_PREFIX:-rag:session}
       RAG_SESSION_STORE: ${RAG_SESSION_STORE:-redis}
-      SERVICE_KIND: rag-evaluation-worker-celery
-      SERVICE_NAME: evaluation-worker
     extra_hosts:
       - host.docker.internal:host-gateway
     volumes:
@@ -811,8 +802,6 @@ services:
       INGEST_QUEUE_BACKEND: ${INGEST_QUEUE_BACKEND:-celery}
       INGEST_QUEUE_NAME: ${INGEST_QUEUE_NAME:-ingest:jobs}
       INGEST_TASK_NAME: ${INGEST_TASK_NAME:-apps.ingestion.tasks.ingest_document}
-      SERVICE_KIND: scheduled-folder-ingestion-dispatcher
-      SERVICE_NAME: folder-scheduler
     volumes:
       - *folder-sources-volume
     depends_on:
@@ -843,8 +832,6 @@ services:
       INGEST_STALE_AFTER_SECONDS: ${INGEST_STALE_AFTER_SECONDS:-120}
       INGEST_TASK_NAME: ${INGEST_TASK_NAME:-apps.ingestion.tasks.ingest_document}
       INGEST_WORKER_BOOT_CONCURRENCY: ${INGEST_WORKER_BOOT_CONCURRENCY:-1}
-      SERVICE_KIND: ingestion-recovery-and-capacity-controller
-      SERVICE_NAME: ingest-maintenance
     depends_on:
       api:
         condition: service_healthy
@@ -860,9 +847,6 @@ services:
       context: ./frontend
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
-        VITE_POLLING_INTERVAL_MS: ${VITE_POLLING_INTERVAL_MS:-2000}
-    environment:
-      SERVICE_NAME: frontend
     ports:
       - "0.0.0.0:${FRONTEND_PORT:-3000}:3000"
     depends_on:

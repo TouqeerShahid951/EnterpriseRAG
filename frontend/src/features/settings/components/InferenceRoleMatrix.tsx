@@ -103,6 +103,17 @@ export function InferenceRoleMatrix({
             role="reasoning"
             title="Reasoning"
           />
+          <SqlGenerationRoleRow
+            form={form}
+            modelOptions={modelOptions.sqlGeneration}
+            modelPlaceholder={modelPlaceholderForStatus(modelStatuses.reasoning, {
+              canFetch: canFetchModels,
+              loading: modelsLoading,
+            })}
+            modelSelectDisabled={modelSelectDisabled}
+            modelStatus={modelStatuses.reasoning}
+            onChange={onChange}
+          />
           <LanguageRoleRow
             description="Ambiguous route checks before retrieval or artifact generation."
             emptyLabel="Use reasoning model"
@@ -265,6 +276,61 @@ type LanguageRoleRowProps = {
   title: string;
   description: string;
   emptyLabel?: string;
+  form: RagConfigFormState;
+  modelOptions: string[];
+  modelPlaceholder: string;
+  modelSelectDisabled: boolean;
+  modelStatus?: RagModelDiscoveryStatus;
+  onChange: (value: RagConfigFormState) => void;
+};
+
+function SqlGenerationRoleRow({
+  form,
+  modelOptions,
+  modelPlaceholder,
+  modelSelectDisabled,
+  modelStatus,
+  onChange,
+}: SqlGenerationRoleRowProps) {
+  const status = statusTone(modelStatus);
+  return (
+    <article className="grid gap-4 p-4 lg:grid-cols-[minmax(10rem,0.7fr)_minmax(0,1.7fr)] lg:items-start">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <h4 className="text-body-md font-bold text-on-surface">SQL generation</h4>
+          <span className="rounded-full bg-secondary-container px-2 py-0.5 text-label-sm font-bold text-on-secondary-container">
+            {form.sql_generation_model.trim() ? "Explicit model" : "Uses reasoning model"}
+          </span>
+        </div>
+        <div className="mt-1 text-body-md text-secondary">
+          Generates read-only SQL for approved database connector schemas.
+        </div>
+      </div>
+      <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+        <StaticField label="Provider">Uses reasoning service</StaticField>
+        <label className="sv-field">
+          <span className="sv-label">Model</span>
+          <ModelSelect
+            ariaLabel="SQL generation model"
+            value={form.sql_generation_model}
+            onChange={(sql_generation_model) => onChange({ ...form, sql_generation_model })}
+            models={modelOptions}
+            placeholder={modelPlaceholder}
+            emptyLabel="Use reasoning model"
+            disabled={modelSelectDisabled}
+          />
+          {modelStatus && status !== "ok" ? (
+            <span className={`text-body-md ${status === "error" ? "text-error-red" : "text-warning-amber"}`}>
+              {modelStatus.message}
+            </span>
+          ) : null}
+        </label>
+      </div>
+    </article>
+  );
+}
+
+type SqlGenerationRoleRowProps = {
   form: RagConfigFormState;
   modelOptions: string[];
   modelPlaceholder: string;

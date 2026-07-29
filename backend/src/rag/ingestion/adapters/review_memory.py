@@ -80,6 +80,28 @@ class InMemoryReviewRepositoryMixin:
             key=lambda item: item.item_index,
         )
 
+    def list_pending_human_review_document_ids(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    batch.doc_id
+                    for batch in self._review_batches.values()
+                    if batch.status == "pending"
+                }
+            )
+        )
+
+    def list_pending_image_review_document_ids(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    batch.doc_id
+                    for batch in self._image_review_batches.values()
+                    if batch.status == "pending"
+                }
+            )
+        )
+
     def approve_review_item(self, item_id: str, *, corrected_text: str, reviewer_id: str) -> ReviewDecisionRecord | None:
         item = self._review_items.get(item_id)
         if item is None:

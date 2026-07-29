@@ -3,6 +3,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  min-height: 2.75rem;
   margin-top: 0.85rem;
   border: 0;
   background: transparent;
@@ -105,4 +106,36 @@
 .folder-status-text-attention {
   background: color-mix(in srgb, var(--color-warning-amber) 12%, transparent);
   color: var(--color-warning-amber);
+}
+
+@media (max-width: 480px) {
+  .folder-snapshot-file-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0.35rem 0.65rem;
+    align-items: start;
+  }
+
+  .folder-snapshot-file-copy {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .folder-snapshot-file-size {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: start;
+  }
+
+  .folder-snapshot-file-status {
+    grid-column: 2;
+    grid-row: 3;
+    justify-self: start;
+  }
+
+  .folder-snapshot-file-remove {
+    grid-column: 3;
+    grid-row: 1 / span 3;
+    align-self: center;
+  }
 }

@@ -6,6 +6,7 @@ import json
 from typing import Any
 from uuid import UUID
 
+from rag.abbreviations.ingestion import replace_abbreviation_glossary_in_transaction
 from rag.documents.ingestion import apply_staged_ingestion_data
 from rag.shared.persistence import PostgresConnectionMixin
 
@@ -148,6 +149,24 @@ class PostgresIndexPublicationRepository(PostgresConnectionMixin):
                     claims=_list_of_objects(staged.get("claims")),
                     supersedes=supersedes,
                 )
+                abbreviation_entries = _list_of_objects(
+                    staged.get("abbreviation_entries")
+                )
+                if abbreviation_entries:
+                    replace_abbreviation_glossary_in_transaction(
+                        conn,
+                        document_id=document_id,
+                        entries=[
+                            (
+                                str(entry.get("abbreviation") or ""),
+                                str(entry.get("expansion") or ""),
+                                entry.get("source_page")
+                                if isinstance(entry.get("source_page"), int)
+                                else None,
+                            )
+                            for entry in abbreviation_entries
+                        ],
+                    )
 
                 conn.execute(
                     """

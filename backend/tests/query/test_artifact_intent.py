@@ -3,7 +3,12 @@ import pytest
 from rag.artifact_jobs.request_text import (
     cleaned_content_query as artifact_cleaned_content_query,
 )
-from rag.query.artifact_intent import cleaned_content_query, parse_artifact_request
+from rag.query.artifact_intent import (
+    cleaned_content_query,
+    parse_artifact_request,
+    references_previous_answer,
+    requires_conversation_context,
+)
 
 
 def test_query_reexports_artifact_owned_request_cleaner() -> None:
@@ -81,6 +86,9 @@ def test_detail_instruction_does_not_pollute_artifact_topic() -> None:
         ("Using the selected documents, create a PDF risk register", ("pdf",)),
         ("I would like you to prepare slides about policy changes", ("pptx",)),
         ("Give me the current answer as a Word document", ("docx",)),
+        ("I need a PDF summary of quarterly risk", ("pdf",)),
+        ("Turn that into a PDF", ("pdf",)),
+        ("Summarize quarterly risk and export it to PDF", ("pdf",)),
     ],
 )
 def test_explicit_artifact_commands_are_detected(
@@ -108,6 +116,11 @@ def test_explicit_artifact_commands_are_detected(
         "PDF creation in Python",
         "Build a presentation layer in React",
         "Build a presentation component for the dashboard",
+        "Create a PDF parser in Python",
+        "Build a DOCX API",
+        "Build a presentation API that exports PDF",
+        "Create a PDF parser that exports DOCX",
+        "Download the quarterly risk PDF",
     ],
 )
 def test_instructional_or_descriptive_format_mentions_are_not_artifact_requests(
@@ -123,3 +136,47 @@ def test_pronoun_only_conversion_requests_ask_for_clarification(query: str) -> N
     assert request is not None
     assert request.content_query == "this"
     assert request.needs_clarification
+
+
+@pytest.mark.parametrize(
+    ("query", "content_query"),
+    [
+        ("Make that a PDF", "that"),
+        ("Turn that into a PDF", "that"),
+        (
+            "Summarize quarterly risk and export it to PDF",
+            "Summarize quarterly risk",
+        ),
+        (
+            "Could you create a PowerPoint about incident trends?",
+            "incident trends?",
+        ),
+        ("Please make me a PDF about quarterly risk", "quarterly risk"),
+    ],
+)
+def test_artifact_content_query_removes_output_wrappers(
+    query: str,
+    content_query: str,
+) -> None:
+    request = parse_artifact_request(query)
+
+    assert request is not None
+    assert request.content_query == content_query
+
+
+def test_context_reference_is_distinct_from_a_concrete_relative_period() -> None:
+    assert requires_conversation_context("this policy")
+    assert not requires_conversation_context("this quarter's risks")
+
+
+def test_previous_answer_reference_is_explicitly_identified() -> None:
+    assert references_previous_answer("the previous answer")
+    assert not references_previous_answer("quarterly risk")
+
+
+def test_software_topic_format_is_not_added_as_an_output() -> None:
+    request = parse_artifact_request("Create slides about a PDF parser")
+
+    assert request is not None
+    assert request.formats == ("pptx",)
+    assert request.content_query == "PDF parser"

@@ -55,6 +55,7 @@ describe("query tracker state", () => {
 
     expect(done.finalResponse?.answer).toBe("Use the approved policy.");
     expect(done.timeline.find((item) => item.node === "synthesizer")?.durationMs).toBe(240);
+    expect(done.finalResponse?.node_timings?.[1].phase_timings_ms).toEqual({ sql_execution: 5000 });
     expect(verified.verifiedResponse?.faithfulness_score).toBe(0.92);
     expect(slowestNodeTimings(done.finalResponse).map((timing) => timing.node)).toEqual(["synthesizer", "reranker"]);
   });
@@ -80,7 +81,13 @@ function response(overrides: Partial<RAGResponse> = {}): RAGResponse {
     latency_ms: 640,
     node_timings: [
       { node: "synthesizer", duration_ms: 240, execution_mode: "ai_assisted", detail: "draft" },
-      { node: "reranker", duration_ms: 80, execution_mode: "deterministic", detail: null },
+      {
+        node: "reranker",
+        duration_ms: 80,
+        execution_mode: "deterministic",
+        detail: null,
+        phase_timings_ms: { sql_execution: 5000 },
+      },
     ],
     session_id: "session-1",
     sources: [sourceAnchor()],

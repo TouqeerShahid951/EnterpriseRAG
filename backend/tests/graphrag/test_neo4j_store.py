@@ -116,3 +116,18 @@ def test_delete_document_graph_removes_graph_records_and_scrubs_entity_sources()
     assert "entity.source_chunk_ids = [" in queries
     assert "entity.community_id = null" in queries
     assert "DETACH DELETE entity" in queries
+
+
+def test_entity_upsert_unions_existing_provenance() -> None:
+    driver = FakeDriver()
+    store = Neo4jGraphStore(
+        config=Neo4jConfig(uri="bolt://neo4j:7687", user="neo4j", password="pw"),
+        driver=driver,
+    )
+
+    store._upsert_entities([], partition="/ops|clearance:1")
+
+    query = driver.calls[-1][0]
+    assert "coalesce(entity.source_doc_ids, [])" in query
+    assert "coalesce(entity.source_chunk_ids, [])" in query
+    assert "CASE WHEN value IN acc THEN acc ELSE acc + value END" in query

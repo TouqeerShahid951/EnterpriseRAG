@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from collections.abc import Iterator
+from contextlib import contextmanager
+from time import perf_counter
 from typing import NotRequired, TypedDict
 
 from ..auth.context import UserContext
 from ..shared.contracts.evidence import ConflictPair
-from .artifact_intent import ArtifactRequest, parse_artifact_request, requires_document_scope
-from .artifact_models import ArtifactContent, ArtifactPlan, ArtifactValidation, CoverageReport, EvidenceUnit
 from .cancellation import QueryCancellationToken
+from rag.query.answering.evidence_sufficiency import EvidenceSufficiencyResult
 from rag.query.answering.evidence_quality import EvidenceQuality
 from .qdrant import SearchHit
 from rag.query.retrieval.retrieval_trace import RetrievalTraceStage
 from rag.query.routing.routing_models import QuerySignals, RoutePlan
+from rag.query.routing.conversation_resolution import ConversationResolution
 from .schemas import QueryIntent, QueryNodeTiming, QueryRequest, RAGResponse
 
 
@@ -29,6 +31,7 @@ class QueryContext(TypedDict):
     trace_id: str
     session_id: str
     request: QueryRequest
+    effective_query: str
     user: UserContext
     cancellation_token: NotRequired[QueryCancellationToken]
     query_rewritten: list[str]
@@ -38,6 +41,10 @@ class QueryContext(TypedDict):
     route_signals: NotRequired[QuerySignals]
     source_decision: NotRequired[object]
     source_expansion: NotRequired[dict[str, object]]
+    source_expansion_from: NotRequired[str]
+    source_primary_hits: NotRequired[list[SearchHit]]
+    abbreviation_query: NotRequired[str]
+    abbreviation_glossary_hits: NotRequired[list[SearchHit]]
     route_reroute_count: int
     sub_queries: list[str]
     is_current_only: bool
@@ -47,8 +54,22 @@ class QueryContext(TypedDict):
     exhaustive_deadline: NotRequired[float]
     force_faithfulness_check: bool
     session_turns: list[dict[str, object]]
+    conversation_resolution: NotRequired[ConversationResolution]
     node_trace: list[dict[str, str | None]]
-    node_timings: list[dict[str, str | int | None]]
+    node_timings: list[dict[str, object]]
+    retrieval_phase_timings_ms: NotRequired[dict[str, int]]
+    reranker_candidate_limit: NotRequired[int]
+    reranker_candidate_count: NotRequired[int]
+    reranker_input_characters: NotRequired[int]
+    reranker_passage_max_characters: NotRequired[int]
+    reranker_batch_count: NotRequired[int]
+    reranker_stop_reason: NotRequired[str | None]
+    synthesis_source_limit: NotRequired[int]
+    synthesis_token_limit: NotRequired[int]
+    synthesis_context_count: NotRequired[int]
+    synthesis_estimated_prompt_tokens: NotRequired[int]
+    required_query_slot_count: NotRequired[int]
+    covered_query_slot_count: NotRequired[int]
     execution_modes: dict[str, str]
     execution_details: dict[str, str]
     graphrag_communities: NotRequired[list[object]]
@@ -57,14 +78,9 @@ class QueryContext(TypedDict):
     wall_time_start: float
     verifier_decision: str
     evidence_quality: NotRequired[EvidenceQuality]
+    evidence_sufficiency: NotRequired[EvidenceSufficiencyResult]
     conflict_checker_used: bool
     synthesis_profile: NotRequired[str]
-    artifact_request: NotRequired[ArtifactRequest]
-    artifact_plan: NotRequired[ArtifactPlan]
-    artifact_evidence: NotRequired[tuple[EvidenceUnit, ...]]
-    artifact_coverage: NotRequired[CoverageReport]
-    artifact_content: NotRequired[ArtifactContent]
-    artifact_validation: NotRequired[ArtifactValidation]
     conflict_flag: bool
     conflict_pairs: list[ConflictPair]
     faithfulness_score: float
@@ -87,20 +103,11 @@ def initial_state(
     capture_retrieval_trace: bool = False,
     force_faithfulness_check: bool = False,
 ) -> QueryContext:
-    artifact_request = parse_artifact_request(request.query)
-    if (
-        artifact_request is not None
-        and artifact_request.needs_clarification
-        and request.document_ids
-        and requires_document_scope(artifact_request.content_query)
-    ):
-        artifact_request = replace(artifact_request, needs_clarification=False)
-    if artifact_request is not None and not artifact_request.needs_clarification:
-        request = request.model_copy(update={"query": artifact_request.content_query})
     ctx: QueryContext = {
         "trace_id": trace_id,
         "session_id": session_id,
         "request": request,
+        "effective_query": request.query,
         "user": user,
         "query_rewritten": [],
         "intent": "factual_simple",
@@ -121,19 +128,21 @@ def initial_state(
         "conflict_checker_used": False,
         "conflict_flag": False,
         "conflict_pairs": [],
-        "faithfulness_score": 1.0,
+        "faithfulness_score": 0.0,
         "faithfulness_status": "pending",
         "unfounded_claims": [],
         "degraded": False,
         "degraded_reason": None,
     }
-    if artifact_request is not None:
-        ctx["artifact_request"] = artifact_request
     if cancellation_token is not None:
         ctx["cancellation_token"] = cancellation_token
     if capture_retrieval_trace:
         ctx["retrieval_trace"] = []
     return ctx
+
+
+def active_query(ctx: QueryContext) -> str:
+    return ctx["effective_query"]
 
 
 def initial_retrieval_state(
@@ -180,12 +189,28 @@ def visible_group_paths(ctx: QueryContext) -> tuple[str, ...]:
 
 
 def record_node_timing(ctx: QueryContext, node: str, duration_ms: int) -> None:
-    ctx["node_timings"].append({
+    timing: dict[str, object] = {
         "node": node,
         "duration_ms": max(0, int(duration_ms)),
         "execution_mode": ctx["execution_modes"].get(node),
         "detail": ctx["execution_details"].get(node),
-    })
+    }
+    if node == "abac_retriever":
+        phases = ctx.pop("retrieval_phase_timings_ms", {})
+        if phases:
+            timing["phase_timings_ms"] = dict(phases)
+    ctx["node_timings"].append(timing)
+
+
+@contextmanager
+def timed_retrieval_phase(ctx: QueryContext, phase: str) -> Iterator[None]:
+    started = perf_counter()
+    try:
+        yield
+    finally:
+        elapsed_ms = max(0, int((perf_counter() - started) * 1000))
+        phases = ctx.setdefault("retrieval_phase_timings_ms", {})
+        phases[phase] = phases.get(phase, 0) + elapsed_ms
 
 
 def response_node_timings(ctx: QueryContext) -> list[QueryNodeTiming]:
@@ -194,7 +219,9 @@ def response_node_timings(ctx: QueryContext) -> list[QueryNodeTiming]:
 
 def finalize_response_node_timings(ctx: QueryContext) -> QueryContext:
     if "response" in ctx:
-        ctx["response"] = ctx["response"].model_copy(update={
-            "node_timings": response_node_timings(ctx),
-        })
+        ctx["response"] = ctx["response"].model_copy(
+            update={
+                "node_timings": response_node_timings(ctx),
+            }
+        )
     return ctx

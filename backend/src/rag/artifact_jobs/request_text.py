@@ -6,21 +6,43 @@ import re
 
 
 GENERATION_VERBS = (
-    r"(?:generate|create|make|export|download|draft|produce|prepare|build)"
+    r"(?:generate|create|make|export|draft|produce|prepare|build)"
 )
 GENERATION_VERB_RE = re.compile(rf"\b{GENERATION_VERBS}\b", re.IGNORECASE)
-OUTPUT_REQUEST_VERBS = r"(?:convert|give|provide|return|save|send)"
+OUTPUT_REQUEST_VERBS = r"(?:convert|give|provide|return|save|send|turn)"
+_OUTPUT_FORMAT = r"(?:docx|word(?:\s+document)?|pptx|powerpoint|slides?|slide\s+deck|pdf)"
+_LEADING_GENERATION_REQUEST_RE = re.compile(
+    rf"^\s*(?:(?:please[\s,]+)|(?:can|could|would|will)\s+you\s+(?:please\s+)?|"
+    rf"(?:i\s+)?(?:want|need)\s+(?:you\s+)?to\s+|"
+    rf"i(?:'d|\s+would)\s+like\s+(?:you\s+)?to\s+)?{GENERATION_VERBS}\b\s+(?:me\s+)?",
+    re.IGNORECASE,
+)
+_LEADING_DESIRED_OUTPUT_RE = re.compile(
+    rf"^\s*(?:i\s+(?:want|need)|i(?:'d|\s+would)\s+like)\s+(?:a|an)?\s*(?={_OUTPUT_FORMAT}\b)",
+    re.IGNORECASE,
+)
 _LEADING_OUTPUT_REQUEST_RE = re.compile(
     rf"^\s*(?:please[\s,]+)?{OUTPUT_REQUEST_VERBS}\s+(?:me\s+)?",
+    re.IGNORECASE,
+)
+_TRAILING_OUTPUT_REQUEST_RE = re.compile(
+    rf"\s+(?:and\s+)?(?:export|convert|save|return|provide|send)\s+"
+    rf"(?:(?:it|this|that|the\s+(?:answer|response|result|report))\s+)?"
+    rf"(?:as|in|into|to)\s+(?:a|an)?\s*{_OUTPUT_FORMAT}\b.*$",
     re.IGNORECASE,
 )
 _TRAILING_OUTPUT_WRAPPER_RE = re.compile(
     r"\b(?:as|in|into|to)\s+(?:a|an)?\s*$",
     re.IGNORECASE,
 )
+SOFTWARE_SUBJECT_PATTERN = (
+    r"(?:api|class|code|component|converter|editor|framework|function|generator|layer|"
+    r"library|logic|model|module|package|parser|pattern|renderer|sdk|tier|tool|view|viewer)"
+)
 _REMOVE_PATTERNS = (
     re.compile(
-        r"(?<!\.)\b(?:docx|word(?:\s+document)?|pptx|powerpoint|slides?|slide\s+deck|presentation|pdf)\b",
+        rf"(?<!\.)\b(?:docx|word(?:\s+document)?|pptx|powerpoint|slides?|slide\s+deck|presentation|pdf)\b"
+        rf"(?!\s+{SOFTWARE_SUBJECT_PATTERN}\b)",
         re.IGNORECASE,
     ),
     re.compile(r"\b(?:file|deck)\b", re.IGNORECASE),
@@ -54,7 +76,10 @@ _LEADING_OPERATION_NORMALIZERS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 def cleaned_content_query(query: str) -> str:
-    cleaned = _LEADING_OUTPUT_REQUEST_RE.sub("", query.strip())
+    cleaned = _TRAILING_OUTPUT_REQUEST_RE.sub("", query.strip())
+    cleaned = _LEADING_GENERATION_REQUEST_RE.sub("", cleaned)
+    cleaned = _LEADING_DESIRED_OUTPUT_RE.sub("", cleaned)
+    cleaned = _LEADING_OUTPUT_REQUEST_RE.sub("", cleaned)
     for pattern in _REMOVE_PATTERNS:
         cleaned = pattern.sub(" ", cleaned)
     cleaned = _TRAILING_OUTPUT_WRAPPER_RE.sub(" ", cleaned)
@@ -62,6 +87,7 @@ def cleaned_content_query(query: str) -> str:
         r"\b(?:and|or)\s+(?:a|an|the)?\s*$", " ", cleaned, flags=re.IGNORECASE
     )
     cleaned = re.sub(r"\b(?:and|or)\b\s*(?=$)", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(?:a|an|the)\s*$", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^[\s:,-]+|[\s:,-]+$", "", cleaned)
     previous = None
     while previous != cleaned:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from ..cancellation import cancellation_token_from_context
-from rag.query.routing.query_intent import should_include_superseded
 from rag.query.routing.routing_models import RoutePlan
 from ..state import QueryContext
 
@@ -14,7 +13,7 @@ def _apply_route_plan(ctx: QueryContext, plan: RoutePlan) -> None:
     ctx["route_plan"] = plan
     ctx["intent"] = plan.public_intent
     ctx["is_current_only"] = _is_current_only_for_route(plan)
-    ctx["sub_queries"] = [plan.resolved_query]
+    ctx["sub_queries"] = list(plan.sub_queries or (plan.resolved_query,))
 
 
 def _raise_if_cancelled(ctx: QueryContext) -> None:
@@ -29,26 +28,12 @@ def _mark_execution(ctx: QueryContext, node: str, mode: str, detail: str | None 
         ctx["execution_details"][node] = detail
 
 
-def _response_source_types(sources: list[object]) -> list[str]:
-    types: list[str] = []
-    for source in sources:
-        doc_id = str(getattr(source, "doc_id", "") or "")
-        source_type = "database" if doc_id.startswith("connector-live-scope:") else "corpus"
-        if source_type not in types:
-            types.append(source_type)
-    return types
-
-
 def _is_current_only_for_route(plan: RoutePlan) -> bool:
     if not plan.needs_retrieval:
         return True
     if _target_date_from_route(plan) is not None:
         return False
-    if plan.intent in {"temporal_comparison", "comparative_summary"}:
-        return False
-    if plan.use_temporal_filter and _requires_superseded_evidence(plan.resolved_query):
-        return False
-    return not should_include_superseded(plan.resolved_query)
+    return plan.temporal_scope == "current"
 
 
 def _target_date_from_route(plan: RoutePlan) -> str | None:
@@ -56,37 +41,15 @@ def _target_date_from_route(plan: RoutePlan) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _requires_superseded_evidence(query: str) -> bool:
-    if should_include_superseded(query):
-        return True
-    normalized = query.lower()
-    return any(
-        term in normalized
-        for term in (
-            "after",
-            "changed",
-            "what changed",
-            "compared",
-            "difference between",
-            "version",
-        )
-    )
-
-
 def _should_promote_parent_context(plan: RoutePlan | None) -> bool:
     if plan is None or plan.chunk_granularity not in {"section", "document"}:
         return False
-    return plan.intent in {
-        "summarization",
-        "procedural",
-        "troubleshooting",
-        "troubleshooting_procedure",
-        "document_navigation",
-        "comparison",
-        "temporal_comparison",
-        "comparative_summary",
-        "multi_hop",
-    }
+    return bool(
+        set(plan.capabilities)
+        & {"document_search", "document_navigation", "decomposed_search"}
+        or plan.response_mode
+        in {"summary", "comparison", "procedure", "conflict_analysis"}
+    )
 
 
 def _retrieval_execution_summary(ctx: QueryContext) -> tuple[str, str]:
@@ -104,11 +67,6 @@ def _retrieval_execution_summary(ctx: QueryContext) -> tuple[str, str]:
         detail_parts.append(live_detail)
     detail_parts.append(f"hits={len(ctx['retrieved_hits'])}")
     return mode, ",".join(detail_parts)
-
-
-def _artifact_generation_requested(ctx: QueryContext) -> bool:
-    artifact_request = ctx.get("artifact_request")
-    return artifact_request is not None and not artifact_request.needs_clarification
 
 
 def _retrieval_retry_limit_reached(

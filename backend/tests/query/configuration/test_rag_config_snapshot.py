@@ -11,6 +11,7 @@ from rag.query.configuration.mapping import (
 )
 from rag.query.configuration.models import RagConfigRecord
 from rag.query.service import LocalRagService
+from rag.query.adapters.chat_history_memory import InMemoryChatHistoryRepository
 
 
 def test_resolved_mixed_provider_snapshot_round_trips_runtime_fields() -> None:
@@ -31,9 +32,18 @@ def test_resolved_mixed_provider_snapshot_round_trips_runtime_fields() -> None:
     assert restored.effective_routing_base_url == original.effective_routing_base_url
     assert restored.chat_model == original.chat_model
     assert restored.embed_model == original.embed_model
+    assert restored.sql_generation_model == original.sql_generation_model
     assert restored.reranker_model == original.reranker_model
+    assert restored.routing_timeout_seconds == original.routing_timeout_seconds
+    assert restored.reasoning_timeout_seconds == original.reasoning_timeout_seconds
+    assert (
+        restored.faithfulness_timeout_seconds
+        == original.faithfulness_timeout_seconds
+    )
     assert restored.retrieval_token_budget == original.retrieval_token_budget
     assert restored.query_planner_enabled is original.query_planner_enabled
+    assert restored.evidence_gate_policy == original.evidence_gate_policy
+    assert restored.faithfulness_policy == original.faithfulness_policy
     assert restored.embedding_port == 0
 
 
@@ -48,8 +58,16 @@ def test_resolved_mixed_provider_snapshot_round_trips_runtime_fields() -> None:
         (("base_url",), ""),
         (("chat_timeout_seconds",), 0),
         (("embed_timeout_seconds",), -1),
+        (("routing_timeout_seconds",), 0),
+        (("routing_timeout_seconds",), 31),
+        (("reasoning_timeout_seconds",), 0),
+        (("reasoning_timeout_seconds",), 301),
+        (("faithfulness_timeout_seconds",), 0),
+        (("faithfulness_timeout_seconds",), 301),
         (("json_num_predict",), 128),
         (("retrieval_token_budget",), 999),
+        (("evidence_gate_policy",), "sometimes"),
+        (("faithfulness_policy",), "sometimes"),
     ],
 )
 def test_invalid_snapshot_values_fail_closed(
@@ -96,18 +114,20 @@ def test_explicit_runtime_config_bypasses_live_repository_resolution(
         rag_config=record,
         ollama=object(),  # type: ignore[arg-type]
         qdrant=object(),  # type: ignore[arg-type]
-        session_store=object(),  # type: ignore[arg-type]
+        chat_history_repo=InMemoryChatHistoryRepository(),
         conflict_checker=object(),  # type: ignore[arg-type]
-        artifact_service=object(),  # type: ignore[arg-type]
         artifact_job_service=object(),  # type: ignore[arg-type]
     )
 
     assert service.rag_config is record
     assert service.nodes.reasoning_model == record.effective_reasoning_model
+    assert service.nodes.sql_generation_model == record.sql_generation_model
     assert service.nodes.routing_model == record.routing_model
     assert service.nodes.faithfulness_model == record.faithfulness_model
     assert service.nodes.reranker_model == record.reranker_model
     assert service.nodes.query_planner_enabled is record.query_planner_enabled
+    assert service.nodes.evidence_gate_policy == record.evidence_gate_policy
+    assert service.nodes.faithfulness_policy == record.faithfulness_policy
 
 
 def _snapshot() -> dict[str, object]:
@@ -134,6 +154,7 @@ def _record() -> RagConfigRecord:
         chat_model="Qwen/Qwen3-14B-AWQ",
         embed_model="nomic-ai/nomic-embed-text-v1.5-Q",
         reasoning_model="Qwen/Qwen3-14B-AWQ",
+        sql_generation_model="Qwen/Qwen2.5-Coder-14B-Instruct-AWQ",
         routing_model="qwen3:8b",
         faithfulness_model="qwen3:14b",
         ingestion_model="Qwen/Qwen3-14B-AWQ",
@@ -142,8 +163,13 @@ def _record() -> RagConfigRecord:
         json_num_predict=8192,
         retrieval_token_budget=24000,
         query_planner_enabled=False,
+        evidence_gate_policy="never",
+        faithfulness_policy="never",
         reranker_model="jinaai/jina-reranker-v1-turbo-en",
         chat_timeout_seconds=180,
+        routing_timeout_seconds=7,
+        reasoning_timeout_seconds=31,
+        faithfulness_timeout_seconds=29,
         embed_timeout_seconds=45,
         health_status="ok",
         health_message="Snapshot source was healthy.",

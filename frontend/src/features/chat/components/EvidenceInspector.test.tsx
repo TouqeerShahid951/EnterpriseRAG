@@ -145,6 +145,87 @@ describe("EvidenceInspector", () => {
     expect(markup).not.toContain(">R630</mark>");
   });
 
+  it("renders an unverified live database row before raw query context", () => {
+    const markup = renderToStaticMarkup(
+      <EvidenceInspector
+        onClose={vi.fn()}
+        source={{
+          ...source,
+          doc_id: "connector-live-scope:catalog-1",
+          doc_title: "Live connector query: Approved cases",
+          chunk_id: "connector-live-scope:catalog-1:query:0",
+          excerpt: "Connector type: postgres\nRows returned: 2\nstatus: open\nSQL: SELECT status FROM cases",
+          attribution_status: "complete",
+          evidence_windows: [
+            {
+              claim_id: "claim-1",
+              claim: "The case is open.",
+              fields: [
+                { label: "Case", value: "C-101", supports_claim: false },
+                { label: "Status", value: "open", supports_claim: true },
+              ],
+              highlight_ranges: [],
+              kind: "table_row",
+              passage: "status: open",
+              quote_end: null,
+              quote_start: null,
+              source_end: 12,
+              source_start: 0,
+              support_score: 0.5,
+              support_status: "semantic_fallback",
+              table_title: "Approved cases",
+              truncated_end: false,
+              truncated_start: false,
+            },
+          ],
+          effective_date: null,
+          page: null,
+          page_end: null,
+          page_start: null,
+        }}
+        sourceCount={1}
+        sourceNumber={1}
+      />,
+    );
+
+    expect(markup).toContain("Live database");
+    expect(markup).toContain("1 returned row");
+    expect(markup).toContain("Relevant returned row, not verified");
+    expect(markup).toContain("Show query context");
+    expect(markup).toContain(">open</dd>");
+    expect(markup).not.toContain("<mark");
+    expect(markup).not.toContain("Open original source");
+    expect(markup).not.toContain("Page unknown");
+    expect(markup).not.toContain("Page Range");
+    expect(markup).not.toContain("Effective");
+  });
+
+  it("renders managed glossary evidence without a broken document link", () => {
+    const markup = renderToStaticMarkup(
+      <EvidenceInspector
+        onClose={vi.fn()}
+        source={{
+          ...source,
+          doc_id: "managed-glossary:/legal",
+          doc_title: "Managed Abbreviation Glossary",
+          chunk_id: "abbreviation:entry-1",
+          excerpt: "AD — Assistant Director",
+          effective_date: null,
+          page: null,
+          page_end: null,
+          page_start: null,
+        }}
+        sourceCount={1}
+        sourceNumber={1}
+      />,
+    );
+
+    expect(markup).toContain("Managed glossary");
+    expect(markup).toContain("AD — Assistant Director");
+    expect(markup).not.toContain("Open original source");
+    expect(markup).not.toContain("Page unknown");
+  });
+
   it("shows pending sources as unverified retrieved context", () => {
     const markup = renderToStaticMarkup(
       <EvidenceInspector

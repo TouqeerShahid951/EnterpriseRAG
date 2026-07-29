@@ -49,11 +49,11 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
   const [profileDraft, setProfileDraft] = useState<ConnectorProfileDraft>(() => defaultProfileDraft());
   const [connectorSetupOpen, setConnectorSetupOpen] = useState(false);
   const [connectorWorkspaceTab, setConnectorWorkspaceTab] = useState<ConnectorWorkspaceTab>("connections");
+  const [guidedProfileId, setGuidedProfileId] = useState<string | null>(null);
   const [profileEditor, setProfileEditor] = useState<ConnectorProfileEditorState | null>(null);
   const [catalogEditor, setCatalogEditor] = useState<ConnectorCatalogEditorState | null>(null);
   const [schemaViewer, setSchemaViewer] = useState<ConnectorSchemaSnapshotViewerState | null>(null);
   const [deleteProfileConfirm, setDeleteProfileConfirm] = useState<ConnectorProfile | null>(null);
-  const [pendingAiDraftProfileId, setPendingAiDraftProfileId] = useState<string | null>(null);
   const [aiDraftProgress, setAiDraftProgress] = useState<AiDraftProgress | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [folderInputResetKey, setFolderInputResetKey] = useState(0);
@@ -62,6 +62,9 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
   const [profileEditError, setProfileEditError] = useState<string | null>(null);
   const selection = useMemo(() => summarizeFolderFiles(selectedFiles), [selectedFiles]);
   const clearanceOptions = useMemo(() => clearanceLevelsAssignableBy(currentUser), [currentUser]);
+  const defaultClearanceLevel = clearanceOptions.includes(currentUser.clearance_level)
+    ? currentUser.clearance_level
+    : clearanceOptions[0] ?? "NATO_RESTRICTED";
 
   const schedulesQuery = useQuery({
     queryKey: ["folder-ingest", "schedules"],
@@ -112,7 +115,13 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
       setDraft((current) => ({ ...current, sourceMode: "connector", connectorProfileId: profile.id }));
       setConnectorSetupOpen(false);
       setConnectorWorkspaceTab("connections");
-      void queryClient.invalidateQueries({ queryKey: ["connectors", "profiles"] });
+      setGuidedProfileId(profile.id);
+      notify({
+        title: "Database connection saved",
+        description: "Test the connection before reading its schema.",
+        tone: "success",
+      });
+      void queryClient.invalidateQueries({ queryKey: ["connectors", "profiles"] }).then(() => focusConnectorPrimaryAction(profile.id));
     },
   });
   const updateProfileMutation = useMutation<ConnectorProfile, Error, { profile: ConnectorProfile; draft: ConnectorProfileDraft }>({
@@ -129,6 +138,7 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
     onSuccess: (_result, variables) => {
       setProfileEditor((current) => current?.profile.id === variables.profile.id ? null : current);
       setCatalogEditor((current) => current?.profile.id === variables.profile.id ? null : current);
+      setGuidedProfileId((current) => current === variables.profile.id ? null : current);
       void queryClient.invalidateQueries({ queryKey: ["connectors", "profiles"] });
     },
   });
@@ -139,16 +149,25 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
     },
     onSuccess: (result, variables) => {
       if (variables.action === "test" && "message" in result) {
+        const testedProfile = result.profile;
+        if (testedProfile) {
+          queryClient.setQueryData<{ items: ConnectorProfile[]; total: number }>(["connectors", "profiles"], (current) => current ? {
+            ...current,
+            items: current.items.map((profile) => profile.id === testedProfile.id ? testedProfile : profile),
+          } : current);
+        }
+        setConnectorWorkspaceTab("connections");
         notify({
           title: result.status === "ok" ? "Connection test passed" : "Connection test failed",
-          description: result.message,
+          description: result.status === "ok" ? `${result.message} Read the schema next.` : result.message,
           tone: result.status === "ok" ? "success" : "error",
         });
+        focusConnectorPrimaryAction(variables.id);
       }
       if (variables.action === "introspect" && "schema_json" in result) {
         const profile = connectorProfiles.find((item) => item.id === variables.id) ?? null;
+        if (createAiCatalogMutation.isError) createAiCatalogMutation.reset();
         setSchemaViewer({ profile, snapshot: result });
-        setConnectorWorkspaceTab("diagnostics");
         notify({
           title: result.status === "ok" ? "Schema snapshot ready" : "Schema introspection failed",
           description: result.status === "ok"
@@ -201,7 +220,6 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
     },
     onSettled: () => {
       setAiDraftProgress(null);
-      setPendingAiDraftProfileId(null);
     },
   });
   const createAiCatalogMutation = useMutation<ConnectorSchemaCatalog, Error, { profile: ConnectorProfile; groupPath: string; clearanceLevel: ClearanceLevel }>({
@@ -212,18 +230,18 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
         clearance_level: clearanceLevel,
     }),
     onSuccess: (catalog, variables) => {
+      setSchemaViewer(null);
       setCatalogEditor({ profile: variables.profile, catalog });
       setConnectorWorkspaceTab("schema_reviews");
       notify({
         title: "Database access review created",
-        description: "The review window is open. AI can fill descriptions one table at a time, and you can edit everything before approval.",
+        description: "The review window is open. AI is proposing editable schema metadata one table at a time; approval remains manual.",
         tone: "info",
       });
       void queryClient.invalidateQueries({ queryKey: ["connectors", "profiles", variables.profile.id, "schema-catalogs"] });
       enrichAiCatalogMutation.mutate({ profile: variables.profile, catalog });
     },
     onError: (error) => {
-      setPendingAiDraftProfileId(null);
       notify({
         title: "Database access review failed",
         description: errorMessage(error, "Unable to prepare a database access review."),
@@ -234,9 +252,15 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
   const updateCatalogMutation = useMutation<ConnectorSchemaCatalog, Error, { profile: ConnectorProfile; catalog: ConnectorSchemaCatalog; request: UpdateConnectorSchemaCatalogRequest }>({
     mutationFn: ({ profile, catalog, request }) => connectorApi.updateSchemaCatalog(profile.id, catalog.id, request),
     onSuccess: (catalog, variables) => {
-      setCatalogEditor({ profile: variables.profile, catalog });
+      if (catalog.status === "approved") {
+        setCatalogEditor(null);
+        setConnectorWorkspaceTab("live_access");
+        focusConnectorWorkspaceTab("live_access");
+      } else {
+        setCatalogEditor({ profile: variables.profile, catalog });
+      }
       notify({
-        title: "Database access review saved",
+        title: catalog.status === "approved" ? "Live DB access enabled" : "Database access review saved",
         description: catalog.status === "approved" ? "This database access review is now available for Live DB answers." : "Your review changes were saved.",
         tone: "success",
       });
@@ -307,6 +331,7 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
   }
 
   function openProfileEditor(profile: ConnectorProfile) {
+    setGuidedProfileId(profile.id);
     setProfileEditError(null);
     setProfileEditor({ profile, draft: profileDraftFromProfile(profile) });
   }
@@ -347,6 +372,7 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
   const scheduleLoadError = "Unable to load folder schedules.";
 
   function openConnectorSetup() {
+    setGuidedProfileId(null);
     setFormError(null);
     setProfileError(null);
     setConnectorSetupOpen(true);
@@ -358,29 +384,35 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
     setConnectorSetupOpen(false);
   }
 
-  function handleCreateAiDraft(profile: ConnectorProfile) {
-    const groupPath = writableSpacePaths[0];
-    if (!groupPath) {
-      setFormError("Create a writable Knowledge Space before preparing a database access review.");
-      return;
-    }
-    setPendingAiDraftProfileId(profile.id);
+  function handleCreateAiDraft(profile: ConnectorProfile, groupPath: string, clearanceLevel: ClearanceLevel) {
+    if (createAiCatalogMutation.isPending || enrichAiCatalogMutation.isPending) return;
+    setGuidedProfileId(profile.id);
     notify({
-      title: "Preparing database access review",
-      description: "The review window will open first, then table descriptions can be filled and saved separately.",
+      title: "Preparing AI-assisted review",
+      description: "The review will open while editable schema metadata is generated and saved one table at a time.",
       tone: "info",
     });
     createAiCatalogMutation.mutate({
       profile,
       groupPath,
-      clearanceLevel: clearanceOptions.includes(currentUser.clearance_level) ? currentUser.clearance_level : clearanceOptions[0] ?? "NATO_RESTRICTED",
+      clearanceLevel,
     });
   }
 
   function handleContinueAiDraft(profile: ConnectorProfile, catalog: ConnectorSchemaCatalog) {
     if (enrichAiCatalogMutation.isPending) return;
-    setPendingAiDraftProfileId(profile.id);
+    setGuidedProfileId(profile.id);
     enrichAiCatalogMutation.mutate({ profile, catalog });
+  }
+
+  function handleProfileAction(action: "test" | "introspect", id: string) {
+    setGuidedProfileId(id);
+    profileActionMutation.mutate({ action, id });
+  }
+
+  function openCatalogEditor(profile: ConnectorProfile, catalog: ConnectorSchemaCatalog) {
+    setGuidedProfileId(profile.id);
+    setCatalogEditor({ profile, catalog });
   }
 
   return (
@@ -396,27 +428,26 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
           catalogSaving={updateCatalogMutation.isPending}
           clearanceOptions={clearanceOptions}
           connectorProfiles={connectorProfiles}
-          draftCreationError={createAiCatalogMutation.error}
           enrichmentProgress={aiDraftProgress}
+          guidedProfileId={guidedProfileId}
           isProfilesError={profilesQuery.isError}
           isProfilesLoading={profilesQuery.isLoading}
           onCatalogEditorClose={() => setCatalogEditor(null)}
           onCatalogSave={(profile, catalog, request) => updateCatalogMutation.mutate({ profile, catalog, request })}
           onContinueAiDraft={handleContinueAiDraft}
-          onCreateAiDraft={handleCreateAiDraft}
           onDeleteProfile={handleDeleteProfile}
           onEditProfile={openProfileEditor}
-          onOpenCatalog={(profile, catalog) => setCatalogEditor({ profile, catalog })}
+          onGuidedProfileChange={setGuidedProfileId}
+          onOpenCatalog={openCatalogEditor}
           onProfileEditCancel={() => {
             setProfileEditor(null);
             setProfileEditError(null);
           }}
           onProfileEditChange={(patch) => setProfileEditor((current) => current ? { ...current, draft: { ...current.draft, ...patch } } : current)}
           onProfileEditSubmit={handleProfileEditSubmit}
-          onProfileAction={(action, id) => profileActionMutation.mutate({ action, id })}
+          onProfileAction={handleProfileAction}
           onStartSetup={openConnectorSetup}
           onTabChange={setConnectorWorkspaceTab}
-          pendingAiDraftProfileId={pendingAiDraftProfileId}
           pendingDeleteProfileId={deleteProfileMutation.isPending ? deleteProfileMutation.variables?.profile.id ?? null : null}
           pendingProfileActionId={profileActionMutation.isPending ? profileActionMutation.variables?.id ?? null : null}
           pendingProfileActionType={profileActionMutation.isPending ? profileActionMutation.variables?.action ?? null : null}
@@ -458,8 +489,10 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
 
       {isConnectorPanel ? (
         <ConnectorManagementModals
+          clearanceOptions={clearanceOptions}
           createError={createProfileMutation.error}
           creating={createProfileMutation.isPending}
+          defaultClearanceLevel={defaultClearanceLevel}
           deletePending={deleteProfileMutation.isPending}
           deleteProfile={deleteProfileConfirm}
           pendingActionId={profileActionMutation.isPending ? profileActionMutation.variables?.id ?? null : null}
@@ -467,15 +500,19 @@ export function FolderIngestPanel({ currentUser, groupsLoading, variant = "folde
           profileDraft={profileDraft}
           profileError={profileError}
           profilesLoading={profilesQuery.isLoading}
+          reviewCreationError={createAiCatalogMutation.error}
+          reviewCreating={createAiCatalogMutation.isPending || enrichAiCatalogMutation.isPending}
           schemaViewer={schemaViewer}
           setupOpen={connectorSetupOpen}
+          writableSpacePaths={writableSpacePaths}
           onCloseDelete={() => setDeleteProfileConfirm(null)}
           onCloseSchemaViewer={() => setSchemaViewer(null)}
           onCloseSetup={closeConnectorSetup}
           onConfirmDelete={confirmDeleteProfile}
-          onProfileAction={(action, id) => profileActionMutation.mutate({ action, id })}
+          onProfileAction={handleProfileAction}
           onProfileChange={(patch) => setProfileDraft((current) => ({ ...current, ...patch }))}
           onProfileSubmit={handleProfileSubmit}
+          onPrepareReview={handleCreateAiDraft}
         />
       ) : null}
     </section>
@@ -488,3 +525,14 @@ type Props = {
   variant?: FolderIngestPanelVariant;
   writableSpacePaths: string[];
 };
+
+function focusConnectorPrimaryAction(profileId: string) {
+  window.requestAnimationFrame(() => (
+    document.getElementById(`connector-guide-action-${profileId}`)
+    ?? document.getElementById(`connector-primary-action-${profileId}`)
+  )?.focus());
+}
+
+function focusConnectorWorkspaceTab(tab: ConnectorWorkspaceTab) {
+  window.requestAnimationFrame(() => document.getElementById(`connector-workspace-tab-${tab}`)?.focus());
+}

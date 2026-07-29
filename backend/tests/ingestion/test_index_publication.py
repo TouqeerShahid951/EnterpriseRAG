@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from rag.shared.contracts.abbreviations import ABBREVIATION_GLOSSARY_DOC_TYPE
 from rag.ingestion import maintenance
 from rag.ingestion.adapters import backend as backend_adapter
 from rag.ingestion.adapters.backend import BackendInternalClient
@@ -53,6 +54,27 @@ def test_generation_points_are_isolated_and_hidden_until_publication() -> None:
     assert payload["index_generation_id"] == "generation-a"
     assert payload["generation_published"] is False
     assert payload["is_current"] is False
+
+
+def test_declared_glossary_type_survives_generated_metadata() -> None:
+    points = build_qdrant_points(
+        job=IngestJobPayload(
+            job_id="job-glossary",
+            doc_id="document-glossary",
+            file_path="memory://glossary.pdf",
+            group_path="/ops",
+            effective_date=None,
+            supersedes=[],
+            doc_type=ABBREVIATION_GLOSSARY_DOC_TYPE,
+        ),
+        chunks=[_chunk()],
+        vectors=[[0.1, 0.2]],
+        sparse_vectors=[SparseVector(indices=[], values=[])],
+        metadata={"doc_type": "policy"},
+        file_bytes=b"glossary",
+    )
+
+    assert points[0]["payload"]["doc_type"] == ABBREVIATION_GLOSSARY_DOC_TYPE
 
 
 def test_qdrant_stages_verifies_and_publishes_only_one_generation(
@@ -191,6 +213,7 @@ def test_activation_commits_the_pointer_and_job_in_one_transaction(monkeypatch) 
     repository = publication_postgres.PostgresIndexPublicationRepository("postgresql://test")
     monkeypatch.setattr(repository, "_connect", lambda: connection)
     staged: list[dict[str, object]] = []
+    glossary: list[dict[str, object]] = []
 
     def apply_staged_ingestion_data(conn: object, **kwargs: object) -> None:
         staged.append({"conn": conn, **kwargs})
@@ -199,6 +222,15 @@ def test_activation_commits_the_pointer_and_job_in_one_transaction(monkeypatch) 
         publication_postgres,
         "apply_staged_ingestion_data",
         apply_staged_ingestion_data,
+    )
+
+    def replace_abbreviation_glossary(conn: object, **kwargs: object) -> None:
+        glossary.append({"conn": conn, **kwargs})
+
+    monkeypatch.setattr(
+        publication_postgres,
+        "replace_abbreviation_glossary_in_transaction",
+        replace_abbreviation_glossary,
     )
 
     generation = repository.activate(
@@ -216,6 +248,13 @@ def test_activation_commits_the_pointer_and_job_in_one_transaction(monkeypatch) 
             "metadata": {"summary": "Updated"},
             "claims": [],
             "supersedes": [],
+        }
+    ]
+    assert glossary == [
+        {
+            "conn": connection,
+            "document_id": "document-a",
+            "entries": [("AD", "Assistant Director", 7)],
         }
     ]
     assert connection.statement_params("SET state = 'retiring'") == (
@@ -368,6 +407,13 @@ class _ActivationConnection:
                         "claims": [],
                         "supersedes": [],
                         "warnings": [],
+                        "abbreviation_entries": [
+                            {
+                                "abbreviation": "AD",
+                                "expansion": "Assistant Director",
+                                "source_page": 7,
+                            }
+                        ],
                     },
                 }
             )

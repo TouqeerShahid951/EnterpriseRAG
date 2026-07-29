@@ -19,9 +19,6 @@ import {
 } from "@/features/chat/components/AssistantResponseNotices";
 
 
-export { ArtifactDownloads };
-
-
 export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArtifactJob, onExpandSourceSearch, onRetryArtifactJob, onSelectSource, selectedSource, turn }: Props) {
   if (turn.status === "pending") return <PendingAssistant documents={documents} onSelectSource={onSelectSource} selectedSource={selectedSource} turn={turn} />;
   if (turn.status === "cancelled") return <StoppedAssistant documents={documents} onSelectSource={onSelectSource} turn={turn} />;
@@ -120,13 +117,21 @@ function NodeTimingsPanel({ timings }: { timings: QueryNodeTiming[] }) {
         </div>
         <div className="grid gap-1">
           {timings.map((timing, index) => (
-            <div key={`${timing.node}-${index}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
-              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-                {formatNodeLabel(timing.node)}
-                {timing.execution_mode ? <span className="text-secondary"> - {timing.execution_mode}</span> : null}
-                {timing.detail ? <span className="text-secondary"> - {timing.detail}</span> : null}
-              </span>
-              <span className="font-bold text-on-surface">{formatNodeDurationMs(timing.duration_ms)}</span>
+            <div key={`${timing.node}-${index}`} className="grid gap-1">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                  {formatNodeLabel(timing.node)}
+                  {timing.execution_mode ? <span className="text-secondary"> - {timing.execution_mode}</span> : null}
+                  {timing.detail ? <span className="text-secondary"> - {timing.detail}</span> : null}
+                </span>
+                <span className="font-bold text-on-surface">{formatNodeDurationMs(timing.duration_ms)}</span>
+              </div>
+              {Object.entries(timing.phase_timings_ms ?? {}).map(([phase, durationMs]) => (
+                <div key={phase} className="ml-4 grid grid-cols-[minmax(0,1fr)_auto] gap-3 text-secondary">
+                  <span>{formatNodeLabel(phase)}</span>
+                  <span>{formatNodeDurationMs(durationMs)}</span>
+                </div>
+              ))}
             </div>
           ))}
         </div>

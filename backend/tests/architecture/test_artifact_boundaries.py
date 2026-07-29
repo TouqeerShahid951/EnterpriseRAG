@@ -25,7 +25,6 @@ ARTIFACT_QUERY_GENERATION_ADAPTER_FILE = (
 )
 ARTIFACT_GENERATION_APPLICATION_FILES = (
     RAG_ROOT / "artifact_jobs" / "execution" / "bundle_repair.py",
-    RAG_ROOT / "artifact_jobs" / "generation" / "composer.py",
     RAG_ROOT / "artifact_jobs" / "generation" / "composition.py",
     RAG_ROOT / "artifact_jobs" / "generation" / "composition_deadline.py",
     RAG_ROOT / "artifact_jobs" / "execution" / "executor.py",

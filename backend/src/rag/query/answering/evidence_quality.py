@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from rag.shared.contracts.structured_payloads import normalized_match_tokens
 
 from rag.query.qdrant import SearchHit
 
-STRONG_RETRIEVAL_SCORE = 0.6
+STRONG_RETRIEVAL_SCORE = 0.55
 SUPPORTED_TOKEN_COVERAGE = 0.5
 PARTIAL_TOKEN_COVERAGE = 0.25
 
@@ -95,7 +96,12 @@ _DOCUMENT_CLASS_FIELDS = (
     "source_id",
 )
 _AGGREGATION_INTENTS = {"aggregation"}
-_SUMMARY_INTENTS = {"summarization", "comparative_summary", "general_rag", "graphrag_global"}
+_SUMMARY_INTENTS = {
+    "summarization",
+    "comparative_summary",
+    "general_rag",
+    "graphrag_global",
+}
 _COMPARISON_INTENTS = {"comparison", "temporal_comparison", "comparative_summary"}
 _NAVIGATION_INTENTS = {"document_navigation"}
 
@@ -121,7 +127,9 @@ class EvidenceQuality:
         return self.quality == "weak"
 
 
-def assess_evidence_quality(query: str, hits: list[SearchHit], *, route_plan: object | None = None) -> EvidenceQuality:
+def assess_evidence_quality(
+    query: str, hits: list[SearchHit], *, route_plan: object | None = None
+) -> EvidenceQuality:
     if not hits:
         return EvidenceQuality(
             quality="weak",
@@ -137,11 +145,14 @@ def assess_evidence_quality(query: str, hits: list[SearchHit], *, route_plan: ob
     rerank_scores = [
         float(score)
         for hit in hits
-        if (score := hit.payload.get("_rerank_score")) is not None and isinstance(score, int | float)
+        if (score := hit.payload.get("_rerank_score")) is not None
+        and isinstance(score, int | float)
     ]
     query_tokens = _query_tokens(query)
     evidence_tokens = set().union(*(_hit_tokens(hit) for hit in hits[:3]))
-    coverage = len(query_tokens & evidence_tokens) / len(query_tokens) if query_tokens else 0.0
+    coverage = (
+        len(query_tokens & evidence_tokens) / len(query_tokens) if query_tokens else 0.0
+    )
     distinct_docs = {
         str(hit.payload["doc_id"])
         for hit in hits
@@ -187,16 +198,24 @@ def assess_evidence_quality(query: str, hits: list[SearchHit], *, route_plan: ob
         document_class_match_count=document_class_match_count,
         exhaustive_scope_match_count=exhaustive_scope_match_count,
     )
-    reasons.extend(_score_reasons(
-        route_intent,
-        score,
-        outcome,
-        structured_hit_count,
-        metadata_hit_count,
-        document_class_match_count,
-        exhaustive_scope_match_count,
-    ))
-    quality = "supported" if outcome == "pass" else "partial" if outcome == "partial" else "weak"
+    reasons.extend(
+        _score_reasons(
+            route_intent,
+            score,
+            outcome,
+            structured_hit_count,
+            metadata_hit_count,
+            document_class_match_count,
+            exhaustive_scope_match_count,
+        )
+    )
+    quality = (
+        "supported"
+        if outcome == "pass"
+        else "partial"
+        if outcome == "partial"
+        else "weak"
+    )
     return EvidenceQuality(
         quality=quality,
         reasons=tuple(reasons),
@@ -260,7 +279,9 @@ def _combined_evidence_score(
         "breadth": _clamp(distinct_doc_count / 4),
         "structured": _clamp(structured_hit_count / 6),
         "metadata": _clamp(metadata_hit_count / 6),
-        "doc_class": _clamp((document_class_match_count + exhaustive_scope_match_count) / 3),
+        "doc_class": _clamp(
+            (document_class_match_count + exhaustive_scope_match_count) / 3
+        ),
     }
     weights = _route_weights(route_intent)
     return round(sum(features[name] * weight for name, weight in weights.items()), 3)
@@ -279,9 +300,15 @@ def _evidence_outcome(
     exhaustive_scope_match_count: int,
 ) -> str:
     if route_intent in _AGGREGATION_INTENTS:
-        if exhaustive_scope_match_count > 0 and query_token_coverage >= SUPPORTED_TOKEN_COVERAGE:
+        if (
+            exhaustive_scope_match_count > 0
+            and query_token_coverage >= SUPPORTED_TOKEN_COVERAGE
+        ):
             return "pass"
-        if exhaustive_scope_match_count > 0 and query_token_coverage >= PARTIAL_TOKEN_COVERAGE:
+        if (
+            exhaustive_scope_match_count > 0
+            and query_token_coverage >= PARTIAL_TOKEN_COVERAGE
+        ):
             return "partial"
         has_aggregate_support = (
             document_class_match_count > 0
@@ -297,18 +324,27 @@ def _evidence_outcome(
         if metadata_hit_count > 0 and score >= 0.45:
             return "pass"
         return "partial" if metadata_hit_count > 0 else "degrade"
-    if route_intent in _COMPARISON_INTENTS and distinct_doc_count >= 2 and score >= 0.50:
+    if (
+        route_intent in _COMPARISON_INTENTS
+        and distinct_doc_count >= 2
+        and score >= 0.50
+    ):
         return "pass"
     if route_intent in _SUMMARY_INTENTS and distinct_doc_count >= 1 and score >= 0.50:
         return "pass"
     if (
         max_retrieval_score >= STRONG_RETRIEVAL_SCORE
         or query_token_coverage >= SUPPORTED_TOKEN_COVERAGE
-        or (max_retrieval_score >= 0.3 and query_token_coverage >= PARTIAL_TOKEN_COVERAGE)
+        or (
+            max_retrieval_score >= 0.3
+            and query_token_coverage >= PARTIAL_TOKEN_COVERAGE
+        )
         or (score >= 0.58 and query_token_coverage >= PARTIAL_TOKEN_COVERAGE)
     ):
         return "pass"
-    if score >= 0.45 and (max_retrieval_score >= 0.3 or query_token_coverage >= PARTIAL_TOKEN_COVERAGE):
+    if score >= 0.45 and (
+        max_retrieval_score >= 0.3 or query_token_coverage >= PARTIAL_TOKEN_COVERAGE
+    ):
         return "partial"
     return "degrade"
 
@@ -399,12 +435,17 @@ def _document_class_doc_ids(query_tokens: set[str], hits: list[SearchHit]) -> se
     return matched
 
 
-def _exhaustive_scope_doc_ids(query_tokens: set[str], hits: list[SearchHit]) -> set[str]:
+def _exhaustive_scope_doc_ids(
+    query_tokens: set[str], hits: list[SearchHit]
+) -> set[str]:
     if not query_tokens:
         return set()
     matched: set[str] = set()
     for hit in hits:
-        if str(hit.payload.get("exhaustive_scope_origin", "")) != "document_class_scope":
+        if (
+            str(hit.payload.get("exhaustive_scope_origin", ""))
+            != "document_class_scope"
+        ):
             continue
         if query_tokens & _hit_tokens(hit):
             matched.add(str(hit.payload.get("doc_id", hit.point_id)))
@@ -429,20 +470,32 @@ def _is_structured_hit(hit: SearchHit) -> bool:
         return True
     table_json = payload.get("table_json")
     structured_fields = payload.get("structured_fields")
-    return isinstance(table_json, dict) and bool(table_json) or isinstance(structured_fields, list) and bool(structured_fields)
+    return (
+        isinstance(table_json, dict)
+        and bool(table_json)
+        or isinstance(structured_fields, list)
+        and bool(structured_fields)
+    )
 
 
 def _has_source_metadata(hit: SearchHit) -> bool:
     return any(
         hit.payload.get(field) not in (None, "", [])
-        for field in ("page", "page_start", "page_end", "section_path", "parent_section_id")
+        for field in (
+            "page",
+            "page_start",
+            "page_end",
+            "section_path",
+            "parent_section_id",
+        )
     )
 
 
 def _rerank_confidence(score: float | None) -> float:
     if score is None:
         return 0.0
-    return _clamp((score + 1.0) / 2.0)
+    bounded = max(-20.0, min(20.0, score))
+    return 1.0 / (1.0 + math.exp(-bounded))
 
 
 def _clamp(value: float) -> float:

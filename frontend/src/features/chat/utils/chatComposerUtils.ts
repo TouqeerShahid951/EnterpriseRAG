@@ -65,23 +65,6 @@ export function failedComposerUploadJob(message: string): UploadJobView {
   };
 }
 
-export function isSupportedDocumentFile(file: File): boolean {
-  const name = file.name.toLowerCase();
-  return (
-    file.type === "application/pdf"
-    || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    || file.type === "image/jpeg"
-    || file.type === "image/png"
-    || file.type === "application/json"
-    || name.endsWith(".pdf")
-    || name.endsWith(".docx")
-    || name.endsWith(".jpg")
-    || name.endsWith(".jpeg")
-    || name.endsWith(".png")
-    || name.endsWith(".json")
-  );
-}
-
 export function activeMentionQuery(value: string): string | null {
   const match = /(^|\s)@([^\s@]*)$/.exec(value);
   return match ? match[2].toLowerCase() : null;

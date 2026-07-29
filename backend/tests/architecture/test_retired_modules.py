@@ -111,11 +111,13 @@ LEGACY_ARTIFACT_PATHS = (
 LEGACY_QUERY_MODULES = frozenset(
     {
         "rag.api.routes.query_routes",
+        "rag.query.query_memory",
         "rag.schemas.query",
     }
 )
 LEGACY_QUERY_PATHS = (
     RAG_ROOT / "api" / "routes" / "query_routes.py",
+    RAG_ROOT / "query" / "query_memory.py",
     RAG_ROOT / "schemas" / "query.py",
 )
 
@@ -210,7 +212,11 @@ REORGANIZED_MODULES = frozenset(
         "rag.query.routing_rules",
         "rag.query.routing_signals",
         "rag.query.routing_verifier",
+        "rag.query.routing.routing_evidence",
+        "rag.query.routing.routing_rules",
+        "rag.query.routing.routing_verifier",
         "rag.query.source_advisory",
+        "rag.query.sources.source_advisory",
         "rag.query.source_catalog",
         "rag.query.source_context_budget",
         "rag.query.source_evidence_selection",

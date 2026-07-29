@@ -73,6 +73,31 @@ class FakeDocumentQdrant:
         ]
 
 
+class MixedScopeCommunityQdrant(FakeCommunityQdrant):
+    def search_summaries(self, *, vector, qdrant_filter, limit):
+        hits = super().search_summaries(
+            vector=vector,
+            qdrant_filter=qdrant_filter,
+            limit=limit,
+        )
+        summary = hits[0].summary
+        return [
+            CommunitySearchHit(
+                id=hits[0].id,
+                score=hits[0].score,
+                summary=CommunitySummary(
+                    **{
+                        **summary.__dict__,
+                        "source_refs": [
+                            *summary.source_refs,
+                            SourceRef(doc_id="doc-b", chunk_id="chunk-b"),
+                        ],
+                    }
+                ),
+            )
+        ]
+
+
 def test_graphrag_retriever_applies_abac_and_document_scope() -> None:
     community_qdrant = FakeCommunityQdrant()
     document_qdrant = FakeDocumentQdrant()
@@ -142,6 +167,33 @@ def test_disabled_graphrag_returns_degraded_result() -> None:
 
     assert result.is_available is False
     assert result.degraded_reason == "graphrag_disabled"
+
+
+def test_document_scope_rejects_mixed_document_community_summary() -> None:
+    document_qdrant = FakeDocumentQdrant()
+    ctx = initial_state(
+        trace_id="trace-1",
+        session_id="session-1",
+        request=QueryRequest(query="major themes", document_ids=["doc-a"]),
+        user=UserContext(
+            user_id="user-1",
+            email="user@example.com",
+            group_paths=("/ops",),
+            clearance_level="NATO_SECRET",
+        ),
+        started=perf_counter(),
+    )
+
+    result = GraphRAGRetriever(
+        config=FakeConfig(),
+        embedder=FakeEmbedder(),
+        document_qdrant=document_qdrant,  # type: ignore[arg-type]
+        community_qdrant=MixedScopeCommunityQdrant(),  # type: ignore[arg-type]
+    ).retrieve(ctx)
+
+    assert result.is_available is False
+    assert result.degraded_reason == "graphrag_no_scope_safe_community_summaries"
+    assert document_qdrant.chunk_refs is None
 
 
 def _has_condition(qdrant_filter, key: str, value) -> bool:

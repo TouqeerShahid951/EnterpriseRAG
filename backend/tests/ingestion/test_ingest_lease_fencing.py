@@ -26,7 +26,6 @@ from rag.ingestion.internal_schemas import (
     InternalJobAttemptRequest,
     InternalJobStatusRequest,
 )
-from rag.internal.schemas import ServiceTokenContext
 
 
 ACTIVE_STATUSES = frozenset({"scheduled", "queued", "processing", "human_review"})
@@ -135,7 +134,6 @@ def test_status_route_rejects_stale_token_after_takeover() -> None:
                 ),
                 document_repo=repo,
                 job_repo=repo,
-                service=ServiceTokenContext(service_name="ingestion-worker"),
             )
         )
 
@@ -168,7 +166,6 @@ def test_status_route_rechecks_token_when_takeover_wins_update_race() -> None:
                 ),
                 document_repo=racing_repo,  # type: ignore[arg-type]
                 job_repo=racing_repo,  # type: ignore[arg-type]
-                service=ServiceTokenContext(service_name="ingestion-worker"),
             )
         )
 
@@ -223,7 +220,6 @@ def test_attempt_route_reports_live_final_attempt_as_busy() -> None:
             job_id,
             InternalJobAttemptRequest(run_token="worker-4"),
             job_repo=repo,
-            service=ServiceTokenContext(service_name="ingestion-worker"),
         )
     )
 

@@ -9,6 +9,15 @@ import { isRecord, numberValue, stringValue } from "@/features/connectors/utils/
 export type ConnectorWorkspaceTab = "connections" | "schema_reviews" | "live_access" | "diagnostics";
 export type ConnectorMetricTone = "neutral" | "success" | "warning" | "danger";
 export type ConnectorReviewTab = "summary" | "tables" | "joins" | "access" | "raw_schema";
+export type ConnectorNextAction = "test" | "read_schema" | "review" | "live";
+export type ConnectorFlowStep = 1 | 2 | 3 | 4;
+
+const connectorFlowStepByAction: Record<ConnectorNextAction, ConnectorFlowStep> = {
+  test: 1,
+  read_schema: 2,
+  review: 3,
+  live: 4,
+};
 
 export type ConnectorWorkspaceCounts = {
   connections: number;
@@ -54,6 +63,16 @@ type SchemaSnapshotForeignKeySummary = {
 type SchemaSnapshotIndexSummary = {
   name: string;
 };
+
+export function nextConnectorAction(profile: ConnectorProfile, catalog: ConnectorSchemaCatalog | null): ConnectorNextAction {
+  if (profile.last_test_status !== "ok") return "test";
+  if (!catalog) return "read_schema";
+  return catalog.status === "approved" ? "live" : "review";
+}
+
+export function connectorFlowStep(profile: ConnectorProfile, catalog: ConnectorSchemaCatalog | null): ConnectorFlowStep {
+  return connectorFlowStepByAction[nextConnectorAction(profile, catalog)];
+}
 
 export function validateDraft(draft: FolderScheduleDraft, selection: ReturnType<typeof summarizeFolderFiles>, writableSpacePaths: string[]): string | null {
   if (!draft.name.trim()) return "Enter a schedule name.";

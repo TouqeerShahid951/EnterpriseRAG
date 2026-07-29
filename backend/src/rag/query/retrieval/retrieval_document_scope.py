@@ -224,10 +224,12 @@ _DOCUMENT_TARGET_TRAILING_ADJUNCTS = (
 
 
 def _should_expand_document_scope(query: str, plan: RoutePlan | None) -> bool:
-    if plan is None or plan.intent != "aggregation":
-        return False
-    tokens = normalized_match_tokens(query)
-    return bool(tokens & _EXHAUSTIVE_SCOPE_TOKENS)
+    return bool(
+        plan is not None
+        and plan.coverage == "exhaustive"
+        and plan.scope in {"document", "corpus"}
+        and "document_search" in plan.capabilities
+    )
 
 
 def _document_scope_hits(

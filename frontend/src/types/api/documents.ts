@@ -42,6 +42,39 @@ export interface DocumentCatalogSummary {
   total: number;
 }
 
+interface DocumentOverviewAttentionItem {
+  id: string;
+  title: string;
+  group_path: string;
+  ingest_status: DocumentIngestStatus;
+}
+
+export interface DocumentOverviewSpace {
+  group_path: string;
+  library_documents: number;
+  current_versions: number;
+  processing_current: number;
+  review_current: number;
+  failed_current: number;
+  unknown_current: number;
+}
+
+export interface DocumentOverview {
+  library_documents: number;
+  current_versions: number;
+  indexed_current: number;
+  processing_current: number;
+  review_current: number;
+  failed_current: number;
+  unknown_current: number;
+  needs_attention: number;
+  superseded_versions: number;
+  expiring_soon_current: number;
+  trash: number;
+  attention_documents: DocumentOverviewAttentionItem[];
+  spaces: DocumentOverviewSpace[];
+}
+
 interface DocumentEntity {
   text: string;
   type: string;

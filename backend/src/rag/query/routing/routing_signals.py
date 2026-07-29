@@ -8,6 +8,11 @@ from rag.query.routing.routing_models import QuerySignals
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _DATE_RE = re.compile(r"\b(?:19|20)\d{2}(?:-\d{2}){0,2}\b")
+_RELATIVE_DATE_RE = re.compile(
+    r"\b(?:q[1-4](?:\s+(?:19|20)\d{2})?|(?:last|previous|prior|first|second|third|fourth)\s+quarter|"
+    r"last\s+(?:month|year)|at\s+the\s+time|(?:former|prior|earlier)\s+version)\b",
+    re.IGNORECASE,
+)
 _FOLLOWUP_RE = re.compile(
     r"\b(it|that|those|they|them|previous answer|above|same|what about|how about|and for)\b",
     re.IGNORECASE,
@@ -46,29 +51,26 @@ def extract_query_signals(query: str, turns: list[dict[str, object]]) -> QuerySi
     original = query
     normalized = normalize_query(query)
     tokens = tuple(match.group(0).lower() for match in _TOKEN_RE.finditer(normalized))
-    previous_query = _previous_query(turns)
     temporal_clues = tuple(_temporal_clues(normalized))
     followup_clues = list(match.group(0).lower() for match in _FOLLOWUP_RE.finditer(normalized))
-    if previous_query:
+    if turns:
         for demonstrative in ("this", "these"):
             if re.search(rf"\b{demonstrative}\b", normalized):
                 followup_clues.append(demonstrative)
-    if previous_query and len(tokens) <= 3 and temporal_clues:
+    if turns and len(tokens) <= 3 and temporal_clues:
         followup_clues.extend(temporal_clues)
     is_vague_followup = bool(followup_clues) and len(tokens) <= 8
-    use_memory = bool(is_vague_followup and previous_query)
-    resolved = resolve_followup_query(original, previous_query) if use_memory else original.strip()
     domain_clues = tuple(_domain_entity_clues(original, tokens))
     return QuerySignals(
         original_query=original,
         normalized_query=normalized,
-        resolved_query=resolved,
+        resolved_query=original.strip(),
         tokens=tokens,
         domain_entity_clues=domain_clues,
         temporal_clues=temporal_clues,
         followup_clues=tuple(_unique(followup_clues)),
-        has_session_context=previous_query is not None,
-        use_conversation_memory=use_memory,
+        has_session_context=bool(turns),
+        use_conversation_memory=False,
         is_short_query=len(tokens) <= 2,
         is_vague_followup=is_vague_followup,
         clarity_bonus=_has_clarity(normalized, tokens),
@@ -79,22 +81,9 @@ def normalize_query(query: str) -> str:
     return " ".join(query.strip().lower().split())
 
 
-def resolve_followup_query(query: str, previous_query: str | None) -> str:
-    if not previous_query:
-        return query.strip()
-    return f"{query.strip()}\nPrevious user question: {previous_query}"
-
-
-def _previous_query(turns: list[dict[str, object]]) -> str | None:
-    for turn in reversed(turns):
-        previous = turn.get("query")
-        if isinstance(previous, str) and previous.strip():
-            return previous.strip()
-    return None
-
-
 def _temporal_clues(normalized: str) -> list[str]:
     clues = _DATE_RE.findall(normalized)
+    clues.extend(match.group(0).lower() for match in _RELATIVE_DATE_RE.finditer(normalized))
     for phrase in (
         "latest",
         "current",
@@ -112,7 +101,7 @@ def _temporal_clues(normalized: str) -> list[str]:
         "update",
         "version",
     ):
-        if phrase in normalized:
+        if re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", normalized):
             clues.append(phrase)
     return sorted(set(clues))
 

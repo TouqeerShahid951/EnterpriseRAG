@@ -1,3 +1,5 @@
+import type { KeyboardEvent } from "react";
+
 import type { ConnectorReviewTab } from "@/features/connectors/utils/connectorPanelUtils";
 
 const connectorReviewTabs: Array<{ id: ConnectorReviewTab; label: string }> = [
@@ -8,17 +10,35 @@ const connectorReviewTabs: Array<{ id: ConnectorReviewTab; label: string }> = [
   { id: "raw_schema", label: "Raw Schema" },
 ];
 
-export function ConnectorReviewTabs({ onChange, value }: ConnectorReviewTabsProps) {
+export function ConnectorReviewTabs({ idPrefix, onChange, value }: ConnectorReviewTabsProps) {
+  function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % connectorReviewTabs.length;
+    if (event.key === "ArrowLeft") nextIndex = (index - 1 + connectorReviewTabs.length) % connectorReviewTabs.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = connectorReviewTabs.length - 1;
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    const nextTab = connectorReviewTabs[nextIndex];
+    onChange(nextTab.id);
+    event.currentTarget.ownerDocument.getElementById(`${idPrefix}-tab-${nextTab.id}`)?.focus();
+  }
+
   return (
     <div className="knowledge-inspector-tabs" role="tablist" aria-label="Database access review sections" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(7rem, 1fr))" }}>
-      {connectorReviewTabs.map((tab) => (
+      {connectorReviewTabs.map((tab, index) => (
         <button
           key={tab.id}
+          id={`${idPrefix}-tab-${tab.id}`}
           type="button"
           role="tab"
+          aria-controls={`${idPrefix}-panel-${tab.id}`}
           aria-selected={value === tab.id}
           className={value === tab.id ? "knowledge-inspector-tab-active" : "knowledge-inspector-tab"}
           onClick={() => onChange(tab.id)}
+          onKeyDown={(event) => handleKeyDown(event, index)}
+          tabIndex={value === tab.id ? 0 : -1}
         >
           {tab.label}
         </button>
@@ -46,6 +66,7 @@ export function SchemaReviewStat({ label, value }: SchemaReviewMetricProps) {
 }
 
 export type ConnectorReviewTabsProps = {
+  idPrefix: string;
   onChange: (tab: ConnectorReviewTab) => void;
   value: ConnectorReviewTab;
 };

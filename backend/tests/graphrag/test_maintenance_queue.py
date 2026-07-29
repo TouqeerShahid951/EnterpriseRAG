@@ -86,6 +86,7 @@ def test_celery_adapter_preserves_document_and_rebuild_dispatch_contracts() -> N
             doc_id="doc-1",
             job_id="job-1",
             reason="user_request",
+            index_generation_id="generation-1",
         )
     )
     queue.enqueue_partition_rebuild(
@@ -99,7 +100,14 @@ def test_celery_adapter_preserves_document_and_rebuild_dispatch_contracts() -> N
     assert app.sent_tasks == [
         (
             INDEX_TASK_NAME,
-            [{"doc_id": "doc-1", "job_id": "job-1", "reason": "user_request"}],
+            [
+                {
+                    "doc_id": "doc-1",
+                    "job_id": "job-1",
+                    "reason": "user_request",
+                    "index_generation_id": "generation-1",
+                }
+            ],
             "graphrag:jobs",
         ),
         (

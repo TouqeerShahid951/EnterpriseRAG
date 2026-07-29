@@ -4,12 +4,14 @@ from rag.auth.context import UserContext
 from rag.query.qdrant import SearchHit
 from rag.query.ollama import (
     ANSWER_NUM_PREDICT,
+    FACTUAL_ANSWER_NUM_PREDICT,
     LONG_ANSWER_NUM_PREDICT,
     SYNTHESIS_PROMPT_HEADROOM_TOKENS,
     answer_num_predict_for_profile,
     build_answer_prompt,
     estimate_answer_prompt_tokens,
 )
+from rag.query.answering.evidence_sufficiency import EvidenceSufficiencyResult
 from rag.query.routing.routing_models import RoutePlan
 from rag.query.sources import sources_from_hits
 from rag.query.state import QueryContext, initial_state
@@ -61,6 +63,9 @@ def _partial_exhaustive_context() -> QueryContext:
         original_query=ctx["request"].query,
         resolved_query=ctx["request"].query,
         intent="aggregation",
+        capabilities=("general_search", "structured_query", "document_search"),
+        scope="corpus",
+        coverage="exhaustive",
         public_intent="aggregation",
         top_k=24,
     )
@@ -98,6 +103,9 @@ def test_scoped_aggregation_synthesis_requires_document_coverage() -> None:
         original_query=ctx["request"].query,
         resolved_query=ctx["request"].query,
         intent="aggregation",
+        capabilities=("general_search", "structured_query", "document_search"),
+        scope="corpus",
+        coverage="exhaustive",
         public_intent="aggregation",
         top_k=24,
     )
@@ -141,6 +149,9 @@ def test_partial_exhaustive_scope_forbids_complete_inventory_claims() -> None:
         original_query=ctx["request"].query,
         resolved_query=ctx["request"].query,
         intent="aggregation",
+        capabilities=("general_search", "structured_query", "document_search"),
+        scope="corpus",
+        coverage="exhaustive",
         public_intent="aggregation",
         top_k=24,
     )
@@ -225,6 +236,9 @@ def test_structured_exhaustive_status_survives_other_degradation_reasons() -> No
         original_query=ctx["request"].query,
         resolved_query=ctx["request"].query,
         intent="aggregation",
+        capabilities=("general_search", "structured_query", "document_search"),
+        scope="corpus",
+        coverage="exhaustive",
         public_intent="aggregation",
         top_k=24,
     )
@@ -272,6 +286,9 @@ def test_partial_coverage_is_enforced_in_answer_and_response_contract() -> None:
         original_query=ctx["request"].query,
         resolved_query=ctx["request"].query,
         intent="aggregation",
+        capabilities=("general_search", "structured_query", "document_search"),
+        scope="corpus",
+        coverage="exhaustive",
         public_intent="aggregation",
         top_k=24,
     )
@@ -316,6 +333,9 @@ def test_unresolved_exhaustive_scope_returns_clarification_status() -> None:
         original_query=ctx["request"].query,
         resolved_query=ctx["request"].query,
         intent="aggregation",
+        capabilities=("general_search", "structured_query", "document_search"),
+        scope="corpus",
+        coverage="exhaustive",
         public_intent="aggregation",
         top_k=24,
     )
@@ -350,6 +370,9 @@ def test_synthesis_contexts_fit_final_prompt_budget() -> None:
         original_query=ctx["request"].query,
         resolved_query=ctx["request"].query,
         intent="aggregation",
+        capabilities=("general_search", "structured_query", "document_search"),
+        scope="corpus",
+        coverage="exhaustive",
         public_intent="aggregation",
         top_k=24,
     )
@@ -379,6 +402,12 @@ def test_synthesis_contexts_fit_final_prompt_budget() -> None:
 
     assert len(prepared.contexts) < len(sources)
     assert len(prepared.contexts) == len(prepared.sources)
+    assert ctx["synthesis_context_count"] == len(prepared.contexts)
+    assert ctx["synthesis_estimated_prompt_tokens"] == estimate_answer_prompt_tokens(
+        question=prepared.question,
+        contexts=prepared.contexts,
+        profile=prepared.profile,
+    )
     assert prepared.sources[0].doc_id == "report-a"
     assert (
         estimate_answer_prompt_tokens(
@@ -407,6 +436,74 @@ def test_factual_answer_prompt_omits_structured_guidance() -> None:
     assert "For highest/lowest/max/min" not in factual_prompt
     assert "Treat named table rows" not in factual_prompt
     assert len(factual_prompt) < len(legacy_prompt)
+
+
+def test_answer_prompt_forbids_citation_only_output() -> None:
+    prompt = build_answer_prompt(
+        question="What is the status?",
+        contexts=["[doc:1]\nStatus: Open."],
+        profile="factual_simple",
+    )
+
+    assert "Never return a citation alone" in prompt
+
+
+def test_answer_prompt_defaults_to_detailed_grounded_response() -> None:
+    prompt = build_answer_prompt(
+        question="Explain the approval process.",
+        contexts=["[policy:1]\nA manager reviews the request before finance approves it."],
+        profile="procedural",
+    )
+
+    assert "Lead with the direct answer" in prompt
+    assert "details, reasons, relationships, conditions, exceptions, and examples" in prompt
+    assert "Unless the user asks for brevity, be descriptive and complete" in prompt
+    assert "stop after the direct answer" not in prompt
+
+
+def test_citation_only_database_answer_uses_structured_row_fallback() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(
+            query="Which demo case has the highest priority? Return its case ID, status, assigned team, and outstanding amount."
+        ),
+        user=UserContext(
+            user_id="user", email="user@example.com", group_paths=("/admin",)
+        ),
+        started=perf_counter(),
+    )
+    citation = "[connector-live-scope:catalog:query:0]"
+    ctx["retrieved_hits"] = [
+        SearchHit(
+            point_id="connector-live-scope:catalog:query:0",
+            score=1.0,
+            payload={
+                "doc_id": "connector-live-scope:catalog",
+                "chunk_id": "connector-live-scope:catalog:query:0",
+                "doc_title": "Live connector query: Demo cases",
+                "text": "case_id: DEMO-ALPHA\nstatus: Escalated\nassigned_team: Phoenix\noutstanding_amount: 1250.75",
+                "source_type": "connector_live_sql_database_scope",
+                "structured_kind": "kv_record",
+                "structured_fields": [
+                    {"label": "case_id", "value": "DEMO-ALPHA"},
+                    {"label": "status", "value": "Escalated"},
+                    {"label": "assigned_team", "value": "Phoenix"},
+                    {"label": "outstanding_amount", "value": "1250.75"},
+                ],
+            },
+        )
+    ]
+
+    synthesize_response(ctx, FakeLlm(citation))
+
+    response = ctx["response"]
+    assert response.answer == (
+        "case_id: DEMO-ALPHA; status: Escalated; assigned_team: Phoenix; "
+        f"outstanding_amount: 1250.75 {citation}."
+    )
+    assert response.answer_status == "complete"
+    assert not response.degraded
 
 
 def test_auto_citations_preserve_markdown_table_syntax() -> None:
@@ -487,10 +584,64 @@ def test_table_context_keeps_table_guidance_for_factual_profile() -> None:
     assert "Treat named table rows" in prompt
 
 
-def test_answer_generation_uses_fast_output_budget() -> None:
+def test_answer_generation_uses_route_appropriate_output_budget() -> None:
     assert ANSWER_NUM_PREDICT == 1024
-    assert answer_num_predict_for_profile("factual_simple") == ANSWER_NUM_PREDICT
-    assert answer_num_predict_for_profile("summarization") == LONG_ANSWER_NUM_PREDICT
+    assert FACTUAL_ANSWER_NUM_PREDICT == ANSWER_NUM_PREDICT
+    assert (
+        answer_num_predict_for_profile("factual_simple")
+        == FACTUAL_ANSWER_NUM_PREDICT
+    )
+    for profile in (
+        "general_rag",
+        "procedural",
+        "summarization",
+        "troubleshooting",
+        "troubleshooting_procedure",
+    ):
+        assert answer_num_predict_for_profile(profile) == LONG_ANSWER_NUM_PREDICT
+
+
+def test_deterministic_factual_synthesis_uses_all_sources_that_fit_prompt_budget() -> None:
+    query = "What is the account code for Vega?"
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query=query),
+        user=UserContext(
+            user_id="user", email="user@example.com", group_paths=("/admin",)
+        ),
+        started=perf_counter(),
+    )
+    ctx["route_plan"] = RoutePlan(
+        original_query=query,
+        resolved_query=query,
+        intent="general_rag",
+        capabilities=("general_search",),
+        response_mode="lookup",
+    )
+    ctx["evidence_sufficiency"] = EvidenceSufficiencyResult(
+        relevance="relevant",
+        sufficiency="sufficient",
+        supported_aspects=("matched structured field",),
+        missing_aspects=(),
+        action="answer",
+        evaluator_status="not_needed",
+    )
+    ctx["retrieved_hits"] = [
+        hit(
+            f"account:{index}",
+            doc_id="account",
+            doc_title="Vega account record",
+            text=f"Account evidence {index}",
+        )
+        for index in range(5)
+    ]
+    sources = sources_from_hits(ctx["retrieved_hits"], query=query)
+
+    prepared = prepare_synthesis_input(ctx, sources)
+
+    assert prepared.sources == sources
+    assert len(prepared.contexts) == len(sources) == 5
 
 
 def test_documents_do_not_contain_information_is_global_abstention() -> None:

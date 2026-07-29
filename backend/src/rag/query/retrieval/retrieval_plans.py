@@ -1,163 +1,130 @@
-"""Retrieval settings derived from internal route intents."""
+"""Compile typed retrieval capabilities into executable settings."""
 
 from __future__ import annotations
 
-from rag.query.routing.routing_models import RouteIntent, RiskLevel
+from typing import get_args
+
 from rag.query.retrieval.temporal import target_date_for_query
+from rag.query.routing.routing_models import (
+    CoverageMode,
+    QueryScope,
+    ResponseMode,
+    RetrievalCapability,
+    RiskLevel,
+    TemporalScope,
+)
 
 
-def retrieval_settings_for(intent: RouteIntent, *, query: str, base_top_k: int) -> dict[str, object]:
-    base_top_k = max(1, base_top_k)
+def retrieval_settings_for(
+    capabilities: tuple[RetrievalCapability, ...],
+    *,
+    response_mode: ResponseMode,
+    scope: QueryScope,
+    coverage: CoverageMode,
+    temporal_scope: TemporalScope,
+    query: str,
+    base_top_k: int,
+) -> dict[str, object]:
+    """Return server-owned execution settings for a validated capability plan."""
+    selected = set(capabilities) or {"general_search"}
+    unknown = selected.difference(get_args(RetrievalCapability))
+    if unknown:
+        raise ValueError(
+            f"Unsupported retrieval capabilities: {', '.join(sorted(unknown))}"
+        )
+
+    top_k = max(1, base_top_k)
+    chunk_granularity = "medium"
+    if coverage == "exhaustive":
+        chunk_granularity = "document"
+        top_k = max(top_k, 24)
+    elif "document_search" in selected:
+        chunk_granularity = "document" if scope == "corpus" else "section"
+        top_k = max(top_k, 8)
+    elif selected & {"structured_query", "document_navigation"}:
+        chunk_granularity = "section"
+
+    if "structured_query" in selected:
+        top_k = max(top_k, 24)
+    elif "global_graph" in selected:
+        top_k = max(top_k, 8)
+    elif selected & {"document_navigation", "decomposed_search"}:
+        top_k = max(top_k, 6)
+    if response_mode == "conflict_analysis":
+        top_k = max(top_k, 8)
+
     target_date = target_date_for_query(query)
-    temporal_scope = _has_temporal_scope(query, target_date)
-    settings = {
-        "needs_retrieval": True,
-        "retrieval_strategy": "hybrid_reranked",
-        "search_mode": "hybrid",
-        "use_query_planner": False,
-        "use_reranker": True,
-        "use_temporal_filter": False,
-        "use_conflict_checker": False,
-        "use_structured_query": False,
-        "chunk_granularity": "medium",
-        "top_k": base_top_k,
-        "filters": {},
-        "allow_abstain": True,
-        "risk_level": _risk_level(intent),
-    }
-    if intent in {"procedural", "troubleshooting_procedure"}:
-        settings.update(
-            retrieval_strategy="hybrid_parent_section_ordered",
-            chunk_granularity="section",
-            top_k=max(base_top_k, 6),
-        )
-    elif intent == "summarization":
-        if _is_section_scoped_summary(query):
-            settings.update(
-                retrieval_strategy="section_or_document_summary",
-                chunk_granularity="section",
-                top_k=max(base_top_k, 8),
-            )
-        else:
-            settings.update(
-                retrieval_strategy="section_or_document_summary",
-                use_query_planner=True,
-                use_reranker=False,
-                chunk_granularity="document",
-                top_k=max(base_top_k, 4),
-            )
-    elif intent in {"comparison", "temporal_comparison", "comparative_summary"}:
-        settings.update(
-            retrieval_strategy="multi_query_hybrid_balanced",
-            search_mode="multi_query_hybrid",
-            use_query_planner=True,
-            top_k=max(base_top_k, 6),
-        )
-    elif intent == "multi_hop":
-        settings.update(
-            retrieval_strategy="planned_subquery_hybrid",
-            search_mode="multi_query_hybrid",
-            use_query_planner=True,
-            top_k=max(base_top_k, 6),
-        )
-    elif intent == "aggregation":
-        settings.update(
-            retrieval_strategy="structured_table_metadata_first",
-            search_mode="structured_first",
-            use_structured_query=True,
-            chunk_granularity="section",
-            top_k=max(base_top_k, 24),
-        )
-    elif intent == "graphrag_global":
-        settings.update(
-            retrieval_strategy="graphrag_global",
-            search_mode="hybrid",
-            use_query_planner=False,
-            use_reranker=False,
-            chunk_granularity="document",
-            top_k=max(base_top_k, 8),
-        )
-    elif intent == "conflict_check":
-        settings.update(
-            retrieval_strategy="competing_claims_hybrid",
-            use_conflict_checker=True,
-            top_k=max(base_top_k, 8),
-        )
-    elif intent == "troubleshooting":
-        settings.update(
-            retrieval_strategy="symptom_cause_fix_hybrid",
-            use_query_planner=True,
-            chunk_granularity="section",
-            top_k=max(base_top_k, 6),
-        )
-    elif intent == "document_navigation":
-        settings.update(
-            retrieval_strategy="source_metadata_lookup",
-            search_mode="metadata",
-            chunk_granularity="section",
-            top_k=max(base_top_k, 6),
-        )
-    elif intent == "out_of_scope":
-        settings.update(
-            needs_retrieval=False,
-            retrieval_strategy="abstain_without_retrieval",
-            use_reranker=False,
-            top_k=0,
-            allow_abstain=True,
-        )
-    if intent in {"temporal", "temporal_comparison", "temporal_factual"} or (
-        temporal_scope and intent in {"aggregation", "comparative_summary", "troubleshooting", "troubleshooting_procedure"}
-    ):
-        settings["use_temporal_filter"] = True
-        filters = dict(settings["filters"])
-        if target_date is not None:
-            filters["target_date"] = target_date
-        settings["filters"] = filters
-    return settings
-
-
-def _is_section_scoped_summary(query: str) -> bool:
-    normalized = query.lower()
-    return any(term in normalized for term in ("section", "chapter", "page", "paragraph", "requirements"))
-
-
-def _has_temporal_scope(query: str, target_date: str | None) -> bool:
+    filters: dict[str, object] = {}
     if target_date is not None:
-        return True
-    normalized = query.lower()
-    return any(
-        term in normalized
-        for term in (
-            "latest",
-            "current",
-            "currently",
-            "as of",
-            "historical",
-            "previous",
-            "old",
-            "before",
-            "after",
-            "changed",
-            "updated",
-            "update",
-            "version",
-            "still valid",
-        )
-    )
+        filters["target_date"] = target_date
+
+    return {
+        "needs_retrieval": True,
+        "retrieval_strategy": _compatibility_strategy(selected, response_mode),
+        "search_mode": (
+            "structured_first"
+            if "structured_query" in selected
+            else "metadata"
+            if "document_navigation" in selected
+            else "multi_query_hybrid"
+            if "decomposed_search" in selected
+            else "hybrid"
+        ),
+        "use_query_planner": "decomposed_search" in selected,
+        "use_reranker": True,
+        "use_temporal_filter": temporal_scope in {"historical", "as_of"}
+        or target_date is not None,
+        "use_conflict_checker": response_mode == "conflict_analysis",
+        "use_structured_query": "structured_query" in selected,
+        "chunk_granularity": chunk_granularity,
+        "top_k": top_k,
+        "filters": filters,
+        "allow_abstain": True,
+        "risk_level": _risk_level(
+            selected,
+            response_mode=response_mode,
+            coverage=coverage,
+            temporal_scope=temporal_scope,
+        ),
+    }
 
 
-def _risk_level(intent: RouteIntent) -> RiskLevel:
-    if intent in {"aggregation", "graphrag_global", "conflict_check", "out_of_scope"}:
+def _compatibility_strategy(capabilities: set[str], response_mode: ResponseMode) -> str:
+    """Keep old executors working while capabilities become authoritative."""
+    if "global_graph" in capabilities:
+        return "graphrag_global"
+    if "live_sql" in capabilities:
+        return "live_sql_hybrid"
+    if "structured_query" in capabilities:
+        return "structured_table_metadata_first"
+    if "document_navigation" in capabilities:
+        return "source_metadata_lookup"
+    if "document_search" in capabilities:
+        return "section_or_document_summary"
+    if "decomposed_search" in capabilities:
+        return "planned_subquery_hybrid"
+    if response_mode == "conflict_analysis":
+        return "competing_claims_hybrid"
+    return "hybrid_reranked"
+
+
+def _risk_level(
+    capabilities: set[str],
+    *,
+    response_mode: ResponseMode,
+    coverage: CoverageMode,
+    temporal_scope: TemporalScope,
+) -> RiskLevel:
+    if (
+        coverage == "exhaustive"
+        or response_mode == "conflict_analysis"
+        or capabilities & {"structured_query", "live_sql", "global_graph"}
+    ):
         return "high"
-    if intent in {
-        "comparison",
-        "temporal",
-        "temporal_comparison",
-        "multi_hop",
-        "troubleshooting",
-        "troubleshooting_procedure",
-        "comparative_summary",
+    if temporal_scope in {"historical", "as_of"} or capabilities & {
+        "document_search",
         "document_navigation",
+        "decomposed_search",
     }:
         return "medium"
     return "low"

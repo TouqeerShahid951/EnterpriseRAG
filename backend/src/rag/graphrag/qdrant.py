@@ -40,18 +40,53 @@ class QdrantGraphRAGClient:
         self.community_collection = community_collection
         self.timeout_seconds = timeout_seconds
 
-    def retrieve_document_chunks(self, doc_id: str, *, limit: int = 5000) -> list[ChunkRecord]:
-        response = self._request(
-            "POST",
-            f"/collections/{quote(self.documents_collection, safe='')}/points/scroll",
-            {
-                "filter": {"must": [{"key": "doc_id", "match": {"value": doc_id}}]},
-                "limit": limit,
+    def retrieve_document_chunks(
+        self,
+        doc_id: str,
+        *,
+        index_generation_id: str | None = None,
+    ) -> list[ChunkRecord]:
+        must: list[dict[str, Any]] = [
+            {"key": "doc_id", "match": {"value": doc_id}},
+            {"key": "is_current", "match": {"value": True}},
+        ]
+        if index_generation_id:
+            must.extend(
+                [
+                    {
+                        "key": "index_generation_id",
+                        "match": {"value": index_generation_id},
+                    },
+                    {"key": "generation_published", "match": {"value": True}},
+                ]
+            )
+        chunks: list[ChunkRecord] = []
+        offset: object | None = None
+        while True:
+            payload: dict[str, Any] = {
+                "filter": {"must": must},
+                "limit": 256,
                 "with_payload": True,
                 "with_vector": False,
-            },
-        )
-        return [_chunk_from_payload(point.get("payload")) for point in _points(response) if isinstance(point.get("payload"), dict)]
+            }
+            if offset is not None:
+                payload["offset"] = offset
+            response = self._request(
+                "POST",
+                f"/collections/{quote(self.documents_collection, safe='')}/points/scroll",
+                payload,
+            )
+            chunks.extend(
+                _chunk_from_payload(point["payload"])
+                for point in _points(response)
+                if isinstance(point.get("payload"), dict)
+            )
+            result = response.get("result")
+            offset = (
+                result.get("next_page_offset") if isinstance(result, dict) else None
+            )
+            if offset is None:
+                return chunks
 
     def ensure_community_collection(self, vector_size: int) -> None:
         path = f"/collections/{quote(self.community_collection, safe='')}"

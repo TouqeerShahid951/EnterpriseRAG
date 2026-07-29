@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from rag.shared.contracts.abbreviations import ABBREVIATION_GLOSSARY_DOC_TYPE
 from rag.documents.adapters.claim_postgres import (
     replace_claims_and_detect_conflicts_in_transaction,
 )
@@ -51,7 +52,7 @@ def _apply_metadata(conn: Any, *, document_id: str, metadata: dict[str, Any]) ->
             language = %s,
             topics = %s::jsonb,
             llm_topics = %s::jsonb,
-            doc_type = COALESCE(%s, doc_type),
+            doc_type = CASE WHEN doc_type = %s THEN doc_type ELSE COALESCE(%s, doc_type) END,
             auto_doc_type = %s,
             extracted_dates = %s::jsonb,
             metadata_flags = %s::jsonb,
@@ -64,6 +65,7 @@ def _apply_metadata(conn: Any, *, document_id: str, metadata: dict[str, Any]) ->
             _text_or_none(metadata.get("language")),
             json.dumps(_string_list(metadata.get("topics"))),
             json.dumps(_string_list(metadata.get("llm_topics"))),
+            ABBREVIATION_GLOSSARY_DOC_TYPE,
             _derived_doc_type(metadata),
             _text_or_none(metadata.get("auto_doc_type")),
             json.dumps(_object(metadata.get("extracted_dates"))),

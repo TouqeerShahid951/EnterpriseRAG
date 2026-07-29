@@ -202,6 +202,7 @@ export function ReviewCorrectionPanel({ item, onReviewed, previewMode }: { item:
     onSuccess: (_response, _variables, _context) => {
       if (item) onReviewed(item.id);
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      void queryClient.invalidateQueries({ queryKey: ["documents"] });
       notify({ title: "Correction approved", description: item?.doc_title, tone: "success" });
     },
     onError: (error) => notify({
@@ -215,6 +216,7 @@ export function ReviewCorrectionPanel({ item, onReviewed, previewMode }: { item:
     onSuccess: () => {
       if (item) onReviewed(item.id);
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
+      void queryClient.invalidateQueries({ queryKey: ["documents"] });
       notify({ title: "Review block rejected", description: item?.doc_title, tone: "success" });
     },
     onError: (error) => notify({

@@ -389,8 +389,16 @@ class Neo4jGraphStore:
                 entity.group_path = row.group_path,
                 entity.clearance_level = row.clearance_level,
                 entity.clearance_rank = row.clearance_rank,
-                entity.source_doc_ids = row.source_doc_ids,
-                entity.source_chunk_ids = row.source_chunk_ids,
+                entity.source_doc_ids = reduce(
+                  acc = coalesce(entity.source_doc_ids, []),
+                  value IN row.source_doc_ids |
+                    CASE WHEN value IN acc THEN acc ELSE acc + value END
+                ),
+                entity.source_chunk_ids = reduce(
+                  acc = coalesce(entity.source_chunk_ids, []),
+                  value IN row.source_chunk_ids |
+                    CASE WHEN value IN acc THEN acc ELSE acc + value END
+                ),
                 entity.is_current = row.is_current,
                 entity.updated_at = datetime()
             """,

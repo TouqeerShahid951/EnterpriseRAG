@@ -23,11 +23,14 @@ from ...ingestion.review.models import (
     ReviewItemRecord,
 )
 from ...shared.contracts.clearance import ClearanceLevel, normalize_clearance_level
+from rag.shared.contracts.abbreviations import preserved_document_type
 from ..models import (
     AuditEventRecord,
     DocumentCrossReferenceRecord,
     DocumentEntityRecord,
     DocumentImageAssetRecord,
+    DocumentOverviewSnapshot,
+    DocumentOverviewSpaceRecord,
     DocumentRecord,
 )
 from .memory_values import _bbox_list, _int_or_none
@@ -103,6 +106,16 @@ class InMemoryDocumentRepository(
             reverse=True,
         )
 
+    def list_documents_by_ids(
+        self, document_ids: tuple[str, ...]
+    ) -> list[DocumentRecord]:
+        requested_ids = set(document_ids)
+        return [
+            document
+            for document in self.list_documents()
+            if document.id in requested_ids
+        ]
+
     def count_documents_by_owner_group(
         self,
         *,
@@ -125,6 +138,104 @@ class InMemoryDocumentRepository(
                 continue
             counts[document.group_path] = counts.get(document.group_path, 0) + 1
         return dict(sorted(counts.items()))
+
+    def summarize_document_overview(
+        self,
+        *,
+        clearance_levels: tuple[ClearanceLevel, ...],
+        group_paths: tuple[str, ...] | None,
+        expiring_from: date,
+        expiring_to: date,
+        attention_limit: int,
+    ) -> DocumentOverviewSnapshot:
+        visible_groups = None if group_paths is None else set(group_paths)
+        documents = [
+            document
+            for state in ("active", "deleted")
+            for document in self.list_documents(state=state)
+            if document.clearance_level in clearance_levels
+            and (
+                visible_groups is None
+                or visible_groups.intersection(document.access_group_paths)
+            )
+        ]
+        active = [document for document in documents if document.deleted_at is None]
+        current = [document for document in active if document.is_current]
+        attention = [
+            document
+            for document in current
+            if document.ingest_status in {"failed", "human_review", "unknown"}
+        ]
+        attention.sort(
+            key=lambda document: document.updated_at
+            or document.created_at
+            or datetime.min.replace(tzinfo=UTC),
+            reverse=True,
+        )
+        space_counts: dict[str, dict[str, int]] = {}
+        for document in active:
+            access_paths = (
+                document.access_group_paths
+                if visible_groups is None
+                else tuple(visible_groups.intersection(document.access_group_paths))
+            )
+            for group_path in access_paths:
+                counts = space_counts.setdefault(
+                    group_path,
+                    {
+                        "library_documents": 0,
+                        "current_versions": 0,
+                        "processing_current": 0,
+                        "review_current": 0,
+                        "failed_current": 0,
+                        "unknown_current": 0,
+                    },
+                )
+                counts["library_documents"] += 1
+                if not document.is_current:
+                    continue
+                counts["current_versions"] += 1
+                if document.ingest_status in {"scheduled", "queued", "processing"}:
+                    counts["processing_current"] += 1
+                elif document.ingest_status == "human_review":
+                    counts["review_current"] += 1
+                elif document.ingest_status == "failed":
+                    counts["failed_current"] += 1
+                elif document.ingest_status == "unknown":
+                    counts["unknown_current"] += 1
+        return DocumentOverviewSnapshot(
+            library_documents=len(active),
+            current_versions=len(current),
+            indexed_current=sum(
+                document.ingest_status == "complete" for document in current
+            ),
+            processing_current=sum(
+                document.ingest_status in {"scheduled", "queued", "processing"}
+                for document in current
+            ),
+            review_current=sum(
+                document.ingest_status == "human_review" for document in current
+            ),
+            failed_current=sum(
+                document.ingest_status == "failed" for document in current
+            ),
+            unknown_current=sum(
+                document.ingest_status == "unknown" for document in current
+            ),
+            needs_attention=len(attention),
+            superseded_versions=sum(not document.is_current for document in active),
+            expiring_soon_current=sum(
+                document.expiry_date is not None
+                and expiring_from <= document.expiry_date <= expiring_to
+                for document in current
+            ),
+            trash=sum(document.deleted_at is not None for document in documents),
+            attention_documents=tuple(attention[:attention_limit]),
+            spaces=tuple(
+                DocumentOverviewSpaceRecord(group_path=group_path, **counts)
+                for group_path, counts in sorted(space_counts.items())
+            ),
+        )
 
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None:
         document = self._documents.get(document_id)
@@ -243,7 +354,7 @@ class InMemoryDocumentRepository(
             language=language,
             topics=tuple(_unique_text(topics)),
             llm_topics=tuple(_unique_text(llm_topics)),
-            doc_type=doc_type or document.doc_type,
+            doc_type=preserved_document_type(document.doc_type, doc_type),
             auto_doc_type=auto_doc_type,
             extracted_dates=dict(extracted_dates),
             metadata_flags=dict(metadata_flags),

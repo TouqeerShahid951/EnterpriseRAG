@@ -2,6 +2,13 @@
 
 import hashlib
 import json
+import re
+
+from rag.shared.contracts.abbreviations import (
+    ABBREVIATION_GLOSSARY_DOC_TYPE,
+    abbreviation_entries,
+    normalize_abbreviation_entry,
+)
 
 from ..chunking import chunk_items
 from ..indexing.claims import build_claim_records
@@ -15,6 +22,16 @@ from .progress import (
     should_report_progress,
 )
 from .state import IngestDependencies, IngestState
+
+
+_GLOSSARY_TABLE_HEADER_RE = re.compile(
+    r"^\s*(?:abbreviations?|acronyms?|short forms?|codes?)\s+"
+    r"(?:expansions?|full forms?|meanings?|definitions?)\s*$",
+    re.IGNORECASE,
+)
+_GLOSSARY_TABLE_ROW_RE = re.compile(
+    r"^\s*([A-Z][A-Z0-9./&-]{1,19})\s+(.{2,240}?)\s*$"
+)
 
 
 def mark_processing(state: IngestState, deps: IngestDependencies) -> IngestState:
@@ -42,11 +59,19 @@ def chunk_text(state: IngestState, deps: IngestDependencies) -> IngestState:
     )
     if not state["chunks"]:
         raise RuntimeError("document extraction produced no chunks")
-    state["claims"] = build_claim_records(
-        job=state["payload"],
-        chunks=state["chunks"],
-        metadata=state["metadata"],
-    )
+    if state["payload"].doc_type == ABBREVIATION_GLOSSARY_DOC_TYPE:
+        state["abbreviation_entries"] = _abbreviation_entries_with_pages(
+            state["chunks"]
+        )
+        if not state["abbreviation_entries"]:
+            raise RuntimeError("abbreviation glossary contains no recognized entries")
+        state["claims"] = []
+    else:
+        state["claims"] = build_claim_records(
+            job=state["payload"],
+            chunks=state["chunks"],
+            metadata=state["metadata"],
+        )
     deps.backend.update_job(
         job_id=state["payload"].job_id,
         status="processing",
@@ -191,6 +216,78 @@ def activate_generation(state: IngestState, deps: IngestDependencies) -> IngestS
         generation_id=state["index_generation_id"],
     )
     return state
+
+
+def stage_abbreviation_glossary(
+    state: IngestState, deps: IngestDependencies
+) -> IngestState:
+    generation_id = generation_id_for_job(state["payload"].job_id)
+    state["index_generation_id"] = generation_id
+    deps.backend.stage_index_generation(
+        job_id=state["payload"].job_id,
+        generation_id=generation_id,
+        input_hash=hashlib.sha256(state["file_bytes"]).hexdigest(),
+        configuration_digest=_configuration_digest(deps),
+        expected_point_count=0,
+        expected_item_hash=aggregate_generation_hash([]),
+        vector_dimension=0,
+        metadata=state["metadata"],
+        claims=[],
+        supersedes=state["payload"].supersedes,
+        warnings=state.get("warnings", []),
+        abbreviation_entries=state["abbreviation_entries"],
+    )
+    deps.backend.verify_index_generation(
+        job_id=state["payload"].job_id,
+        generation_id=generation_id,
+    )
+    deps.backend.update_job(
+        job_id=state["payload"].job_id,
+        status="processing",
+        progress_pct=92,
+        stage_progress=items_progress(
+            "metadata",
+            len(state["abbreviation_entries"]),
+            len(state["abbreviation_entries"]),
+            "Prepared abbreviation glossary",
+        ),
+    )
+    return state
+
+
+def _abbreviation_entries_with_pages(chunks: list[object]) -> list[dict[str, object]]:
+    entries: dict[str, dict[str, object]] = {}
+    table_rows_expected = False
+    for chunk in chunks:
+        text = str(getattr(chunk, "text", ""))
+        fields = getattr(chunk, "structured_fields", [])
+        page = getattr(chunk, "page_start", None) or getattr(chunk, "page", None)
+        lines = text.splitlines()
+        table_rows_expected = table_rows_expected or any(
+            _GLOSSARY_TABLE_HEADER_RE.fullmatch(line) for line in lines
+        )
+        pairs = abbreviation_entries(text, fields)
+        if table_rows_expected:
+            for line in lines:
+                match = _GLOSSARY_TABLE_ROW_RE.fullmatch(line)
+                if match and match[2][0] not in "—–-:=":
+                    pairs.append((match[1], match[2]))
+        for raw_abbreviation, raw_expansion in dict.fromkeys(pairs):
+            abbreviation, expansion = normalize_abbreviation_entry(
+                raw_abbreviation, raw_expansion
+            )
+            current = entries.get(abbreviation)
+            if current is not None and str(current["expansion"]).casefold() != expansion.casefold():
+                raise RuntimeError(f"conflicting definitions for {abbreviation}")
+            entries.setdefault(
+                abbreviation,
+                {
+                    "abbreviation": abbreviation,
+                    "expansion": expansion,
+                    "source_page": page if isinstance(page, int) and page > 0 else None,
+                },
+            )
+    return list(entries.values())
 
 
 def _configuration_digest(deps: IngestDependencies) -> str:

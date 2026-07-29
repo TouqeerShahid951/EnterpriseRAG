@@ -35,6 +35,43 @@ def test_release_gate_fails_closed_for_missing_trace_metric_and_pin_drift() -> N
     assert any("pin_mismatch:image_digest" in item for item in report["failures"])
 
 
+def test_release_gate_rejects_reranking_that_loses_top_ten_recall() -> None:
+    runs, gold, cases, pins = _fixture()
+    decoys = [
+        {
+            "doc_title": f"Decoy-{index}.pdf",
+            "page": 1,
+            "rerank_status": "scored",
+        }
+        for index in range(10)
+    ]
+    relevant = {
+        "doc_title": "One.pdf",
+        "page": 1,
+        "rerank_status": "scored",
+    }
+    for run in runs:
+        trace = run["cases"][0]["diagnostic"]["retrieval_trace"]
+        for stage in trace:
+            if stage["name"] == "rerank_input":
+                stage["candidates"] = [relevant, *decoys]
+            elif stage["name"] == "reranked":
+                stage["candidates"] = [*decoys, relevant]
+
+    report = evaluate_release_gate(
+        runs, ranking_gold=gold, dataset_cases=cases, expected_pins=pins
+    )
+
+    assert report["passed"] is False
+    metrics = report["run_reports"][0]["metrics"]
+    assert metrics["post_rerank_recall_at_10"] < metrics["pre_rerank_recall_at_10"]
+    assert metrics["post_rerank_mrr_at_10"] < metrics["pre_rerank_mrr_at_10"]
+    assert any(
+        "threshold_failed:post_rerank_recall_at_10" in failure
+        for failure in report["failures"]
+    )
+
+
 def test_opaque_anchor_diagnostics_prove_exact_recall() -> None:
     runs, gold, cases, pins = _fixture()
     cases[0]["question_type"] = "exhaustive_list"

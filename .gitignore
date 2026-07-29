@@ -33,6 +33,7 @@ outputs/
 input.json
 program.py
 bootstrap.py
+!backend/src/rag/auth/bootstrap.py
 frontend.backup.*/
 *.bak-codex-*
 backups/

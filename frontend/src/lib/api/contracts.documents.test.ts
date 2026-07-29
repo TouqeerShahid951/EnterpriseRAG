@@ -51,6 +51,20 @@ describe("documentsApi", () => {
     expect(response.total).toBe(3);
   });
 
+  it("loads the authorization-aware document overview", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      library_documents: 4,
+      needs_attention: 1,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await documentsApi.overview();
+
+    const calls = fetchMock.mock.calls as unknown as Array<[unknown]>;
+    expect(String(calls[0][0])).toContain("/api/v1/docs/overview");
+    expect(response.library_documents).toBe(4);
+  });
+
   it("updates document clearance through a CSRF-protected patch", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ ...legacyDocument, clearance_level: "NATO_SECRET", ingest_status: "completed" }));
     vi.stubGlobal("fetch", fetchMock);

@@ -21,6 +21,11 @@ def test_prewarm_uses_portable_regular_snapshot_files(monkeypatch) -> None:
         "_load_reranker_model",
         lambda model, cache: calls.append(("reranker", model, cache)),
     )
+    monkeypatch.setattr(
+        prewarm_fastembed,
+        "prewarm_entailment_model",
+        lambda cache: calls.append(("entailment", "nli", cache)),
+    )
 
     cache = Path("/models/fastembed")
     prewarm_fastembed.prewarm_fastembed_models(
@@ -37,4 +42,5 @@ def test_prewarm_uses_portable_regular_snapshot_files(monkeypatch) -> None:
         ("dense", "dense-model", cache),
         ("sparse", "sparse-model", cache),
         ("reranker", "reranker-model", cache),
+        ("entailment", "nli", cache),
     ]

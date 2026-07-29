@@ -1,11 +1,16 @@
-import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ExternalLink, FileText, X } from "lucide-react";
+import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent, type Ref } from "react";
+import { BookOpenText, Database, ExternalLink, FileText, X } from "lucide-react";
 
 import { Fact } from "@/components/layout/Common";
 import type { SourceAnchor } from "@/types/api";
 import { formatDate } from "@/lib/utils/format";
 import { sourceCitationLabel, sourceCitationName } from "@/features/chat/utils/sourceCitation";
-import { sourceMatchedSpanCount, sourceMatchedSpanLabel } from "@/features/chat/utils/sourceEvidence";
+import {
+  isLiveDatabaseSource,
+  isManagedAbbreviationSource,
+  sourceMatchedSpanCount,
+  sourceMatchedSpanLabel,
+} from "@/features/chat/utils/sourceEvidence";
 import { sourcePageLabel } from "@/features/documents/utils/sourcePage";
 import { sourceViewerHref } from "@/features/source-viewer/utils/sourceViewer";
 import { EvidenceWindows } from "./EvidenceWindows";
@@ -81,18 +86,30 @@ export function EvidenceInspector({ onClose, source, sourceCount, sourceNumber }
   );
 }
 
-export function MobileEvidencePanel({ onClose, source, sourceCount, sourceNumber }: Props) {
+export function MobileEvidencePanel({ onClose, panelRef, source, sourceCount, sourceNumber }: Props & { panelRef?: Ref<HTMLElement> }) {
   const sourceCountLabel = formatSourceCount(sourceCount);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!window.matchMedia("(max-width: 1180px)").matches) return;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => closeRef.current?.focus({ preventScroll: true }));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      returnFocusRef.current?.focus({ preventScroll: true });
+    };
+  }, []);
 
   return (
-    <section className="rag-mobile-evidence-panel rounded-lg border border-surface-border bg-surface p-4" aria-label="Source evidence">
+    <section ref={panelRef} className="rag-mobile-evidence-panel rounded-lg border border-surface-border bg-surface p-4" aria-label="Source evidence">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <p className="sv-eyebrow">Citation Inspector</p>
           <h2 className="text-headline-sm text-on-surface">Evidence</h2>
           <span className="sv-pill mt-2">{sourceCountLabel}</span>
         </div>
-        <button type="button" onClick={onClose} className="rag-evidence-close" aria-label="Close evidence panel">
+        <button ref={closeRef} type="button" onClick={onClose} className="rag-evidence-close" aria-label="Close evidence panel">
           <X size={16} />
         </button>
       </div>
@@ -106,34 +123,40 @@ function SourceEvidence({ compact = false, source, sourceNumber }: { compact?: b
   const citationLabel = sourceCitationLabel(source);
   const sourceName = sourceCitationName(sourceNumber);
   const matchedSpanCount = sourceMatchedSpanCount(source);
-  const evidenceSummary = sourceEvidenceSummary(source, matchedSpanCount);
+  const liveDatabase = isLiveDatabaseSource(source);
+  const managedGlossary = isManagedAbbreviationSource(source);
+  const structuredSource = liveDatabase || managedGlossary;
+  const evidenceSummary = sourceEvidenceSummary(source, matchedSpanCount, structuredSource);
+  const SourceIcon = liveDatabase ? Database : managedGlossary ? BookOpenText : FileText;
   return (
     <div className="space-y-4">
       <div className="rag-evidence-source-header">
         <span className="rag-evidence-source-icon" aria-hidden="true">
-          <FileText size={17} />
+          <SourceIcon size={17} />
         </span>
         <div className="min-w-0">
-          <p className="sv-eyebrow">Document</p>
+          <p className="sv-eyebrow">{liveDatabase ? "Live database" : managedGlossary ? "Managed glossary" : "Document"}</p>
           <h3 className="rag-evidence-source-title">{source.doc_title}</h3>
           <div className="rag-evidence-source-meta">
-            {pageLabel ? <span>{pageLabel}</span> : <span>Page unknown</span>}
+            {!structuredSource ? (pageLabel ? <span>{pageLabel}</span> : <span>Page unknown</span>) : null}
             {evidenceSummary ? <span>{evidenceSummary}</span> : null}
           </div>
         </div>
       </div>
 
-      <a className="rag-evidence-open-source" href={sourceViewerHref(source)} target="_blank" rel="noreferrer">
-        <ExternalLink aria-hidden="true" size={15} />
-        Open original source
-      </a>
+      {!structuredSource ? (
+        <a className="rag-evidence-open-source" href={sourceViewerHref(source)} target="_blank" rel="noreferrer">
+          <ExternalLink aria-hidden="true" size={15} />
+          Open original source
+        </a>
+      ) : null}
 
       <EvidenceWindows source={source} />
 
       <dl className={`rag-evidence-facts text-body-md ${compact ? "md:grid-cols-3" : ""}`}>
         <Fact label="Citation" value={sourceName} />
-        <Fact label="Page Range" value={pageLabel || "Unknown"} />
-        <Fact label="Effective" value={formatDate(source.effective_date)} />
+        {!structuredSource ? <Fact label="Page Range" value={pageLabel || "Unknown"} /> : null}
+        {!structuredSource ? <Fact label="Effective" value={formatDate(source.effective_date)} /> : null}
         <Fact label="Knowledge Space" value={source.group_path} />
       </dl>
       <span className="sr-only">{citationLabel}</span>
@@ -145,14 +168,20 @@ function formatSourceCount(count: number): string {
   return count === 1 ? "1 source" : `${count} sources`;
 }
 
-function sourceEvidenceSummary(source: SourceAnchor, legacyMatchCount: number): string {
+function sourceEvidenceSummary(source: SourceAnchor, legacyMatchCount: number, liveDatabase: boolean): string {
   if (source.evidence_windows !== undefined || source.attribution_status !== undefined) {
     const verifiedCount = source.evidence_windows?.filter((window) => window.support_status === "verified").length ?? 0;
     const fallbackCount = source.evidence_windows?.filter((window) => window.support_status === "semantic_fallback").length ?? 0;
-    if (verifiedCount > 0) return verifiedCount === 1 ? "1 verified passage" : `${verifiedCount} verified passages`;
-    if (fallbackCount > 0) return fallbackCount === 1 ? "1 likely passage" : `${fallbackCount} likely passages`;
+    if (verifiedCount > 0) {
+      if (liveDatabase) return verifiedCount === 1 ? "1 supported row" : `${verifiedCount} supported rows`;
+      return verifiedCount === 1 ? "1 verified passage" : `${verifiedCount} verified passages`;
+    }
+    if (fallbackCount > 0) {
+      if (liveDatabase) return fallbackCount === 1 ? "1 returned row" : `${fallbackCount} returned rows`;
+      return fallbackCount === 1 ? "1 likely passage" : `${fallbackCount} likely passages`;
+    }
     if (source.attribution_status === "pending") return "Attribution pending";
-    return "No verified passage";
+    return liveDatabase ? "No supported row" : "No verified passage";
   }
   return legacyMatchCount > 0 ? sourceMatchedSpanLabel(source) : "Legacy response";
 }

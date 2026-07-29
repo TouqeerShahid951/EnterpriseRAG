@@ -39,7 +39,6 @@ def update_ingest_config(
     saved = repo.save_active(
         IngestConfigRecord(
             worker_concurrency=payload.worker_concurrency,
-            quality_preset=payload.quality_preset,
             ocr_review_confidence_threshold=payload.ocr_review_confidence_threshold,
             pdf_image_review_threshold=payload.pdf_image_review_threshold,
             vision_layout_repair_enabled=payload.vision_layout_repair_enabled,
@@ -55,7 +54,6 @@ def update_ingest_config(
         target_id=None,
         payload={
             "worker_concurrency": saved.worker_concurrency,
-            "quality_preset": saved.quality_preset,
             "ocr_review_confidence_threshold": saved.ocr_review_confidence_threshold,
             "pdf_image_review_threshold": saved.pdf_image_review_threshold,
             "vision_layout_repair_enabled": saved.vision_layout_repair_enabled,
@@ -70,7 +68,6 @@ def update_ingest_config(
 def _response(config: IngestConfigRecord, result: WorkerControlResult) -> IngestConfigResponse:
     return IngestConfigResponse(
         worker_concurrency=config.worker_concurrency,
-        quality_preset=config.quality_preset,
         ocr_review_confidence_threshold=config.ocr_review_confidence_threshold,
         pdf_image_review_threshold=config.pdf_image_review_threshold,
         vision_layout_repair_enabled=config.vision_layout_repair_enabled,

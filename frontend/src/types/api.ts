@@ -1,4 +1,5 @@
 export * from "./api/common";
+export * from "./api/abbreviations";
 export * from "./api/auth";
 export * from "./api/settings";
 export * from "./api/ingestion";

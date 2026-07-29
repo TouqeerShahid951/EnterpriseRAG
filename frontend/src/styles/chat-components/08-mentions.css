@@ -33,7 +33,6 @@
 .rag-mention-menu button:hover,
 .rag-mention-menu button:focus-visible {
   background: var(--color-surface-tint);
-  outline: none;
 }
 
 .rag-mention-menu svg,
@@ -58,4 +57,3 @@
   color: var(--color-secondary);
   font-size: 0.75rem;
 }
-

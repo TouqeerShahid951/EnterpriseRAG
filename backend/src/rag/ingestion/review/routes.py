@@ -14,6 +14,7 @@ from .image_routes import (
     list_image_review_batches,
     router as image_review_router,
 )
+from .summary_routes import router as summary_router, summarize_review_queue
 
 router = APIRouter()
 router.include_router(
@@ -22,6 +23,7 @@ router.include_router(
 router.include_router(
     image_review_router, prefix="/review-queue", tags=["review-queue"]
 )
+router.include_router(summary_router, prefix="/review-queue", tags=["review-queue"])
 
 __all__ = [
     "approve_review_item",
@@ -30,5 +32,6 @@ __all__ = [
     "list_image_review_batches",
     "list_review_queue",
     "reject_review_item",
+    "summarize_review_queue",
     "router",
 ]

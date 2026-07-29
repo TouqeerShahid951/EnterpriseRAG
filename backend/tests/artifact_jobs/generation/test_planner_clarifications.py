@@ -70,6 +70,41 @@ def test_topic_question_is_preferred_when_multiple_answers_exist() -> None:
     assert plan.title == "Vendor Policy Exceptions"
 
 
+def test_unrelated_conversation_history_does_not_force_llm_planning() -> None:
+    inference = _CountingInference()
+    job = replace(
+        _job(original_request="Create a PDF report about vendor policy"),
+        requested_formats=("pdf",),
+        conversation_context=(
+            {"query": "What is the leave policy?", "answer": "It is documented."},
+        ),
+    )
+
+    plan = plan_document(job, inference=inference, model=None)
+
+    assert plan.title == "Vendor Policy"
+    assert inference.calls == 0
+
+
+def test_resolved_context_query_supplies_the_artifact_topic_without_an_llm_call() -> None:
+    inference = _CountingInference()
+    job = replace(
+        _job(original_request="Make that a PDF"),
+        requested_formats=("pdf",),
+        conversation_context=(
+            {
+                "resolved_query": "Create a PDF report about vendor policy",
+                "antecedent_turn_ids": ["previous-user"],
+            },
+        ),
+    )
+
+    plan = plan_document(job, inference=inference, model=None)
+
+    assert plan.title == "Vendor Policy"
+    assert inference.calls == 0
+
+
 def _job(*, original_request: str):
     return InMemoryArtifactJobRepository().create_job(
         client_request_id="request-1",
@@ -93,3 +128,12 @@ def _job(*, original_request: str):
 class _FailingInference:
     def generate_json(self, **_kwargs) -> str:
         raise TimeoutError("planner unavailable")
+
+
+class _CountingInference:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate_json(self, **_kwargs) -> str:
+        self.calls += 1
+        return "{}"

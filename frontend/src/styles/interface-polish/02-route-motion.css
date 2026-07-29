@@ -5,7 +5,7 @@
 
 .app-route-stage > .Prudentia-shell > .Prudentia-main,
 .app-route-stage > .source-viewer-shell {
-  animation: Prudentia-main-enter var(--motion-fast) var(--ease-out-product) both;
+  animation: Prudentia-main-enter var(--motion-fast) var(--ease-out-product);
 }
 
 @keyframes Prudentia-main-enter {
@@ -15,7 +15,7 @@
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
@@ -50,4 +50,3 @@
   from { transform: translateX(-110%); }
   to { transform: translateX(110%); }
 }
-

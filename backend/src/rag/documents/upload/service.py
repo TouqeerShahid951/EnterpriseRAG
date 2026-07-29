@@ -22,6 +22,7 @@ from rag.ingestion.delivery.service import (
 )
 from rag.ingestion.quality import normalize_ingestion_quality_preset
 from rag.ingestion.queue import IngestQueue
+from rag.shared.contracts.abbreviations import ABBREVIATION_GLOSSARY_DOC_TYPE
 from rag.documents.models import DocumentRepository
 from rag.auth.identity_models import IdentityRepository, UserRecord
 from rag.ingestion.job_models import IngestJobRepository
@@ -29,6 +30,7 @@ from rag.shared.contracts.clearance import clearance_rank, normalize_clearance_l
 from rag.documents.scanning import FileScanner
 from rag.documents.storage import UploadStorage
 from rag.documents.upload.validation import (
+    PDF_CONTENT_TYPE,
     UploadRejected,
     default_filename,
     default_title,
@@ -91,6 +93,22 @@ class UploadDocument:
         normalized_group = self._validated_upload_group(
             command.group_path, command.actor
         )
+        initial_doc_type = _normalize_declared_doc_type(command.doc_type)
+        if (
+            initial_doc_type == ABBREVIATION_GLOSSARY_DOC_TYPE
+            and not is_global_admin(command.actor)
+        ):
+            raise UploadRejected(
+                category="forbidden",
+                code="abbreviation_glossary_admin_required",
+                message="Only platform and system administrators can manage global abbreviation sources.",
+            )
+        if initial_doc_type == ABBREVIATION_GLOSSARY_DOC_TYPE and command.shared_group_paths:
+            raise UploadRejected(
+                category="invalid",
+                code="abbreviation_glossary_scope_not_allowed",
+                message="The global abbreviation glossary cannot be scoped or shared by Knowledge Space.",
+            )
         normalized_shared_groups = self._validated_upload_shares(
             command.shared_group_paths,
             owner_group_path=normalized_group,
@@ -99,17 +117,30 @@ class UploadDocument:
         normalized_clearance = _validated_upload_clearance(
             command.clearance_level, command.actor
         )
+        if (
+            initial_doc_type == ABBREVIATION_GLOSSARY_DOC_TYPE
+            and normalized_clearance != "NATO_UNCLASSIFIED"
+        ):
+            raise UploadRejected(
+                category="invalid",
+                code="abbreviation_glossary_must_be_unclassified",
+                message="The global abbreviation glossary must be unclassified.",
+            )
         validate_declared_dates(command.effective_date, command.expiry_date)
         normalized_description = validated_description(command.description)
         normalized_quality_preset = _validated_quality_preset(command.quality_preset)
         supersedes_ids = self._validate_supersedes(command.supersedes, command.actor)
-        initial_doc_type = _normalize_declared_doc_type(command.doc_type)
         validate_upload_size(command.content, max_bytes=self._max_upload_bytes)
         content_type = validated_document_type(
             command.content,
             command.filename,
             command.declared_content_type,
         )
+        if initial_doc_type == ABBREVIATION_GLOSSARY_DOC_TYPE:
+            self._validate_glossary_upload(
+                content_type=content_type,
+                supersedes=supersedes_ids,
+            )
         content_hash = hashlib.sha256(command.content).hexdigest()
         if self._document_repo.find_current_by_content_hash(content_hash):
             raise UploadRejected(
@@ -241,6 +272,54 @@ class UploadDocument:
             code="upload_share_forbidden",
             message="User cannot share uploads with one or more selected Knowledge Spaces.",
         )
+
+    def _validate_glossary_upload(
+        self,
+        *,
+        content_type: str,
+        supersedes: list[str],
+    ) -> None:
+        if content_type != PDF_CONTENT_TYPE:
+            raise UploadRejected(
+                category="invalid",
+                code="abbreviation_glossary_pdf_required",
+                message="An abbreviation glossary must be uploaded as a PDF.",
+            )
+
+        if len(supersedes) > 1:
+            raise UploadRejected(
+                category="invalid",
+                code="invalid_abbreviation_glossary_replacement",
+                message="A glossary PDF can replace only one active source.",
+            )
+        for document_id in supersedes:
+            document = self._document_repo.get_document(document_id)
+            if (
+                document is None
+                or document.doc_type != ABBREVIATION_GLOSSARY_DOC_TYPE
+                or not document.is_current
+                or document.ingest_status != "complete"
+            ):
+                raise UploadRejected(
+                    category="invalid",
+                    code="invalid_abbreviation_glossary_replacement",
+                    message="A glossary PDF can replace only one active PDF source.",
+                )
+        pending_replacements = {
+            source_id
+            for document in self._document_repo.list_documents()
+            if document.is_current
+            and document.doc_type == ABBREVIATION_GLOSSARY_DOC_TYPE
+            and document.ingest_status
+            in {"scheduled", "queued", "processing", "human_review"}
+            for source_id in document.pending_supersedes
+        }
+        if any(document_id in pending_replacements for document_id in supersedes):
+            raise UploadRejected(
+                category="conflict",
+                code="abbreviation_glossary_update_in_progress",
+                message="This glossary PDF source already has a replacement in progress.",
+            )
 
     def _validate_supersedes(
         self, doc_ids: tuple[str, ...], user: UserRecord

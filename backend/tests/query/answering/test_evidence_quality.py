@@ -1,10 +1,18 @@
 from types import SimpleNamespace
 
-from rag.query.answering.evidence_quality import assess_evidence_quality
+from rag.query.answering.evidence_quality import _rerank_confidence, assess_evidence_quality
 from rag.query.qdrant import SearchHit
 
 
-def hit(point_id: str, *, doc_id: str, doc_title: str, text: str, score: float = 0.5, **payload: object) -> SearchHit:
+def hit(
+    point_id: str,
+    *,
+    doc_id: str,
+    doc_title: str,
+    text: str,
+    score: float = 0.5,
+    **payload: object,
+) -> SearchHit:
     return SearchHit(
         point_id=point_id,
         score=score,
@@ -19,12 +27,41 @@ def hit(point_id: str, *, doc_id: str, doc_title: str, text: str, score: float =
     )
 
 
+def test_reranker_logits_are_mapped_without_saturating_the_model_scale() -> None:
+    assert 0.0 < _rerank_confidence(-8.0) < _rerank_confidence(-2.0) < 0.5
+    assert 0.5 < _rerank_confidence(2.0) < _rerank_confidence(8.0) < 1.0
+
+
 def test_aggregation_scores_breadth_and_document_class_above_token_overlap() -> None:
     hits = [
-        hit("fir-1", doc_id="fir-1", doc_title="FIR_01.pdf", text="Robbery under section 392.", chunk_type="table_row"),
-        hit("fir-2", doc_id="fir-2", doc_title="FIR_02.pdf", text="Kidnapping for ransom.", chunk_type="table_row"),
-        hit("fir-3", doc_id="fir-3", doc_title="FIR_03.pdf", text="Cyber stalking and personation.", chunk_type="table_row"),
-        hit("fir-4", doc_id="fir-4", doc_title="FIR_04.pdf", text="Narcotics trafficking.", chunk_type="table_row"),
+        hit(
+            "fir-1",
+            doc_id="fir-1",
+            doc_title="FIR_01.pdf",
+            text="Robbery under section 392.",
+            chunk_type="table_row",
+        ),
+        hit(
+            "fir-2",
+            doc_id="fir-2",
+            doc_title="FIR_02.pdf",
+            text="Kidnapping for ransom.",
+            chunk_type="table_row",
+        ),
+        hit(
+            "fir-3",
+            doc_id="fir-3",
+            doc_title="FIR_03.pdf",
+            text="Cyber stalking and personation.",
+            chunk_type="table_row",
+        ),
+        hit(
+            "fir-4",
+            doc_id="fir-4",
+            doc_title="FIR_04.pdf",
+            text="Narcotics trafficking.",
+            chunk_type="table_row",
+        ),
     ]
 
     quality = assess_evidence_quality(
@@ -71,7 +108,15 @@ def test_aggregation_accepts_exhaustive_plain_text_scope_evidence() -> None:
 def test_factual_route_still_degrades_unrelated_low_overlap_evidence() -> None:
     quality = assess_evidence_quality(
         "what is vacation policy",
-        [hit("manual-1", doc_id="manual", doc_title="Server manual.pdf", text="Rail kit installation steps.", score=0.35)],
+        [
+            hit(
+                "manual-1",
+                doc_id="manual",
+                doc_title="Server manual.pdf",
+                text="Rail kit installation steps.",
+                score=0.35,
+            )
+        ],
         route_plan=SimpleNamespace(intent="factual_simple"),
     )
 
@@ -82,7 +127,14 @@ def test_factual_route_still_degrades_unrelated_low_overlap_evidence() -> None:
 def test_factual_route_passes_directly_supported_evidence() -> None:
     quality = assess_evidence_quality(
         "what is vacation policy",
-        [hit("policy-1", doc_id="policy", doc_title="HR policy.pdf", text="Vacation requests require manager approval.")],
+        [
+            hit(
+                "policy-1",
+                doc_id="policy",
+                doc_title="HR policy.pdf",
+                text="Vacation requests require manager approval.",
+            )
+        ],
         route_plan=SimpleNamespace(intent="factual_simple"),
     )
 
@@ -93,7 +145,15 @@ def test_factual_route_passes_directly_supported_evidence() -> None:
 def test_topics_do_not_count_as_answer_evidence() -> None:
     quality = assess_evidence_quality(
         "what does OCR say about benchmark accuracy",
-        [hit("doc-1", doc_id="doc", doc_title="Maintenance notes.pdf", text="Rail kit installation steps.", topics=["OCR benchmark accuracy"])],
+        [
+            hit(
+                "doc-1",
+                doc_id="doc",
+                doc_title="Maintenance notes.pdf",
+                text="Rail kit installation steps.",
+                topics=["OCR benchmark accuracy"],
+            )
+        ],
         route_plan=SimpleNamespace(intent="factual_simple"),
     )
 

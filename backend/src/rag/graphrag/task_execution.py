@@ -21,6 +21,15 @@ logger = logging.getLogger("rag.graphrag.task_execution")
 PartitionRebuildDispatcher = Callable[[dict[str, Any], str, int], None]
 
 
+class GraphRAGDeliveryRetry(RuntimeError):
+    """Request that the queue transport redeliver GraphRAG work."""
+
+    def __init__(self, cause: Exception, *, countdown: int = 30) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.countdown = countdown
+
+
 def run_document_graph_index(
     payload: dict[str, Any],
     *,
@@ -28,6 +37,7 @@ def run_document_graph_index(
 ) -> dict[str, Any]:
     doc_id = str(payload.get("doc_id", "")).strip()
     job_id = str(payload.get("job_id", "")).strip()
+    index_generation_id = str(payload.get("index_generation_id") or "").strip()
     if not doc_id:
         return {"status": "skipped", "degraded_reason": "missing_doc_id"}
 
@@ -41,18 +51,15 @@ def run_document_graph_index(
 
     backend = build_backend_client(config)
     runtime_config = backend.get_rag_config()
-    inference = build_ingestion_inference_client(
-        runtime_config,
-        timeout_seconds=config.http_timeout_seconds,
-        retry_base_seconds=config.ollama_retry_base_seconds,
-        embedding_batch_size=config.embedding_batch_size,
-        num_ctx=config.ollama_num_ctx,
-    )
+    inference = _build_graph_inference(config, runtime_config)
     graph_config = config_from_mapping(config)
     result = GraphRAGIndexingService(
         config=graph_config,
         inference=inference,
-    ).index_document(doc_id)
+    ).index_document(
+        doc_id,
+        index_generation_id=index_generation_id or None,
+    )
     result_payload = asdict(result)
     if (
         result.status == "complete"
@@ -68,7 +75,7 @@ def run_document_graph_index(
         )
     if job_id:
         _record_graphrag_event(config, job_id=job_id, result=result_payload)
-    return result_payload
+    return _retry_degraded_result(result_payload)
 
 
 def run_partition_rebuild(payload: dict[str, Any]) -> dict[str, Any]:
@@ -94,13 +101,7 @@ def run_partition_rebuild(payload: dict[str, Any]) -> dict[str, Any]:
             }
         backend = build_backend_client(config)
         runtime_config = backend.get_rag_config()
-        inference = build_ingestion_inference_client(
-            runtime_config,
-            timeout_seconds=config.http_timeout_seconds,
-            retry_base_seconds=config.ollama_retry_base_seconds,
-            embedding_batch_size=config.embedding_batch_size,
-            num_ctx=config.ollama_num_ctx,
-        )
+        inference = _build_graph_inference(config, runtime_config)
         result = GraphRAGIndexingService(
             config=config_from_mapping(config),
             inference=inference,
@@ -108,7 +109,7 @@ def run_partition_rebuild(payload: dict[str, Any]) -> dict[str, Any]:
         result_payload = asdict(result)
         if job_id:
             _record_graphrag_event(config, job_id=job_id, result=result_payload)
-        return result_payload
+        return _retry_degraded_result(result_payload)
     finally:
         if dedupe_key:
             _clear_rebuild_marker(config, dedupe_key)
@@ -161,6 +162,17 @@ def _enqueue_partition_rebuild(
     return "queued"
 
 
+def _build_graph_inference(config: WorkerConfig, runtime_config: object) -> object:
+    return build_ingestion_inference_client(
+        runtime_config,
+        timeout_seconds=config.http_timeout_seconds,
+        retry_base_seconds=config.ollama_retry_base_seconds,
+        embedding_batch_size=config.embedding_batch_size,
+        dense_cache_dir=config.local_embeddings.dense_cache_dir,
+        num_ctx=config.ollama_num_ctx,
+    )
+
+
 def _set_rebuild_marker(
     config: WorkerConfig,
     key: str,
@@ -210,3 +222,17 @@ def _record_graphrag_event(
             result.get("status", "unknown"),
             exc_info=True,
         )
+
+
+def _retry_degraded_result(result: dict[str, Any]) -> dict[str, Any]:
+    reason = str(result.get("degraded_reason") or "").strip()
+    rebuild_enqueue_failed = (
+        result.get("partition_rebuild_status") == "enqueue_failed"
+    )
+    if rebuild_enqueue_failed:
+        reason = reason or "GraphRAG partition rebuild could not be queued"
+    if result.get("status") == "degraded" or rebuild_enqueue_failed:
+        raise GraphRAGDeliveryRetry(
+            RuntimeError(reason or "GraphRAG processing was degraded")
+        )
+    return result

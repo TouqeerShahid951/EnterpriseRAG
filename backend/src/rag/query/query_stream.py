@@ -8,8 +8,8 @@ from time import perf_counter
 
 from .schemas import QueryStreamEvent, RAGResponse
 from .cancellation import call_with_optional_cancellation, cancellation_token_from_context
-from .state import QueryContext, finalize_response_node_timings, record_node_timing
-from .graph import route_intent, route_output, route_verifier
+from .state import QueryContext, active_query, finalize_response_node_timings, record_node_timing
+from .graph import route_conversation, route_intent, route_verifier
 from .nodes import QueryNodes
 from rag.query.routing.routing_logs import log_node_timing
 from rag.query.sources import sources_from_hits
@@ -21,6 +21,7 @@ from rag.query.answering.synthesis import (
     merge_sources,
     prepare_synthesis_input,
     response_sources,
+    validate_synthesized_answer,
 )
 
 
@@ -33,6 +34,19 @@ def stream_graph(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEv
     yield QueryStreamEvent(event="trace", data={"trace_id": ctx["trace_id"], "session_id": ctx["session_id"]})
     yield _node_event("session_memory")
     ctx = _run("session_memory", ctx, nodes.session_memory)
+    yield _node_event("conversation_resolver")
+    ctx = _run("conversation_resolver", ctx, nodes.conversation_resolver)
+    if route_conversation(ctx) == "clarify":
+        yield _node_event("conversation_clarifier")
+        ctx = _run("conversation_clarifier", ctx, nodes.conversation_clarifier)
+        yield QueryStreamEvent(event="intent", data={"intent": ctx["intent"]})
+        yield _node_event("response_serializer")
+        ctx = _run("response_serializer", ctx, nodes.response_serializer)
+        ctx = _refresh_response_metadata(ctx)
+        response = ctx["response"]
+        yield QueryStreamEvent(event="token", data={"text": response.answer})
+        yield QueryStreamEvent(event="done", data=response.model_dump())
+        return
     yield _node_event("source_resolver")
     ctx = _run("source_resolver", ctx, nodes.source_resolver)
     yield _node_event("intent_router")
@@ -49,9 +63,6 @@ def stream_graph(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEv
     if intent_route == "plan":
         ctx = _run("query_planner", ctx, nodes.query_planner)
         yield _node_event("query_planner", ctx=ctx)
-    elif intent_route == "artifact":
-        ctx = _run("artifact_planner", ctx, nodes.artifact_planner)
-        yield _node_event("artifact_planner", ctx=ctx)
     while True:
         yield _node_event("abac_retriever")
         ctx = _run("abac_retriever", ctx, nodes.abac_retriever)
@@ -65,111 +76,46 @@ def stream_graph(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEv
         if route_verifier(ctx) == "pass":
             ctx = _run("temporal_resolver", ctx, nodes.temporal_resolver)
             yield _node_event("temporal_resolver", ctx=ctx)
+        yield _node_event("evidence_builder")
+        ctx = _run("evidence_builder", ctx, nodes.evidence_builder)
+        ctx = _run("evidence_gate", ctx, nodes.evidence_gate)
+        yield _node_event("evidence_gate", ctx=ctx)
+        if route_verifier(ctx) == "retry":
+            yield QueryStreamEvent(event="warning", data={"code": "verifier_retry", "retry_count": ctx["retry_count"]})
+            continue
+        if ctx["retrieved_hits"]:
             ctx = _run("contradiction_detector", ctx, nodes.contradiction_detector)
             yield _node_event("contradiction_detector", ctx=ctx)
         break
-    yield _node_event("evidence_builder")
-    ctx = _run("evidence_builder", ctx, nodes.evidence_builder)
-    for source in sources_from_hits(ctx["retrieved_hits"], query=ctx["request"].query):
+    for source in sources_from_hits(ctx["retrieved_hits"], query=active_query(ctx)):
         yield QueryStreamEvent(event="source", data=source.model_dump())
-    if route_output(ctx) == "artifact":
-        yield _node_event("artifact_composer")
-        ctx = _run("artifact_composer", ctx, nodes.artifact_composer)
-        yield _node_event("artifact_content_validator")
-        ctx = _run("artifact_content_validator", ctx, nodes.artifact_content_validator)
-        yield _node_event("artifact_generator")
-        ctx = _run("artifact_generator", ctx, nodes.artifact_generator)
-        yield QueryStreamEvent(event="token", data={"text": ctx["response"].answer})
-        for artifact in ctx["response"].artifacts:
-            yield QueryStreamEvent(event="artifact", data=artifact.model_dump())
-        yield _node_event("response_serializer")
-        ctx = _run("response_serializer", ctx, nodes.response_serializer)
-        ctx = finalize_response_node_timings(ctx)
-        yield QueryStreamEvent(event="done", data=ctx["response"].model_dump())
-        return
     yield _node_event("synthesizer")
     ctx = yield from _stream_timed_synthesizer(ctx, nodes)
     ctx = yield from _stream_response_tail(ctx, nodes)
 
 
 def _stream_response_tail(ctx: QueryContext, nodes: QueryNodes) -> Generator[QueryStreamEvent, None, QueryContext]:
-    if _should_defer_faithfulness(ctx, nodes):
-        yield _node_event("response_serializer")
-        ctx = _run("response_serializer", ctx, nodes.response_serializer)
-        ctx = _refresh_response_metadata(ctx)
-        response = ctx["response"]
-        yield from _terminal_warnings(response, nodes, include_faithfulness=False)
-        yield QueryStreamEvent(event="done", data=response.model_dump())
-
-        yield _node_event("faithfulness_checker")
-        ctx = _run("faithfulness_checker", ctx, nodes.faithfulness_checker)
-        ctx = _refresh_response_metadata(ctx)
-        response = ctx["response"]
-        yield from _faithfulness_warnings(response, nodes)
-        yield QueryStreamEvent(event="verified", data=response.model_dump())
-        return ctx
-
     yield _node_event("faithfulness_checker")
     ctx = _run("faithfulness_checker", ctx, nodes.faithfulness_checker)
-    response = ctx["response"]
-    yield _node_event("artifact_generator")
-    ctx = _run("artifact_generator", ctx, nodes.artifact_generator)
-    response = ctx["response"]
-    for artifact in response.artifacts:
-        yield QueryStreamEvent(event="artifact", data=artifact.model_dump())
     yield _node_event("response_serializer")
     ctx = _run("response_serializer", ctx, nodes.response_serializer)
     ctx = _refresh_response_metadata(ctx)
     response = ctx["response"]
-    yield from _terminal_warnings(response, nodes, include_faithfulness=True)
+    yield QueryStreamEvent(event="token", data={"text": response.answer})
+    yield from _terminal_warnings(response)
     yield QueryStreamEvent(event="done", data=response.model_dump())
     return ctx
-
-
-def _should_defer_faithfulness(ctx: QueryContext, nodes: QueryNodes) -> bool:
-    return (
-        bool(nodes.config.rag_defer_faithfulness)
-        and nodes.should_run_faithfulness(ctx)
-        and not _artifact_generation_requested(ctx)
-    )
-
-
-def _artifact_generation_requested(ctx: QueryContext) -> bool:
-    artifact_request = ctx.get("artifact_request")
-    return artifact_request is not None and not artifact_request.needs_clarification
 
 
 def _refresh_response_metadata(ctx: QueryContext) -> QueryContext:
     return finalize_response_node_timings(ctx)
 
 
-def _terminal_warnings(
-    response: RAGResponse,
-    nodes: QueryNodes,
-    *,
-    include_faithfulness: bool,
-) -> Iterator[QueryStreamEvent]:
-    if include_faithfulness:
-        yield from _faithfulness_warnings(response, nodes)
+def _terminal_warnings(response: RAGResponse) -> Iterator[QueryStreamEvent]:
     if response.conflict_flag:
         yield QueryStreamEvent(event="warning", data={"code": "conflicting_sources"})
     if response.degraded:
         yield QueryStreamEvent(event="warning", data={"code": response.degraded_reason or "degraded"})
-
-
-def _faithfulness_warnings(response: RAGResponse, nodes: QueryNodes) -> Iterator[QueryStreamEvent]:
-    if (
-        response.faithfulness_status == "checked"
-        and response.faithfulness_score < nodes.config.rag_faithfulness_threshold
-    ):
-        yield QueryStreamEvent(
-            event="warning",
-            data={
-                "code": "low_faithfulness",
-                "score": response.faithfulness_score,
-                "unfounded_claims": response.unfounded_claims,
-            },
-        )
 
 
 def _stream_timed_synthesizer(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEvent]:
@@ -182,18 +128,17 @@ def _stream_timed_synthesizer(ctx: QueryContext, nodes: QueryNodes) -> Iterator[
 
 
 def _stream_synthesizer(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEvent]:
+    yield from ()
     _raise_if_cancelled(ctx)
     ctx["node_trace"].append({"node": "synthesizer", "agent": None})
-    evidence_sources = sources_from_hits(ctx["retrieved_hits"], query=ctx["request"].query)
+    if ctx.get("graphrag_communities") and ctx["retrieved_hits"]:
+        ctx = nodes.synthesizer(ctx)
+        return ctx
+    evidence_sources = sources_from_hits(ctx["retrieved_hits"], query=active_query(ctx))
     plan = ctx.get("route_plan")
     prepared = prepare_synthesis_input(ctx, evidence_sources)
     ctx["synthesis_profile"] = prepared.profile
-    streamed_answer = False
-    artifact_request = ctx.get("artifact_request")
-    if artifact_request is not None and artifact_request.needs_clarification:
-        available_sources = []
-        answer = "What should the file cover? Please include a topic or question, and I can generate the requested file."
-    elif plan is not None and not plan.needs_retrieval:
+    if plan is not None and not plan.needs_retrieval:
         available_sources = []
         answer = "I can only answer questions grounded in the indexed documents."
         ctx["degraded"] = True
@@ -215,23 +160,14 @@ def _stream_synthesizer(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryS
         for chunk in chunk_stream:
             _raise_if_cancelled(ctx)
             chunks.append(chunk)
-            yield QueryStreamEvent(event="token", data={"text": chunk})
         raw_answer = "".join(chunks)
-        answer = ensure_answer_has_citation(raw_answer, available_sources)
-        streamed_answer = True
-        # Token events are append-only; non-prefix corrections are delivered by the authoritative done snapshot.
-        if answer.startswith(raw_answer):
-            citation_suffix = answer[len(raw_answer):]
-            if citation_suffix:
-                yield QueryStreamEvent(event="token", data={"text": citation_suffix})
+        answer = validate_synthesized_answer(ctx, raw_answer, available_sources)
     else:
         available_sources = []
         answer = "No accessible current sources were found for this query."
         ctx["degraded"] = True
         ctx["degraded_reason"] = ctx["degraded_reason"] or "no_indexed_sources"
-    if not streamed_answer:
-        answer = ensure_answer_has_citation(answer, available_sources)
-        yield QueryStreamEvent(event="token", data={"text": answer})
+    answer = ensure_answer_has_citation(answer, available_sources)
     ctx["response"] = build_rag_response(
         ctx,
         answer=answer,

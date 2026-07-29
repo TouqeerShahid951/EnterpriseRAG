@@ -79,6 +79,51 @@ describe("connectorApi", () => {
     expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
   });
 
+  it("returns failed connection tests from HTTP 200 responses", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      status: "failed",
+      message: "Connection refused.",
+      detail: {},
+      profile: null,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    const result = await connectorApi.testProfile("profile/1");
+
+    expect(result.status).toBe("failed");
+    expect(result.message).toBe("Connection refused.");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/connectors/profiles/profile%2F1/test");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify(null));
+  });
+
+  it("returns successful schema introspection snapshots from HTTP 200 responses", async () => {
+    const snapshot = {
+      id: "snapshot-1",
+      profile_id: "profile/1",
+      connector_type: "postgres",
+      schema_json: { tables: [{ key: "public.cases", columns: [] }] },
+      status: "ok",
+      error_message: null,
+      created_at: "2026-07-19T10:00:00Z",
+    };
+    const fetchMock = vi.fn(async () => jsonResponse(snapshot));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+
+    const result = await connectorApi.introspectProfile("profile/1");
+
+    expect(result).toEqual(snapshot);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/connectors/profiles/profile%2F1/introspect");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify(null));
+  });
+
   it("creates approved schema catalogs through the connector contract", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({
       id: "catalog-1",
@@ -159,5 +204,35 @@ describe("connectorApi", () => {
     expect(init.method).toBe("POST");
     expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
     expect(init.body).toBe(JSON.stringify({ table_key: "public.cases" }));
+  });
+
+  it("approves schema catalogs through encoded connector paths", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      id: "catalog/1",
+      profile_id: "profile/1",
+      connector_type: "postgres",
+      status: "approved",
+      group_path: "/ops",
+      clearance_level: "NATO_SECRET",
+      catalog_json: { tables: [{ key: "public.cases", allowed: true }] },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+    const request = {
+      catalog_json: { tables: [{ key: "public.cases", allowed: true }] },
+      status: "approved" as const,
+      group_path: "/ops",
+      group_paths: ["/ops"],
+      clearance_level: "NATO_SECRET" as const,
+    };
+
+    const result = await connectorApi.updateSchemaCatalog("profile/1", "catalog/1", request);
+
+    expect(result.status).toBe("approved");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/connectors/profiles/profile%2F1/schema-catalogs/catalog%2F1");
+    expect(init.method).toBe("PUT");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify(request));
   });
 });

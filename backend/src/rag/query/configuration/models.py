@@ -8,9 +8,16 @@ from typing import Protocol
 from urllib.parse import urlsplit
 
 from rag.shared.contracts.rag_defaults import (
+    DEFAULT_EVIDENCE_GATE_POLICY,
+    DEFAULT_FAITHFULNESS_POLICY,
+    DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS,
     DEFAULT_JSON_NUM_PREDICT,
     DEFAULT_QUERY_PLANNER_ENABLED,
+    DEFAULT_REASONING_TIMEOUT_SECONDS,
     DEFAULT_RETRIEVAL_TOKEN_BUDGET,
+    DEFAULT_ROUTING_TIMEOUT_SECONDS,
+    EvidenceGatePolicy,
+    FaithfulnessPolicy,
     SUPPORTED_EMBEDDING_PROVIDERS as SHARED_EMBEDDING_PROVIDERS,
     SUPPORTED_INFERENCE_PROVIDERS as SHARED_INFERENCE_PROVIDERS,
 )
@@ -31,6 +38,9 @@ class RagConfigRecord:
     faithfulness_model: str | None
     chat_timeout_seconds: float
     embed_timeout_seconds: float
+    routing_timeout_seconds: float = DEFAULT_ROUTING_TIMEOUT_SECONDS
+    reasoning_timeout_seconds: float = DEFAULT_REASONING_TIMEOUT_SECONDS
+    faithfulness_timeout_seconds: float = DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS
     embedding_base_url: str = ""
     embedding_provider: str = ""
     reasoning_provider: str | None = None
@@ -45,12 +55,15 @@ class RagConfigRecord:
     vision_base_url: str | None = None
     thinking_enabled: bool = False
     reasoning_model: str | None = None
+    sql_generation_model: str | None = None
     routing_model: str | None = None
     ingestion_model: str | None = None
     vision_model: str | None = None
     json_num_predict: int = DEFAULT_JSON_NUM_PREDICT
     retrieval_token_budget: int = DEFAULT_RETRIEVAL_TOKEN_BUDGET
     query_planner_enabled: bool = DEFAULT_QUERY_PLANNER_ENABLED
+    evidence_gate_policy: EvidenceGatePolicy = DEFAULT_EVIDENCE_GATE_POLICY
+    faithfulness_policy: FaithfulnessPolicy = DEFAULT_FAITHFULNESS_POLICY
     reranker_model: str = DEFAULT_RERANKER_MODEL
     health_status: str = "unknown"
     health_message: str = "Not checked."
@@ -73,6 +86,20 @@ class RagConfigRecord:
                 "openai_compatible" if self.provider == "vllm" else "ollama",
             )
         object.__setattr__(self, "reranker_model", normalize_reranker_model(self.reranker_model))
+        if not 1.0 <= self.routing_timeout_seconds <= 30.0:
+            raise ValueError("Routing timeout must be between 1 and 30 seconds.")
+        if not 1.0 <= self.reasoning_timeout_seconds <= 300.0:
+            raise ValueError("Reasoning timeout must be between 1 and 300 seconds.")
+        if not 1.0 <= self.faithfulness_timeout_seconds <= 300.0:
+            raise ValueError("Faithfulness timeout must be between 1 and 300 seconds.")
+        if self.evidence_gate_policy not in {"adaptive", "always", "never"}:
+            raise ValueError(
+                "Evidence Gate policy must be adaptive, always, or never."
+            )
+        if self.faithfulness_policy not in {"adaptive", "always", "never"}:
+            raise ValueError(
+                "Faithfulness policy must be adaptive, always, or never."
+            )
         for field_name in (
             "reasoning_base_url",
             "routing_base_url",
@@ -95,6 +122,10 @@ class RagConfigRecord:
     @property
     def effective_reasoning_model(self) -> str | None:
         return self.reasoning_model or self.routing_model
+
+    @property
+    def effective_sql_generation_model(self) -> str | None:
+        return self.sql_generation_model or self.effective_reasoning_model
 
     @property
     def effective_reasoning_base_url(self) -> str:

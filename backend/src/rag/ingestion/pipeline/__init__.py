@@ -1,4 +1,4 @@
-"""LangGraph ingestion workflow package."""
+"""Ingestion workflow package."""
 
 from .graph import IngestDependencies, run_ingest_graph
 

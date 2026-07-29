@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { RAGResponse } from "@/types/api";
 import type { ChatTurn, SavedChatSessionSummary } from "@/types/chat";
-import { applyStreamEvent, mergeSavedSessionsWithLocal, updateChatSessionTurns, type ChatSessionTurnCache } from "./useChatSession";
+import { mergeSavedSessionsWithLocal, updateChatSessionTurns, type ChatSessionTurnCache } from "./chatSessionCache";
+import { applyStreamEvent } from "./chatStreamReducer";
 
 describe("chat session cache helpers", () => {
   it("updates a background session without changing the visible session id", () => {

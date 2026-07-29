@@ -29,6 +29,7 @@ class IngestState(TypedDict, total=False):
     index_generation_id: str
     upsert_count: int
     warnings: list[str]
+    abbreviation_entries: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)

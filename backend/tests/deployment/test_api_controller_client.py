@@ -40,7 +40,6 @@ def test_client_sends_authenticated_controller_payload(
 
     message = HttpDeploymentControllerClient(
         base_url="http://controller.example/",
-        token_header="X-Service-Token",
         token="test-secret",
         timeout_seconds=930.0,
     ).apply(record, services=["vllm-text", "vllm-vision"])

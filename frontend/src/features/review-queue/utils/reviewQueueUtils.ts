@@ -1,5 +1,5 @@
 import type { DocumentRegion } from "@/features/documents/components/DocumentRegionViewer";
-import type { ImageReviewCandidate, ReviewItem } from "@/types/api";
+import type { ImageReviewBatch, ImageReviewCandidate, ReviewItem } from "@/types/api";
 
 export function reviewRegionFromItem(item: ReviewItem): DocumentRegion {
   return {
@@ -19,6 +19,16 @@ export function groupReviewItemsByDocument(items: ReviewItem[]): ReviewDocumentG
     groups.set(item.doc_id, group);
   }
   return [...groups.values()];
+}
+
+export function reviewDocumentCount(
+  items: Pick<ReviewItem, "doc_id">[],
+  imageBatches: Pick<ImageReviewBatch, "doc_id">[],
+): number {
+  return new Set([
+    ...items.map((item) => item.doc_id),
+    ...imageBatches.map((batch) => batch.doc_id),
+  ]).size;
 }
 
 function normalizeBBox(value: number[] | null): [number, number, number, number] | null {

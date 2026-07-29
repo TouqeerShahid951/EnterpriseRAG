@@ -75,6 +75,7 @@ class QueryNodeTiming(ContractModel):
     duration_ms: int = Field(..., ge=0)
     execution_mode: str | None = None
     detail: str | None = None
+    phase_timings_ms: dict[str, int] = Field(default_factory=dict)
 
 
 class QueryCoverage(ContractModel):

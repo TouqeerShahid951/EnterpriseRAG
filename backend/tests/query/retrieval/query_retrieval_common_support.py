@@ -111,6 +111,13 @@ def route_plan(query: str) -> RoutePlan:
         original_query=query,
         resolved_query=query,
         intent="aggregation",
+        capabilities=(
+            "general_search",
+            "structured_query",
+            "document_search",
+        ),
+        scope="corpus",
+        coverage="exhaustive",
         public_intent="aggregation",
         use_structured_query=True,
         search_mode="structured_first",

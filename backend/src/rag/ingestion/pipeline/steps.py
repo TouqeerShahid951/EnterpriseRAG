@@ -28,6 +28,7 @@ from .indexing_stages import (
     embed_chunks as embed_chunks,
     mark_processing as mark_processing,
     upsert_qdrant as upsert_qdrant,
+    stage_abbreviation_glossary as stage_abbreviation_glossary,
 )
 from .parser_diagnostics import parser_failure_provenance as _parser_failure_provenance
 from .progress import (
@@ -68,6 +69,7 @@ __all__ = [
     "generate_metadata",
     "mark_processing",
     "activate_generation",
+    "stage_abbreviation_glossary",
     "upsert_qdrant",
 ]
 

@@ -13,7 +13,6 @@ from rag.internal.ingest_status_routes import update_ingest_job_status
 from rag.documents.adapters.memory import InMemoryDocumentRepository
 from rag.auth.identity_models import UserRecord
 from rag.ingestion.internal_schemas import InternalJobStatusRequest
-from rag.internal.schemas import ServiceTokenContext
 
 
 class FakeQueue:
@@ -228,7 +227,6 @@ def test_internal_worker_status_update_does_not_resurrect_cancelled_job() -> Non
             InternalJobStatusRequest(status="processing", progress_pct=55),
             document_repo=repo,
             job_repo=repo,
-            service=ServiceTokenContext(service_name="ingestion-worker"),
         )
     )
 

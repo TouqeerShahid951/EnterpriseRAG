@@ -5,6 +5,7 @@ import type {
   DocumentCatalogSummary,
   DocumentGraphEnrichmentResponse,
   DocumentIngestStatus,
+  DocumentOverview,
   DocumentReingestRequest,
   DocumentReingestResponse,
   DocumentSharesResponse,
@@ -47,6 +48,7 @@ export const documentsApi = {
     return { ...response, items: response.items.map(normalizeDocument) };
   },
   summary: () => apiClient.get<DocumentCatalogSummary>("/api/v1/docs/summary"),
+  overview: () => apiClient.get<DocumentOverview>("/api/v1/docs/overview"),
   get: async (documentId: string) => normalizeDocument(await apiClient.get<Document>(`/api/v1/docs/${encodeURIComponent(documentId)}`)),
   source: (documentId: string, chunkId: string) =>
     apiClient.get<SourceAnchor>(`/api/v1/docs/${encodeURIComponent(documentId)}/sources/${encodeURIComponent(chunkId)}`),

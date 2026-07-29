@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { CheckCircle2, Network, Plus, Search, ShieldAlert, Trash2, X } from "lucide-react";
 
 import { InlineMessage } from "@/components/layout/Common";
@@ -39,8 +39,11 @@ import type { ConnectorCatalogEditorProps } from "@/features/connectors/componen
 
 export type { ConnectorCatalogEditorProps } from "@/features/connectors/components/connector-workspace/ConnectorCatalogEditor.types";
 
+const guidedReviewTabs: ConnectorReviewTab[] = ["summary", "tables", "joins", "access"];
+
 
 export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mutationError, onClose, onContinueAiEnrichment, onSave, profile, writableSpacePaths }: ConnectorCatalogEditorProps) {
+  const reviewTabsId = useId();
   const [draftJson, setDraftJson] = useState<SchemaCatalogJson>(() => normalizeCatalogJson(catalog.catalog_json));
   const [ownerGroupPath, setOwnerGroupPath] = useState(catalogOwnerGroupPath(catalog));
   const [sharedGroupPaths, setSharedGroupPaths] = useState<string[]>(() => catalogSharedGroupPaths(catalog));
@@ -88,6 +91,9 @@ export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mu
   const shareOptions = writableSpacePaths.filter((path) => path !== ownerGroupPath && !sharedGroupPaths.includes(path));
   const joinDraftReady = Boolean(joinDraft.leftTable && joinDraft.leftColumn && joinDraft.rightTable && joinDraft.rightColumn);
   const joinDraftDuplicate = joinDraftReady && relationships.some((relationship) => schemaCatalogRelationshipMatchesDraft(relationship, joinDraft));
+  const guidedReviewIndex = guidedReviewTabs.indexOf(reviewTab);
+  const previousReviewTab = guidedReviewIndex > 0 ? guidedReviewTabs[guidedReviewIndex - 1] : null;
+  const nextReviewTab = guidedReviewIndex >= 0 && guidedReviewIndex < guidedReviewTabs.length - 1 ? guidedReviewTabs[guidedReviewIndex + 1] : null;
 
   function updateTable(index: number, patch: Partial<SchemaCatalogTable>) {
     setDraftJson((current) => {
@@ -209,12 +215,20 @@ export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mu
         </div>
       </div>
 
-      <ConnectorReviewTabs onChange={setReviewTab} value={reviewTab} />
+      <ConnectorReviewTabs idPrefix={reviewTabsId} onChange={setReviewTab} value={reviewTab} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="space-y-4">
-          {reviewTab === "summary" ? (
-            <>
+          <div
+            aria-labelledby={`${reviewTabsId}-tab-summary`}
+            className="space-y-4"
+            hidden={reviewTab !== "summary"}
+            id={`${reviewTabsId}-panel-summary`}
+            role="tabpanel"
+            tabIndex={0}
+          >
+            {reviewTab === "summary" ? (
+              <>
           <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <SchemaReviewMetric label="Included tables" value={`${reviewStats.allowedTables}/${reviewStats.totalTables}`} />
             <SchemaReviewMetric label="Included columns" value={`${reviewStats.allowedColumns}/${reviewStats.totalColumns}`} />
@@ -252,11 +266,20 @@ export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mu
               className="sv-input min-h-24"
             />
           </label>
-            </>
-          ) : null}
+              </>
+            ) : null}
+          </div>
 
-          {reviewTab === "tables" ? (
-            <>
+          <div
+            aria-labelledby={`${reviewTabsId}-tab-tables`}
+            className="space-y-4"
+            hidden={reviewTab !== "tables"}
+            id={`${reviewTabsId}-panel-tables`}
+            role="tabpanel"
+            tabIndex={0}
+          >
+            {reviewTab === "tables" ? (
+              <>
           <section className="rounded-md border border-surface-border bg-surface p-3">
             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem]">
               <label className="sv-field">
@@ -346,8 +369,8 @@ export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mu
                           {column.sensitive === true || column.allowed === false ? <small className="mt-2 block text-secondary">Excluded from Live DB SQL prompts.</small> : null}
                         </div>
                         <div className="grid gap-2">
-                          <textarea value={column.description ?? ""} onChange={(event) => updateColumn(tableIndex, columnIndex, { description: event.target.value })} placeholder="Column meaning" className="sv-input min-h-16" />
-                          <input value={(column.synonyms ?? []).join(", ")} onChange={(event) => updateColumn(tableIndex, columnIndex, { synonyms: splitCommaList(event.target.value) })} placeholder="Synonyms, comma separated" className="sv-input" />
+                          <textarea aria-label={`${column.name ?? "Column"} description`} value={column.description ?? ""} onChange={(event) => updateColumn(tableIndex, columnIndex, { description: event.target.value })} placeholder="Column meaning" className="sv-input min-h-16" />
+                          <input aria-label={`${column.name ?? "Column"} synonyms`} value={(column.synonyms ?? []).join(", ")} onChange={(event) => updateColumn(tableIndex, columnIndex, { synonyms: splitCommaList(event.target.value) })} placeholder="Synonyms, comma separated" className="sv-input" />
                         </div>
                       </div>
                     ))}
@@ -356,11 +379,19 @@ export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mu
               </details>
             ))}
           </div>
-            </>
-          ) : null}
+              </>
+            ) : null}
+          </div>
 
-          {reviewTab === "joins" ? (
-          <details className="rounded-md border border-surface-border bg-surface p-3" open>
+          <div
+            aria-labelledby={`${reviewTabsId}-tab-joins`}
+            hidden={reviewTab !== "joins"}
+            id={`${reviewTabsId}-panel-joins`}
+            role="tabpanel"
+            tabIndex={0}
+          >
+            {reviewTab === "joins" ? (
+              <details className="rounded-md border border-surface-border bg-surface p-3" open>
             <summary className="cursor-pointer text-body-md font-extrabold text-on-surface">
               <span className="inline-flex items-center gap-2"><Network size={16} />Joins</span>
               <span className="ml-2 text-label-md font-normal text-secondary">{schemaCatalogAllowedRelationships(relationships)} of {relationships.length} joins approved</span>
@@ -401,7 +432,7 @@ export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mu
                 </label>
               </div>
               <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_9rem]">
-                <input value={joinDraft.description} onChange={(event) => updateJoinDraft({ description: event.target.value })} placeholder="Join meaning, optional" className="sv-input" />
+                <input aria-label="Join description" value={joinDraft.description} onChange={(event) => updateJoinDraft({ description: event.target.value })} placeholder="Join meaning, optional" className="sv-input" />
                 <button type="button" disabled={!joinDraftReady || Boolean(joinDraftDuplicate)} onClick={addJoinDraft} className="sv-action-secondary justify-center disabled:opacity-50">
                   <Plus size={16} />
                   Add Join
@@ -421,6 +452,7 @@ export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mu
                         {schemaCatalogRelationshipSource(relationship) === "manual" ? <span className="sv-pill">manual</span> : <span className="sv-pill">detected</span>}
                       </div>
                       <textarea
+                        aria-label={`Description for ${schemaCatalogRelationshipLabel(relationship)}`}
                         value={relationship.description ?? ""}
                         onChange={(event) => updateRelationship(relationshipIndex, { description: event.target.value })}
                         placeholder="Join meaning"
@@ -440,34 +472,66 @@ export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mu
                 ))}
               </div>
             )}
-          </details>
-          ) : null}
+              </details>
+            ) : null}
+          </div>
 
-          {reviewTab === "access" ? (
-            <CatalogAccessPanel
-              catalogStatus={catalog.status}
-              clearanceLevel={clearanceLevel}
-              clearanceOptions={clearanceOptions}
-              groupOptions={groupOptions}
-              ownerGroupPath={ownerGroupPath}
-              shareCandidate={shareCandidate}
-              shareOptions={shareOptions}
-              sharedGroupPaths={sharedGroupPaths}
-              onAddSharedGroupPath={addSharedGroupPath}
-              onClearanceChange={setClearanceLevel}
-              onOwnerGroupPathChange={updateOwnerGroupPath}
-              onShareCandidateChange={setShareCandidate}
-              onSharedGroupPathsChange={setSharedGroupPaths}
-            />
-          ) : null}
+          <div
+            aria-labelledby={`${reviewTabsId}-tab-access`}
+            hidden={reviewTab !== "access"}
+            id={`${reviewTabsId}-panel-access`}
+            role="tabpanel"
+            tabIndex={0}
+          >
+            {reviewTab === "access" ? (
+              <CatalogAccessPanel
+                catalogStatus={catalog.status}
+                clearanceLevel={clearanceLevel}
+                clearanceOptions={clearanceOptions}
+                groupOptions={groupOptions}
+                ownerGroupPath={ownerGroupPath}
+                shareCandidate={shareCandidate}
+                shareOptions={shareOptions}
+                sharedGroupPaths={sharedGroupPaths}
+                onAddSharedGroupPath={addSharedGroupPath}
+                onClearanceChange={setClearanceLevel}
+                onOwnerGroupPathChange={updateOwnerGroupPath}
+                onShareCandidateChange={setShareCandidate}
+                onSharedGroupPathsChange={setSharedGroupPaths}
+              />
+            ) : null}
+          </div>
 
-          {reviewTab === "raw_schema" ? (
-            <details className="rounded-md border border-surface-border bg-surface p-3" open>
-              <summary className="cursor-pointer text-body-md font-extrabold text-on-surface">Raw schema catalog JSON</summary>
-              <pre className="mt-3 max-h-[32rem] overflow-auto rounded-md bg-surface-container-low p-3 text-xs text-on-surface">
-                {JSON.stringify(draftJson, null, 2)}
-              </pre>
-            </details>
+          <div
+            aria-labelledby={`${reviewTabsId}-tab-raw_schema`}
+            hidden={reviewTab !== "raw_schema"}
+            id={`${reviewTabsId}-panel-raw_schema`}
+            role="tabpanel"
+            tabIndex={0}
+          >
+            {reviewTab === "raw_schema" ? (
+              <details className="rounded-md border border-surface-border bg-surface p-3" open>
+                <summary className="cursor-pointer text-body-md font-extrabold text-on-surface">Raw schema catalog JSON</summary>
+                <pre className="mt-3 max-h-[32rem] overflow-auto rounded-md bg-surface-container-low p-3 text-xs text-on-surface">
+                  {JSON.stringify(draftJson, null, 2)}
+                </pre>
+              </details>
+            ) : null}
+          </div>
+
+          {previousReviewTab || nextReviewTab ? (
+            <div className="flex flex-wrap items-center gap-2 border-t border-surface-border pt-3">
+              {previousReviewTab ? (
+                <button type="button" onClick={() => setReviewTab(previousReviewTab)} className="sv-action-secondary">
+                  Back
+                </button>
+              ) : null}
+              {nextReviewTab ? (
+                <button type="button" onClick={() => setReviewTab(nextReviewTab)} className="sv-action-primary ml-auto">
+                  Next
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
 

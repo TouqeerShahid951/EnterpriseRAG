@@ -1,6 +1,6 @@
 # Prudentia AI Administrator Manual
 
-Last updated: 2026-07-07
+Last updated: 2026-07-18
 
 This manual explains how to administer Prudentia AI from the web application. It
 is written for Platform Admins, System Admins, and Space Admins.
@@ -167,7 +167,31 @@ an item should be hidden from retrieval but retained for review.
 When replacing a document, use supersedes metadata so the previous version stays
 auditable.
 
-## 7. Folder Sources
+## 7. Abbreviation Glossary
+
+Platform Admins and System Admins can open **Corpus > Document Intake >
+Abbreviation Glossary** and use **Terms in use** to search, add, edit,
+or delete definitions. There is one global glossary; no Knowledge Space,
+sharing, or clearance selection is required. Saved changes become available to
+all queries immediately and do not re-index the document corpus.
+
+To import governed sources, upload one or more PDFs containing abbreviation and
+expansion pairs, either in two-column tables or as lines such as
+`AD — Assistant Director`. Definitions from active PDFs merge into the global
+glossary. Each PDF can be replaced or removed independently, and replacements
+do not affect other sources. Identical definitions may be shared by several
+PDFs; conflicting definitions fail activation and remain visible in ingestion
+activity for review. Source PDFs remain available for governance and audit,
+but are not embedded or searched as ordinary corpus documents.
+
+Query
+expansion works in both directions: `AD` adds `Assistant Director`, while
+`Assistant Director` adds `AD`. The original user text remains unchanged for
+display and audit. Ambiguous definitions are not expanded automatically. When
+a PDF definition supports an answer, its evidence records the source PDF and
+page without exposing unrelated glossary content to retrieval.
+
+## 8. Folder Sources
 
 Open **Corpus > Document Intake > Folder Sources** to upload local folder
 snapshots for bulk ingestion.
@@ -179,7 +203,23 @@ new snapshot.
 Use run details to review queued, skipped, cancelled, and failed files.
 Unsupported files are recorded as skipped.
 
-## 8. Database Connectors
+### Document Health Count Semantics
+
+Document Overview, Knowledge Spaces, Workspace Summary, and the Trash badge use
+the same access- and clearance-filtered document snapshot. Counts are grouped by
+persisted document identity, not by ingestion attempts or browser upload rows.
+Needs attention is the distinct set of visible current documents in failed,
+unknown, or human-review state. Processing is separate, cancelled is excluded,
+and superseded versions do not contribute current health.
+
+A retry updates the existing document state, so failed becomes processing and
+does not stack another issue. A new unrelated upload is a different document
+and does not acknowledge the original failure. A replacement leaves the old
+version current until successful publication, then moves the old version to
+Superseded. Use Activity and Ingestion Health for run and attempt counts; their
+totals intentionally differ from document-health totals.
+
+## 9. Database Connectors
 
 Platform Admins, System Admins, and Space Admins can prepare governed live SQL
 access from **Document Intake > Database Connectors**.
@@ -196,27 +236,45 @@ returned rows as answer evidence.
 
 ### Connector Approval Workflow
 
-1. Add a connection profile with a least-privilege read-only database account.
-2. Save the encrypted profile.
-3. Test the profile.
-4. Select **Read Schema** to capture schema metadata.
-5. Select **Prepare Review** to create a reviewable schema catalog.
-6. Review table and column descriptions, synonyms, relationships, business
+Selecting an action for a saved connection activates its guided setup. Each
+successful stage advances to the next workspace automatically; completed stages
+remain selectable for review, and **All Connections** returns to the overview.
+
+1. Add and save a connection with a least-privilege read-only database account.
+2. Follow the connection's primary action to **Test Connection**.
+3. After a successful test, select **Read Schema** to capture schema metadata.
+4. Inspect the snapshot, explicitly select its owner Knowledge Space and
+   clearance, and choose **Prepare AI-assisted review**.
+5. Prudentia creates an editable review and proposes descriptions, synonyms,
+   join context, and business rules from schema metadata, one table at a time.
+   Completed tables are saved; use **Continue AI Enrichment** after an interruption.
+6. Follow the guided Summary, Tables, Joins, and Access review. Correct table
+   and column descriptions, synonyms, relationships, business
    rules, allowed fields, and sensitivity flags.
 7. Assign the owner Knowledge Space, optional shared Knowledge Spaces, and
    clearance.
-8. Select **Continue AI Enrichment** if enrichment has not finished.
-9. Select **Save Review** while drafting or while waiting for review.
-10. Select **Enable Live DB Access** only after human review is complete.
+8. Select **Save Review** to preserve the current review state.
+9. Select **Enable Live DB Access** only after human review is complete. A
+   successful approval advances the workspace to **Live Access**.
+
+AI enrichment supplies editable suggestions only and does not inspect row
+values. It cannot approve a catalog, change its access scope, or enable Live DB
+access.
 
 Only approved, non-sensitive tables, columns, and relationships can be queried.
 Write statements, wildcard column selection, unapproved joins, system schemas,
 and chained SQL statements are blocked.
 
-## 9. Review Queue Administration
+## 10. Review Queue Administration
 
 Document Contributors, Space Admins, System Admins, and Platform Admins can open
 **Review Queue**.
+
+The sidebar badge counts distinct, visible documents with pending OCR or PDF
+image review work. It does not count individual blocks or images, and partial
+decisions keep the document counted. The document leaves the count when its last
+pending review item is approved, rejected, skipped, or closed by cancellation.
+**Activity** remains an unbadged operational history.
 
 If many documents pause in **Needs review**:
 
@@ -228,7 +286,7 @@ If many documents pause in **Needs review**:
 4. Re-check Activity after approvals or skip decisions to confirm ingestion
    continues.
 
-## 10. RAG Evaluation
+## 11. RAG Evaluation
 
 RAG Evaluation is Platform Admin-only. Use it to measure answer quality with
 repeatable datasets.
@@ -263,10 +321,20 @@ evaluation answer LLM verifier is enabled, a failed literal must-include check
 can be reviewed semantically by the configured model. The verdict is recorded in
 the case **Checks and diagnostic JSON** as `answer_content.llm_verifier`.
 
-## 11. Runtime Settings
+## 12. Runtime Settings
 
 Runtime Settings is Platform Admin-only under **Govern > Runtime Settings**. It
 includes **Models & Roles**, **Inference Services**, and **Ingestion Controls**.
+
+The Evidence token budget is a workspace maximum. Query routes use smaller
+source-count and token limits for factual, comparison, and multi-hop answers to
+bound latency while preserving one available result per planned subquery.
+Confident factual routes rerank up to 12 candidates; uncertain implicit hybrid
+source routes widen that pool to 20 under the operator ceiling. Deployment
+operators can additionally bound local cross-encoder work with
+`RAG_RERANKER_MAX_CANDIDATES` and `RAG_RERANKER_TIMEOUT_SECONDS`. Exhaustive
+queries use a larger bounded budget and report partial coverage rather than
+claiming completeness when the available budget is insufficient.
 
 ### Models & Roles
 
@@ -288,12 +356,20 @@ Use the guided flow in order:
 | Embeddings | Creates dense vectors. |
 | Reranker | Reorders retrieved evidence before synthesis. |
 
-4. Tune budgets, timeouts, model thinking, and the query planner.
+4. Tune budgets, model thinking, the query planner, and the separate timeouts
+   for answer synthesis, reasoning, routing, faithfulness, and embeddings.
 5. Select **Test draft**.
 6. Select **Save & activate** only after validation succeeds.
 
 Changing the embedding provider or embedding model requires reindexing existing
 documents so stored vectors match the active embedding model.
+
+To run without LLM-based answer judging, set both **Evidence Gate** and
+**Faithfulness checker** to **Never**. The deterministic retrieval verifier,
+reranker, citation checks, and access controls still run, but uncertain evidence
+and generated claims are no longer reviewed by an LLM. Use this lower-latency
+mode only when that quality tradeoff is acceptable. Evaluation jobs may
+explicitly force faithfulness checking to measure answer quality.
 
 ### Inference Services
 
@@ -321,7 +397,7 @@ the image-review gate to be skipped. Graph enrichment controls whether the
 completed-document graph enrichment action is visible; keep it off for faster
 bulk ingestion when corpus-level graph analysis is not needed.
 
-## 12. System Audit
+## 13. System Audit
 
 Open **Govern > System Audit** to review append-only activity visible to your
 account.
@@ -340,7 +416,7 @@ You can filter by:
 Use **Export CSV** to preserve a filtered audit set. The exported file should be
 handled according to your organization's sensitive-data policy.
 
-## 13. Admin Troubleshooting
+## 14. Admin Troubleshooting
 
 | Problem | Likely cause | Admin action |
 | --- | --- | --- |
@@ -353,7 +429,7 @@ handled according to your organization's sensitive-data policy.
 | Query answers degrade | Runtime provider, retrieval, or source availability issue | Check Runtime Settings health, document indexing, and source mode. |
 | GraphRAG unavailable | Graph worker or Neo4j unavailable, or docs not opted in | Check Ingestion Health and operator runtime status. |
 
-## 14. Admin Safety Rules
+## 15. Admin Safety Rules
 
 - Use least privilege for roles, Knowledge Spaces, database scopes, and
   clearance.

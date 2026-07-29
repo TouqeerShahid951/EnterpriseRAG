@@ -8,12 +8,6 @@ from typing import Literal
 from rag.connectors.repositories import ConnectorProfileRepository
 from rag.documents.models import DocumentRepository
 from rag.ingestion.folders.models import FolderScheduleRepository
-from rag.query.sources.source_advisory import (
-    _advisory_llm_source_router as _advisory_llm_source_router,
-    _float as _float,
-    _source_router_prompt as _source_router_prompt,
-    _valid_router_catalog_id as _valid_router_catalog_id,
-)
 from rag.query.sources.source_catalog import (
     QuerySourceAccessError as QuerySourceAccessError,
     QuerySourceTargetKind as QuerySourceTargetKind,
@@ -49,7 +43,6 @@ from rag.query.sources.source_matching import (
     _deterministic_preference as _deterministic_preference,
     _document_match_score as _document_match_score,
     _inline_named_source as _inline_named_source,
-    _looks_like_followup as _looks_like_followup,
     _normalize as _normalize,
     _source_match_score as _source_match_score,
     _strip_named_source as _strip_named_source,
@@ -58,7 +51,7 @@ from rag.query.sources.source_matching import (
     _term_score as _term_score,
     _tokens as _tokens,
 )
-from rag.query.state import QueryContext, scoped_user_context
+from rag.query.state import QueryContext, active_query, scoped_user_context
 
 ResolvedSourceMode = Literal["corpus_only", "db_only", "db_first", "corpus_first", "hybrid"]
 
@@ -89,9 +82,6 @@ class SourceDecision:
 def resolve_query_source(
     ctx: QueryContext,
     *,
-    config: object | None = None,
-    llm: object | None = None,
-    routing_model: str | None = None,
     schedule_repo: FolderScheduleRepository | None = None,
     connector_profile_repo: ConnectorProfileRepository | None = None,
     document_repo: DocumentRepository | None = None,
@@ -110,7 +100,7 @@ def resolve_query_source(
         schedule_repo=schedule_repo,
         connector_profile_repo=connector_profile_repo,
     )
-    query_after_directives, directive = _strip_source_directive(request.query)
+    query_after_directives, directive = _strip_source_directive(active_query(ctx))
     inline_source = selected if selected is not None else _inline_named_source(query_after_directives, sources)
     if selected is None and inline_source is not None:
         query_after_directives = _strip_named_source(query_after_directives, inline_source)
@@ -121,7 +111,8 @@ def resolve_query_source(
     preferred_source_record = _best_scored_source(source_scores)
     document_match_score = max((_document_match_score(query_after_directives, document) for document in documents), default=0)
     db_bias, corpus_bias = _conversation_source_bias(ctx.get("session_turns", []))
-    followup = _looks_like_followup(query_after_directives)
+    resolution = ctx.get("conversation_resolution")
+    followup = resolution is not None and resolution.relation == "follow_up"
     preference = _deterministic_preference(
         structured_score=structured_score,
         corpus_score=corpus_score,
@@ -268,26 +259,17 @@ def resolve_query_source(
             routing_confidence=preference.confidence,
             signal_reason=preference.reason,
         )
-    router = _advisory_llm_source_router(
-        query=query_after_directives,
-        user=user,
-        sources=sources,
-        documents=documents,
-        session_turns=ctx.get("session_turns", []),
-        config=config,
-        llm=llm,
-        routing_model=routing_model,
-        deterministic=preference,
+    resolved_mode: ResolvedSourceMode = (
+        "corpus_first" if preference.preferred_source == "corpus" else "hybrid"
     )
-    effective = router or preference
     reason = (
-        "auto_hybrid_llm_router"
-        if router is not None
-        else f"auto_hybrid_{effective.preferred_source}_preferred"
+        "auto_corpus_first_corpus_preferred"
+        if resolved_mode == "corpus_first"
+        else "auto_hybrid_all_visible_sources"
     )
     return _decision(
         request.source_mode,
-        "hybrid",
+        resolved_mode,
         query_after_directives,
         explicit=False,
         reason=reason,
@@ -296,12 +278,12 @@ def resolve_query_source(
         corpus_score=corpus_score,
         source_match_score=source_match_score,
         document_match_score=document_match_score,
-        preferred_source=effective.preferred_source,
-        preferred_catalog_id=effective.preferred_catalog_id
+        preferred_source=preference.preferred_source,
+        preferred_catalog_id=preference.preferred_catalog_id
         or (preferred_source_record.target_id if preferred_source_record is not None else None),
-        routing_confidence=effective.confidence,
-        router_mode=effective.router_mode,
-        signal_reason=effective.reason,
+        routing_confidence=preference.confidence,
+        router_mode=preference.router_mode,
+        signal_reason=preference.reason,
     )
 
 

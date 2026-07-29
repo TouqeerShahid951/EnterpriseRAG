@@ -4,21 +4,23 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from rag.internal.schemas import ServiceTokenContext
 from rag.internal.service_token_auth import require_service_token
 
-from .dependencies import get_index_publication_service
+from .dependencies import get_index_publication_repository
 from .models import IndexGeneration
+from .repository import IndexPublicationRepository
 from .schemas import (
     IndexGenerationCancelResponse,
     IndexGenerationResponse,
     IndexGenerationStageRequest,
     IndexGenerationTransitionRequest,
 )
-from .service import IndexPublicationService
 
 
-router = APIRouter(tags=["internal-ingest-publication"])
+router = APIRouter(
+    tags=["internal-ingest-publication"],
+    dependencies=[Depends(require_service_token)],
+)
 
 
 @router.post(
@@ -29,12 +31,10 @@ router = APIRouter(tags=["internal-ingest-publication"])
 async def stage_index_generation(
     job_id: str,
     payload: IndexGenerationStageRequest,
-    service: IndexPublicationService = Depends(get_index_publication_service),
-    token: ServiceTokenContext = Depends(require_service_token),
+    repository: IndexPublicationRepository = Depends(get_index_publication_repository),
 ) -> IndexGenerationResponse:
-    _ = token
     try:
-        generation = service.stage(
+        generation = repository.stage(
             generation_id=payload.generation_id,
             job_id=job_id,
             run_token=payload.run_token,
@@ -48,6 +48,9 @@ async def stage_index_generation(
                 "claims": [claim.model_dump() for claim in payload.claims],
                 "supersedes": payload.supersedes,
                 "warnings": payload.warnings,
+                "abbreviation_entries": [
+                    entry.model_dump() for entry in payload.abbreviation_entries
+                ],
             },
         )
     except ValueError as exc:
@@ -63,12 +66,10 @@ async def stage_index_generation(
 async def verify_index_generation(
     job_id: str,
     payload: IndexGenerationTransitionRequest,
-    service: IndexPublicationService = Depends(get_index_publication_service),
-    token: ServiceTokenContext = Depends(require_service_token),
+    repository: IndexPublicationRepository = Depends(get_index_publication_repository),
 ) -> IndexGenerationResponse:
-    _ = token
     try:
-        generation = service.mark_verified(
+        generation = repository.mark_verified(
             generation_id=payload.generation_id,
             job_id=job_id,
             run_token=payload.run_token,
@@ -86,12 +87,10 @@ async def verify_index_generation(
 async def activate_index_generation(
     job_id: str,
     payload: IndexGenerationTransitionRequest,
-    service: IndexPublicationService = Depends(get_index_publication_service),
-    token: ServiceTokenContext = Depends(require_service_token),
+    repository: IndexPublicationRepository = Depends(get_index_publication_repository),
 ) -> IndexGenerationResponse:
-    _ = token
     try:
-        generation = service.activate(
+        generation = repository.activate(
             generation_id=payload.generation_id,
             job_id=job_id,
             run_token=payload.run_token,
@@ -108,11 +107,11 @@ async def activate_index_generation(
 )
 async def cancel_index_generation(
     job_id: str,
-    service: IndexPublicationService = Depends(get_index_publication_service),
-    token: ServiceTokenContext = Depends(require_service_token),
+    repository: IndexPublicationRepository = Depends(get_index_publication_repository),
 ) -> IndexGenerationCancelResponse:
-    _ = token
-    return IndexGenerationCancelResponse(generation_id=service.cancel_building(job_id=job_id))
+    return IndexGenerationCancelResponse(
+        generation_id=repository.cancel_building(job_id=job_id)
+    )
 
 
 def _response(generation: IndexGeneration) -> IndexGenerationResponse:

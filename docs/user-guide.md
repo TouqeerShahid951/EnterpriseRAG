@@ -1,6 +1,6 @@
 # Prudentia AI User Guide
 
-Last updated: 2026-07-07
+Last updated: 2026-07-18
 
 This guide explains how to use the Prudentia AI / AgenticRAG workspace from the
 web application. It covers every account type and the main workflows users see
@@ -90,8 +90,8 @@ Each uploaded or scheduled file receives an ingestion job. Common statuses are:
 
 The Query Intelligence composer can use four source modes:
 
-- **Auto**: Prudentia chooses documents, live database data, or a combination
-  from the question and the sources visible to you.
+- **Auto**: Prudentia searches the most likely source first, checks the evidence,
+  and searches the other source only when the first result is weak or empty.
 - **Documents**: uses only indexed documents in the active Knowledge Space and
   any documents selected with `@` tags.
 - **Live DB**: runs generated, validated, read-only SQL against approved
@@ -296,7 +296,22 @@ Use source mode deliberately when the origin of the answer matters:
   such as comparing a current case status with a policy requirement.
 - Keep **Auto** when you want Prudentia to infer the best source. Questions that
   clearly ask for counts or structured records favor live data when an approved
-  source is visible; document-oriented questions favor the corpus.
+  source is visible; document-oriented questions favor the corpus. A generic
+  word such as "list" does not override a strong match to a visible document.
+
+The composer starts in **Auto** when you start or load a conversation. A manual
+source choice applies to the active conversation and does not become a global
+preference for later conversations.
+
+The current saved conversation supplies context for follow-up questions such as
+**Why?** or **What about contractors?** Clear follow-ups are converted into a
+standalone retrieval question and checked against fresh, currently authorized
+evidence. Ambiguous references produce a clarification question without running
+retrieval. A self-contained new topic does not inherit the previous topic's
+source preference.
+
+Context is never carried between separate chats. Deleting a saved conversation
+removes its transcript from future query context.
 
 If a selected source cannot answer the question, the response may offer
 **Search all sources**. Use it to rerun the question in Hybrid mode across the
@@ -386,21 +401,44 @@ its own ingestion job.
 1. Open **Document Intake > Add Files**.
 2. Select one or more supported files.
 3. Choose a writable Knowledge Space.
-4. Choose **Fast**, **Balanced**, or **High accuracy** under **Ingestion
-   Quality**.
-5. Optionally enable **GraphRAG** to include these documents in graph-based
+4. Optionally enable **GraphRAG** to include these documents in graph-based
    relationship and corpus analysis. Leave it off for standard RAG only.
-6. Optionally set an effective date and expiry date.
-7. Optionally add a description.
-8. For a single-file upload, optionally enter document IDs in **Supersedes** to
+5. Optionally set an effective date and expiry date.
+6. Optionally add a description.
+7. For a single-file upload, optionally enter document IDs in **Supersedes** to
    link the new file as a replacement.
-9. Click **Upload documents**.
-10. Watch **Recent upload jobs** for per-file document and optional graph
+8. Click **Upload documents**.
+9. Watch **Recent upload jobs** for per-file document and optional graph
     progress.
 
 Documents inherit the selected Knowledge Space and clearance controls. The
 system scans, stores, parses, enriches metadata, chunks, embeds, indexes, and
 finalizes each document.
+
+### Abbreviation Glossary
+
+Platform and System Administrators can open **Document Intake > Abbreviation
+Glossary** and manage the single global glossary in the **Terms in use**
+table. Use **Add term** to create a row, or the row
+actions to edit or delete one. Search filters the current table. No Knowledge
+Space, sharing, or clearance selection is required. UI changes are available
+to every query as soon as they are saved and do not generate a PDF.
+
+The same page can import multiple PDFs containing abbreviation and expansion
+pairs. PDFs can use two-column tables or lines such as
+`AD — Assistant Director`. Their definitions merge into the global glossary,
+while provenance identifies the supplying PDF and page. Each PDF source can be
+replaced or removed independently. Identical definitions can be supplied by
+more than one source; conflicting definitions fail activation for review. Raw
+glossary chunks are not embedded or returned as ordinary corpus evidence.
+
+After ingestion completes, all queries use the definitions immediately;
+the existing document corpus does not need reingestion. The original question
+remains unchanged for display and audit. Retrieval expands definitions in both
+directions: `AD` adds `Assistant Director`, and `Assistant Director` adds `AD`.
+If multiple abbreviations have the same definition, the ambiguous full form is
+left unchanged. A matching PDF definition is cited using its source document
+and page.
 
 ### Cancel Upload Jobs
 
@@ -434,14 +472,16 @@ the returned rows as answer evidence.
 
 ### Create and Test a Connection Profile
 
-1. Open **Database Connectors** and click **Add profile**.
+1. Open **Database Connectors** and click **Add Connection**.
 2. Choose SQL Server or PostgreSQL.
 3. Enter a profile name, server or host, port, database, read-only user, and
    password.
 4. For SQL Server, choose ODBC Driver 18, Driver 17, or a deployment-specific
    custom driver. For PostgreSQL, choose the required SSL mode.
-5. Click **Save**. Credentials are encrypted at rest and redacted after save.
-6. Click **Test** on the saved profile and confirm that the connection succeeds.
+5. Click **Save Connection**. Credentials are encrypted at rest and redacted
+   after save.
+6. Follow the connection's primary action to **Test Connection**. After a
+   successful test, the same action advances to **Read Schema**.
 
 Use a database account that has only the minimum read permissions needed for
 the approved scope. Editing a profile changes future introspection and Live DB
@@ -453,10 +493,12 @@ stored credentials.
 1. Click **Read Schema** on a tested profile.
 2. Review the captured table, column, relationship, index, and estimated-row
    information. Raw schema JSON is available for detailed inspection.
-3. Click **Prepare Review** to create a reviewable schema catalog. A writable
-   Knowledge Space is required. Prudentia enriches tables one at a time and
-   saves completed work, so the window can be closed while enrichment continues.
-4. Open **Review Access** under **Schema Reviews**.
+3. Select an owner Knowledge Space and clearance, then click **Prepare
+   AI-assisted review**. Prudentia opens an editable review and proposes
+   descriptions, synonyms, join context, and business rules from schema
+   metadata, one table at a time. Completed work is saved if enrichment pauses.
+4. Follow **Summary**, **Tables**, **Joins**, and **Access** using the guided
+   Back and Next actions.
 5. Correct the catalog name, business rules, table and column descriptions, and
    synonyms. Mark tables and columns as allowed or disallowed, and flag
    sensitive fields.
@@ -465,10 +507,12 @@ stored credentials.
 7. If enrichment is incomplete, select **Continue AI Enrichment** before final
    approval.
 8. Select **Save Review** while drafting, or **Enable Live DB Access** when the
-   catalog is ready for live queries.
+   catalog is ready for live queries. Approval advances the workspace to
+   **Live Access**.
 
-AI-generated descriptions are suggestions only. Live DB retrieval cannot use a
-catalog until it is approved. Only approved, non-sensitive tables, columns, and
+AI-generated metadata is editable and does not use row values. AI cannot approve
+the catalog, change its access scope, or enable Live DB. Live DB retrieval cannot
+use a catalog until it is approved. Only approved, non-sensitive tables, columns, and
 relationships can be used; wildcard column selection, write statements,
 unapproved joins, system schemas, and chained SQL statements are blocked.
 
@@ -490,6 +534,10 @@ future live questions can no longer use any catalog tied to that connection.
 
 Open **Document Intake > Activity** to track upload, folder, reingest, and
 restore jobs.
+
+Activity is a job history and operational status view, so its navigation item
+does not show a badge. Actionable human-review work is counted on **Review
+Queue** instead.
 
 Use filters for:
 
@@ -536,6 +584,23 @@ The Document Library has four main views:
 - **Documents**: searchable document table.
 - **Trash**: soft-deleted documents.
 
+Document Overview and Knowledge Spaces use the same authorization-aware
+snapshot. **Library documents** counts visible, non-deleted records, including
+retained superseded versions. **Current**, **Indexed**, **Processing**, and
+**Needs attention** count each visible current document once. Needs attention
+means failed, unknown, or waiting for human review; cancelled documents are not
+actionable and are excluded. Trash is counted separately. Upload-form errors
+that never created a document remain on the Upload page and do not affect these
+library counts.
+
+Retrying a failed document changes that document from failed to queued or
+processing, so its attention count clears while the retry runs and returns only
+if it fails again. Uploading an unrelated new document does not clear the old
+failure: the old document remains one attention item and the new document is
+counted in its own current state. For a replacement, the old version remains
+current until the replacement succeeds; after supersession it moves to the
+superseded count and no longer contributes current health.
+
 ### Search and Filter Documents
 
 Use document filters to narrow by:
@@ -581,6 +646,12 @@ has no assigned users.
 Open **Review Queue** to resolve extraction holds before affected documents
 continue into the searchable library. The page has separate tabs for OCR blocks
 and PDF image batches.
+
+The sidebar badge counts distinct documents with pending review work that your
+account can resolve. A document counts once even when it has multiple OCR blocks,
+PDF image candidates, or both. Opening a document or resolving only some items
+does not clear it. The count falls when that document has no pending review work,
+including after the final approval, rejection, skip decision, or job cancellation.
 
 The **OCR blocks** tab includes:
 
@@ -757,7 +828,8 @@ so stored vectors match the active embedding model.
 
 Runtime behavior includes:
 
-- **JSON/Layout output budget** for planning, composition, and layout contracts.
+- **Artifact JSON output budget** for artifact planning, composition, and layout
+  contracts. It does not change normal answer length.
 - **Evidence token budget** for evidence passed into answer synthesis.
 - **Chat timeout** and **Embed timeout**.
 - **Model thinking**, which applies only to Ollama language roles.
@@ -793,16 +865,7 @@ container. These controls do not change the active model assignments in
 ### Ingestion Controls and Ingestion Settings
 
 Use **Ingestion Controls** to manage worker capacity, review gates, and
-enrichment behavior for new ingestion jobs. The quality profile on **Add Files**
-still applies to that upload batch.
-
-| Ingestion profile | Behavior | Use when |
-| --- | --- | --- |
-| Fast | Native text first, no vision, and capped Docling repair | High-volume, text-native documents where throughput matters most |
-| Balanced | Native text first with a larger Docling page-repair budget | Mixed collections with some complex layouts |
-| High accuracy | Deeper Docling layout repair and preference for full-document repair | Fidelity-sensitive scans, tables, or layout-heavy documents |
-
-Additional controls are:
+enrichment behavior for new ingestion jobs. Controls are:
 
 - **Worker concurrency**: 1-10 per worker replica. One is recommended for the
   default 8 GB Docker environment. The page warns above 2 and requires hazard

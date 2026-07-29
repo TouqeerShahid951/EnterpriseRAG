@@ -3,24 +3,21 @@ import { ChevronRight, Edit3, Folder, RotateCw, Trash2 } from "lucide-react";
 
 import { ContextMetric, EmptyState, SpaceOverviewSkeleton } from "@/features/documents/components/library/DocumentPagePrimitives";
 import {
-  isProcessingIngestStatus,
   sortedSpaceOverviewRows,
   spaceAttentionCount,
   spaceHealth,
   type SpaceOverviewRow,
 } from "@/features/documents/utils/documentPageUtils";
-import type { Document } from "@/types/api";
+import type { DocumentOverview } from "@/types/api";
 import type { GroupOption } from "@/lib/utils/groups";
 
 type TreeRowStyle = CSSProperties & { "--space-depth": number };
 
 type KnowledgeSpacesOverviewProps = {
-  activeDocuments: Document[];
   canCreateSpace: boolean;
   canManageSpaces: boolean;
   canOpenSpaces: boolean;
   deletingSpacePath: string | null;
-  deletedCount: number;
   isLoading: boolean;
   onCreateSpace: () => void;
   onDeleteSpace: (space: GroupOption) => void;
@@ -28,16 +25,15 @@ type KnowledgeSpacesOverviewProps = {
   onOpenSpace: (path: string) => void;
   onShowJobs: () => void;
   onShowTrash: () => void;
+  overview: DocumentOverview | null;
   rows: SpaceOverviewRow[];
 };
 
 export function KnowledgeSpacesOverview({
-  activeDocuments,
   canCreateSpace,
   canManageSpaces,
   canOpenSpaces,
   deletingSpacePath,
-  deletedCount,
   isLoading,
   onCreateSpace,
   onDeleteSpace,
@@ -45,14 +41,11 @@ export function KnowledgeSpacesOverview({
   onOpenSpace,
   onShowJobs,
   onShowTrash,
+  overview,
   rows,
 }: KnowledgeSpacesOverviewProps) {
-  const currentCount = activeDocuments.filter((doc) => doc.is_current).length;
-  const processingCount = activeDocuments.filter((doc) => isProcessingIngestStatus(doc.ingest_status)).length;
-  const reviewCount = activeDocuments.filter((doc) => doc.ingest_status === "human_review").length;
-  const failedCount = activeDocuments.filter((doc) => doc.ingest_status === "failed").length;
-  const unknownCount = activeDocuments.filter((doc) => doc.ingest_status === "unknown").length;
-  const attentionCount = processingCount + reviewCount + failedCount + unknownCount;
+  const currentCount = overview?.current_versions ?? 0;
+  const attentionCount = overview?.needs_attention ?? 0;
   const sortedRows = sortedSpaceOverviewRows(rows);
   const attentionRows = sortedRows.filter((row) => spaceAttentionCount(row) > 0).slice(0, 5);
   const emptyCount = rows.filter((row) => row.documentsCount === 0).length;
@@ -70,10 +63,10 @@ export function KnowledgeSpacesOverview({
       <div className="knowledge-spaces-metrics" aria-label="Knowledge Spaces metrics">
         <ContextMetric label="Spaces" value={String(rows.length)} loading={isLoading} />
         <ContextMetric label="Empty spaces" value={String(emptyCount)} loading={isLoading} />
-        <ContextMetric label="Documents" value={String(activeDocuments.length)} loading={isLoading} />
+        <ContextMetric label="Documents" value={String(overview?.library_documents ?? 0)} loading={isLoading} />
         <ContextMetric label="Current" value={String(currentCount)} loading={isLoading} tone="success" />
         <ContextMetric label="Needs attention" value={String(attentionCount)} loading={isLoading} />
-        <ContextMetric label="Trash" value={String(deletedCount)} loading={isLoading} />
+        <ContextMetric label="Trash" value={String(overview?.trash ?? 0)} loading={isLoading} />
       </div>
 
       <div className="knowledge-spaces-workbench">
@@ -114,7 +107,7 @@ export function KnowledgeSpacesOverview({
             <div className="knowledge-space-panel-header">
               <div>
                 <h3>Attention</h3>
-                <p>Ingestion work and review states across visible spaces.</p>
+                <p>Current failed, unknown, and review-required documents across visible spaces.</p>
               </div>
               <span className="sv-pill">{attentionCount}</span>
             </div>

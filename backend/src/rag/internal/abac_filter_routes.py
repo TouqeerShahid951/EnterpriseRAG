@@ -3,10 +3,9 @@ from fastapi import APIRouter, Depends, Query
 from ..auth.abac import build_abac_filter
 from ..auth.context import UserContext
 from rag.auth.schemas.internal import AbacFilterResponse
-from rag.internal.schemas import ServiceTokenContext
 from .service_token_auth import require_service_token
 
-router = APIRouter(tags=["internal-abac"])
+router = APIRouter(tags=["internal-abac"], dependencies=[Depends(require_service_token)])
 
 
 @router.get(
@@ -21,7 +20,6 @@ async def get_abac_filter(
     clearance_level: str = "NATO_RESTRICTED",
     permission_version: int = 0,
     is_current_only: bool = True,
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> AbacFilterResponse:
     user = UserContext(
         user_id=user_id,

@@ -295,7 +295,7 @@ class RerankHitsTests(unittest.TestCase):
         self.assertEqual(result.candidate_coverage_status, "complete")
         self.assertEqual(result.evidence_coverage_status, "partial")
         self.assertEqual(result.evidence_stop_reason, "semantic_scope_unresolved")
-    def test_low_value_toc_chunk_is_soft_downranked_after_reranking(self) -> None:
+    def test_low_value_penalty_does_not_override_reranker_score(self) -> None:
         hits = [
             hit(
                 "toc",
@@ -314,8 +314,8 @@ class RerankHitsTests(unittest.TestCase):
         with patch("rag.query.reranker._load_cross_encoder", return_value=model):
             ranked = rerank_hits("what is the warranty claim process", hits, top_k=2)
 
-        self.assertEqual([item.point_id for item in ranked], ["body", "toc"])
-        toc = ranked[1]
+        self.assertEqual([item.point_id for item in ranked], ["toc", "body"])
+        toc = ranked[0]
         self.assertEqual(toc.payload["_rerank_score"], 0.92)
         self.assertEqual(toc.payload["_low_value_penalty"], 0.35)
         self.assertEqual(toc.payload["_rerank_adjusted_score"], 0.57)

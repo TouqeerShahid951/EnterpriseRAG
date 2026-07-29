@@ -32,6 +32,10 @@ export interface ReviewDecisionResponse {
   batch_complete: boolean;
 }
 
+export interface ReviewQueueSummary {
+  pending_document_count: number;
+}
+
 export interface ImageReviewCandidate {
   id: string;
   batch_id: string;

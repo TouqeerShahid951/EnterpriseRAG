@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { canTransferDocumentOwner, ownershipTransferOptions } from "./PrudentiaDocumentsPage";
-import type { Document, User } from "@/types/api";
+import { buildSpaceOverviewRows, canTransferDocumentOwner, ownershipTransferOptions, spaceAttentionCount } from "../utils/documentPageUtils";
+import type { Document, DocumentOverviewSpace, User } from "@/types/api";
 import type { GroupOption } from "@/lib/utils/groups";
 
 describe("document ownership transfer helpers", () => {
@@ -25,6 +25,17 @@ describe("document ownership transfer helpers", () => {
     expect(canTransferDocumentOwner(contributor, _document("/legal"))).toBe(false);
     expect(canTransferDocumentOwner(spaceAdmin, _document("/legal"))).toBe(false);
     expect(ownershipTransferOptions(spaceAdmin, "/legal", _spaces())).toEqual([]);
+  });
+});
+
+describe("Knowledge Space overview counts", () => {
+  it("uses the server document snapshot and does not count processing as attention", () => {
+    const rows = buildSpaceOverviewRows(_spaces(), [_overviewSpace("/finance", { processing_current: 2 }), _overviewSpace("/finance/legal", { failed_current: 1 })]);
+    const finance = rows.find((row) => row.space.path === "/finance")!;
+
+    expect(finance.documentsCount).toBe(2);
+    expect(finance.processingCount).toBe(2);
+    expect(spaceAttentionCount(finance)).toBe(1);
   });
 });
 
@@ -78,4 +89,17 @@ function _spaces(): GroupOption[] {
     { depth: 0, name: "Finance", parentPath: null, path: "/finance" },
     { depth: 0, name: "Ops", parentPath: null, path: "/ops" },
   ];
+}
+
+function _overviewSpace(groupPath: string, values: Partial<DocumentOverviewSpace>): DocumentOverviewSpace {
+  return {
+    group_path: groupPath,
+    library_documents: 1,
+    current_versions: 1,
+    processing_current: 0,
+    review_current: 0,
+    failed_current: 0,
+    unknown_current: 0,
+    ...values,
+  };
 }

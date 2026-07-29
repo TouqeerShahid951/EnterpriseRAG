@@ -6,10 +6,21 @@ import re
 from pathlib import Path
 
 from rag.core.config import Settings
+from rag.ingestion.config import WorkerConfig
+from rag.ingestion.configuration.schemas import (
+    IngestConfigRequest,
+    IngestConfigResponse,
+    IngestRuntimeConfigResponse,
+)
 from rag.shared.contracts.rag_defaults import (
+    DEFAULT_EVIDENCE_GATE_POLICY,
     DEFAULT_EMBEDDING_MODEL_ID,
     DEFAULT_FAITHFULNESS_POLICY,
+    DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS,
     DEFAULT_RAG_HTTP_TIMEOUT_SECONDS,
+    DEFAULT_RERANKER_DEVICE,
+    DEFAULT_ROUTING_TIMEOUT_SECONDS,
+    DEFAULT_REASONING_TIMEOUT_SECONDS,
     DEFAULT_VLLM_CHAT_MODEL,
     DEFAULT_VLLM_VISION_MODEL_ID,
 )
@@ -30,6 +41,18 @@ TOPOLOGY_RAG_KEYS = frozenset(
     }
 )
 LEGACY_ENV_KEYS = frozenset({"RAG_CHUNK_MAX_CHARS", "RAG_CHUNK_OVERLAP_CHARS"})
+RETIRED_ROUTER_ENV_KEYS = frozenset(
+    {
+        "RAG_INTENT_ROUTER_VERSION",
+        "RAG_ROUTE_LLM_VERIFIER_ENABLED",
+        "RAG_ROUTE_LLM_VERIFIER_MODEL",
+        "RAG_SOURCE_ROUTER_LLM_ENABLED",
+        "RAG_SOURCE_ROUTER_LLM_MIN_CONFIDENCE",
+    }
+)
+RETIRED_FAITHFULNESS_ENV_KEYS = frozenset(
+    {"RAG_DEFER_FAITHFULNESS", "RAG_FAITHFULNESS_THRESHOLD"}
+)
 FORBIDDEN_DOCKERFILE_DEFAULTS = frozenset(
     {
         "ENABLE_MOCK_MODELS",
@@ -51,7 +74,24 @@ def test_python_defaults_preserve_the_supported_docker_profile() -> None:
     config = Settings()
 
     assert config.rag_http_timeout_seconds == DEFAULT_RAG_HTTP_TIMEOUT_SECONDS == 180.0
-    assert config.rag_faithfulness_policy == DEFAULT_FAITHFULNESS_POLICY == "never"
+    assert (
+        config.rag_routing_timeout_seconds
+        == DEFAULT_ROUTING_TIMEOUT_SECONDS
+        == 5.0
+    )
+    assert (
+        config.rag_reasoning_timeout_seconds
+        == DEFAULT_REASONING_TIMEOUT_SECONDS
+        == 30.0
+    )
+    assert (
+        config.rag_faithfulness_timeout_seconds
+        == DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS
+        == 30.0
+    )
+    assert config.rag_evidence_gate_policy == DEFAULT_EVIDENCE_GATE_POLICY == "adaptive"
+    assert config.rag_faithfulness_policy == DEFAULT_FAITHFULNESS_POLICY == "adaptive"
+    assert config.rag_reranker_device == DEFAULT_RERANKER_DEVICE == "auto"
     assert config.graphrag_enabled is True
     assert config.embedding_model_id == DEFAULT_EMBEDDING_MODEL_ID == "nomic-ai/nomic-embed-text-v1.5"
     assert config.vllm_chat_model == DEFAULT_VLLM_CHAT_MODEL == "Qwen/Qwen3-8B-AWQ"
@@ -68,6 +108,39 @@ def test_compose_exposes_every_typed_rag_override() -> None:
     }
 
     assert settings_keys <= backend_environment.keys()
+
+
+def test_retired_router_environment_is_not_exposed() -> None:
+    assert RETIRED_ROUTER_ENV_KEYS.isdisjoint(_compose_backend_environment())
+    assert RETIRED_ROUTER_ENV_KEYS.isdisjoint(
+        re.findall(
+            r"^([A-Z][A-Z0-9_]*)=",
+            ENV_EXAMPLE_PATH.read_text(encoding="utf-8"),
+            flags=re.MULTILINE,
+        )
+    )
+
+
+def test_retired_faithfulness_environment_is_not_exposed() -> None:
+    assert RETIRED_FAITHFULNESS_ENV_KEYS.isdisjoint(_compose_backend_environment())
+    assert RETIRED_FAITHFULNESS_ENV_KEYS.isdisjoint(
+        re.findall(
+            r"^([A-Z][A-Z0-9_]*)=",
+            ENV_EXAMPLE_PATH.read_text(encoding="utf-8"),
+            flags=re.MULTILINE,
+        )
+    )
+
+
+def test_ingestion_quality_preset_is_not_runtime_configuration() -> None:
+    assert "ingestion_quality_preset" not in Settings.model_fields
+    assert "ingestion_quality_preset" not in WorkerConfig.__dataclass_fields__
+    assert all(
+        "quality_preset" not in schema.model_fields
+        for schema in (IngestConfigRequest, IngestConfigResponse, IngestRuntimeConfigResponse)
+    )
+    assert "INGESTION_QUALITY_PRESET" not in COMPOSE_PATH.read_text(encoding="utf-8")
+    assert "INGESTION_QUALITY_PRESET=" not in ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
 
 
 def test_compose_does_not_own_behavioral_rag_defaults() -> None:

@@ -15,6 +15,7 @@ def test_worker_uses_canonical_runtime_defaults_without_duplicate_inference_fiel
 
     assert config.http_timeout_seconds == 180.0
     assert config.graphrag_enabled is True
+    assert config.graphrag_max_llm_community_summaries == 64
     assert config.ingest_task_name == "apps.ingestion.tasks.ingest_document"
     assert (
         config.graphrag_index_task_name
@@ -34,6 +35,7 @@ def test_worker_uses_canonical_runtime_defaults_without_duplicate_inference_fiel
     ("name", "value"),
     [
         ("GRAPHRAG_EXTRACTION_CONCURRENCY", "0"),
+        ("GRAPHRAG_MAX_LLM_COMMUNITY_SUMMARIES", "-1"),
         ("INGEST_WORKER_BOOT_CONCURRENCY", "11"),
         ("LAYERED_DOCLING_MAX_PAGES", "0"),
         ("DOCLING_CONVERT_TIMEOUT_SECONDS", "-1"),

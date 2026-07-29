@@ -53,13 +53,14 @@ def rank_scored_hits(
     ranked = sorted(
         enumerate(zip(scored_hits, scores, strict=True)),
         key=lambda item: (
-            -_rerank_sort_score(item[1][0], item[1][1]),
+            -item[1][1],
+            _table_field_label_priority(query, item[1][0]),
+            low_value_penalty_score(item[1][0]),
             -metadata_score(item[1][0]),
             -topic_score(item[1][0]),
             item[0],
         ),
     )
-    ranked = _promote_table_field_label_matches(query, ranked)
     return [hit for _, (hit, _) in ranked[:top_k]]
 
 
@@ -87,6 +88,30 @@ def limit_rerank_candidates(
     )
     selected = unique_hits(retrieval_head)
     seen = {hit_identity(hit) for hit in selected}
+    covered_capabilities = {
+        capability
+        for hit in selected
+        for capability in _retrieval_capabilities(hit)
+    }
+    covered_query_slots = {
+        slot for hit in selected for slot in _retrieval_query_slots(hit)
+    }
+    for hit in hits:
+        capabilities = _retrieval_capabilities(hit)
+        query_slots = _retrieval_query_slots(hit)
+        if not (
+            capabilities.difference(covered_capabilities)
+            or query_slots.difference(covered_query_slots)
+        ):
+            continue
+        key = hit_identity(hit)
+        if key not in seen:
+            selected.append(hit)
+            seen.add(key)
+        covered_capabilities.update(capabilities)
+        covered_query_slots.update(query_slots)
+        if len(selected) >= max_candidates:
+            return selected
     for _, hit in ranked:
         key = hit_identity(hit)
         if key in seen:
@@ -96,6 +121,20 @@ def limit_rerank_candidates(
         if len(selected) >= max_candidates:
             break
     return selected
+
+
+def _retrieval_capabilities(hit: SearchHit) -> set[str]:
+    value = hit.payload.get("_retrieval_capabilities")
+    if not isinstance(value, list | tuple):
+        return set()
+    return {str(capability) for capability in value if str(capability)}
+
+
+def _retrieval_query_slots(hit: SearchHit) -> set[int]:
+    value = hit.payload.get("_retrieval_query_slots")
+    if not isinstance(value, list | tuple):
+        return set()
+    return {slot for slot in value if isinstance(slot, int) and slot >= 0}
 
 
 def fallback_rank_hits(
@@ -139,13 +178,7 @@ def fallback_rank_hits(
         )
         for original_index, hit in ranked
     ]
-    fallback_ranked = _promote_table_field_label_matches(query, fallback_ranked)
     return [hit for _, (hit, _) in fallback_ranked[:top_k]]
-
-
-def _rerank_sort_score(hit: SearchHit, raw_score: float) -> float:
-    value = hit.payload.get("_rerank_adjusted_score")
-    return float(value) if isinstance(value, int | float) else raw_score
 
 
 def _structured_origin_priority(hit: SearchHit) -> int:
@@ -155,22 +188,6 @@ def _structured_origin_priority(hit: SearchHit) -> int:
     if origin == "sibling":
         return 2
     return 1
-
-
-def _promote_table_field_label_matches(
-    query: str,
-    ranked: list[tuple[int, tuple[SearchHit, float]]],
-) -> list[tuple[int, tuple[SearchHit, float]]]:
-    if not ranked:
-        return ranked
-    priorities = [_table_field_label_priority(query, hit) for _, (hit, _) in ranked]
-    if all(priority == 2 for priority in priorities):
-        return ranked
-    ordered = sorted(
-        enumerate(ranked),
-        key=lambda item: (priorities[item[0]], item[0]),
-    )
-    return [ranked_item for _, ranked_item in ordered]
 
 
 def _table_field_label_priority(query: str, hit: SearchHit) -> int:

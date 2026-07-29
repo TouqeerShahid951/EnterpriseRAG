@@ -25,7 +25,6 @@ from rag.ingestion.internal_schemas import (
     InternalJobAttemptRequest,
     InternalJobStatusRequest,
 )
-from rag.internal.schemas import ServiceTokenContext
 
 
 ACTIVE_STATUSES = frozenset({"scheduled", "queued", "processing", "human_review"})
@@ -199,7 +198,6 @@ def test_attempt_route_reports_live_final_attempt_as_busy() -> None:
             job_id,
             InternalJobAttemptRequest(run_token="worker-4"),
             job_repo=repo,
-            service=ServiceTokenContext(service_name="ingestion-worker"),
         )
     )
 
@@ -300,7 +298,6 @@ def test_worker_terminal_callback_that_loses_cancel_race_does_not_audit_requeste
             InternalJobStatusRequest(status="complete", progress_pct=100),
             document_repo=repo,
             job_repo=racing_repo,  # type: ignore[arg-type]
-            service=ServiceTokenContext(service_name="ingestion-worker"),
         )
     )
 
@@ -334,7 +331,6 @@ def test_worker_status_callback_rejects_lost_run_token() -> None:
                 ),
                 document_repo=repo,
                 job_repo=repo,
-                service=ServiceTokenContext(service_name="ingestion-worker"),
             )
         )
 

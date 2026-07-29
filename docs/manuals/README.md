@@ -32,5 +32,5 @@ The generated files are written to `docs/manuals/generated/`.
    [Administrator Manual](administrator-manual.md).
 3. Day-to-day users read the [End User Manual](end-user-manual.md).
 
-Do not rely on the older walkthrough PDF as the only handoff document. It is a
-short guided tour, not a full standalone manual set.
+The Markdown files in this directory are the only manual sources. Regenerate
+their DOCX and PDF versions with `scripts/build_user_manuals.py`.

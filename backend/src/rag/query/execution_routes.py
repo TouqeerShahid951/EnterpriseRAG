@@ -3,9 +3,6 @@
 import asyncio
 from collections.abc import Iterator
 from contextlib import suppress
-from datetime import UTC, datetime
-from uuid import uuid4
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
@@ -24,8 +21,7 @@ from .cancellation import (
     QueryCancelled,
     call_with_optional_cancellation,
 )
-from .chat_history_models import ChatHistoryRepository
-from .chat_history_repository import get_chat_history_repository
+from .chat_history_models import ChatHistoryRequestConflict
 from .http import ServiceRequestError
 from .query_stream import format_sse
 from .route_access import (
@@ -52,7 +48,6 @@ async def run_query(
     request: Request,
     user: UserRecord = Depends(require_current_user),
     identity_repo: IdentityRepository = Depends(get_identity_repository),
-    chat_history_repo: ChatHistoryRepository = Depends(get_chat_history_repository),
     schedule_repo: FolderScheduleRepository = Depends(get_folder_schedule_repository),
     connector_profile_repo: ConnectorProfileRepository = Depends(
         get_connector_profile_repository
@@ -72,12 +67,6 @@ async def run_query(
             payload,
             user_context(user, identity_repo),
         )
-        _save_completed_query(
-            chat_history_repo,
-            user=user,
-            payload=payload,
-            response=response,
-        )
         return response
     except ServiceRequestError as exc:
         raise HTTPException(
@@ -92,6 +81,11 @@ async def run_query(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": exc.code, "message": exc.message},
         ) from exc
+    except ChatHistoryRequestConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "query_request_conflict", "message": str(exc)},
+        ) from exc
 
 
 @router.post(
@@ -104,7 +98,6 @@ async def stream_query(
     request: Request,
     user: UserRecord = Depends(require_current_user),
     identity_repo: IdentityRepository = Depends(get_identity_repository),
-    chat_history_repo: ChatHistoryRepository = Depends(get_chat_history_repository),
     schedule_repo: FolderScheduleRepository = Depends(get_folder_schedule_repository),
     connector_profile_repo: ConnectorProfileRepository = Depends(
         get_connector_profile_repository
@@ -143,23 +136,6 @@ async def stream_query(
                 next_task = None
                 if event is None:
                     return
-                if event.event == "done":
-                    response = RAGResponse.model_validate(event.data)
-                    _save_completed_query(
-                        chat_history_repo,
-                        user=user,
-                        payload=payload,
-                        response=response,
-                    )
-                elif event.event == "verified":
-                    response = RAGResponse.model_validate(event.data)
-                    chat_history_repo.update_assistant_response(
-                        user_id=user.id,
-                        permission_version=user.permission_version,
-                        session_id=response.session_id,
-                        trace_id=response.trace_id,
-                        response=response.model_dump(mode="json"),
-                    )
                 yield format_sse(event)
         except QueryCancelled:
             return
@@ -181,6 +157,13 @@ async def stream_query(
                 QueryStreamEvent(
                     event="error",
                     data={"code": exc.code, "message": exc.message},
+                )
+            )
+        except ChatHistoryRequestConflict as exc:
+            yield format_sse(
+                QueryStreamEvent(
+                    event="error",
+                    data={"code": "query_request_conflict", "message": str(exc)},
                 )
             )
         finally:
@@ -208,47 +191,3 @@ def _next_stream_event(
         return next(iterator)
     except StopIteration:
         return None
-
-
-def _save_completed_query(
-    repo: ChatHistoryRepository,
-    *,
-    user: UserRecord,
-    payload: QueryRequest,
-    response: RAGResponse,
-) -> None:
-    created_at = _isoformat(datetime.now(UTC))
-    question = payload.query.strip()
-    user_turn = {
-        "id": f"user-{uuid4()}",
-        "role": "user",
-        "content": question,
-        "createdAt": created_at,
-    }
-    assistant_turn = {
-        "id": f"assistant-{uuid4()}",
-        "role": "assistant",
-        "status": "complete",
-        "question": question,
-        "createdAt": created_at,
-        "groupPath": payload.group_path,
-        "documentIds": payload.document_ids,
-        "progress": [],
-        "response": response.model_dump(mode="json"),
-    }
-    repo.append_completed_turn(
-        user_id=user.id,
-        permission_version=user.permission_version,
-        session_id=response.session_id,
-        title=_compact_session_title(question),
-        user_turn=user_turn,
-        assistant_turn=assistant_turn,
-    )
-
-
-def _isoformat(value: datetime | None) -> str:
-    return (value or datetime.now(UTC)).isoformat()
-
-
-def _compact_session_title(value: str) -> str:
-    return f"{value[:49].rstrip()}..." if len(value) > 52 else value

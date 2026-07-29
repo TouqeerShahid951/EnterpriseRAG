@@ -26,8 +26,32 @@
 
 .review-tabs button,
 .review-refresh-action,
+.review-open-original,
+.review-image-grid-toolbar .sv-action-secondary,
+.review-actions :is(.sv-action-primary, .sv-action-secondary, .sv-action-danger),
 .review-clear-actions button,
 .audit-row-detail-button {
+  min-height: 2.75rem;
+}
+
+.rag-eval-tooltip-trigger {
+  width: 2.75rem;
+  min-width: 2.75rem;
+  height: 2.75rem;
+  min-height: 2.75rem;
+}
+
+.rag-eval-tracker-source-segments button {
+  min-height: 2.75rem;
+}
+
+.audit-toolbar :is(.sv-input, .sv-select),
+.audit-search,
+.audit-toolbar-actions .sv-action-secondary,
+.audit-events-panel .ingest-job-pagination .sv-action-secondary,
+.audit-link-list .sv-action-secondary,
+.audit-advanced-filters summary,
+.audit-payload-json summary {
   min-height: 2.75rem;
 }
 
@@ -112,4 +136,3 @@
     width: 100%;
   }
 }
-

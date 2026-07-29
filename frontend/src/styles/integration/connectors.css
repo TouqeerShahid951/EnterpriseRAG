@@ -82,17 +82,83 @@
   align-self: center;
 }
 
-.connector-workflow-path {
-  display: inline-flex;
-  margin-top: 0.65rem;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-surface-border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-primary) 9%, transparent);
-  padding: 0.35rem 0.65rem;
-  color: var(--color-on-surface-variant);
+.connector-workflow-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.connector-workflow-steps li {
+  min-width: 0;
+  color: var(--color-secondary);
   font-size: 0.72rem;
-  font-weight: 700;
-  line-height: 1;
+}
+
+.connector-workflow-step-button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.4rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: inherit;
+  padding: 0.25rem;
+  text-align: left;
+}
+
+.connector-workflow-step-button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.connector-workflow-step-button:not(:disabled) {
+  cursor: pointer;
+}
+
+.connector-workflow-step-button:not(:disabled):hover,
+.connector-workflow-steps li[data-selected="true"] .connector-workflow-step-button {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
+.connector-workflow-step-button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.connector-workflow-step-button > span {
+  display: inline-flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  font-weight: 800;
+}
+
+.connector-workflow-step-button > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.connector-workflow-steps li[data-state="complete"] {
+  color: var(--color-success);
+}
+
+.connector-workflow-steps li[data-state="current"] {
+  color: var(--color-on-surface);
+}
+
+.connector-workflow-steps li[data-state="current"] .connector-workflow-step-button > span {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+  color: var(--color-primary);
 }
 
 .connector-workflow-actions {
@@ -173,38 +239,47 @@
 }
 
 .connector-profile-table {
-  min-width: 0;
+  min-width: 62rem;
   table-layout: fixed;
+}
+
+.connector-secondary-table {
+  min-width: 62rem;
 }
 
 .connector-profile-table th:nth-child(1),
 .connector-profile-table td:nth-child(1) {
-  width: 20%;
+  width: 18%;
 }
 
 .connector-profile-table th:nth-child(2),
 .connector-profile-table td:nth-child(2) {
-  width: 22%;
+  width: 19%;
 }
 
 .connector-profile-table th:nth-child(3),
 .connector-profile-table td:nth-child(3) {
-  width: 28%;
+  width: 27%;
 }
 
 .connector-profile-table th:nth-child(4),
 .connector-profile-table td:nth-child(4) {
-  width: 16%;
+  width: 15%;
 }
 
 .connector-profile-table th:nth-child(5),
 .connector-profile-table td:nth-child(5) {
-  width: 14%;
+  width: 21%;
 }
 
 .connector-profile-table-wrap {
   max-width: 100%;
+  overflow-x: auto;
   background: color-mix(in srgb, var(--color-surface-card) 84%, transparent);
+}
+
+.connector-secondary-table-wrap {
+  overflow-x: auto;
 }
 
 .connector-identity-cell {
@@ -228,20 +303,20 @@
 }
 
 .connector-row-primary-action {
-  min-height: 2rem;
+  min-height: 2.75rem;
   padding-inline: 0.55rem;
   max-width: 100%;
 }
 
 .connector-row-menu {
   position: relative;
-  min-width: 2rem;
+  min-width: 2.75rem;
 }
 
 .connector-row-menu summary {
   display: inline-flex;
-  width: 2rem;
-  height: 2rem;
+  width: 2.75rem;
+  height: 2.75rem;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--color-surface-border);
@@ -278,7 +353,7 @@
 
 .connector-row-menu-items button {
   display: inline-flex;
-  min-height: 2rem;
+  min-height: 2.75rem;
   align-items: center;
   gap: 0.45rem;
   border-radius: 0.35rem;
@@ -300,6 +375,11 @@
 
 .connector-row-menu-items .connector-row-menu-danger {
   color: var(--color-error-red);
+}
+
+.connector-secondary-table button {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
 }
 
 .connector-profile-table tbody tr:last-child .connector-row-menu-items {
@@ -370,5 +450,9 @@
 
   .connector-workflow-actions .sv-action-primary {
     width: 100%;
+  }
+
+  .connector-workflow-steps {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

@@ -6,11 +6,10 @@ from fastapi import APIRouter, Depends
 
 from ..query.configuration.repository import RagConfigRepository, effective_rag_config, get_rag_config_repository
 from ..query.configuration.mapping import rag_config_response
-from rag.internal.schemas import ServiceTokenContext
 from rag.query.configuration.schemas import RagConfigResponse
 from .service_token_auth import require_service_token
 
-router = APIRouter(tags=["internal-rag-config"])
+router = APIRouter(tags=["internal-rag-config"], dependencies=[Depends(require_service_token)])
 
 
 @router.get(
@@ -20,7 +19,5 @@ router = APIRouter(tags=["internal-rag-config"])
 )
 async def get_internal_rag_config(
     repo: RagConfigRepository = Depends(get_rag_config_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> RagConfigResponse:
-    _ = service
     return rag_config_response(effective_rag_config(repo=repo))

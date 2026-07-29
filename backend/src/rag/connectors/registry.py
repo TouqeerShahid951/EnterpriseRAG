@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from .catalog import row_mapping as _row_mapping
 from .catalog import introspection as _schema_introspection
 from .adapters import postgres as _postgres
@@ -50,33 +48,6 @@ _table_key = _schema_introspection.table_key
 _tables_from_column_rows = _schema_introspection.tables_from_column_rows
 
 
-class UnsupportedConnector:
-    def __init__(self, connector_type: str) -> None:
-        self.connector_type = connector_type
-
-    def test_connection(
-        self, *, config: dict[str, Any], secrets: dict[str, Any]
-    ) -> ConnectorTestResult:
-        _ = config, secrets
-        raise RuntimeError(
-            f"{self.connector_type} connector runtime is not implemented yet."
-        )
-
-    def introspect(
-        self, *, config: dict[str, Any], secrets: dict[str, Any]
-    ) -> dict[str, Any]:
-        _ = config, secrets
-        raise RuntimeError(
-            f"{self.connector_type} connector introspection is not implemented yet."
-        )
-
-    def execute_query(self, **kwargs: Any) -> ConnectorQueryResult:
-        _ = kwargs
-        raise RuntimeError(
-            f"{self.connector_type} connector live query is not implemented yet."
-        )
-
-
 class ConnectorRegistry:
     def __init__(self) -> None:
         self._connectors: dict[str, Connector] = {
@@ -86,9 +57,10 @@ class ConnectorRegistry:
         }
 
     def get(self, connector_type: str) -> Connector:
-        return self._connectors.get(
-            connector_type, UnsupportedConnector(connector_type)
-        )
+        try:
+            return self._connectors[connector_type]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported connector type: {connector_type}") from exc
 
 
 def default_connector_registry() -> ConnectorRegistry:
@@ -103,7 +75,6 @@ __all__ = [
     "FakeConnector",
     "PostgresConnector",
     "SqlServerConnector",
-    "UnsupportedConnector",
     "default_connector_registry",
     "validate_read_only_sql",
 ]

@@ -35,6 +35,10 @@ class ReviewQueueResponse(ContractModel):
     total: int = Field(..., ge=0)
 
 
+class ReviewQueueSummaryResponse(ContractModel):
+    pending_document_count: int = Field(..., ge=0)
+
+
 class ReviewApproveRequest(ContractModel):
     corrected_text: str = Field(..., min_length=1)
 

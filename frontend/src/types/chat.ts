@@ -40,6 +40,7 @@ export interface UploadBatchItemView {
   fileSize: number | null;
   groupPath: string;
   clearanceLevel: ClearanceLevel;
+  isCurrentSession: boolean;
   requestState: "uploading" | "accepted" | "failed";
   job: UploadJobView | null;
   uploadError: Error | null;

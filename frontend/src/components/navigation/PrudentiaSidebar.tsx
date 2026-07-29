@@ -33,8 +33,6 @@ export {
   Prudentia_SIDEBAR_MIN_WIDTH,
   getPrudentiaSidebarDefaultWidth,
 } from "./prudentia-sidebar/useSidebarResize";
-export { reviewQueueBadgeCount } from "./prudentia-sidebar/useSidebarBadges";
-
 export function PrudentiaSidebar({
   activeRoute,
   headerContent,
@@ -53,11 +51,20 @@ export function PrudentiaSidebar({
   const primarySpace = formatKnowledgeSpace(userGroupPaths);
   const items = useMemo(() => visibleNavigation(user), [user]);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(() => navigationGroupForRoute(activeRoute));
+  const [mobileLayout, setMobileLayout] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches);
   const badgeValue = useSidebarBadges(user);
 
   useEffect(() => {
     setExpandedGroup(navigationGroupForRoute(activeRoute));
   }, [activeRoute]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 900px)");
+    const updateLayout = () => setMobileLayout(mediaQuery.matches);
+    updateLayout();
+    mediaQuery.addEventListener("change", updateLayout);
+    return () => mediaQuery.removeEventListener("change", updateLayout);
+  }, []);
 
   const drawer = useSidebarDrawer(activeRoute);
   const resize = useSidebarResize({ onSidebarWidthChange, sidebarCollapsed, sidebarWidth });
@@ -87,13 +94,18 @@ export function PrudentiaSidebar({
           <Menu size={18} />
         </button>
       </div>
-      <button type="button" className={drawer.mobileOpen ? "Prudentia-sidebar-backdrop Prudentia-sidebar-backdrop-visible" : "Prudentia-sidebar-backdrop"} onClick={drawer.closeAndRestoreFocus} aria-label="Close workspace navigation" tabIndex={drawer.mobileOpen ? 0 : -1} />
+      {drawer.mobileOpen ? (
+        <button type="button" className="Prudentia-sidebar-backdrop Prudentia-sidebar-backdrop-visible" onClick={drawer.closeAndRestoreFocus} aria-label="Close workspace navigation" />
+      ) : null}
       <aside
         ref={drawer.drawerRef}
         id="Prudentia-primary-sidebar"
         className={sidebarClassName}
         aria-label="Workspace navigation"
+        aria-hidden={mobileLayout && !drawer.mobileOpen ? true : undefined}
+        aria-modal={drawer.mobileOpen ? true : undefined}
         onKeyDown={drawer.onKeyDown}
+        role={drawer.mobileOpen ? "dialog" : undefined}
       >
         <div className="Prudentia-sidebar-mobile-heading">
           <span className="Prudentia-sidebar-mobile-heading-brand">
@@ -166,7 +178,7 @@ export function PrudentiaSidebar({
               type="button"
               role="switch"
               aria-checked={isLightMode}
-              aria-label={isLightMode ? "Switch to dark mode" : "Switch to light mode"}
+              aria-label="Light theme"
               className="Prudentia-theme-switch"
               onClick={onToggleTheme}
               title="Theme"

@@ -25,6 +25,7 @@ On the offline Windows host:
 
 - Docker Desktop is installed and switched to Linux containers.
 - WSL 2 backend is enabled.
+- A Turing-or-newer NVIDIA GPU has an R580-or-newer Windows driver.
 - Ollama is installed, running, and has the selected chat and embedding models.
 - The project source bundle, Docker image tar, and cache-volume tar files have
   been transferred from a connected preparation machine.
@@ -62,9 +63,11 @@ REDIS_PASSWORD=replace-with-local-redis-password
 MINIO_ACCESS_KEY=agenticrag
 MINIO_SECRET_KEY=replace-with-local-minio-password
 MINIO_BUCKET=agenticrag-uploads
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=replace-with-local-neo4j-password
+NEO4J_DATABASE=neo4j
 
 JWT_SECRET_KEY=replace-with-local-jwt-secret
-CSRF_SECRET_KEY=replace-with-local-csrf-secret
 SERVICE_TOKEN=replace-with-local-service-token
 DEPLOYMENT_CONTROLLER_TOKEN=replace-with-local-deployment-controller-token
 BOOTSTRAP_ADMIN_EMAIL=admin@prudentia.ai
@@ -78,17 +81,19 @@ OLLAMA_VISION_MODEL=
 OLLAMA_NUM_CTX=16384
 OLLAMA_THINKING_ENABLED=false
 
-RAG_FAITHFULNESS_POLICY=never
+RAG_FAITHFULNESS_POLICY=always
 RAG_RETRIEVAL_TOKEN_BUDGET=12000
 RAG_JSON_NUM_PREDICT=4096
 RAG_SPARSE_MODEL=Qdrant/bm25
 RAG_SPARSE_CACHE_DIR=/models/fastembed
 RAG_RERANKER_MODEL=jinaai/jina-reranker-v1-turbo-en
 RAG_RERANKER_CACHE_DIR=/models/fastembed
+RAG_RERANKER_DEVICE=cuda
 FASTEMBED_CACHE_HOST_DIR=./model-cache/fastembed
 DOCLING_CACHE_HOST_DIR=./model-cache/docling
 
 PREWARM_FASTEMBED=false
+RERANKER_RUNTIME=cuda
 PREWARM_DOCLING=false
 DOCLING_OCR_BACKEND=onnxruntime
 DOCLING_OCR_LANGS=english
@@ -105,13 +110,37 @@ CLAMAV_NO_FRESHCLAMD=true
 CLAMAV_SCAN_ENABLED=true
 
 VITE_API_BASE_URL=
-VITE_POLLING_INTERVAL_MS=2000
 '@ | Set-Content -Encoding ASCII .env.windows-airgap
 ```
 
 Leave `VITE_API_BASE_URL` blank for the default same-origin setup. Users can
 open the frontend at the current host IP and port, and the frontend will call
 the API through that same origin.
+
+This NVIDIA deployment uses the tracked GPU override for every Compose command.
+It builds the shared API image on CUDA 13.0 with cuDNN, installs
+`fastembed-gpu`, and exposes the GPU to the API, query, artifact, and evaluation
+processes that can rerank:
+
+CUDA 13 requires an NVIDIA R580-or-newer Windows driver and a Turing-or-newer
+GPU. CUDA 13 removed library support for Maxwell, Pascal, and Volta. Verify the
+target GPU before moving the bundle into the air-gapped environment.
+
+```powershell
+docker compose --env-file .env.windows-airgap `
+  -f docker-compose.yml `
+  -f deploy/docker-compose.reranker-gpu.yml `
+  build api
+
+docker compose --env-file .env.windows-airgap `
+  -f docker-compose.yml `
+  -f deploy/docker-compose.reranker-gpu.yml `
+  up -d api query-api
+```
+
+Startup fails clearly if the CUDA execution provider is unavailable. Use the
+base Compose file with `RERANKER_RUNTIME=cpu` and `RAG_RERANKER_DEVICE=cpu` on a
+CPU-only host.
 
 If the airgapped deployment does not have a pre-seeded ClamAV database in the
 image or through an internal update process, file uploads may fail while virus
@@ -130,6 +159,8 @@ Set a bundle directory outside the repo:
 ```powershell
 $Bundle = "C:\agenticrag-airgap-bundle"
 New-Item -ItemType Directory -Force $Bundle | Out-Null
+$env:DOCKER_DEFAULT_PLATFORM = "linux/amd64"
+$ComposeFiles = @("-f", "docker-compose.yml", "-f", "deploy/docker-compose.reranker-gpu.yml")
 ```
 
 Verify the two backend dependency locks before building the transferable images:
@@ -146,8 +177,8 @@ part of an airgap bundle build.
 Build the project images and pull third-party runtime images:
 
 ```powershell
-docker compose --env-file .env.windows-airgap pull postgres redis minio qdrant clamav
-docker compose --env-file .env.windows-airgap build --pull api ingestion-worker frontend
+docker compose --env-file .env.windows-airgap @ComposeFiles pull postgres redis minio qdrant neo4j clamav
+docker compose --env-file .env.windows-airgap @ComposeFiles build --pull api ingestion-worker frontend
 ```
 
 Create and seed the FastEmbed sparse/reranker cache volume used for the
@@ -172,8 +203,9 @@ docker run --rm `
   python -m rag.ops.prewarm_fastembed --all-rerankers
 ```
 
-The command downloads and probes the sparse model plus every supported
-cross-encoder reranker before exporting `backend-reranker-cache.tgz`.
+The command downloads and probes the dense and sparse models, every supported
+reranker, and the small entailment model used by adaptive faithfulness before
+exporting `backend-reranker-cache.tgz`.
 
 Create and seed the shared Docling cache volume used for the transfer archive
 while still online:
@@ -207,9 +239,10 @@ Export the images needed for the no-vLLM runtime:
 ```powershell
 $Images = @(
   "postgres:16-alpine",
-  "redis:7-alpine",
+  "redis:7.4.9-alpine",
   "minio/minio:RELEASE.2024-07-16T23-46-41Z",
   "qdrant/qdrant:v1.12.6",
+  "neo4j:5.26-community",
   "clamav/clamav-debian:stable",
   "agenticrag-api",
   "agenticrag-ingestion-worker",
@@ -270,6 +303,7 @@ New-Item -ItemType Directory -Force $InstallRoot | Out-Null
 Expand-Archive -Force "$Bundle\AgenticRAG-source.zip" $InstallRoot
 Set-Location "$InstallRoot\AgenticRAG"
 Copy-Item "$Bundle\.env.windows-airgap" .\.env.windows-airgap
+$ComposeFiles = @("-f", "docker-compose.yml", "-f", "deploy/docker-compose.reranker-gpu.yml")
 ```
 
 Load Docker images without network access:
@@ -315,7 +349,7 @@ because Ollama should not be exposed to untrusted networks.
 Start the no-vLLM stack:
 
 ```powershell
-docker compose --env-file .env.windows-airgap up -d --no-build --pull never --wait
+docker compose --env-file .env.windows-airgap @ComposeFiles up -d --no-build --pull never --wait
 ```
 
 The frontend is available at:
@@ -333,7 +367,7 @@ http://localhost:3000/api/v1
 Useful checks:
 
 ```powershell
-docker compose --env-file .env.windows-airgap ps
+docker compose --env-file .env.windows-airgap @ComposeFiles ps
 Invoke-RestMethod http://localhost:3000/healthz
 docker compose --env-file .env.windows-airgap exec api `
   python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=8)"
@@ -380,7 +414,7 @@ Prepare a new bundle on a connected machine using the same process, then on the
 offline host:
 
 ```powershell
-docker compose --env-file .env.windows-airgap down
+docker compose --env-file .env.windows-airgap @ComposeFiles down
 docker load --input "$Bundle\agenticrag-runtime-images.tar"
 ```
 
@@ -388,7 +422,7 @@ Replace the source directory with the new release source, keep `.env.windows-air
 and start again:
 
 ```powershell
-docker compose --env-file .env.windows-airgap up -d --no-build --pull never --wait
+docker compose --env-file .env.windows-airgap @ComposeFiles up -d --no-build --pull never --wait
 ```
 
 Do not delete the data volumes unless the update requires a clean install.
@@ -411,13 +445,13 @@ On the connected GPU staging machine, temporarily allow Hugging Face downloads
 for the vLLM services and start the profile once to fill the cache:
 
 ```powershell
-docker compose --env-file .env.windows-airgap --profile vllm pull vllm-text vllm-embeddings vllm-vision
+docker compose --env-file .env.windows-airgap @ComposeFiles --profile vllm pull vllm-text vllm-embeddings vllm-vision
 
 $env:AIRGAP_RUNTIME_OFFLINE = "0"
 $env:HF_HUB_OFFLINE = "0"
 $env:TRANSFORMERS_OFFLINE = "0"
 $env:HF_DATASETS_OFFLINE = "0"
-docker compose --env-file .env.windows-airgap --profile vllm up -d vllm-text vllm-embeddings
+docker compose --env-file .env.windows-airgap @ComposeFiles --profile vllm up -d vllm-text vllm-embeddings
 ```
 
 Add `vllm-vision` to the `up` command only when preparing the vision model too.
@@ -426,7 +460,7 @@ After the services have fully loaded once, stop them and export the vLLM image
 and cache:
 
 ```powershell
-docker compose --env-file .env.windows-airgap --profile vllm down
+docker compose --env-file .env.windows-airgap @ComposeFiles --profile vllm down
 docker image save --output "$Bundle\agenticrag-vllm-image.tar" vllm/vllm-openai:latest
 
 $BundlePath = (Resolve-Path $Bundle).Path
@@ -442,7 +476,7 @@ On the offline Windows host, load the vLLM image, import the cache into
 `agenticrag_vllm-model-cache`, verify Docker Desktop GPU support, then start:
 
 ```powershell
-docker compose --env-file .env.windows-airgap --profile vllm up -d --no-build --pull never vllm-text vllm-embeddings
+docker compose --env-file .env.windows-airgap @ComposeFiles --profile vllm up -d --no-build --pull never vllm-text vllm-embeddings
 ```
 
 Add `vllm-vision` here only if the vision cache was prepared and the machine has
@@ -453,7 +487,7 @@ Only after those endpoints are healthy should you change `RAG_MODEL_PROVIDER` to
 workers after changing provider settings:
 
 ```powershell
-docker compose --env-file .env.windows-airgap up -d --no-build --pull never --force-recreate `
+docker compose --env-file .env.windows-airgap @ComposeFiles up -d --no-build --pull never --force-recreate `
   api ingestion-worker artifact-worker evaluation-worker folder-scheduler ingest-maintenance
 ```
 

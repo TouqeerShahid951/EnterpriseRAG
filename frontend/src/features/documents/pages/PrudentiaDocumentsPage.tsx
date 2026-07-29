@@ -23,7 +23,6 @@ import { SpacePanel, type SpacePanelState } from "@/features/documents/component
 import { useDocumentActions } from "@/features/documents/state/useDocumentActions";
 import {
   buildSpaceOverviewRows,
-  canTransferDocumentOwner,
   createSpaceDraft,
   documentsForView,
   explorerTabKey,
@@ -32,7 +31,6 @@ import {
   initialExplorerTabFromUrl,
   initialStringParamFromUrl,
   mergeSpaceOptions,
-  ownershipTransferOptions,
   spaceFromPath,
   syncExplorerUrl,
   type DocumentIngestFilter,
@@ -43,7 +41,6 @@ import {
 } from "@/features/documents/utils/documentPageUtils";
 import type { RouteId } from "@/routes/routes";
 import type { User as AuthUser } from "@/types/api";
-import type { UploadBatchItemView } from "@/types/chat";
 import { errorMessage } from "@/lib/utils/format";
 import {
   buildGroupPath,
@@ -52,9 +49,7 @@ import {
   type GroupOption,
 } from "@/lib/utils/groups";
 
-export { canTransferDocumentOwner, ownershipTransferOptions };
-
-export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], user, view = "spaces" }: Props) {
+export function PrudentiaDocumentsPage({ onLogout, onNavigate, user, view = "spaces" }: Props) {
   const queryClient = useQueryClient();
   const { notify } = useToast();
   const isSpaceManager = canManageSpaces(user);
@@ -89,12 +84,20 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
 
   const activeDocsQuery = useQuery({ queryKey: ["documents", "list", "active"], queryFn: () => documentsApi.list({ state: "active" }), enabled: view !== "trash", staleTime: 5000, retry: false });
   const deletedDocsQuery = useQuery({ queryKey: ["documents", "list", "deleted"], queryFn: () => documentsApi.list({ state: "deleted" }), enabled: view === "trash", staleTime: 15000, retry: false });
+  const overviewQuery = useQuery({
+    queryKey: ["documents", "overview"],
+    queryFn: documentsApi.overview,
+    enabled: view === "spaces",
+    refetchInterval: (query) => query.state.data?.processing_current ? 3000 : 15000,
+    staleTime: 3000,
+    retry: false,
+  });
   const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.listGroups, retry: false, enabled: canLoadSpaceDirectory });
 
   const activeDocuments = activeDocsQuery.data?.items ?? [];
   const deletedDocuments = deletedDocsQuery.data?.items ?? [];
   const allKnownDocuments = useMemo(() => [...activeDocuments, ...deletedDocuments], [activeDocuments, deletedDocuments]);
-  const hasGraphEligibleDocuments = view !== "trash" && activeDocuments.some((document) => document.ingest_status === "complete");
+  const hasGraphEligibleDocuments = view !== "trash" && activeDocuments.some((document) => document.ingest_status === "complete" && document.doc_type !== "abbreviation_glossary");
   const graphStatusQuery = useQuery({
     queryKey: ["ingest-jobs", "graphrag-status", "documents"],
     queryFn: ingestJobsApi.graphragStatus,
@@ -246,7 +249,7 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
   }
 
   const currentTabDocuments = documentsForView(view, visibleActiveTab, activeDocuments, deletedDocuments, documentSearch, statusFilter, ingestFilter, spaceFilter);
-  const spaceOverviewRows = useMemo(() => buildSpaceOverviewRows(spaceOptions, activeDocuments, uploadJobs), [activeDocuments, spaceOptions, uploadJobs]);
+  const spaceOverviewRows = useMemo(() => buildSpaceOverviewRows(spaceOptions, overviewQuery.data?.spaces ?? []), [overviewQuery.data?.spaces, spaceOptions]);
   const selectedDocuments = currentTabDocuments.filter((doc) => selectedIds.has(doc.id));
   const activeRoute: RouteId = view === "documents" ? "documents" : view === "trash" ? "document-trash" : "knowledge-spaces";
   const pageTitle = view === "documents" ? "Documents" : view === "trash" ? "Trash" : "Knowledge Spaces";
@@ -283,6 +286,7 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
           </header>
 
           {groupsQuery.isError && canLoadSpaceDirectory ? <InlineMessage tone="error">{errorMessage(groupsQuery.error, "Unable to load Knowledge Spaces.")}</InlineMessage> : null}
+          {overviewQuery.isError && view === "spaces" ? <InlineMessage tone="error">{errorMessage(overviewQuery.error, "Unable to load the document overview.")}</InlineMessage> : null}
           {activeDocsQuery.isError && view !== "trash" ? <InlineMessage tone="error">{errorMessage(activeDocsQuery.error, "Unable to load documents.")}</InlineMessage> : null}
           {deletedDocsQuery.isError && view === "trash" ? <InlineMessage tone="warning">{errorMessage(deletedDocsQuery.error, "Unable to load Trash.")}</InlineMessage> : null}
           {deleteSpaceMutation.isError ? <InlineMessage tone="error">{errorMessage(deleteSpaceMutation.error, "Unable to delete Knowledge Space.")}</InlineMessage> : null}
@@ -322,19 +326,18 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
                     />
                   ) : (
                     <KnowledgeSpacesOverview
-                      activeDocuments={activeDocuments}
                       canCreateSpace={isSpaceManager}
                       canManageSpaces={isSpaceManager}
                       canOpenSpaces
                       deletingSpacePath={deletingSpacePath}
-                      deletedCount={deletedDocuments.length}
-                      isLoading={activeDocsQuery.isLoading || isLoadingDirectory}
+                      isLoading={overviewQuery.isLoading || overviewQuery.isError || isLoadingDirectory}
                       onCreateSpace={openCreateSpace}
                       onDeleteSpace={deleteSpace}
                       onEditSpace={openEditSpace}
                       onOpenSpace={openSpace}
                       onShowJobs={() => onNavigate("ingestion-jobs")}
                       onShowTrash={() => onNavigate("document-trash")}
+                      overview={overviewQuery.data ?? null}
                       rows={spaceOverviewRows}
                     />
                   )}
@@ -469,4 +472,4 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, uploadJobs = [], 
   );
 }
 
-type Props = { onLogout: () => void; onNavigate: (route: RouteId) => void; uploadJobs?: UploadBatchItemView[]; user: AuthUser; view?: DocumentsView };
+type Props = { onLogout: () => void; onNavigate: (route: RouteId) => void; user: AuthUser; view?: DocumentsView };

@@ -12,14 +12,16 @@ from rag.core.config import Settings
 from rag.documents.models import DocumentRepository
 from rag.auth.identity_models import IdentityRepository
 from rag.retrieval.contracts import AuthorizedCorpusRetriever
-from rag.artifact_jobs.generation.composer import (
-    COMPOSER_PROMPT_VERSION,
-    FORMATTER_PROMPT_VERSION,
-    compose_document_bundle,
+from rag.artifact_jobs.execution.bundle_repair import (
     fallback_repair_document_bundle,
     normalize_bundle_evidence_ids,
     repair_document_bundle,
 )
+from rag.artifact_jobs.generation.composition import (
+    COMPOSER_PROMPT_VERSION,
+    compose_document_bundle,
+)
+from rag.artifact_jobs.generation.format_adaptation import FORMATTER_PROMPT_VERSION
 from rag.artifact_jobs.generation.llm_json import LlmContractError
 from rag.artifact_jobs.contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
 from rag.artifact_jobs.execution.errors import (

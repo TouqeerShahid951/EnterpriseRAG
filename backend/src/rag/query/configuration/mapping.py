@@ -47,6 +47,7 @@ def rag_config_response(record: RagConfigRecord) -> RagConfigResponse:
         chat_model=record.chat_model,
         embed_model=record.embed_model,
         reasoning_model=record.effective_reasoning_model,
+        sql_generation_model=record.sql_generation_model,
         routing_model=record.routing_model,
         faithfulness_model=record.faithfulness_model,
         ingestion_model=record.ingestion_model,
@@ -56,7 +57,12 @@ def rag_config_response(record: RagConfigRecord) -> RagConfigResponse:
         json_num_predict=record.json_num_predict,
         retrieval_token_budget=record.retrieval_token_budget,
         query_planner_enabled=record.query_planner_enabled,
+        evidence_gate_policy=record.evidence_gate_policy,
+        faithfulness_policy=record.faithfulness_policy,
         chat_timeout_seconds=record.chat_timeout_seconds,
+        routing_timeout_seconds=record.routing_timeout_seconds,
+        reasoning_timeout_seconds=record.reasoning_timeout_seconds,
+        faithfulness_timeout_seconds=record.faithfulness_timeout_seconds,
         embed_timeout_seconds=record.embed_timeout_seconds,
         health=RagConfigHealth(
             status=record.health_status,
@@ -106,6 +112,12 @@ def rag_config_from_snapshot(snapshot: dict[str, Any]) -> RagConfigRecord:
         raise ValueError("RAG configuration snapshot has an unsupported reranker model")
     if response.chat_timeout_seconds <= 0 or response.embed_timeout_seconds <= 0:
         raise ValueError("RAG configuration snapshot timeouts must be positive")
+    if not 1.0 <= response.routing_timeout_seconds <= 30.0:
+        raise ValueError("RAG configuration snapshot routing timeout is invalid")
+    if not 1.0 <= response.reasoning_timeout_seconds <= 300.0:
+        raise ValueError("RAG configuration snapshot reasoning timeout is invalid")
+    if not 1.0 <= response.faithfulness_timeout_seconds <= 300.0:
+        raise ValueError("RAG configuration snapshot faithfulness timeout is invalid")
     if not 256 <= response.json_num_predict <= 32768:
         raise ValueError("RAG configuration snapshot JSON token limit is invalid")
     if not 1000 <= response.retrieval_token_budget <= 200000:
@@ -151,6 +163,7 @@ def rag_config_from_snapshot(snapshot: dict[str, Any]) -> RagConfigRecord:
         chat_model=_required_text(response.chat_model, field="chat_model"),
         embed_model=_required_text(response.embed_model, field="embed_model"),
         reasoning_model=_optional_text(response.reasoning_model),
+        sql_generation_model=_optional_text(response.sql_generation_model),
         routing_model=_optional_text(response.routing_model),
         faithfulness_model=_optional_text(response.faithfulness_model),
         ingestion_model=_optional_text(response.ingestion_model),
@@ -159,8 +172,13 @@ def rag_config_from_snapshot(snapshot: dict[str, Any]) -> RagConfigRecord:
         json_num_predict=response.json_num_predict,
         retrieval_token_budget=response.retrieval_token_budget,
         query_planner_enabled=response.query_planner_enabled,
+        evidence_gate_policy=response.evidence_gate_policy,
+        faithfulness_policy=response.faithfulness_policy,
         reranker_model=response.reranker_model,
         chat_timeout_seconds=response.chat_timeout_seconds,
+        routing_timeout_seconds=response.routing_timeout_seconds,
+        reasoning_timeout_seconds=response.reasoning_timeout_seconds,
+        faithfulness_timeout_seconds=response.faithfulness_timeout_seconds,
         embed_timeout_seconds=response.embed_timeout_seconds,
         health_status=response.health.status,
         health_message=response.health.message,

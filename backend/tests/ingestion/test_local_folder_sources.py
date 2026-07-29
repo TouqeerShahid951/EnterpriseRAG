@@ -11,7 +11,7 @@ from rag.ingestion.folders.adapters.memory import InMemoryFolderScheduleReposito
 from rag.ingestion.folders.adapters.sources import LocalFileSystemSource
 from rag.ingestion.folders.config import FolderIngestionConfig
 from rag.ingestion.folders.dispatch import dispatch_due_schedules
-from rag.ingestion.folders.service import create_local_folder_schedule
+from rag.ingestion.folders.source_schedules import create_local_folder_schedule
 from rag.ingestion.folders.sources import list_local_folder_directories
 from rag.ingestion.queue import InMemoryIngestQueue
 

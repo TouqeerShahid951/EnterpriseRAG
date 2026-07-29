@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from rag.artifact_jobs.adapters.generated_postgres import GENERATED_ARTIFACT_SCHEMA_SQL
+from rag.abbreviations.schema import ABBREVIATION_SCHEMA_SQL
 from rag.artifact_jobs.adapters.job_postgres import ARTIFACT_JOB_SCHEMA_SQL
 from rag.artifact_jobs.adapters.schema_compat import GENERATED_ARTIFACT_COMPAT_SQL
 from rag.bootstrap.base_schema import BASE_SCHEMA_SQL, DEFAULT_GROUP_CLEANUP_SQL
@@ -64,6 +65,7 @@ def ensure_postgres_schema(config: Settings = settings) -> None:
         conn.execute(GENERATED_ARTIFACT_COMPAT_SQL)
         conn.execute(EVALUATION_SCHEMA_SQL)
         conn.execute(CONNECTOR_SCHEMA_SQL)
+        conn.execute(ABBREVIATION_SCHEMA_SQL)
         conn.execute(DEFAULT_GROUP_CLEANUP_SQL)
 
     # Reuse repository-owned schema repair for workspace configuration tables.

@@ -1,7 +1,8 @@
 import type { User as AuthUser } from "@/types/api";
-import { canManageSpaces, canManageUsers, canQuery, canReview, canUpload, canViewAudit, canViewIngestion, isPlatformAdmin } from "@/lib/auth/authz";
+import { canManageSpaces, canManageUsers, canQuery, canReview, canUpload, canViewAudit, canViewIngestion, isGlobalAdmin, isPlatformAdmin } from "@/lib/auth/authz";
 
 export type RouteId =
+  | "abbreviation-glossary"
   | "access"
   | "account"
   | "activity-log"
@@ -28,6 +29,7 @@ export type RouteId =
   | "workspace-settings";
 
 export const routePaths: Record<RouteId, string> = {
+  "abbreviation-glossary": "/document-intake/abbreviation-glossary",
   access: "/access",
   account: "/account",
   "activity-log": "/activity-log",
@@ -55,6 +57,7 @@ export const routePaths: Record<RouteId, string> = {
 };
 
 export const routeTitles: Record<RouteId, string> = {
+  "abbreviation-glossary": "Abbreviation Glossary",
   access: "User Management",
   account: "Account",
   "activity-log": "System Audit",
@@ -97,6 +100,7 @@ const platformOnlyRoutes = new Set<RouteId>([
 ]);
 const userManagementRoutes = new Set<RouteId>(["access"]);
 const auditRoutes = new Set<RouteId>(["activity-log", "security-audit"]);
+const glossaryRoutes = new Set<RouteId>(["abbreviation-glossary"]);
 const uploadRoutes = new Set<RouteId>(["upload"]);
 const folderSourceRoutes = new Set<RouteId>(["document-extraction", "database-connectors"]);
 const ingestionRoutes = new Set<RouteId>(["ingestion-health", "ingestion-jobs"]);
@@ -108,6 +112,7 @@ export function canAccessRoute(user: AuthUser, route: RouteId): boolean {
   if (platformOnlyRoutes.has(route)) return isPlatformAdmin(user);
   if (userManagementRoutes.has(route)) return canManageUsers(user);
   if (auditRoutes.has(route)) return canViewAudit(user);
+  if (glossaryRoutes.has(route)) return isGlobalAdmin(user);
   if (uploadRoutes.has(route)) return canUpload(user);
   if (folderSourceRoutes.has(route)) return canManageSpaces(user);
   if (ingestionRoutes.has(route)) return canViewIngestion(user);
@@ -161,9 +166,10 @@ const workspaceNavigation: WorkspaceNavigationItem[] = [
   {
     children: [
       { label: "Add Files", route: "upload" },
+      { label: "Abbreviation Glossary", route: "abbreviation-glossary" },
       { label: "Folder Sources", route: "document-extraction" },
       { label: "Database Connectors", route: "database-connectors" },
-      { badge: "jobs", label: "Activity", route: "ingestion-jobs" },
+      { label: "Activity", route: "ingestion-jobs" },
     ],
     icon: "documents",
     id: "document-intake",
@@ -212,7 +218,7 @@ function legacyKnowledgeSpaceRoute(pathname: string, search: string): RouteId | 
   return null;
 }
 
-export type NavigationBadge = "jobs" | "review" | "trash";
+export type NavigationBadge = "review" | "trash";
 export type NavigationIcon = "audit" | "documents" | "evaluations" | "overview" | "query" | "review" | "settings" | "spaces" | "users";
 export type NavigateOptions = { replace?: boolean; search?: string | URLSearchParams };
 type WorkspaceNavigationChild = { badge?: NavigationBadge; label: string; route: RouteId };

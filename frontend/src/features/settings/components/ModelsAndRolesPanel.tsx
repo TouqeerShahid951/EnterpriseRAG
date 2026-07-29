@@ -212,7 +212,7 @@ function GuidedStep({ children, controls, defaultOpen = false, impact, number, s
         aria-label={`${number}. ${title}. ${summary}`}
         aria-controls={contentId}
         aria-expanded={open}
-        className={`flex w-full items-start gap-3 bg-surface-container-low px-3 py-2 text-left transition-colors hover:bg-surface-container-high focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
+        className={`flex min-h-11 w-full items-start gap-3 bg-surface-container-low px-3 py-2 text-left transition-colors hover:bg-surface-container-high focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
           open ? "border-b border-surface-border" : ""
         }`}
         onClick={() => setOpen((value) => !value)}
@@ -404,6 +404,7 @@ function CurrentRagStatus({ actionsDisabled, config, onReset }: CurrentRagStatus
         <Fact label="Synthesis endpoint" value={config.base_url} />
         <Fact label="Reasoning" value={`${providerName(config.reasoning_provider ?? config.provider)}: ${config.reasoning_model ?? config.routing_model ?? config.chat_model}`} />
         <Fact label="Reasoning endpoint" value={config.reasoning_base_url ?? config.base_url} />
+        <Fact label="SQL generation" value={`${providerName(config.reasoning_provider ?? config.provider)}: ${config.sql_generation_model ?? config.reasoning_model ?? config.routing_model ?? config.chat_model}`} />
         <Fact label="Router" value={`${providerName(config.routing_provider ?? config.reasoning_provider ?? config.provider)}: ${config.routing_model ?? config.reasoning_model ?? config.chat_model}`} />
         <Fact label="Router endpoint" value={config.routing_base_url ?? config.reasoning_base_url ?? config.base_url} />
         <Fact label="Faithfulness" value={`${providerName(config.faithfulness_provider ?? config.provider)}: ${config.faithfulness_model ?? config.chat_model}`} />
@@ -417,7 +418,9 @@ function CurrentRagStatus({ actionsDisabled, config, onReset }: CurrentRagStatus
         <Fact label="Reranker model" value={config.reranker_model} />
         <Fact label="Model thinking" value={config.thinking_enabled ? "Enabled" : "Disabled"} />
         <Fact label="Query planner" value={config.query_planner_enabled ? "Enabled" : "Disabled"} />
-        <Fact label="JSON/Layout budget" value={String(config.json_num_predict)} />
+        <Fact label="Evidence Gate" value={config.evidence_gate_policy === "adaptive" ? "Adaptive" : config.evidence_gate_policy === "always" ? "Always" : "Disabled"} />
+        <Fact label="Faithfulness checker" value={config.faithfulness_policy === "adaptive" ? "Adaptive" : config.faithfulness_policy === "always" ? "Always" : "Disabled"} />
+        <Fact label="Artifact JSON budget" value={String(config.json_num_predict)} />
         <Fact label="Evidence budget" value={String(config.retrieval_token_budget)} />
         <Fact label="Health" value={`${config.health.status}: ${config.health.message}`} />
         <Fact label="Checked" value={formatDateTime(config.health.checked_at)} />

@@ -104,11 +104,11 @@ def _preferred_duplicate(existing: SearchHit, candidate: SearchHit) -> SearchHit
     existing_obligations = _coverage_obligation_ids(existing)
     candidate_obligations = _coverage_obligation_ids(candidate)
     if not existing_obligations and not candidate_obligations:
-        return existing
+        return _merge_query_slots(existing, candidate)
     if existing_obligations >= candidate_obligations:
-        return existing
+        return _merge_query_slots(existing, candidate)
     if candidate_obligations >= existing_obligations:
-        return candidate
+        return _merge_query_slots(candidate, existing)
     return None
 
 
@@ -135,8 +135,50 @@ def build_evidence_hits(
     candidates = dedupe_hits(hits)
     if broader_table_context:
         candidates = dedupe_hits(_promote_parent_text(candidates))
-    candidates = _with_coverage_reserve(candidates, query)
+    candidates = _with_coverage_reserve(
+        candidates,
+        query,
+        head_limit=2 if limit >= 4 else COVERAGE_HEAD_LIMIT,
+    )
+    candidates = _with_lineage_reserve(candidates)
     return _hits_within_budget(candidates, token_budget=token_budget, limit=limit)
+
+
+def with_retrieval_query_slot(hit: SearchHit, slot: int) -> SearchHit:
+    if slot < 0:
+        raise ValueError("retrieval query slot must be non-negative")
+    slots = tuple(dict.fromkeys((*retrieval_query_slots(hit), slot)))
+    return SearchHit(
+        point_id=hit.point_id,
+        score=hit.score,
+        payload={**hit.payload, "_retrieval_query_slots": list(slots)},
+    )
+
+
+def retrieval_query_slots(hit: SearchHit) -> tuple[int, ...]:
+    raw = hit.payload.get("_retrieval_query_slots")
+    if not isinstance(raw, list | tuple):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            slot
+            for value in raw
+            if isinstance(value, int) and (slot := value) >= 0
+        )
+    )
+
+
+def _merge_query_slots(preferred: SearchHit, other: SearchHit) -> SearchHit:
+    slots = tuple(
+        dict.fromkeys((*retrieval_query_slots(preferred), *retrieval_query_slots(other)))
+    )
+    if not slots:
+        return preferred
+    return SearchHit(
+        point_id=preferred.point_id,
+        score=preferred.score,
+        payload={**preferred.payload, "_retrieval_query_slots": list(slots)},
+    )
 
 
 def sources_from_hits(hits: list[SearchHit], *, query: str = "") -> list[SourceAnchor]:
@@ -151,7 +193,12 @@ def _coverage_terms(query: str) -> list[str]:
     return [term for term in _query_terms(query) if term not in _COVERAGE_STOPWORDS]
 
 
-def _with_coverage_reserve(hits: list[SearchHit], query: str) -> list[SearchHit]:
+def _with_coverage_reserve(
+    hits: list[SearchHit],
+    query: str,
+    *,
+    head_limit: int,
+) -> list[SearchHit]:
     terms = _coverage_terms(query)
     exact_values = _exact_values(query)
     if not terms and not exact_values:
@@ -193,13 +240,55 @@ def _with_coverage_reserve(hits: list[SearchHit], query: str) -> list[SearchHit]
         seen.add(key)
         ordered.append(hit)
 
-    for hit in hits[:COVERAGE_HEAD_LIMIT]:
+    for hit in hits[:head_limit]:
         add(hit)
     for hit in reserve:
         add(hit)
-    for hit in hits[COVERAGE_HEAD_LIMIT:]:
+    for hit in hits[head_limit:]:
         add(hit)
     return ordered
+
+
+def _with_lineage_reserve(hits: list[SearchHit]) -> list[SearchHit]:
+    if not hits:
+        return hits
+    ordered = list(hits[:COVERAGE_HEAD_LIMIT])
+    seen_hits = {_dedupe_identity(hit) for hit in ordered}
+    covered = {
+        lineage
+        for hit in ordered
+        for lineage in _lineage_keys(hit)
+    }
+    for hit in hits:
+        lineages = _lineage_keys(hit)
+        if not lineages.difference(covered):
+            continue
+        identity = _dedupe_identity(hit)
+        if identity not in seen_hits:
+            ordered.append(hit)
+            seen_hits.add(identity)
+        covered.update(lineages)
+    ordered.extend(
+        hit for hit in hits if _dedupe_identity(hit) not in seen_hits
+    )
+    return ordered
+
+
+def _lineage_keys(hit: SearchHit) -> set[tuple[str, object]]:
+    raw_capabilities = hit.payload.get("_retrieval_capabilities")
+    capabilities = (
+        {str(value) for value in raw_capabilities if str(value)}
+        if isinstance(raw_capabilities, list | tuple)
+        else set()
+    )
+    return {
+        *(("query", slot) for slot in retrieval_query_slots(hit)),
+        *(("capability", capability) for capability in capabilities),
+    }
+
+
+def _dedupe_identity(hit: SearchHit) -> tuple[str, ...]:
+    return tuple(sorted(_dedupe_keys(hit)))
 
 
 def _coverage_score(

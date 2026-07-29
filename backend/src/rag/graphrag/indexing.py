@@ -46,6 +46,7 @@ class GraphRAGRuntimeConfig:
     min_chunk_chars: int = 80
     redis_url: str = ""
     extraction_checkpoint_ttl_seconds: int = 86400
+    max_llm_community_summaries: int = 64
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,12 @@ class GraphRAGIndexingService:
         self._checkpoint_client: object | None = None
         self._checkpoint_unavailable = False
 
-    def index_document(self, doc_id: str) -> GraphRAGIndexResult:
+    def index_document(
+        self,
+        doc_id: str,
+        *,
+        index_generation_id: str | None = None,
+    ) -> GraphRAGIndexResult:
         started = perf_counter()
         timings = _PhaseTimings()
         if not self.config.enabled:
@@ -100,7 +106,14 @@ class GraphRAGIndexingService:
             )
         try:
             with timings.measure("retrieve_chunks"):
-                chunks = [chunk for chunk in self.qdrant.retrieve_document_chunks(doc_id) if chunk.text.strip()]
+                chunks = [
+                    chunk
+                    for chunk in self.qdrant.retrieve_document_chunks(
+                        doc_id,
+                        index_generation_id=index_generation_id,
+                    )
+                    if chunk.text.strip()
+                ]
         except QdrantGraphRAGError as exc:
             return _result(
                 "degraded",
@@ -358,13 +371,19 @@ class GraphRAGIndexingService:
         return self._checkpoint_client
 
     def _summarize_communities(self, communities: list[GraphCommunity]) -> list[CommunitySummary]:
-        summarizer = CommunitySummarizer(self.inference)
-        return _parallel_map(
-            communities,
-            summarizer.summarize,
+        llm_count = min(len(communities), self.config.max_llm_community_summaries)
+        llm_summarizer = CommunitySummarizer(self.inference)
+        llm_summaries = _parallel_map(
+            communities[:llm_count],
+            llm_summarizer.summarize,
             concurrency=self.config.summary_concurrency,
             thread_name_prefix="graphrag-summary",
         )
+        fallback_summarizer = CommunitySummarizer()
+        return llm_summaries + [
+            fallback_summarizer.summarize(community)
+            for community in communities[llm_count:]
+        ]
 
     def _select_chunks_for_graph(self, chunks: list[ChunkRecord]) -> list[ChunkRecord]:
         selected: list[ChunkRecord] = []
@@ -412,6 +431,13 @@ def config_from_mapping(value: Any) -> GraphRAGRuntimeConfig:
             86400,
             minimum=60,
             maximum=604800,
+        ),
+        max_llm_community_summaries=_bounded_mapping_int(
+            value,
+            "graphrag_max_llm_community_summaries",
+            64,
+            minimum=0,
+            maximum=10000,
         ),
     )
 

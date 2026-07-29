@@ -208,36 +208,33 @@ failures with backoff, and clean up partial vectors when jobs are cancelled.
 
 ```mermaid
 flowchart TD
-    Start["Query request"] --> Memory["Load session memory"]
-    Memory --> Intent["Intent router"]
-    Intent --> Plan{"Needs planning?"}
-    Plan -->|yes| Planner["Query planner"]
-    Plan -->|artifact| ArtifactPlan["Artifact planner"]
-    Plan -->|no| Retrieve["ABAC retriever"]
-    Planner --> Retrieve
-    ArtifactPlan --> Retrieve
+    Start["Query request"] --> Artifact{"Artifact request?"}
+    Artifact -->|yes| Queue["Queue artifact job"]
+    Artifact -->|no| Memory["Load session memory"]
+    Memory --> Source["Resolve explicit source scope"]
+    Source --> Planner["Typed capability planner"]
+    Planner --> Compile["Compile retrieval capabilities"]
+    Compile --> Retrieve["ABAC retrieval fan-out"]
     Retrieve --> Rerank["Reranker"]
-    Rerank --> Verify["Retrieval verifier"]
-    Verify -->|retry| Retrieve
-    Verify -->|degrade| Evidence["Evidence builder"]
-    Verify -->|pass| Temporal["Temporal resolver"]
-    Temporal --> Conflict["Contradiction detector"]
-    Conflict --> Evidence
-    Evidence --> Output{"Output type"}
-    Output -->|answer| Synthesis["Synthesizer"]
-    Synthesis --> Faith["Faithfulness checker"]
+    Rerank --> Verify["Retrieval availability check"]
+    Verify -->|rewrite once| Retrieve
+    Verify --> Temporal["Temporal resolver"]
+    Temporal --> Evidence["Evidence builder"]
+    Evidence --> Gate["Semantic relevance and sufficiency gate"]
+    Gate -->|correct once| Retrieve
+    Gate -->|partial or abstain| Synthesis["Synthesizer"]
+    Gate -->|sufficient| Conflict["Contradiction detector"]
+    Conflict --> Synthesis
+    Synthesis --> Faith["Answer support and responsiveness validator"]
     Faith --> Serialize["Response serializer"]
-    Output -->|artifact| Composer["Artifact composer"]
-    Composer --> Validate["Content validator"]
-    Validate --> Generator["Artifact generator"]
-    Generator --> Serialize
 ```
 
 `LocalRagService` builds an effective RAG configuration from environment and
 workspace settings, then runs `QueryGraphRunner`. The query graph handles
-session memory, routing, retrieval, reranking, verification, temporal
-resolution, conflict detection, evidence construction, answer synthesis,
-faithfulness checks, artifact generation, and response serialization.
+session memory, typed capability planning, compiled multi-path retrieval,
+reranking, bounded correction, temporal resolution, semantic evidence
+sufficiency, conflict detection, evidence construction, answer synthesis,
+support and responsiveness validation, and response serialization.
 
 Streaming queries use SSE events from `/api/v1/query/stream`. Disconnects
 trigger a cancellation token so long-running graph work can stop where
@@ -245,9 +242,8 @@ supported.
 
 ## Artifact Generation
 
-Artifact requests can be detected from query text when
-`ARTIFACT_PIPELINE_VERSION=v2`. Simple responses return immediately with a
-queued job summary. The artifact worker then:
+Artifact requests are detected from query text. The query API returns
+immediately with a queued job summary. The artifact worker then:
 
 1. Validates the job context through the internal API.
 2. Starts a durable attempt and sends heartbeats.

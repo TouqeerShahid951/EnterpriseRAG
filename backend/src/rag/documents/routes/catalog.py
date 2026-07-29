@@ -18,12 +18,14 @@ from rag.documents.schemas import (
     DocumentCatalogSummary,
     DocumentGroupCount,
     DocumentListResponse,
+    DocumentOverviewResponse,
 )
 from ..claim_dependencies import get_claim_repository
 from ..claim_models import ClaimRepository
+from ..overview import build_document_overview
 from ..repository import DocumentRepository, get_document_repository
 from .authorization import require_visible_document
-from .presenters import document_to_schema, version_node
+from .presenters import document_overview_to_schema, document_to_schema, version_node
 
 router = APIRouter(prefix="/docs")
 
@@ -76,6 +78,23 @@ async def summarize_documents(
         groups=groups,
         total=sum(group.count for group in groups),
     )
+
+
+@router.get(
+    "/overview",
+    response_model=DocumentOverviewResponse,
+    summary="Summarize the visible Document Library",
+)
+async def summarize_document_overview(
+    user: UserRecord = Depends(require_current_user),
+    repo: DocumentRepository = Depends(get_document_repository),
+) -> DocumentOverviewResponse:
+    overview = await run_in_threadpool(
+        build_document_overview,
+        user=user,
+        repository=repo,
+    )
+    return document_overview_to_schema(overview)
 
 
 @router.get(

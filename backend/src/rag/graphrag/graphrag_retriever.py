@@ -65,6 +65,16 @@ class GraphRAGRetriever:
             return GraphRAGRetrievalResult([], [], f"graphrag_retrieval_failed: {str(exc)[:240]}")
         if not community_hits:
             return GraphRAGRetrievalResult([], [], "graphrag_no_community_summaries")
+        community_hits = _document_scoped_communities(
+            community_hits,
+            ctx["request"].document_ids,
+        )
+        if not community_hits:
+            return GraphRAGRetrievalResult(
+                [],
+                [],
+                "graphrag_no_scope_safe_community_summaries",
+            )
         refs = _source_refs([hit.summary for hit in community_hits])
         if not refs:
             return GraphRAGRetrievalResult(community_hits, [], "graphrag_summaries_missing_sources")
@@ -115,3 +125,18 @@ def _source_refs(summaries: list[CommunitySummary]) -> list[SourceRef]:
             seen.add(key)
             refs.append(ref)
     return refs
+
+
+def _document_scoped_communities(
+    communities: list[CommunitySearchHit],
+    document_ids: list[str],
+) -> list[CommunitySearchHit]:
+    scoped_ids = {doc_id.strip() for doc_id in document_ids if doc_id.strip()}
+    if not scoped_ids:
+        return communities
+    return [
+        hit
+        for hit in communities
+        if hit.summary.source_refs
+        and {ref.doc_id for ref in hit.summary.source_refs}.issubset(scoped_ids)
+    ]

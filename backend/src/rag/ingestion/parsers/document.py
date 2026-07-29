@@ -8,9 +8,6 @@ keeps the established import and monkeypatch surface stable for callers.
 
 from __future__ import annotations
 
-import logging
-from typing import Callable
-
 from rag.ingestion.parsers.docling.adapter import DoclingProgressCallback
 from .document_dispatch import (
     CONNECTOR_RECORD_CONTENT_TYPE as CONNECTOR_RECORD_CONTENT_TYPE,
@@ -22,9 +19,6 @@ from .document_dispatch import (
     DocumentParserOperations,
     PageProgressCallback as PageProgressCallback,
     PdfImageReviewRequired as PdfImageReviewRequired,
-    build_image_context as _build_image_context_impl,
-    document_kind as _document_kind_impl,
-    looks_like_json_bytes as _looks_like_json_bytes_impl,
     parse_document_with_operations,
     resume_pdf_image_review_with_operations,
 )
@@ -34,7 +28,6 @@ from rag.ingestion.parsers.images import (
     ImageProgressCallback,
     ImageSource,
     PdfVisualSourceResult,
-    ScannedVisualRegionResult,
     docx_image_sources as docx_image_sources,
     image_dimensions as image_dimensions,
     image_source_candidate_key as image_source_candidate_key,
@@ -48,12 +41,9 @@ from rag.ingestion.parsers.images import (
 )
 from .models import DocumentParseResult, ParsedImageAsset, ParsedPdfItem
 from rag.ingestion.parsers.pdf.fallback import (
-    parse_error_code as _parse_error_code_impl,
-    parse_error_quality_flag as _parse_error_quality_flag_impl,
     parse_pdf_with_ocr_fallback as _parse_pdf_with_ocr_fallback,
     parse_pdf_with_vision_fallback as _parse_pdf_with_vision_fallback_impl,
     pdf_parser_config as _pdf_parser_config,
-    vision_fallback_items as _vision_fallback_items_impl,
 )
 from rag.ingestion.parsers.pdf.image_processing import (
     DEFAULT_PDF_IMAGE_MAX_FULL_PAGE_FALLBACKS as DEFAULT_PDF_IMAGE_MAX_FULL_PAGE_FALLBACKS,
@@ -73,10 +63,6 @@ from rag.ingestion.parsers.pdf.image_processing import (
     _parsed_text_chars_by_page as _parsed_text_chars_by_page,
     _pdf_image_analysis_score as _pdf_image_analysis_score,
     append_image_outputs as _append_image_outputs,
-    merge_items_by_page_position as _merge_items_by_page_position_impl,
-    page_count as _page_count_impl,
-    renumber_items as _renumber_items_impl,
-    scanned_visual_region_sources as _scanned_visual_region_sources_impl,
     select_pdf_image_sources_for_analysis as _select_pdf_image_sources_for_analysis,
     pdf_visual_source_set as _pdf_visual_sources_impl,
 )
@@ -89,7 +75,6 @@ from rag.ingestion.parsers.pdf.layout_repair import (
     _analysis_blocks as _analysis_blocks,
     _analysis_confidence as _analysis_confidence,
     _analysis_quality_flags as _analysis_quality_flags,
-    _analyze_layout_source as _analyze_layout_source_impl,
     _apply_vision_layout_replacements as _apply_vision_layout_replacements,
     _block_bbox as _block_bbox,
     _block_confidence as _block_confidence,
@@ -113,60 +98,6 @@ from rag.ingestion.parsers.pdf.layout_repair import (
     log_skipped_vision_layout_repair as _log_skipped_vision_layout_repair,
     repair_pdf_complex_layout_with_vision as _repair_pdf_complex_layout_with_vision_impl,
 )
-from rag.ingestion.parsers.word import validated_docx_items as _validated_docx_items_impl
-
-logger = logging.getLogger(__name__)
-
-
-def _image_context(
-    doc_id: str | None,
-    image_asset_store: ImageAssetStore | None,
-    image_analyzer: ImageAnalyzer | None,
-) -> tuple[str, ImageAssetStore, ImageAnalyzer] | None:
-    return _build_image_context_impl(doc_id, image_asset_store, image_analyzer)
-
-
-def _looks_like_json_bytes(file_bytes: bytes) -> bool:
-    return _looks_like_json_bytes_impl(file_bytes)
-
-
-def _document_kind(content_type: str | None, file_path: str) -> str:
-    return _document_kind_impl(content_type, file_path)
-
-
-def _validated_docx_items(file_bytes: bytes) -> list[ParsedPdfItem]:
-    return _validated_docx_items_impl(file_bytes)
-
-
-def _parse_error_code(exc: Exception) -> str:
-    return _parse_error_code_impl(exc)
-
-
-def _parse_error_quality_flag(exc: Exception) -> str:
-    return _parse_error_quality_flag_impl(exc)
-
-
-def _vision_fallback_items(
-    items: list[ParsedPdfItem], *, parse_error: Exception
-) -> list[ParsedPdfItem]:
-    return _vision_fallback_items_impl(items, parse_error=parse_error)
-
-
-def _merge_items_by_page_position(
-    parsed_items: list[ParsedPdfItem],
-    image_items: list[ParsedPdfItem],
-) -> list[ParsedPdfItem]:
-    return _merge_items_by_page_position_impl(parsed_items, image_items)
-
-
-def _page_count(items: list[ParsedPdfItem]) -> int:
-    return _page_count_impl(items)
-
-
-def _renumber_items(items: list[ParsedPdfItem]) -> list[ParsedPdfItem]:
-    return _renumber_items_impl(items)
-
-
 def _parse_pdf_with_vision_fallback(
     file_bytes: bytes,
     *,
@@ -201,38 +132,6 @@ def _repair_pdf_complex_layout_with_vision(
         page_source_factory=pdf_page_image_sources,
         dimension_reader=image_dimensions,
         analysis_payload_factory=_vision_analysis_payload,
-    )
-
-
-def _analyze_layout_source(
-    source: ImageSource, analyze_layout: Callable[..., object]
-) -> object:
-    return _analyze_layout_source_impl(
-        source,
-        analyze_layout,
-        _vision_analysis_payload,
-    )
-
-
-def _scanned_visual_region_sources(
-    file_bytes: bytes,
-    *,
-    parsed: DocumentParseResult,
-    image_sources: list[ImageSource],
-    enabled: bool,
-    min_area_ratio: float,
-    max_regions_per_page: int,
-    text_mask_padding_px: int,
-) -> ScannedVisualRegionResult:
-    return _scanned_visual_region_sources_impl(
-        file_bytes,
-        parsed=parsed,
-        image_sources=image_sources,
-        enabled=enabled,
-        min_area_ratio=min_area_ratio,
-        max_regions_per_page=max_regions_per_page,
-        text_mask_padding_px=text_mask_padding_px,
-        source_factory=pdf_scanned_visual_region_sources,
     )
 
 

@@ -105,3 +105,42 @@ def test_event_recording_failure_is_logged_without_failing_indexing(
         )
 
     assert "indexing event could not be recorded" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"status": "degraded", "degraded_reason": "neo4j_unavailable"},
+        {"status": "complete", "partition_rebuild_status": "enqueue_failed"},
+    ],
+)
+def test_degraded_graph_result_requests_queue_retry(result) -> None:
+    with pytest.raises(task_execution.GraphRAGDeliveryRetry):
+        task_execution._retry_degraded_result(result)
+
+
+def test_skipped_graph_result_does_not_retry() -> None:
+    result = {"status": "skipped", "degraded_reason": "no_document_chunks"}
+
+    assert task_execution._retry_degraded_result(result) is result
+
+
+def test_graph_inference_uses_shared_fastembed_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def build_inference(_runtime_config: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(
+        task_execution,
+        "build_ingestion_inference_client",
+        build_inference,
+    )
+    config = WorkerConfig.from_env()
+
+    task_execution._build_graph_inference(config, object())
+
+    assert captured["dense_cache_dir"] == config.local_embeddings.dense_cache_dir

@@ -7,7 +7,7 @@ import { formatDateTime } from "@/lib/utils/format";
 
 type NavigateToRoute = (route: RouteId, options?: NavigateOptions) => void;
 
-export function AttentionList({ documents, onNavigate }: { documents: Document[]; onNavigate: NavigateToRoute }) {
+export function AttentionList({ documents, onNavigate }: { documents: Array<Pick<Document, "group_path" | "id" | "ingest_status" | "title">>; onNavigate: NavigateToRoute }) {
   return (
     <div className="knowledge-action-list p-4">
       {documents.map((doc) => (

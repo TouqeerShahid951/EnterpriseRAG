@@ -48,6 +48,7 @@ def test_env_rag_config_supports_mixed_role_providers() -> None:
             rag_model_provider="vllm",
             rag_chat_provider="vllm",
             rag_embedding_provider="fastembed",
+            rag_routing_model="qwen3:8b",
             vllm_base_url="http://vllm-text:8000/v1",
             vllm_chat_model="Qwen/Qwen3-14B-AWQ",
             rag_ingestion_provider="ollama",
@@ -60,6 +61,7 @@ def test_env_rag_config_supports_mixed_role_providers() -> None:
 
     assert record.provider == "vllm"
     assert record.chat_model == "Qwen/Qwen3-14B-AWQ"
+    assert record.routing_model == "qwen3:8b"
     assert record.effective_ingestion_provider == "ollama"
     assert record.effective_ingestion_base_url == "http://host.docker.internal:11434"
     assert record.effective_vision_provider == "ollama"
@@ -182,13 +184,35 @@ def test_build_inference_client_routes_chat_and_routing_to_configured_providers(
             routing_model="qwen3:14b",
             faithfulness_model=None,
             chat_timeout_seconds=180,
+            routing_timeout_seconds=7,
+            reasoning_timeout_seconds=31,
+            faithfulness_timeout_seconds=29,
             embed_timeout_seconds=45,
         ),
         settings=_Settings(),  # type: ignore[arg-type]
     )
 
     assert client.answer(question="What?", contexts=["Evidence"]) == "answer"
+    assert client.reasoning_client.chat_timeout_seconds == 31
+    assert client.faithfulness_client.chat_timeout_seconds == 29
     assert client.verify_route(prompt="route", model=None) == '{"status":"ok"}'
+    assert (
+        client.generate_routing_json(
+            prompt="resolve",
+            model=None,
+            system="Resolve conversation context.",
+            max_tokens=128,
+            timeout_seconds=10,
+        )
+        == '{"status":"ok"}'
+    )
     assert openai_calls[0][0] == "http://vllm-text:8000"
     assert ollama_calls[0][0] == "http://ollama-route:11434"
     assert ollama_calls[0][2]["payload"]["model"] == "qwen3:14b"
+    assert ollama_calls[0][2]["timeout_seconds"] == 7
+    assert ollama_calls[1][0] == "http://ollama-route:11434"
+    assert ollama_calls[1][2]["payload"]["messages"][0]["content"] == (
+        "Resolve conversation context."
+    )
+    assert ollama_calls[1][2]["payload"]["options"]["num_predict"] == 128
+    assert ollama_calls[1][2]["timeout_seconds"] == 10

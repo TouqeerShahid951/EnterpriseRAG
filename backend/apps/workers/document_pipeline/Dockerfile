@@ -13,8 +13,6 @@ ENV UV_LINK_MODE=copy
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 ENV UV_HTTP_TIMEOUT=120
 ENV UV_HTTP_RETRIES=5
-ENV SERVICE_NAME=ingestion-worker
-ENV SERVICE_KIND=rag-ingestion-worker-celery
 
 WORKDIR /app
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -45,7 +43,6 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 ENV DOCLING_ARTIFACTS_PATH=/models/docling
 ENV DOCLING_OCR_BACKEND=onnxruntime
 ENV DOCLING_OCR_LANGS=english
-ENV HF_HUB_DISABLE_XET=1
 
 COPY src/rag/ingestion /app/src/rag/ingestion
 COPY src/rag/__init__.py /app/src/rag/__init__.py

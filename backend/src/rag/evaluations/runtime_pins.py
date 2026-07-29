@@ -22,7 +22,6 @@ PROMPT_POLICY_VERSION = (
 )
 
 _QUERY_SETTING_FIELDS = (
-    "artifact_pipeline_version",
     "connector_include_stale_in_retrieval",
     "connector_live_sql_enabled",
     "connector_live_sql_max_repair_attempts",
@@ -39,20 +38,19 @@ _QUERY_SETTING_FIELDS = (
     "qdrant_url",
     "rag_dense_cache_dir",
     "rag_faithfulness_policy",
-    "rag_faithfulness_threshold",
     "rag_http_timeout_seconds",
     "rag_hybrid_disagreement_detector_enabled",
-    "rag_intent_router_version",
     "rag_query_rewrite_llm_enabled",
     "rag_reranker_cache_dir",
+    "rag_reranker_device",
     "rag_reranker_max_candidates",
     "rag_retrieval_max_retries",
-    "rag_route_llm_verifier_enabled",
-    "rag_source_router_llm_enabled",
-    "rag_source_router_llm_min_confidence",
     "rag_sparse_cache_dir",
     "rag_sparse_model",
     "rag_top_k",
+)
+_RETIRED_QUERY_SETTING_FIELDS = frozenset(
+    {"artifact_pipeline_version", "rag_faithfulness_threshold"}
 )
 
 
@@ -117,15 +115,21 @@ def resolve_pinned_runtime(
     pins = dict(raw_pins)
     query_settings = pins.get("query_settings")
     models = pins.get("model_identifiers")
+    normalized_query_settings = (
+        _normalize_query_settings(query_settings)
+        if isinstance(query_settings, Mapping)
+        else None
+    )
     if (
-        not isinstance(query_settings, Mapping)
-        or set(query_settings) != set(_QUERY_SETTING_FIELDS)
+        normalized_query_settings is None
         or pins.get("query_settings_hash") != _digest(query_settings)
         or pins.get("rag_config_hash") != _digest(_stable_rag_config(rag_config))
         or not isinstance(models, Mapping)
         or pins.get("model_identifiers_hash") != _digest(models)
         or dict(models)
-        != _model_identifiers(_stable_rag_config(rag_config), query_settings)
+        != _model_identifiers(
+            _stable_rag_config(rag_config), normalized_query_settings
+        )
     ):
         raise _invalid_pins()
 
@@ -163,7 +167,7 @@ def resolve_pinned_runtime(
 
     try:
         frozen_config = type(current_config).model_validate(
-            {**current_config.model_dump(), **dict(query_settings)}
+            {**current_config.model_dump(), **normalized_query_settings}
         )
     except Exception as exc:  # noqa: BLE001 - persisted snapshots are a trust boundary
         raise _invalid_pins() from exc
@@ -175,6 +179,18 @@ def runtime_pins_from_snapshot(snapshot: object) -> dict[str, Any]:
         return {}
     pins = snapshot.get(RUNTIME_PINS_KEY)
     return dict(pins) if isinstance(pins, Mapping) else {}
+
+
+def _normalize_query_settings(
+    query_settings: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    fields = frozenset(query_settings)
+    current_fields = set(_QUERY_SETTING_FIELDS)
+    if not current_fields <= fields or not fields <= (
+        current_fields | _RETIRED_QUERY_SETTING_FIELDS
+    ):
+        return None
+    return {field: query_settings[field] for field in _QUERY_SETTING_FIELDS}
 
 
 def _model_identifiers(

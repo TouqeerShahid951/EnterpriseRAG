@@ -22,6 +22,10 @@ EXPECTED_OPERATIONS: dict[OperationKey, OperationContract] = {
         ("documents",),
         frozenset({"200"}),
     ),
+    ("GET", "/api/v1/docs/overview"): (
+        ("documents",),
+        frozenset({"200"}),
+    ),
     ("GET", "/api/v1/docs/{document_id}"): (
         ("documents",),
         frozenset({"200", "404", "422"}),

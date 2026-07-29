@@ -20,8 +20,12 @@ HTTP_BOUNDARY_SUPPORT_FILES = frozenset(
 )
 FOLDER_APPLICATION_FILES = (
     RAG_ROOT / "ingestion" / "folders" / "dispatch.py",
-    RAG_ROOT / "ingestion" / "folders" / "service.py",
+    RAG_ROOT / "ingestion" / "folders" / "schedule_access.py",
+    RAG_ROOT / "ingestion" / "folders" / "schedule_lifecycle.py",
+    RAG_ROOT / "ingestion" / "folders" / "schedule_validation.py",
     RAG_ROOT / "ingestion" / "folders" / "scheduling.py",
+    RAG_ROOT / "ingestion" / "folders" / "snapshot_schedules.py",
+    RAG_ROOT / "ingestion" / "folders" / "source_schedules.py",
     RAG_ROOT / "ingestion" / "folders" / "sources.py",
 )
 EXPECTED_FEATURE_HTTP_HANDLER_OWNERS = {

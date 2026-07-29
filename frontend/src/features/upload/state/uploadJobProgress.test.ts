@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { UploadJobView } from "@/types/chat";
 
 import {
   formatIngestRunLabel,
@@ -8,6 +9,7 @@ import {
   graphEnrichmentForJob,
   isUploadCancellableStatus,
   isUploadTerminalStatus,
+  uploadItemNeedsAttention,
 } from "./uploadJobProgress";
 
 describe("upload job progress formatting", () => {
@@ -150,4 +152,48 @@ describe("upload job progress formatting", () => {
     expect(isUploadCancellableStatus("processing")).toBe(true);
     expect(isUploadCancellableStatus("human_review")).toBe(true);
   });
+
+  it("keeps failed, review, and warning outcomes in attention", () => {
+    const item = {
+      id: "upload-1",
+      fileName: "manual.pdf",
+      fileSize: null,
+      groupPath: "/legal",
+      clearanceLevel: "NATO_RESTRICTED" as const,
+      isCurrentSession: false,
+      requestState: "accepted" as const,
+      job: toJob("complete", ["metadata_extraction_unavailable"]),
+      uploadError: null,
+      jobError: null,
+    };
+
+    expect(uploadItemNeedsAttention(item)).toBe(true);
+    expect(uploadItemNeedsAttention({ ...item, job: toJob("human_review") })).toBe(true);
+    expect(uploadItemNeedsAttention({ ...item, job: toJob("complete") })).toBe(false);
+  });
 });
+
+function toJob(status: "complete" | "human_review", warnings: string[] = []): UploadJobView {
+  return {
+    jobId: "job-1",
+    documentId: "doc-1",
+    retryOfJobId: null,
+    status,
+    progressPct: status === "complete" ? 100 : 50,
+    stage: status,
+    stageLabel: status,
+    stageDetail: status,
+    stageProgress: null,
+    steps: [],
+    warnings,
+    parserProvenance: null,
+    errorCode: null,
+    errorMessage: null,
+    attemptCount: 1,
+    maxAttempts: 3,
+    createdAt: null,
+    updatedAt: null,
+    completedAt: null,
+    lastHeartbeatAt: null,
+  };
+}

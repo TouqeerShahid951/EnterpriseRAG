@@ -1,4 +1,4 @@
-"""Internal data contracts for query intent routing."""
+"""Internal data contracts for query routing."""
 
 from __future__ import annotations
 
@@ -27,7 +27,27 @@ RouteIntent = Literal[
     "comparative_summary",
     "temporal_factual",
 ]
-RouteMethod = Literal["rules", "llm_verifier", "fallback"]
+RetrievalCapability = Literal[
+    "general_search",
+    "structured_query",
+    "live_sql",
+    "document_search",
+    "global_graph",
+    "document_navigation",
+    "decomposed_search",
+]
+ResponseMode = Literal[
+    "lookup",
+    "explanation",
+    "summary",
+    "comparison",
+    "procedure",
+    "conflict_analysis",
+]
+QueryScope = Literal["local", "document", "corpus"]
+CoverageMode = Literal["focused", "exhaustive"]
+TemporalScope = Literal["current", "historical", "as_of", "all"]
+RouteMethod = Literal["rules", "llm_verifier", "llm_planner", "fallback"]
 SearchMode = Literal["hybrid", "multi_query_hybrid", "metadata", "structured_first"]
 ChunkGranularity = Literal["small", "medium", "section", "document"]
 RiskLevel = Literal["low", "medium", "high"]
@@ -82,6 +102,13 @@ class RoutePlan:
     original_query: str
     resolved_query: str
     intent: RouteIntent
+    capabilities: tuple[RetrievalCapability, ...] = ("general_search",)
+    response_mode: ResponseMode = "lookup"
+    scope: QueryScope = "local"
+    coverage: CoverageMode = "focused"
+    temporal_scope: TemporalScope = "current"
+    sub_queries: tuple[str, ...] = ()
+    planner_reason: str = ""
     secondary_intents: tuple[RouteIntent, ...] = ()
     confidence: float = 0.0
     route_method: RouteMethod = "rules"

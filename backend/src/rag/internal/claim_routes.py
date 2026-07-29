@@ -12,19 +12,16 @@ from rag.documents.internal_schemas import (
     ConflictCheckRequest,
     ConflictCheckResponse,
 )
-from rag.internal.schemas import ServiceTokenContext
 from .service_token_auth import require_service_token
 
-router = APIRouter(tags=["internal-claims"])
+router = APIRouter(tags=["internal-claims"], dependencies=[Depends(require_service_token)])
 
 
 @router.post("/claims", response_model=ClaimsSaveResponse, summary="Save extracted claims")
 async def save_claims(
     payload: ClaimsSaveRequest,
     claim_repo: ClaimRepository = Depends(get_claim_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> ClaimsSaveResponse:
-    _ = service
     return ClaimsSaveResponse(saved_count=claim_repo.save_claims(payload.claims))
 
 
@@ -32,9 +29,7 @@ async def save_claims(
 async def save_ingest_claims(
     payload: ClaimsSaveRequest,
     claim_repo: ClaimRepository = Depends(get_claim_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> ClaimsIngestResponse:
-    _ = service
     if payload.doc_id:
         result = claim_repo.replace_claims_and_detect_conflicts(payload.doc_id, payload.claims)
     else:
@@ -51,9 +46,7 @@ async def lookup_claims(
     entity: str = Query(...),
     attribute: str = Query(...),
     claim_repo: ClaimRepository = Depends(get_claim_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> ClaimsLookupResponse:
-    _ = service
     return ClaimsLookupResponse(claims=claim_repo.lookup_claims(entity=entity, attribute=attribute))
 
 
@@ -65,9 +58,7 @@ async def lookup_claims(
 async def check_claim_conflicts(
     payload: ConflictCheckRequest,
     claim_repo: ClaimRepository = Depends(get_claim_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> ConflictCheckResponse:
-    _ = service
     return ConflictCheckResponse(conflicts=claim_repo.check_conflicts(payload.claims))
 
 
@@ -75,7 +66,5 @@ async def check_claim_conflicts(
 async def save_conflicts(
     payload: ConflictSaveRequest,
     claim_repo: ClaimRepository = Depends(get_claim_repository),
-    service: ServiceTokenContext = Depends(require_service_token),
 ) -> ConflictSaveResponse:
-    _ = service
     return ConflictSaveResponse(saved_count=claim_repo.save_conflicts(payload.conflicts))

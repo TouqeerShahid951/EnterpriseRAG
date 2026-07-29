@@ -16,6 +16,7 @@ EXHAUSTIVE_COVERAGE_ROLE = "exhaustive_section_representative"
 class RerankResult:
     candidates: tuple[SearchHit, ...]
     ranked_hits: tuple[SearchHit, ...]
+    ranked_candidates: tuple[SearchHit, ...] = ()
     strategy: str = POINT_RERANK_STRATEGY
     candidate_coverage_status: str = "not_applicable"
     evidence_coverage_status: str = "not_applicable"
@@ -26,6 +27,8 @@ class RerankResult:
     representative_count: int = 0
     representative_scored_count: int = 0
     candidate_wave_count: int = 0
+    input_character_count: int = 0
+    passage_max_chars: int = 0
 
 
 @dataclass(frozen=True, slots=True)

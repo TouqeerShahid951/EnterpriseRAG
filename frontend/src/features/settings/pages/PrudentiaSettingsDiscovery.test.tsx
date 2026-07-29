@@ -5,11 +5,10 @@ import {
   activeStackLabel,
   activeVisionStatus,
   discoveryHealthLabel,
-  modelOptionsFromDiscovery,
   modelPlaceholderForStatus,
-  requestFromForm,
-  rerankerOptionsFromCatalog,
-} from "./PrudentiaSettingsPage";
+} from "../models/settingsLabels";
+import { modelOptionsFromDiscovery, rerankerOptionsFromCatalog } from "../models/ragModelCatalog";
+import { requestFromForm } from "../models/ragConfigForm";
 import { ollamaForm } from "./settingsTestFixtures";
 
 describe("inference settings helpers", () => {
@@ -32,6 +31,7 @@ describe("inference settings helpers", () => {
       chat: ["answer-model"],
       embedding: ["embedding-model"],
       reasoning: ["reasoning-model"],
+      sqlGeneration: ["reasoning-model"],
       routing: ["routing-model"],
       faithfulness: ["faithfulness-model"],
       ingestion: ["ingestion-model"],
@@ -90,6 +90,7 @@ describe("inference settings helpers", () => {
     });
 
     expect(options.reasoning).toEqual(["answer-model"]);
+    expect(options.sqlGeneration).toEqual(["answer-model"]);
     expect(options.routing).toEqual(["answer-model"]);
     expect(options.faithfulness).toEqual(["answer-model"]);
     expect(options.ingestion).toEqual(["answer-model"]);

@@ -2,6 +2,14 @@ import type { HighlightRange, SourceAnchor } from "@/types/api";
 
 type SourceEvidenceFields = Pick<SourceAnchor, "excerpt" | "highlight_ranges">;
 
+export function isLiveDatabaseSource(source: Pick<SourceAnchor, "doc_id">): boolean {
+  return source.doc_id.startsWith("connector-live-scope:");
+}
+
+export function isManagedAbbreviationSource(source: Pick<SourceAnchor, "doc_id">): boolean {
+  return source.doc_id.startsWith("managed-glossary:");
+}
+
 export function normalizeHighlightRanges(excerpt: string, ranges: HighlightRange[]): HighlightRange[] {
   return ranges
     .filter((range) => range.start >= 0 && range.end > range.start && range.end <= excerpt.length)

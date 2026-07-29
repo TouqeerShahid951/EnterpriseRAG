@@ -2,6 +2,7 @@ from typing import Any
 
 from rag.shared.contracts.clearance import clearance_rank
 from rag.shared.contracts.group_paths import normalize_group_path
+from rag.shared.contracts.abbreviations import ABBREVIATION_GLOSSARY_DOC_TYPE
 
 from .context import UserContext
 
@@ -18,7 +19,8 @@ def build_abac_filter(user: UserContext, is_current_only: bool = True) -> dict[s
         return {
             "must": [
                 {"key": "doc_id", "match": {"value": "__no_visible_docs__"}},
-            ]
+            ],
+            "must_not": [_glossary_document_condition()],
         }
 
     must: list[dict[str, Any]] = [
@@ -37,4 +39,11 @@ def build_abac_filter(user: UserContext, is_current_only: bool = True) -> dict[s
 
     if is_current_only:
         must.append({"key": "is_current", "match": {"value": True}})
-    return {"must": must}
+    return {"must": must, "must_not": [_glossary_document_condition()]}
+
+
+def _glossary_document_condition() -> dict[str, Any]:
+    return {
+        "key": "doc_type",
+        "match": {"value": ABBREVIATION_GLOSSARY_DOC_TYPE},
+    }

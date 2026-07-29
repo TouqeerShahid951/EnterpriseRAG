@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { EvaluationDatasetSummary } from "@/types/api";
-import { resolveEvaluationDatasetId } from "./PrudentiaRagEvaluationsPage";
+import { resolveEvaluationDatasetId } from "../utils/evaluationPageUtils";
 
 const datasets: EvaluationDatasetSummary[] = [
   {

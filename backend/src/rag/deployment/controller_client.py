@@ -15,6 +15,7 @@ from .application import (
     DeploymentControllerError,
     deployment_service_message,
 )
+from .http_api import SERVICE_TOKEN_HEADER
 
 
 class HttpDeploymentControllerClient:
@@ -24,12 +25,10 @@ class HttpDeploymentControllerClient:
         self,
         *,
         base_url: str,
-        token_header: str,
         token: str,
         timeout_seconds: float,
     ) -> None:
         self._base_url = base_url.rstrip("/")
-        self._token_header = token_header
         self._token = token
         self._timeout_seconds = timeout_seconds
 
@@ -47,7 +46,7 @@ class HttpDeploymentControllerClient:
             method="POST",
             headers={
                 "Content-Type": "application/json",
-                self._token_header: self._token,
+                SERVICE_TOKEN_HEADER: self._token,
             },
         )
         try:
