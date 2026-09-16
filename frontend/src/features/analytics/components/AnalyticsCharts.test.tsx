@@ -11,6 +11,48 @@ it("formats chart values consistently for tooltip and accessible output", () => 
   expect(formatAnalyticsChartValue(null, "ms")).toBe("Unavailable");
 });
 
+const tooltipBucket = {
+  started_at: "2026-09-08T00:00:00Z",
+  ended_at: "2026-09-09T00:00:00Z",
+  total_executions: 5,
+  p50_latency_ms: 12000,
+  p95_latency_ms: 20333.4,
+  complete: 3,
+  partial: 2,
+  clarification: 0,
+  abstained: 0,
+  system_error: 0,
+  access_denied: 0,
+  cancelled: 0,
+  interrupted: 0,
+  artifact_submitted: 0,
+} as AnalyticsSeriesBucket;
+
+it("exposes exact line values on each bucket control", () => {
+  const markup = renderToStaticMarkup(
+    <AnalyticsLineChart
+      buckets={[tooltipBucket]}
+      metrics={[
+        { key: "total_executions", label: "Executions", tone: "accent", unit: "count" },
+        { key: "p95_latency_ms", label: "P95", tone: "warning", unit: "ms" },
+      ]}
+      onBucketSelect={() => undefined}
+    />,
+  );
+
+  expect(markup).toContain("Executions 5 count");
+  expect(markup).toContain("P95 20,333 ms");
+  expect(markup).not.toContain('aria-hidden="true"');
+});
+
+it("exposes total and category values on each stacked-bar bucket", () => {
+  const markup = renderToStaticMarkup(<AnalyticsOutcomeChart buckets={[tooltipBucket]} onBucketSelect={() => undefined} />);
+
+  expect(markup).toContain("Total 5 count");
+  expect(markup).toContain("Complete 3 count");
+  expect(markup).toContain("Partial 2 count");
+});
+
 it("keeps keyboard drill-down controls in the accessibility tree", () => {
   const buckets = [{ started_at: "2026-09-09T00:00:00Z", total_executions: 1, complete: 1,
     partial: 0, clarification: 0, abstained: 0, system_error: 0, access_denied: 0,
@@ -20,8 +62,9 @@ it("keeps keyboard drill-down controls in the accessibility tree", () => {
     <AnalyticsOutcomeChart buckets={buckets} onBucketSelect={() => {}} />,
   ]) {
     const markup = renderToStaticMarkup(chart);
-    expect(markup).toContain('role="group" aria-label="Filter executions by UTC bucket" aria-hidden="false"');
-    expect(markup).toContain('role="button" tabindex="0" aria-label="Filter executions to 2026-09-09T00:00:00Z UTC bucket"');
+    expect(markup).toContain('role="group" aria-label="Filter executions by UTC bucket"');
+    expect(markup).toContain('role="button" tabindex="0" aria-label="Sep 9, 2026 UTC.');
+    expect(markup).toContain("Filter executions to 2026-09-09T00:00:00Z UTC bucket");
   }
 });
 
