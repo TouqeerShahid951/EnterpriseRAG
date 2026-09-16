@@ -43,6 +43,7 @@ it("renders visible UTC dates, numeric ticks and units for every trend", () => {
     expect(visibleChart).toContain("Date (UTC)");
     expect(visibleChart).not.toMatch(/NaN|Infinity/);
   }
+  expect(renderToStaticMarkup(<AnalyticsOutcomeChart buckets={[bucket]} />)).toContain(">1 count<");
 
   const hourly = renderToStaticMarkup(<AnalyticsOutcomeChart buckets={[
     { ...bucket, started_at: "2026-09-08T23:00:00Z", ended_at: "2026-09-09T00:00:00Z" },

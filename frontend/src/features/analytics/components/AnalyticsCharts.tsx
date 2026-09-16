@@ -96,7 +96,7 @@ export function AnalyticsOutcomeChart({ buckets, onBucketSelect }: { buckets: An
     </svg>
     </ChartAxes>
     <div className="analytics-chart-legend">{outcomeMetrics.map(([, label, tone]) => <span key={label}><i className={`analytics-chart-swatch analytics-chart-swatch-${tone}`} />{label}</span>)}</div>
-    <table className="sr-only"><caption>Query outcomes by UTC bucket</caption><thead><tr><th scope="col">Bucket</th>{outcomeMetrics.map(([, label]) => <th scope="col" key={label}>{label}</th>)}</tr></thead><tbody>{buckets.map((bucket) => <tr key={bucket.started_at}><th scope="row">{bucket.started_at}</th>{outcomeMetrics.map(([key]) => <td key={key}>{bucket[key]}</td>)}</tr>)}</tbody></table>
+    <table className="sr-only"><caption>Query outcomes by UTC bucket</caption><thead><tr><th scope="col">Bucket</th>{outcomeMetrics.map(([, label]) => <th scope="col" key={label}>{label}</th>)}</tr></thead><tbody>{buckets.map((bucket) => <tr key={bucket.started_at}><th scope="row">{bucket.started_at}</th>{outcomeMetrics.map(([key]) => <td key={key}>{formatAnalyticsChartValue(bucket[key], "count")}</td>)}</tr>)}</tbody></table>
   </figure>;
 }
 
