@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 
 import type { AnalyticsSeriesBucket } from "@/types/api";
-import { AnalyticsLineChart, AnalyticsOutcomeChart, formatAnalyticsChartValue } from "./AnalyticsCharts";
+import { AnalyticsLineChart, AnalyticsOutcomeChart, formatAnalyticsChartValue, resolveAnalyticsChartTooltipIndex } from "./AnalyticsCharts";
 
 it("formats chart values consistently for tooltip and accessible output", () => {
   expect(formatAnalyticsChartValue(5, "count")).toBe("5 count");
@@ -17,6 +17,7 @@ const tooltipBucket = {
   total_executions: 5,
   p50_latency_ms: 12000,
   p95_latency_ms: 20333.4,
+  faithfulness_score_mean: null,
   complete: 3,
   partial: 2,
   clarification: 0,
@@ -35,6 +36,7 @@ it("exposes exact line values on each bucket control", () => {
       metrics={[
         { key: "total_executions", label: "Executions", tone: "accent", unit: "count" },
         { key: "p95_latency_ms", label: "P95", tone: "warning", unit: "ms" },
+        { key: "faithfulness_score_mean", label: "Faithfulness", tone: "secondary", unit: "0–1 score" },
       ]}
       onBucketSelect={() => undefined}
     />,
@@ -42,6 +44,7 @@ it("exposes exact line values on each bucket control", () => {
 
   expect(markup).toContain("Executions 5 count");
   expect(markup).toContain("P95 20,333 ms");
+  expect(markup).toContain("Faithfulness Unavailable");
   expect(markup).not.toContain('aria-hidden="true"');
 });
 
@@ -51,6 +54,13 @@ it("exposes total and category values on each stacked-bar bucket", () => {
   expect(markup).toContain("Total 5 count");
   expect(markup).toContain("Complete 3 count");
   expect(markup).toContain("Partial 2 count");
+  expect(markup).toContain("Clarification 0 count");
+});
+
+it("keeps the focused bucket active over the hovered bucket", () => {
+  expect(resolveAnalyticsChartTooltipIndex(null, null)).toBe(null);
+  expect(resolveAnalyticsChartTooltipIndex(2, null)).toBe(2);
+  expect(resolveAnalyticsChartTooltipIndex(2, 1)).toBe(1);
 });
 
 it("keeps keyboard drill-down controls in the accessibility tree", () => {
