@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Protocol
+from collections.abc import Callable
+from rag.shared.contracts.evidence import CitationClaim, SourceAnchor
 
 
 class ArtifactJsonGenerator(Protocol):
@@ -14,7 +16,15 @@ class ArtifactJsonGenerator(Protocol):
         prompt: str,
         model: str | None,
         system: str,
+        timeout_seconds: float | None = None,
+        max_tokens: int | None = None,
+        json_schema: dict[str, object] | None = None,
     ) -> str: ...
+
+    def validate_evidence(self, claims: list[CitationClaim], sources: list[SourceAnchor], *,
+                          question: str, answer: str, model: str, deadline: float,
+                          check_cancelled: Callable[[], None], max_calls: int,
+                          context_tokens: int, output_tokens: int) -> tuple[list[CitationClaim], int]: ...
 
 
 class ArtifactGenerationError(RuntimeError):

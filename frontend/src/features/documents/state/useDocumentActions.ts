@@ -22,6 +22,7 @@ export function useDocumentActions({ onDocumentRemoved, onSelectionCleared }: Us
   const queryClient = useQueryClient();
   const { notify } = useToast();
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
+  const [permanentDeleteDocuments, setPermanentDeleteDocuments] = useState<Document[]>([]);
 
   function markPending(document: Document) {
     setPendingIds((current) => new Set([...current, document.id]));
@@ -200,13 +201,28 @@ export function useDocumentActions({ onDocumentRemoved, onSelectionCleared }: Us
   });
 
   async function performDocumentAction(action: DocumentAction, document: Document) {
+    if (action === "permanent") {
+      setPermanentDeleteDocuments([document]);
+      return;
+    }
     if (!confirmDocumentAction(action, [document])) return;
     await runDocumentActions(action, [document]);
   }
 
   async function performBulkAction(action: DocumentAction, documents: Document[]) {
-    if (documents.length === 0 || !confirmDocumentAction(action, documents)) return;
+    if (documents.length === 0) return;
+    if (action === "permanent") {
+      setPermanentDeleteDocuments(documents);
+      return;
+    }
+    if (!confirmDocumentAction(action, documents)) return;
     await runDocumentActions(action, documents);
+  }
+
+  async function confirmPermanentDelete() {
+    if (permanentDeleteDocuments.length === 0) return;
+    await runDocumentActions("permanent", permanentDeleteDocuments);
+    setPermanentDeleteDocuments([]);
   }
 
   async function runDocumentActions(action: DocumentAction, documents: Document[]) {
@@ -224,15 +240,15 @@ export function useDocumentActions({ onDocumentRemoved, onSelectionCleared }: Us
     const failures = results.filter((result) => !result.ok);
     const successCount = results.length - failures.length;
     notify({
-      title: failures.length ? "Document action partially failed" : "Documents updated",
+      title: failures.length ? "Document action partially failed" : action === "reingest" ? "Reingestion queued" : "Documents updated",
       description: failures.length
         ? `${successCount} succeeded, ${failures.length} failed. ${failures[0]?.message ?? ""}`.trim()
-        : `${successCount} document${successCount === 1 ? "" : "s"} updated.`,
+        : action === "reingest" ? `${successCount} reingestion request${successCount === 1 ? "" : "s"} accepted. Follow Recent recovery attempts for the confirmed outcome.` : `${successCount} document${successCount === 1 ? "" : "s"} updated.`,
       tone: failures.length ? "warning" : "success",
     });
     onSelectionCleared();
     if (action === "trash" || action === "permanent") onDocumentRemoved();
-    await refreshDocuments();
+    await Promise.all([refreshDocuments(), queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] })]);
   }
 
   return {
@@ -246,6 +262,9 @@ export function useDocumentActions({ onDocumentRemoved, onSelectionCleared }: Us
       ? graphEnrichmentMutation.variables?.id ?? null
       : null,
     pendingIds,
+    permanentDeleteDocuments,
+    cancelPermanentDelete: () => setPermanentDeleteDocuments([]),
+    confirmPermanentDelete,
     performBulkAction,
     performDocumentAction,
     transferDocumentOwner: (document: Document, groupPath: string) =>

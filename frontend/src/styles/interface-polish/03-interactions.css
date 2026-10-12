@@ -53,6 +53,10 @@
   transform: translateY(1px) scale(0.985);
 }
 
+.rag-composer-positioned-action:active:not(:disabled) {
+  transform: translateY(calc(-50% + 1px)) scale(0.985);
+}
+
 :is(button, input, select, textarea):disabled,
 [aria-disabled="true"] {
   cursor: not-allowed;
@@ -60,8 +64,10 @@
 }
 
 .sv-action-primary:disabled {
-  background: color-mix(in srgb, var(--color-primary) 44%, var(--color-surface-container-high));
-  color: color-mix(in srgb, var(--color-on-primary) 66%, transparent);
+  opacity: 1;
+  border-color: var(--color-surface-border);
+  background: var(--color-surface-container-high);
+  color: var(--color-on-surface-variant);
 }
 
 .sv-action-primary:focus-visible,

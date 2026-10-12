@@ -16,9 +16,11 @@ from rag.ingestion.folders.adapters.memory import (
 )
 from rag.ingestion.folders.adapters.sources import LocalFileSystemSource
 from rag.ingestion.folders.config import FolderIngestionConfig
+from rag.ingestion.folders import dependencies as folder_dependencies
 from rag.ingestion.folders.errors import FolderIngestionRejected
 from rag.ingestion.folders.snapshot_schedules import create_snapshot_schedule
 from rag.ingestion.folders.source_schedules import create_local_folder_schedule
+from rag.ingestion.configuration import IngestConfigRecord
 
 
 PDF_CONTENT = b"%PDF-1.7\nfolder schedule service\n%%EOF"
@@ -29,6 +31,18 @@ CONFIG = FolderIngestionConfig(
     snapshot_max_bytes=5 * 1024 * 1024,
     upload_max_bytes=1024 * 1024,
 )
+
+
+def test_folder_ingestion_config_uses_workspace_file_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        folder_dependencies,
+        "effective_ingest_config",
+        lambda: IngestConfigRecord(folder_snapshot_max_files=1000),
+    )
+
+    assert folder_dependencies.get_folder_ingestion_config().snapshot_max_files == 1000
 
 
 class MemoryUpload:

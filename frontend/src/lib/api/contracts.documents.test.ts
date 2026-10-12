@@ -65,6 +65,27 @@ describe("documentsApi", () => {
     expect(response.library_documents).toBe(4);
   });
 
+  it("loads a rendered presentation slide with an encoded document id", async () => {
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await documentsApi.presentationSlideContent("doc/1", 3);
+
+    const calls = fetchMock.mock.calls as unknown as Array<[unknown]>;
+    expect(String(calls[0][0])).toContain("/api/v1/docs/doc%2F1/slides/3/content");
+  });
+
+  it("loads the available slide numbers with an encoded document id and propagates errors", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ slides: [1, 3] }))
+      .mockResolvedValueOnce(new Response("Unavailable", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await documentsApi.presentationSlides("doc/1")).toEqual({ slides: [1, 3] });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/docs/doc%2F1/slides");
+    expect(init.method ?? "GET").toBe("GET");
+    await expect(documentsApi.presentationSlides("doc/1")).rejects.toThrow();
+  });
+
   it("updates document clearance through a CSRF-protected patch", async () => {
     const fetchMock = vi.fn(async () => jsonResponse({ ...legacyDocument, clearance_level: "NATO_SECRET", ingest_status: "completed" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -178,4 +199,51 @@ describe("documentsApi reingest", () => {
     expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
     expect(init.body).toBe(JSON.stringify({ retry_of_job_id: "job-1" }));
   });
+
+  it("saves spreadsheet review with PUT and CSRF protection", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ document_id: "doc/1", job_id: "job-3", status: "queued" }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("document", { cookie: "csrf_token=test-token" });
+    const review = {
+      sheets: [{
+        source_name: "Sheet 1",
+        table_name: "Assets",
+        header_rows: [2],
+        header_candidates: [1, 2],
+        excluded: false,
+        description: "Asset register",
+        columns: [{ index: 0, name: "Asset ID", type: "text", description: "Identifier", aliases: ["equipment id"] }],
+      }],
+    };
+
+    await documentsApi.updateSpreadsheetReview("doc/1", review);
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/api/v1/docs/doc%2F1/spreadsheet-review");
+    expect(init.method).toBe("PUT");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("test-token");
+    expect(init.body).toBe(JSON.stringify(review));
+  });
+});
+
+it("carries source revision constraints through all preview requests", async () => {
+  const revision = { index_generation_id: "generation/1", content_hash: "a".repeat(64), evidence_hash: "b".repeat(64) };
+  const fetchMock = vi.fn(async () => jsonResponse({ slides: [1] }));
+  vi.stubGlobal("fetch", fetchMock);
+  try {
+    await documentsApi.source("doc/1", "chunk/2", revision);
+    await documentsApi.content("doc/1", undefined, revision);
+    await documentsApi.imageAssetContent("doc/1", "asset/3", undefined, revision);
+    await documentsApi.presentationSlideContent("doc/1", 1, undefined, revision);
+    await documentsApi.presentationSlides("doc/1", revision);
+    const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
+    for (const [url] of calls) {
+      expect(url).toContain("/docs/doc%2F1/");
+      expect(url).toContain("generation_id=generation%2F1");
+      expect(url).toContain(`content_hash=${revision.content_hash}`);
+    }
+    expect(calls[0][0]).toContain(`/sources/chunk%2F2?`);
+    expect(calls[0][0]).toContain(`evidence_hash=${revision.evidence_hash}`);
+    expect(documentsApi.contentUrl("doc/1", revision)).toContain("generation_id=generation%2F1");
+  } finally { vi.unstubAllGlobals(); }
 });

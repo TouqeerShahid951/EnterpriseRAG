@@ -35,6 +35,20 @@ def test_ingest_payload_round_trips_every_supported_wire_field() -> None:
     assert serialized["acl_group_paths"] is not original.acl_group_paths
 
 
+def test_ingest_payload_preserves_disabled_slide_visual_analysis() -> None:
+    payload = IngestJobPayload(
+        job_id="job-1",
+        doc_id="doc-1",
+        file_path="memory://slides.pptx",
+        group_path="/legal",
+        effective_date=None,
+        supersedes=[],
+        analyze_slide_visuals=False,
+    )
+
+    assert IngestJobPayload.from_dict(payload.to_dict()).analyze_slide_visuals is False
+
+
 @pytest.mark.parametrize("field", ["job_id", "doc_id", "file_path", "group_path"])
 @pytest.mark.parametrize("value", [None, "", "   "])
 def test_ingest_payload_rejects_blank_required_fields(field: str, value: object) -> None:

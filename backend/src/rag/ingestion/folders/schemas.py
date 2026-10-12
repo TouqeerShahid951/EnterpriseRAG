@@ -59,6 +59,7 @@ class FolderScheduleBase(ContractModel):
     timezone: str = "Asia/Karachi"
     scheduled_at: datetime | None = None
     recurrence: RecurrenceWindow | None = None
+    analyze_slide_visuals: bool = True
 
 
 class MinioPrefixScheduleCreateRequest(FolderScheduleBase):

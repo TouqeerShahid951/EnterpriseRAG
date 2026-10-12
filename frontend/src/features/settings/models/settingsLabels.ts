@@ -88,7 +88,7 @@ export function roleAssignmentSummary(form: RagConfigFormState) {
 }
 
 export function behaviorSummaryFromForm(form: RagConfigFormState) {
-  return `Planner ${form.query_planner_enabled ? "on" : "off"}, gate ${form.evidence_gate_policy}, checker ${form.faithfulness_policy}`;
+  return `Context ${form.context_resolver_enabled ? "on" : "off"}, planner ${form.query_planner_enabled ? "on" : "off"}, gate ${form.evidence_gate_policy}, checker ${form.faithfulness_policy}`;
 }
 
 export function discoveryHealthLabel(

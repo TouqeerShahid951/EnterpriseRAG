@@ -11,8 +11,8 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { documentsApi } from "@/lib/api/contracts";
 import { clearanceLevelLabel, isGlobalAdmin } from "@/lib/auth/authz";
+import { documentViewerHref } from "@/features/source-viewer/utils/sourceViewer";
 import {
   DocumentSkeleton,
   DocumentStatePill,
@@ -294,7 +294,7 @@ function DocumentRowActions({ cancellingGraph = false, document, enriching = fal
     <div className="knowledge-row-actions">
       <RowActionTooltip label="View">
         {(tooltipId) => (
-          <a href={documentsApi.contentUrl(document.id)} target="_blank" rel="noreferrer" className="knowledge-icon-action" aria-describedby={tooltipId} aria-label={`View ${document.title}`}>
+          <a href={documentViewerHref(document.id)} target="_blank" rel="noreferrer" className="knowledge-icon-action" aria-describedby={tooltipId} aria-label={`View ${document.title}`}>
             <Eye aria-hidden="true" size={15} />
           </a>
         )}

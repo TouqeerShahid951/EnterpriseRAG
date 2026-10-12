@@ -108,6 +108,7 @@ def evidence_record(
         page_start=1,
         page_end=1,
         text=text,
+        provenance_kind="native",
     )
 
 

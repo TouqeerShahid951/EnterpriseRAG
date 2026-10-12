@@ -9,9 +9,13 @@ export function createAssistantTurn(
   groupPath: string | null = null,
   sourceMode: QuerySourceMode = "auto",
   querySourceId: string | null = null,
+  replyToTurnId: string | null = null,
 ): AssistantTurn {
+  const id = createId("assistant");
   return {
-    id: createId("assistant"),
+    id,
+    clientRequestId: id,
+    replyToTurnId,
     role: "assistant",
     status: "pending",
     question,
@@ -19,7 +23,7 @@ export function createAssistantTurn(
     documentIds,
     sourceMode,
     querySourceId,
-    progress: initialProgressForQuestion(question, "Opening retrieval graph", documentIds, groupPath),
+    progress: initialProgressForQuestion(question, "Opening retrieval graph", documentIds, groupPath, sourceMode),
     createdAt: new Date().toISOString(),
   };
 }
@@ -29,9 +33,10 @@ export type SourceSubmitOverride = {
   querySourceId?: string | null;
   allowSourceExpansion?: boolean;
   documentIds?: string[];
+  replyToTurnId?: string | null;
 };
 
-export function initialProgressForQuestion(question: string, graphLabel = "Opening retrieval graph", documentIds: string[] = [], groupPath: string | null = null): QueryProgressItem[] {
+export function initialProgressForQuestion(question: string, graphLabel = "Opening retrieval graph", documentIds: string[] = [], groupPath: string | null = null, sourceMode?: QuerySourceMode): QueryProgressItem[] {
   return [
     {
       id: createId("progress"),
@@ -41,8 +46,10 @@ export function initialProgressForQuestion(question: string, graphLabel = "Openi
     },
     {
       id: createId("progress"),
-      label: graphLabel,
-      detail: documentIds.length ? "Preparing tagged document search" : `Preparing ${groupPath ?? "Knowledge Space"} search`,
+      label: sourceMode === "db_only" ? "Preparing live database query" : graphLabel,
+      detail: sourceMode === "db_only"
+        ? "Generating and validating read-only SQL"
+        : documentIds.length ? "Preparing tagged document search" : `Preparing ${groupPath ?? "Knowledge Space"} search`,
       kind: "node",
     },
   ];

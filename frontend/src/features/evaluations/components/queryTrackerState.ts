@@ -1,4 +1,4 @@
-import type { QueryIntent, RagSseEvent, RAGResponse, SourceAnchor } from "@/types/api";
+import type { QueryIntent, RagSseEvent, RAGResponse, RetrievalStage, SourceAnchor } from "@/types/api";
 import type { QueryNodeTiming } from "@/types/query";
 import { formatIntent } from "@/lib/utils/format";
 
@@ -19,11 +19,14 @@ export interface QueryTrackerTimelineItem {
 
 export interface QueryTrackerState {
   answerText: string;
+  clientRequestId: string | null;
   completedAt: string | null;
   errorMessage: string | null;
   events: RagSseEvent[];
   finalResponse: RAGResponse | null;
   intent: QueryIntent | null;
+  queryText: string;
+  retrievalStages: RetrievalStage[];
   sessionId: string | null;
   sources: SourceAnchor[];
   startedAt: string | null;
@@ -33,14 +36,21 @@ export interface QueryTrackerState {
   warnings: string[];
 }
 
-export function createQueryTrackerState(startedAt: string | null = null): QueryTrackerState {
+export function createQueryTrackerState(
+  startedAt: string | null = null,
+  clientRequestId: string | null = null,
+  queryText = "",
+): QueryTrackerState {
   return {
     answerText: "",
+    clientRequestId,
     completedAt: null,
     errorMessage: null,
     events: [],
     finalResponse: null,
     intent: null,
+    queryText,
+    retrievalStages: [],
     sessionId: null,
     sources: [],
     startedAt,
@@ -97,6 +107,10 @@ export function reduceQueryTrackerEvent(
 
   if (event.event === "token") {
     return { ...base, answerText: `${state.answerText}${event.data.text}` };
+  }
+
+  if (event.event === "retrieval_stage") {
+    return { ...base, retrievalStages: [...state.retrievalStages, event.data] };
   }
 
   if (event.event === "source") {

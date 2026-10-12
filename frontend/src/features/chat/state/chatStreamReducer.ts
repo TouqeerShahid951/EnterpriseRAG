@@ -6,8 +6,11 @@ import { createId } from "@/lib/utils/ids";
 export function applyStreamEvent(turns: ChatTurn[], assistantTurnId: string, event: RagSseEvent): ChatTurn[] {
   return turns.map((turn) => {
     if (turn.id !== assistantTurnId || turn.role !== "assistant") return turn;
-    if (event.event === "token") return { ...turn, streamText: appendText(turn.streamText, event.data.text) };
-    if (event.event === "done") return { ...turn, status: "complete", response: event.data, streamText: event.data.answer };
+    if (turn.status === "cancelled" || turn.status === "error") return turn;
+    if (event.event === "token") return turn.status === "pending" ? { ...turn, streamText: appendText(turn.streamText, event.data.text) } : turn;
+    if (event.event === "done") {
+      return { ...turn, status: "complete", response: event.data, streamText: event.data.answer };
+    }
     if (event.event === "verified") {
       return {
         ...turn,
@@ -17,7 +20,7 @@ export function applyStreamEvent(turns: ChatTurn[], assistantTurnId: string, eve
         progress: [...turn.progress, verifiedProgress(event.data.faithfulness_status)],
       };
     }
-    const progress = progressFromEvent(event);
+    const progress = progressFromEvent(event, turn.sourceMode);
     return progress ? { ...turn, progress: [...turn.progress, progress] } : turn;
   });
 }
@@ -31,9 +34,9 @@ function verifiedProgress(status: RAGResponse["faithfulness_status"]): QueryProg
   };
 }
 
-function progressFromEvent(event: RagSseEvent): QueryProgressItem | null {
+function progressFromEvent(event: RagSseEvent, sourceMode?: Extract<ChatTurn, { role: "assistant" }>["sourceMode"]): QueryProgressItem | null {
   if (event.event === "trace" && event.data.node) {
-    const nodeProgress = progressForNode(event.data.node);
+    const nodeProgress = progressForNode(event.data.node, sourceMode);
     return {
       id: createId("progress"),
       label: nodeProgress.label,
@@ -94,7 +97,13 @@ function executionDetail(mode?: string, detail?: string | null): string | null {
   return null;
 }
 
-function progressForNode(node: string): Pick<QueryProgressItem, "label" | "detail"> {
+function progressForNode(node: string, sourceMode?: Extract<ChatTurn, { role: "assistant" }>["sourceMode"]): Pick<QueryProgressItem, "label" | "detail"> {
+  if (node === "abac_retriever" && sourceMode === "db_only") {
+    return { label: "Preparing live database query", detail: "Generating and validating read-only SQL" };
+  }
+  if (node === "abac_retriever" && sourceMode === "hybrid") {
+    return { label: "Retrieving permitted sources", detail: "Searching documents and preparing live database query" };
+  }
   const labels: Record<string, Pick<QueryProgressItem, "label" | "detail">> = {
     session_memory: { label: "Checking chat context", detail: "Looking for prior session hints" },
     source_resolver: { label: "Resolving source mode", detail: "Applying composer and source hints" },
@@ -104,6 +113,7 @@ function progressForNode(node: string): Pick<QueryProgressItem, "label" | "detai
     reranker: { label: "Ranking candidate passages", detail: "Prioritizing likely evidence" },
     verifier: { label: "Checking evidence quality", detail: "Deciding whether to retry retrieval" },
     temporal_resolver: { label: "Resolving document timeline", detail: "Preferring current effective sources" },
+    summary_preparer: { label: "Building complete summary", detail: "Processing the document in ordered sections" },
     contradiction_detector: { label: "Checking for conflicts", detail: "Comparing claims across sources" },
     evidence_builder: { label: "Assembling citations", detail: "Preparing source anchors" },
     synthesizer: { label: "Drafting cited answer", detail: "Writing from retrieved evidence" },

@@ -14,7 +14,13 @@ from .models import (
 )
 
 
-def review_item_response(item: ReviewItemRecord) -> ReviewItem:
+def review_item_response(
+    item: ReviewItemRecord,
+    *,
+    image_asset_id: str | None = None,
+    image_source_kind: str | None = None,
+    image_description: str | None = None,
+) -> ReviewItem:
     return ReviewItem(
         id=item.id,
         batch_id=item.batch_id,
@@ -25,6 +31,9 @@ def review_item_response(item: ReviewItemRecord) -> ReviewItem:
         page_start=item.page_start,
         page_end=item.page_end,
         bbox=item.bbox,
+        image_asset_id=image_asset_id,
+        image_source_kind=image_source_kind,
+        image_description=image_description,
         quality_flags=list(item.quality_flags),
         confidence=item.confidence,
         partial_text=item.partial_text,

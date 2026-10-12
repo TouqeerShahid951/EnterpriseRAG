@@ -5,7 +5,27 @@
   }
 
   .review-layout {
-    grid-template-columns: minmax(20rem, 22rem) minmax(32rem, 1fr) minmax(22rem, 26rem);
+    grid-template-columns: minmax(16rem, 19rem) minmax(34rem, 1fr) minmax(20rem, 24rem);
+  }
+
+  .review-workspace .review-ocr-workbench .review-layout {
+    grid-template-columns: minmax(16rem, 19rem) minmax(34rem, 1fr);
+    grid-template-rows: minmax(28rem, auto) minmax(24rem, auto);
+  }
+
+  .review-ocr-workbench .review-queue-panel {
+    grid-column: 1;
+    grid-row: 1 / -1;
+  }
+
+  .review-ocr-workbench .review-preview-panel {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .review-ocr-workbench .review-correction-panel {
+    grid-column: 2;
+    grid-row: 2;
   }
 
   .knowledge-document-workspace-with-inspector,
@@ -24,7 +44,7 @@
   }
 
   .review-layout {
-    grid-template-columns: minmax(22rem, 26rem) minmax(40rem, 1fr) minmax(26rem, 32rem);
+    grid-template-columns: minmax(18rem, 22rem) minmax(40rem, 1fr) minmax(24rem, 30rem);
   }
 
   .knowledge-document-workspace-with-inspector,

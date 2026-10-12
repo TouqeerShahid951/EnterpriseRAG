@@ -88,6 +88,7 @@ class InMemoryIdentityRepository:
         self,
         user_id: str,
         *,
+        email: str | None = None,
         name: str | None = None,
         group_paths: list[str] | None = None,
         is_active: bool | None = None,
@@ -97,6 +98,10 @@ class InMemoryIdentityRepository:
         user = self._users.get(user_id)
         if user is None:
             return None
+        next_email = user.email if email is None else email.strip().lower()
+        existing = self.get_user_by_email(next_email)
+        if existing is not None and existing.id != user_id:
+            raise ValueError("email already exists")
         next_groups = user.group_paths if group_paths is None else tuple(self._normalize_existing_groups(group_paths))
         next_account_type = user.account_type if account_type is None else normalize_account_type(account_type, next_groups)
         next_clearance = (
@@ -109,7 +114,7 @@ class InMemoryIdentityRepository:
         ) or next_account_type != user.account_type or next_clearance != user.clearance_level
         updated = UserRecord(
             id=user.id,
-            email=user.email,
+            email=next_email,
             name=user.name if name is None else name.strip(),
             password_hash=user.password_hash,
             is_active=user.is_active if is_active is None else is_active,
@@ -125,6 +130,31 @@ class InMemoryIdentityRepository:
 
     def delete_user(self, user_id: str) -> bool:
         return self._users.pop(user_id, None) is not None
+
+    def set_user_email(self, user_id: str, email: str) -> UserRecord | None:
+        normalized = email.strip().lower()
+        with self._lock:
+            user = self._users.get(user_id)
+            if user is None:
+                return None
+            existing = self.get_user_by_email(normalized)
+            if existing is not None and existing.id != user_id:
+                raise ValueError("email already exists")
+            updated = UserRecord(
+                id=user.id,
+                email=normalized,
+                name=user.name,
+                password_hash=user.password_hash,
+                is_active=user.is_active,
+                account_type=user.account_type,
+                clearance_level=user.clearance_level,
+                must_change_password=user.must_change_password,
+                permission_version=user.permission_version,
+                group_paths=user.group_paths,
+                last_login_at=user.last_login_at,
+            )
+            self._users[user_id] = updated
+            return updated
 
     def set_user_password(self, user_id: str, password_hash: str, *, must_change_password: bool = False) -> UserRecord | None:
         user = self._users.get(user_id)

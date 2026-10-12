@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from rag.auth.document_access import can_manage_document_ingestion, can_read_document
@@ -73,6 +73,7 @@ class DocumentReingestionService:
         *,
         actor: UserRecord,
         retry_of_job_id: str | None,
+        spreadsheet_review: dict[str, Any] | None = None,
     ) -> DocumentReingestionResult:
         document = self._managed_document(document_id, actor)
         retry_id = self._validated_retry_job(document, retry_of_job_id)
@@ -88,12 +89,28 @@ class DocumentReingestionService:
                 message="Document already has an active ingestion job.",
             )
         stored = self._read_source(document)
+        selected_review = spreadsheet_review or _spreadsheet_review(document)
+        if spreadsheet_review is not None:
+            _require_spreadsheet_source(stored)
+            updated = self._document_repo.update_document_metadata_flag(
+                document.id,
+                key="spreadsheet_review",
+                value=spreadsheet_review,
+            )
+            if updated is None:
+                raise DocumentReingestionRejected(
+                    category="not_found",
+                    code="document_not_found",
+                    message="Document was not found.",
+                )
+            document = updated
         job_id = str(uuid4())
         message = _ingest_message_for_document(
             document,
             job_id,
             stored,
             self._document_repo,
+            spreadsheet_review=selected_review,
         )
         mutation = self._delivery.create_queued_job(
             message,
@@ -117,6 +134,22 @@ class DocumentReingestionService:
             job_id=job.id,
         )
 
+    def get_spreadsheet_review(
+        self,
+        document_id: str,
+        *,
+        actor: UserRecord,
+    ) -> dict[str, Any]:
+        document = self._visible_document(document_id, actor)
+        review = _spreadsheet_review(document)
+        if review is None:
+            raise DocumentReingestionRejected(
+                category="conflict",
+                code="spreadsheet_review_unavailable",
+                message="Reingest this spreadsheet once to prepare its table review.",
+            )
+        return review
+
     def _dispatch_best_effort(self, job_id: str) -> None:
         try:
             dispatch_pending_deliveries(self._delivery, self._queue, limit=1)
@@ -131,13 +164,7 @@ class DocumentReingestionService:
         document_id: str,
         actor: UserRecord,
     ) -> DocumentRecord:
-        document = self._document_repo.get_document(document_id)
-        if document is None or not can_read_document(actor, document):
-            raise DocumentReingestionRejected(
-                category="not_found",
-                code="document_not_found",
-                message="Document was not found.",
-            )
+        document = self._visible_document(document_id, actor)
         if not can_manage_document_ingestion(actor, document):
             raise DocumentReingestionRejected(
                 category="forbidden",
@@ -146,6 +173,20 @@ class DocumentReingestionService:
                     "Only the uploader or a scoped admin can manage this "
                     "ingestion job."
                 ),
+            )
+        return document
+
+    def _visible_document(
+        self,
+        document_id: str,
+        actor: UserRecord,
+    ) -> DocumentRecord:
+        document = self._document_repo.get_document(document_id)
+        if document is None or not can_read_document(actor, document):
+            raise DocumentReingestionRejected(
+                category="not_found",
+                code="document_not_found",
+                message="Document was not found.",
             )
         return document
 
@@ -226,6 +267,8 @@ def _ingest_message_for_document(
     job_id: str,
     stored: object,
     repo: DocumentRepository,
+    *,
+    spreadsheet_review: dict[str, Any] | None = None,
 ) -> IngestJobPayload:
     filename = str(
         getattr(stored, "filename", "") or _filename_for_document(document)
@@ -257,7 +300,30 @@ def _ingest_message_for_document(
         ),
         description=document.description,
         content_type=str(content_type) if content_type else None,
+        spreadsheet_review=spreadsheet_review,
     )
+
+
+def _spreadsheet_review(document: DocumentRecord) -> dict[str, Any] | None:
+    review = document.metadata_flags.get("spreadsheet_review")
+    return dict(review) if isinstance(review, dict) else None
+
+
+def _require_spreadsheet_source(stored: object) -> None:
+    filename = str(getattr(stored, "filename", "") or "").lower()
+    content_type = str(getattr(stored, "content_type", "") or "").split(";", 1)[0].lower()
+    if not (
+        filename.endswith((".csv", ".xlsx"))
+        or content_type in {
+            "text/csv",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }
+    ):
+        raise DocumentReingestionRejected(
+            category="conflict",
+            code="spreadsheet_review_unsupported",
+            message="Table review is available only for CSV and XLSX documents.",
+        )
 
 
 def _filename_for_document(document: DocumentRecord) -> str:
@@ -277,6 +343,12 @@ def _content_type_for_filename(filename: str) -> str:
             "application/vnd.openxmlformats-officedocument."
             "wordprocessingml.document"
         )
+    if lowered.endswith(".pptx"):
+        return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    if lowered.endswith(".csv"):
+        return "text/csv"
+    if lowered.endswith(".xlsx"):
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     if lowered.endswith((".jpg", ".jpeg")):
         return "image/jpeg"
     if lowered.endswith(".png"):

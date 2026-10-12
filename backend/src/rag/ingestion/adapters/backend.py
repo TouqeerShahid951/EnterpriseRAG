@@ -8,6 +8,17 @@ from threading import Lock
 from typing import Any
 
 from .http import ServiceRequestError, request_json
+from ..checkpoints.models import CheckpointDescriptor
+
+
+def _abbreviation_entry_payload(
+    entry: tuple[str, str] | tuple[str, str, int | None],
+) -> dict[str, object]:
+    abbreviation, expansion, *source_page = entry
+    payload: dict[str, object] = {"abbreviation": abbreviation, "expansion": expansion}
+    if source_page:
+        payload["source_page"] = source_page[0]
+    return payload
 
 
 @dataclass(frozen=True)
@@ -88,6 +99,7 @@ class IngestJobSnapshot:
     job_id: str
     doc_id: str
     status: str
+    retry_of_job_id: str | None = None
 
 
 class BackendInternalClient:
@@ -249,6 +261,7 @@ class BackendInternalClient:
             job_id=str(payload["job_id"]),
             doc_id=str(payload["doc_id"]),
             status=str(payload["status"]),
+            retry_of_job_id=str(payload["retry_of_job_id"]) if payload.get("retry_of_job_id") else None,
         )
 
     def heartbeat(self, *, job_id: str) -> None:
@@ -300,6 +313,85 @@ class BackendInternalClient:
             if exc.status_code == 409:
                 self._mark_lease_lost(job_id)
             raise
+
+    def commit_checkpoint(self, descriptor: CheckpointDescriptor) -> CheckpointDescriptor:
+        try:
+            payload = request_json(
+                self.base_url,
+                f"/internal/ingest/jobs/{descriptor.job_id}/checkpoints",
+                service="backend",
+                method="POST",
+                payload={
+                    key: value
+                    for key, value in descriptor.__dict__.items()
+                    if key != "job_id"
+                }
+                | {"run_token": self._require_run_token(descriptor.job_id)},
+                headers={"X-Service-Token": self.service_token},
+                timeout_seconds=self.timeout_seconds,
+            )
+        except ServiceRequestError as exc:
+            if _is_lease_lost_error(exc):
+                self._mark_lease_lost(descriptor.job_id)
+            raise
+        return CheckpointDescriptor(**{key: payload[key] for key in CheckpointDescriptor.__dataclass_fields__})
+
+    def invalidate_checkpoint(self, descriptor: CheckpointDescriptor) -> bool:
+        try:
+            payload = request_json(
+                self.base_url,
+                f"/internal/ingest/jobs/{descriptor.job_id}/checkpoints",
+                service="backend", method="DELETE",
+                payload={key: value for key, value in descriptor.__dict__.items() if key != "job_id"}
+                | {"run_token": self._require_run_token(descriptor.job_id)},
+                headers={"X-Service-Token": self.service_token},
+                timeout_seconds=self.timeout_seconds,
+            )
+        except ServiceRequestError as exc:
+            if _is_lease_lost_error(exc):
+                self._mark_lease_lost(descriptor.job_id)
+            raise
+        if not isinstance(payload.get("invalidated"), bool):
+            raise ServiceRequestError("backend", "Invalid checkpoint invalidation response", 502)
+        return payload["invalidated"]
+
+    def get_checkpoint(self, *, job_id: str, stage_key: str) -> CheckpointDescriptor | None:
+        from urllib.parse import quote
+
+        try:
+            payload = request_json(
+                self.base_url,
+                f"/internal/ingest/jobs/{job_id}/checkpoints/{quote(stage_key, safe='')}",
+                service="backend",
+                headers={"X-Service-Token": self.service_token},
+                timeout_seconds=self.timeout_seconds,
+            )
+        except ServiceRequestError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        if not payload:
+            return None
+        return CheckpointDescriptor(**{key: payload[key] for key in CheckpointDescriptor.__dataclass_fields__})
+
+    def list_checkpoints(self, *, job_id: str, stage_prefix: str) -> tuple[CheckpointDescriptor, ...]:
+        from urllib.parse import quote
+
+        payload = request_json(
+            self.base_url,
+            f"/internal/ingest/jobs/{job_id}/checkpoints?stage_prefix={quote(stage_prefix, safe='')}",
+            service="backend",
+            headers={"X-Service-Token": self.service_token},
+            timeout_seconds=self.timeout_seconds,
+        )
+        values = payload.get("checkpoints") if isinstance(payload, dict) else None
+        if not isinstance(values, list):
+            return ()
+        return tuple(
+            CheckpointDescriptor(**{key: item[key] for key in CheckpointDescriptor.__dataclass_fields__})
+            for item in values
+            if isinstance(item, dict)
+        )
 
     def commit_supersession(self, *, new_doc_id: str, supersedes: list[str]) -> None:
         request_json(
@@ -365,7 +457,7 @@ class BackendInternalClient:
         self,
         *,
         document_id: str,
-        entries: list[tuple[str, str]],
+        entries: list[tuple[str, str] | tuple[str, str, int | None]],
     ) -> None:
         request_json(
             self.base_url,
@@ -374,10 +466,7 @@ class BackendInternalClient:
             method="POST",
             payload={
                 "document_id": document_id,
-                "entries": [
-                    {"abbreviation": abbreviation, "expansion": expansion}
-                    for abbreviation, expansion in entries
-                ],
+                "entries": [_abbreviation_entry_payload(entry) for entry in entries],
             },
             headers={"X-Service-Token": self.service_token},
             timeout_seconds=self.timeout_seconds,

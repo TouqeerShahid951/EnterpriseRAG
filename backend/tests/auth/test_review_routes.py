@@ -84,6 +84,65 @@ def test_review_queue_filters_to_reviewer_document_scope() -> None:
     assert [item.doc_id for item in response.items] == [own_doc.id]
 
 
+def test_review_queue_includes_pptx_slide_preview_asset() -> None:
+    repo = InMemoryDocumentRepository()
+    reviewer = _user("contributor", group_paths=("/ops",))
+    document = _document(repo, user=reviewer, group_path="/ops", title="Briefing.pptx")
+    _review_item(repo, document, page=1)
+    assets = repo.replace_document_image_assets(
+        doc_id=document.id,
+        job_id="job-pptx",
+        assets=[
+            {
+                "source_kind": "pptx_slide",
+                "page": 1,
+                "object_path": "memory://slide-1.png",
+                "content_hash": "slide-hash",
+                "content_type": "image/png",
+            }
+        ],
+    )
+
+    response = asyncio.run(review_routes.list_review_queue(user=reviewer, document_repo=repo, review_repo=repo))
+
+    assert response.items[0].image_asset_id == assets[0].id
+    assert response.items[0].image_source_kind == "pptx_slide"
+
+
+def test_review_queue_includes_docx_embedded_image_asset() -> None:
+    repo = InMemoryDocumentRepository()
+    reviewer = _user("contributor", group_paths=("/ops",))
+    document = _document(repo, user=reviewer, group_path="/ops", title="EMDYN.docx")
+    assets = repo.replace_document_image_assets(
+        doc_id=document.id,
+        job_id="job-docx",
+        assets=[
+            {
+                "source_kind": "docx_media",
+                "object_path": "memory://emdyn.png",
+                "content_hash": "emdyn-hash",
+                "content_type": "image/png",
+            }
+        ],
+    )
+    _review_item(
+        repo,
+        document,
+        parsed_items=[
+            {
+                "index": 0,
+                "image_asset_id": assets[0].id,
+                "image_source_kind": "docx_media",
+            }
+        ],
+    )
+
+    response = asyncio.run(review_routes.list_review_queue(user=reviewer, document_repo=repo, review_repo=repo))
+
+    assert response.items[0].image_asset_id == assets[0].id
+    assert response.items[0].image_source_kind == "docx_media"
+
+
 def test_contributor_can_approve_peer_document_in_same_space() -> None:
     repo = InMemoryDocumentRepository()
     uploader = _user("contributor", group_paths=("/ops",))
@@ -98,6 +157,49 @@ def test_contributor_can_approve_peer_document_in_same_space() -> None:
     assert response.batch_complete is True
     assert len(queue.enqueued) == 1
     assert repo.list_review_items(status="pending") == []
+
+
+def test_consolidated_image_review_completes_once_and_resumes_with_corrected_evidence() -> None:
+    from rag.ingestion.chunking.citation_targets import citation_targets
+    from rag.ingestion.parsers.models import ParsedPdfItem, parsed_item_from_dict, parsed_item_to_dict
+    from rag.ingestion.pipeline.steps import _low_confidence_ocr_items
+    from rag.internal.review_batch_routes import get_review_batch_parsed_items
+
+    repo = InMemoryDocumentRepository()
+    reviewer = _user("contributor", group_paths=("/ops",))
+    document = _document(repo, user=reviewer, group_path="/ops")
+    job = repo.create_ingest_job(doc_id=document.id, status="human_review", progress_pct=35, origin="upload")
+    parsed = ParsedPdfItem(
+        index=0, text="Visible image text:\nUncertain text\n\nImage description:\nA form.",
+        item_type="image_text", page_start=1, page_end=1, bbox=(0, 0, 100, 100),
+        image_asset_id="image-1", image_source_kind="pdf_image",
+        quality_flags=["source:ocr", "ocr_image_consolidated"], confidence=0.6,
+        extraction_method="vision_ocr_description", quote_texts=["Uncertain text"],
+    )
+    batch = repo.create_review_batch(
+        job_id=job.id, doc_id=document.id, parsed_items=[parsed_item_to_dict(parsed)],
+        resume_payload={"job_id": job.id, "doc_id": document.id, "file_path": "memory://doc.pdf", "group_path": "/ops"},
+        review_items=_low_confidence_ocr_items([parsed], 0.9),
+    )
+    response = asyncio.run(review_routes.list_review_queue(user=reviewer, document_repo=repo, review_repo=repo))
+    assert response.total == 1
+    assert response.items[0].partial_text == "Uncertain text"
+    assert response.items[0].image_description == "A form."
+    with pytest.raises(HTTPException) as pending:
+        asyncio.run(get_review_batch_parsed_items(batch.id, review_repo=repo))
+    assert pending.value.status_code == 409
+    queue = FakeQueue()
+    for _ in range(2):
+        assert _approve(repo, response.items[0].id, reviewer=reviewer, queue=queue).batch_complete
+    assert len(queue.enqueued) == 1
+    assert repo.list_review_items(status="pending") == []
+    resumed = asyncio.run(get_review_batch_parsed_items(batch.id, review_repo=repo))
+    assert len(resumed.parsed_items) == 1
+    approved = parsed_item_from_dict(resumed.parsed_items[0])
+    assert approved.quote_texts == ["Corrected text"]
+    assert "Image description:\nA form." in approved.text
+    assert approved.image_asset_id == "image-1"
+    assert [target["exact_text"] for target in citation_targets([approved]) if target["provenance_kind"] == "ocr"] == ["Corrected text"]
 
 
 def test_review_approval_rejects_out_of_scope_document_before_mutation() -> None:
@@ -338,14 +440,20 @@ class _MissingJobRepository:
         return None
 
 
-def _review_item(repo: InMemoryDocumentRepository, document: DocumentRecord) -> ReviewItemRecord:
+def _review_item(
+    repo: InMemoryDocumentRepository,
+    document: DocumentRecord,
+    *,
+    page: int | None = None,
+    parsed_items: list[dict[str, object]] | None = None,
+) -> ReviewItemRecord:
     job = repo.create_ingest_job(doc_id=document.id, status="human_review", progress_pct=35, origin="upload")
     batch = repo.create_review_batch(
         job_id=job.id,
         doc_id=document.id,
-        parsed_items=[],
+        parsed_items=parsed_items or [],
         resume_payload={"job_id": job.id, "doc_id": document.id, "file_path": "memory://doc", "group_path": document.group_path},
-        review_items=[{"item_index": 0, "partial_text": "uncertain", "confidence": 0.4}],
+        review_items=[{"item_index": 0, "page_start": page, "partial_text": "uncertain", "confidence": 0.4}],
     )
     return repo.list_review_items_for_batch(batch.id)[0]
 
@@ -369,9 +477,9 @@ def _image_review_batch(repo: InMemoryDocumentRepository, document: DocumentReco
     )
 
 
-def _document(repo: InMemoryDocumentRepository, *, user: UserRecord, group_path: str) -> DocumentRecord:
+def _document(repo: InMemoryDocumentRepository, *, user: UserRecord, group_path: str, title: str = "Document.pdf") -> DocumentRecord:
     return repo.create_document(
-        title="Document.pdf",
+        title=title,
         source_id=f"upload:{uuid4()}",
         group_path=group_path,
         clearance_level="NATO_RESTRICTED",

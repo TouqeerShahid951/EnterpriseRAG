@@ -54,6 +54,7 @@ async def create_snapshot_schedule(
     timezone_name: str,
     scheduled_at: datetime | None,
     recurrence: dict[str, object],
+    analyze_slide_visuals: bool = True,
     user: UserRecord,
     identity_repo: IdentityRepository,
     document_repo: DocumentRepository,
@@ -117,7 +118,7 @@ async def create_snapshot_schedule(
                     "filename": filename,
                     "status": "skipped",
                     "skip_code": "unsupported_file_type",
-                    "skip_message": "Only PDF, DOCX, JPG, PNG, and JSON files are accepted.",
+                    "skip_message": "Only PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, and JSON files are accepted.",
                 }
             )
             continue
@@ -189,7 +190,7 @@ async def create_snapshot_schedule(
         raise FolderIngestionRejected(
             category="invalid",
             code="empty_folder",
-            message="Selected folder does not contain any accepted PDF, DOCX, JPG, PNG, or JSON files.",
+            message="Selected folder does not contain any accepted PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, or JSON files.",
         )
 
     schedule = schedule_repo.create_schedule(
@@ -206,7 +207,10 @@ async def create_snapshot_schedule(
         timezone=normalized_timezone,
         scheduled_at=next_run_at if schedule_type == "one_time" else None,
         recurrence=recurrence,
-        source_config={"mode": "browser_snapshot"},
+        source_config={
+            "mode": "browser_snapshot",
+            **({} if analyze_slide_visuals else {"analyze_slide_visuals": False}),
+        },
         created_by=user.id,
         next_run_at=next_run_at,
     )

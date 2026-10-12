@@ -90,6 +90,7 @@ class InMemoryChatHistoryRepository:
         assistant_turn: dict[str, Any],
         client_request_id: str | None = None,
         request_fingerprint: str | None = None,
+        continue_source_clarification: bool = False,
     ) -> ChatSessionRecord:
         key = (user_id, session_id, permission_version)
         request_key = (
@@ -100,17 +101,32 @@ class InMemoryChatHistoryRepository:
         now = datetime.now(UTC)
         current = self._sessions.get(key)
         if request_key is not None and request_key in self._request_assistant_indexes:
-            if self._request_fingerprints[request_key] != request_fingerprint:
+            assistant_index = self._request_assistant_indexes[request_key]
+            if current is None:
+                raise RuntimeError("saved chat request referenced a missing session")
+            if continue_source_clarification and not _has_source_clarification(
+                current.turns[assistant_index]
+            ):
+                raise ChatHistoryRequestConflict(
+                    "client request does not reference a source clarification"
+                )
+            if (
+                not continue_source_clarification
+                and self._request_fingerprints[request_key] != request_fingerprint
+            ):
                 raise ChatHistoryRequestConflict(
                     "client_request_id was already used for a different query request"
                 )
-            if current is None:
-                raise RuntimeError("saved chat request referenced a missing session")
             turns = list(current.turns)
-            turns[self._request_assistant_indexes[request_key]] = dict(assistant_turn)
+            turns[assistant_index] = dict(assistant_turn)
             session = replace(current, turns=tuple(turns), updated_at=now)
             self._sessions[key] = session
+            self._request_fingerprints[request_key] = request_fingerprint
             return session
+        if continue_source_clarification:
+            raise ChatHistoryRequestConflict(
+                "source clarification request was not found"
+            )
         if current is None:
             session = ChatSessionRecord(
                 id=session_id,
@@ -184,3 +200,10 @@ class InMemoryChatHistoryRepository:
 
 def _question_count(turns: tuple[dict[str, Any], ...]) -> int:
     return sum(1 for turn in turns if turn.get("role") == "user")
+
+
+def _has_source_clarification(turn: dict[str, Any]) -> bool:
+    response = turn.get("response")
+    return isinstance(response, dict) and isinstance(
+        response.get("source_clarification"), dict
+    )

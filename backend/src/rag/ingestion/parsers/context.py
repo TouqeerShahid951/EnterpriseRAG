@@ -22,7 +22,7 @@ def is_table_title(text: str | None) -> bool:
 def contextualized_item(text: str, item_type: str, section_title: str | None) -> tuple[str, str]:
     if not is_table_title(section_title) or text.startswith(str(section_title)):
         return text, item_type
-    if item_type in {"text", "table"}:
+    if item_type == "table":
         return f"{section_title}\n{text}", "table"
     return text, item_type
 

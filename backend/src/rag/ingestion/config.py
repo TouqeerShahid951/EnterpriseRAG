@@ -18,6 +18,7 @@ from rag.shared.contracts.rag_defaults import (
     SUPPORTED_WORKER_MODEL_PROVIDERS,
 )
 from rag.shared.contracts.task_names import (
+    DEFAULT_GLOSSARY_IMPORT_TASK_NAME,
     DEFAULT_GRAPHRAG_INDEX_TASK_NAME,
     DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME,
     DEFAULT_INGEST_TASK_NAME,
@@ -92,6 +93,7 @@ class VisionConfig:
 class WorkerConfig:
     redis_url: str
     ingest_queue_name: str
+    glossary_import_queue_name: str
     graphrag_queue_name: str
     graphrag_enabled: bool
     graphrag_community_collection: str
@@ -139,6 +141,7 @@ class WorkerConfig:
     qdrant: QdrantConfig
     vision: VisionConfig
     ingest_task_name: str = DEFAULT_INGEST_TASK_NAME
+    glossary_import_task_name: str = DEFAULT_GLOSSARY_IMPORT_TASK_NAME
     graphrag_index_task_name: str = DEFAULT_GRAPHRAG_INDEX_TASK_NAME
     graphrag_partition_rebuild_task_name: str = (
         DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME
@@ -158,6 +161,10 @@ class WorkerConfig:
             "INGEST_TASK_NAME",
             os.getenv("INGEST_TASK_NAME", DEFAULT_INGEST_TASK_NAME),
         )
+        glossary_import_task_name = normalize_task_name(
+            "GLOSSARY_IMPORT_TASK_NAME",
+            os.getenv("GLOSSARY_IMPORT_TASK_NAME", DEFAULT_GLOSSARY_IMPORT_TASK_NAME),
+        )
         graphrag_index_task_name = normalize_task_name(
             "GRAPHRAG_INDEX_TASK_NAME",
             os.getenv(
@@ -174,6 +181,7 @@ class WorkerConfig:
         )
         validate_document_pipeline_task_names(
             ingest=ingest_task_name,
+            glossary_import=glossary_import_task_name,
             graphrag_index=graphrag_index_task_name,
             graphrag_partition_rebuild=graphrag_partition_rebuild_task_name,
         )
@@ -190,8 +198,12 @@ class WorkerConfig:
                 "CELERY_BROKER_URL", os.getenv("REDIS_URL", "redis://redis:6379/0")
             ),
             ingest_queue_name=os.getenv("INGEST_QUEUE_NAME", "ingest:jobs"),
+            glossary_import_queue_name=os.getenv(
+                "GLOSSARY_IMPORT_QUEUE_NAME", "glossary:imports"
+            ),
             graphrag_queue_name=os.getenv("GRAPHRAG_QUEUE_NAME", "graphrag:jobs"),
             ingest_task_name=ingest_task_name,
+            glossary_import_task_name=glossary_import_task_name,
             graphrag_index_task_name=graphrag_index_task_name,
             graphrag_partition_rebuild_task_name=(
                 graphrag_partition_rebuild_task_name

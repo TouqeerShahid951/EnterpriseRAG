@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, FileClock, FileSearch, Search, Upload } from "lucide-react";
+import { Activity, ChevronLeft, ChevronRight, FileClock, FileSearch, Search, Upload } from "lucide-react";
 
 import { adminApi, documentsApi, ingestJobsApi } from "@/lib/api/contracts";
 import { canManageSpaces, canUpload, canViewSpaceMetadata } from "@/lib/auth/authz";
 import { useToast } from "@/components/feedback/ToastProvider";
 import { InlineMessage } from "@/components/layout/Common";
 import { PrudentiaWorkspace } from "@/components/layout/PrudentiaWorkspace";
-import type { RouteId } from "@/routes/routes";
+import { canAccessRoute, type RouteId } from "@/routes/routes";
 import type { GraphEnrichmentTask } from "@/features/upload/state/uploadJobProgress";
 import type { IngestJob, IngestJobOrigin, UploadJobState, User as AuthUser } from "@/types/api";
 import { errorMessage } from "@/lib/utils/format";
@@ -173,6 +173,7 @@ export function PrudentiaIngestionJobsPage({ onLogout, onNavigate, user }: Props
               <p className="sv-page-subtitle">Track upload, folder, restore, and reingestion runs across your visible Knowledge Spaces.</p>
             </div>
             <div className="flex flex-wrap gap-2">
+              {canAccessRoute(user, "ingestion-health") ? <button type="button" onClick={() => onNavigate("ingestion-health")} className="sv-action-secondary"><Activity size={16} aria-hidden="true" /> Pipeline Health</button> : null}
               <button type="button" onClick={() => onNavigate("document-overview")} className="sv-action-secondary">
                 <FileSearch size={16} /> Overview
               </button>

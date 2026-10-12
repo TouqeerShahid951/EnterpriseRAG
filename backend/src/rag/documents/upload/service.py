@@ -31,6 +31,7 @@ from rag.documents.scanning import FileScanner
 from rag.documents.storage import UploadStorage
 from rag.documents.upload.validation import (
     PDF_CONTENT_TYPE,
+    XLSX_CONTENT_TYPE,
     UploadRejected,
     default_filename,
     default_title,
@@ -60,6 +61,7 @@ class UploadDocumentCommand:
     quality_preset: str | None
     supersedes: tuple[str, ...]
     shared_group_paths: tuple[str, ...]
+    analyze_slide_visuals: bool = True
 
 
 @dataclass(frozen=True)
@@ -143,10 +145,16 @@ class UploadDocument:
             )
         content_hash = hashlib.sha256(command.content).hexdigest()
         if self._document_repo.find_current_by_content_hash(content_hash):
+            message = "A current document with the same content already exists."
+            if initial_doc_type == ABBREVIATION_GLOSSARY_DOC_TYPE:
+                message = (
+                    "This glossary source already exists. Retry its failed import from the "
+                    "glossary page, or upload a changed file to replace it."
+                )
             raise UploadRejected(
                 category="conflict",
                 code="duplicate_document",
-                message="A current document with the same content already exists.",
+                message=message,
             )
         scan_upload(self._scanner, command.content)
         stored = self._storage.put(
@@ -192,6 +200,7 @@ class UploadDocument:
             supersedes=supersedes_ids,
             content_type=content_type,
             quality_preset=normalized_quality_preset,
+            analyze_slide_visuals=command.analyze_slide_visuals,
         )
         mutation = self._delivery.create_queued_job(
             message,
@@ -212,6 +221,7 @@ class UploadDocument:
             clearance=normalized_clearance,
             content_type=content_type,
             quality_preset=normalized_quality_preset,
+            analyze_slide_visuals=command.analyze_slide_visuals,
         )
         self._dispatch_best_effort(job.id)
         return UploadDocumentResult(job_id=job.id)
@@ -279,18 +289,18 @@ class UploadDocument:
         content_type: str,
         supersedes: list[str],
     ) -> None:
-        if content_type != PDF_CONTENT_TYPE:
+        if content_type not in {PDF_CONTENT_TYPE, XLSX_CONTENT_TYPE}:
             raise UploadRejected(
                 category="invalid",
-                code="abbreviation_glossary_pdf_required",
-                message="An abbreviation glossary must be uploaded as a PDF.",
+                code="abbreviation_glossary_source_required",
+                message="An abbreviation glossary must be uploaded as a PDF or XLSX file.",
             )
 
         if len(supersedes) > 1:
             raise UploadRejected(
                 category="invalid",
                 code="invalid_abbreviation_glossary_replacement",
-                message="A glossary PDF can replace only one active source.",
+                message="A glossary source can replace only one active source.",
             )
         for document_id in supersedes:
             document = self._document_repo.get_document(document_id)
@@ -303,7 +313,7 @@ class UploadDocument:
                 raise UploadRejected(
                     category="invalid",
                     code="invalid_abbreviation_glossary_replacement",
-                    message="A glossary PDF can replace only one active PDF source.",
+                message="A glossary source can replace only one active source.",
                 )
         pending_replacements = {
             source_id
@@ -355,6 +365,7 @@ class UploadDocument:
         clearance: str,
         content_type: str,
         quality_preset: str | None,
+        analyze_slide_visuals: bool,
     ) -> None:
         payload: dict[str, object] = {
             "job_id": job_id,
@@ -368,6 +379,7 @@ class UploadDocument:
             payload["shared_group_paths"] = shared_groups
         if quality_preset:
             payload["quality_preset"] = quality_preset
+        payload["analyze_slide_visuals"] = analyze_slide_visuals
         self._document_repo.append_audit_event(
             event_type="upload.queued",
             actor_id=actor.id,
@@ -392,6 +404,7 @@ class UploadDocument:
         supersedes: list[str],
         content_type: str,
         quality_preset: str | None,
+        analyze_slide_visuals: bool,
     ) -> IngestJobPayload:
         return IngestJobPayload(
             job_id=job_id,
@@ -407,6 +420,7 @@ class UploadDocument:
             description=description,
             content_type=content_type,
             quality_preset=quality_preset,
+            analyze_slide_visuals=analyze_slide_visuals,
         )
 
     def _dispatch_best_effort(self, job_id: str) -> None:

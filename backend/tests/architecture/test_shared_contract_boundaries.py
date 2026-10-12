@@ -18,12 +18,19 @@ EVIDENCE_CONTRACT_NAMES = frozenset(
         "EvidenceField",
         "EvidenceWindow",
         "HighlightRange",
+        "ImageCitationTarget",
+        "JsonCitationTarget",
+        "PageCitationTarget",
+        "RecordCitationTarget",
+        "SlideCitationTarget",
         "SourceAnchor",
-        "SourceRegion",
+        "SpreadsheetCitationTarget",
+        "TextCitationTarget",
     }
 )
 QUERY_EVIDENCE_REEXPORT_TARGETS = frozenset(
-    f"rag.query.schemas.{name}" for name in EVIDENCE_CONTRACT_NAMES
+    f"rag.query.schemas.{name}"
+    for name in {"CitationTarget", "ConflictPair", "EvidenceField", "EvidenceWindow", "HighlightRange", "SourceAnchor"}
 )
 ALLOWED_SHARED_EVIDENCE_IMPORTS = frozenset(
     {

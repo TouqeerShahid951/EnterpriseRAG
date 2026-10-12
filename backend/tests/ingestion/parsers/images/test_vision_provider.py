@@ -206,6 +206,8 @@ def test_openai_compatible_vision_client_uses_rag_description_prompt(monkeypatch
     assert "For vehicles, be especially specific" in text_part["text"]
     assert "make, model" in text_part["text"]
     assert "visible cues" in text_part["text"]
+    assert "For maps, be especially specific" in text_part["text"]
+    assert "For weapons, be especially specific" in text_part["text"]
     assert "concise caption" not in text_part["text"]
 
 
@@ -311,6 +313,7 @@ def _worker_config(*, ollama_vision_model: str = "") -> WorkerConfig:
     return WorkerConfig(
         redis_url="redis://redis:6379/0",
         ingest_queue_name="ingest:jobs",
+        glossary_import_queue_name="glossary:imports",
         graphrag_queue_name="graphrag:jobs",
         graphrag_enabled=False,
         graphrag_community_collection="graphrag_community_summaries",

@@ -63,10 +63,41 @@ describe("AbbreviationGlossaryManager", () => {
 
     expect(markup).toContain("Active definitions");
     expect(markup).toContain("Both the abbreviation and full term are added to retrieval queries");
-    expect(markup).toContain("PDF sources");
-    expect(markup).toContain("1 active");
-    expect(markup).toContain("directorate-glossary.pdf");
     expect(markup).toContain("Page 4");
     expect(markup).toContain("Added here");
+  });
+
+  it("shows the first glossary page inside the scrollable table", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+    client.setQueryData<AbbreviationGlossaryResponse>(["abbreviation-glossary"], {
+      glossary: null,
+      sources: [],
+      items: Array.from({ length: 21 }, (_, index) => ({
+        id: `entry-${index + 1}`,
+        abbreviation: `TERM${index + 1}`,
+        expansion: `Full term ${index + 1}`,
+        source_kind: "ui" as const,
+        source_document_id: null,
+        source_document_title: null,
+        source_page: null,
+        source_count: 0,
+        revision: 1,
+        created_at: null,
+        updated_at: null,
+      })),
+    });
+
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <AbbreviationGlossaryManager importStatusKey="" />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain("glossary-entry-table-wrap");
+    expect(markup).toContain("Page 1 of 2");
+    expect(markup).toContain("Full term 20");
+    expect(markup).not.toContain("Full term 21");
   });
 });

@@ -26,6 +26,7 @@ ARTIFACT_QUERY_GENERATION_ADAPTER_FILE = (
 ARTIFACT_GENERATION_APPLICATION_FILES = (
     RAG_ROOT / "artifact_jobs" / "execution" / "bundle_repair.py",
     RAG_ROOT / "artifact_jobs" / "generation" / "composition.py",
+    RAG_ROOT / "artifact_jobs" / "generation" / "citation_validation.py",
     RAG_ROOT / "artifact_jobs" / "generation" / "composition_deadline.py",
     RAG_ROOT / "artifact_jobs" / "execution" / "executor.py",
     RAG_ROOT / "artifact_jobs" / "generation" / "fallback_composition.py",
@@ -80,7 +81,7 @@ def test_artifact_submission_contract_is_dependency_light() -> None:
 
 
 def test_artifact_generation_port_is_dependency_light() -> None:
-    allowed_imports = frozenset({"__future__", "typing"})
+    allowed_imports = frozenset({"__future__", "typing", "collections.abc", "rag.shared.contracts.evidence"})
     violations = find_violations(
         (ARTIFACT_GENERATION_PORT_FILE,),
         lambda target: not any(
@@ -138,6 +139,9 @@ def test_artifact_query_composition_imports_are_explicitly_allowlisted() -> None
         ),
         ARTIFACT_QUERY_GENERATION_ADAPTER_FILE: frozenset(
             {
+                "rag.query.evidence_validation",
+                "rag.query.evidence_validation.VerificationBudget",
+                "rag.query.evidence_validation.validate_claims",
                 "rag.query.http",
                 "rag.query.http.ServiceRequestError",
                 "rag.query.inference",

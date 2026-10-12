@@ -1,6 +1,10 @@
 import type { ClearanceLevel, DocType, ISODateString } from "./common";
 import type { DocumentIngestStatus } from "./ingestion";
 
+export interface DocumentSlidesResponse {
+  slides: number[];
+}
+
 export interface Document {
   id: string;
   title: string;
@@ -47,6 +51,11 @@ interface DocumentOverviewAttentionItem {
   title: string;
   group_path: string;
   ingest_status: DocumentIngestStatus;
+  latest_job_id?: string | null;
+  latest_job_status?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  updated_at?: string | null;
 }
 
 export interface DocumentOverviewSpace {
@@ -60,6 +69,7 @@ export interface DocumentOverviewSpace {
 }
 
 export interface DocumentOverview {
+  cancelled_current?: number;
   library_documents: number;
   current_versions: number;
   indexed_current: number;
@@ -121,6 +131,32 @@ export interface DocumentReingestResponse {
 
 export interface DocumentReingestRequest {
   retry_of_job_id?: string | null;
+}
+
+interface SpreadsheetColumnReview {
+  index: number;
+  name: string;
+  type: string;
+  description: string;
+  aliases: string[];
+}
+
+export interface SpreadsheetSheetReview {
+  source_name: string;
+  table_name: string;
+  header_rows: number[];
+  header_candidates: number[];
+  excluded: boolean;
+  description: string;
+  columns: SpreadsheetColumnReview[];
+}
+
+export interface SpreadsheetReviewRequest {
+  sheets: SpreadsheetSheetReview[];
+}
+
+export interface SpreadsheetReviewResponse extends SpreadsheetReviewRequest {
+  document_id: string;
 }
 
 export interface DocumentGraphEnrichmentResponse {

@@ -54,6 +54,74 @@ describe("upload status presentation", () => {
     expect(partition.completedItems).toEqual([]);
     expect(partition.visibleItems).toHaveLength(1);
   });
+
+  it("renders a Windows-safe ingestion activity indicator", () => {
+    const markup = renderToStaticMarkup(
+      <BatchUploadStatus
+        cancelingJobId={null}
+        currentUser={user}
+        graphStatus={undefined}
+        graphStatusError={null}
+        items={[item("processing", "processing.pdf", "processing", true)]}
+        onCancelIngestJob={() => undefined}
+        onClearUploadJobs={() => undefined}
+        onRetryIngestJob={() => undefined}
+        onViewActivity={() => undefined}
+        retryingJobId={null}
+      />,
+    );
+
+    expect(markup).toContain("ingestion-active-icon-spinner");
+    expect(markup).toContain("ingestion-active-icon-static");
+  });
+
+  it("keeps glossary uploads out of normal activity", () => {
+    const markup = renderToStaticMarkup(
+      <BatchUploadStatus
+        cancelingJobId={null}
+        currentUser={user}
+        graphStatus={undefined}
+        graphStatusError={null}
+        hideActivityLink
+        items={[item("glossary", "Glossary.pdf", "complete", true)]}
+        onCancelIngestJob={() => undefined}
+        onClearUploadJobs={() => undefined}
+        onRetryIngestJob={() => undefined}
+        onViewActivity={() => undefined}
+        retryingJobId={null}
+      />,
+    );
+
+    expect(markup).not.toContain("View activity");
+    expect(markup).toContain("Active PDF sources are listed above.");
+  });
+
+  it("shows completed glossary imports in dedicated activity history", () => {
+    const markup = renderToStaticMarkup(
+      <BatchUploadStatus
+        cancelingJobId={null}
+        currentUser={user}
+        dismissible={false}
+        graphStatus={undefined}
+        graphStatusError={null}
+        hideActivityLink
+        hideGovernance
+        items={[item("historical-complete", "old-glossary.pdf", "complete", false)]}
+        onCancelIngestJob={() => undefined}
+        onClearUploadJobs={() => undefined}
+        onRetryIngestJob={() => undefined}
+        onViewActivity={() => undefined}
+        retryingJobId={null}
+        showCompletedHistory
+        title="Glossary import activity"
+      />,
+    );
+
+    expect(markup).toContain("Glossary import activity");
+    expect(markup).toContain("old-glossary.pdf");
+    expect(markup).toContain("1 completed");
+    expect(markup).not.toContain("Dismiss");
+  });
 });
 
 const user: User = {

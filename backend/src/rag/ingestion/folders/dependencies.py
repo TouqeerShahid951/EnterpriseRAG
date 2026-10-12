@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from ...core.config import settings
+from ..configuration.dependencies import effective_ingest_config
 from .adapters.memory import InMemoryFolderScheduleRepository
 from .adapters.postgres import PostgresFolderScheduleRepository
 from .adapters.sources import LocalFileSystemSource, MinioObjectSource
@@ -14,10 +15,11 @@ from rag.ingestion.folders.sources import LocalFolderSource, MinioPrefixSource
 
 
 def get_folder_ingestion_config() -> FolderIngestionConfig:
+    ingest_config = effective_ingest_config()
     return FolderIngestionConfig(
         default_timezone=settings.workspace_timezone,
         sources_root=settings.folder_sources_root,
-        snapshot_max_files=settings.folder_snapshot_max_files,
+        snapshot_max_files=ingest_config.folder_snapshot_max_files,
         snapshot_max_bytes=settings.folder_snapshot_max_bytes,
         upload_max_bytes=settings.upload_max_bytes,
     )

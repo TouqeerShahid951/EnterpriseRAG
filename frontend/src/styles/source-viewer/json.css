@@ -106,3 +106,23 @@
 .source-viewer-json-highlight .source-viewer-json-token-punctuation {
   color: inherit;
 }
+
+.source-viewer-json-search-highlight {
+  border-radius: 0.2rem;
+  background: oklch(0.73 0.09 180);
+  color: oklch(0.14 0.018 255);
+  scroll-margin-block: 8rem;
+}
+
+.source-viewer-json-search-highlight.is-active {
+  outline: 2px solid oklch(0.86 0.13 180);
+}
+
+.source-viewer-json-search-highlight .source-viewer-json-token-key,
+.source-viewer-json-search-highlight .source-viewer-json-token-string,
+.source-viewer-json-search-highlight .source-viewer-json-token-number,
+.source-viewer-json-search-highlight .source-viewer-json-token-boolean,
+.source-viewer-json-search-highlight .source-viewer-json-token-null,
+.source-viewer-json-search-highlight .source-viewer-json-token-punctuation {
+  color: inherit;
+}

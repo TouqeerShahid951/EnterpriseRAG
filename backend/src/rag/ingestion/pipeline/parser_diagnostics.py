@@ -1,6 +1,7 @@
 """Failure provenance for document parsing stages."""
 
 from .state import IngestDependencies
+from ..errors import IncompletePdfError
 
 
 def parser_failure_provenance(
@@ -9,14 +10,18 @@ def parser_failure_provenance(
     file_path: str,
     exc: Exception,
 ) -> dict[str, object]:
+    if isinstance(exc, IncompletePdfError):
+        return {**exc.provenance, "routing_mode": "parse_failed",
+                "errors": [*exc.provenance.get("errors", []), {"component": "parser", "code": exc.code}]}
     document_kind = (
         "json"
         if getattr(exc, "code", None) == "json_parse_failed"
         else document_kind_from(content_type, file_path)
     )
+    structured_kind = document_kind in {"json", "csv", "xlsx"}
     parser_config: dict[str, object] = (
         {}
-        if document_kind == "json"
+        if structured_kind
         else {
             "min_chars_per_page": deps.min_chars_per_page,
             "quality_preset": deps.ingestion_quality_preset,
@@ -32,8 +37,8 @@ def parser_failure_provenance(
         "version": 1,
         "document_kind": document_kind,
         "page_count": None,
-        "primary_parser": "json" if document_kind == "json" else "layered",
-        "secondary_parser": None if document_kind == "json" else "docling",
+        "primary_parser": document_kind if structured_kind else "layered",
+        "secondary_parser": None if structured_kind else "docling",
         "routing_mode": "parse_failed",
         "config": parser_config,
         "docling_selection": None,
@@ -47,12 +52,14 @@ def parser_failure_provenance(
 
 def document_kind_from(content_type: str | None, file_path: str) -> str:
     normalized = (content_type or "").split(";", 1)[0].strip().lower()
-    if (
-        normalized
-        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        or file_path.lower().endswith(".docx")
-    ):
+    if normalized == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or file_path.lower().endswith(".docx"):
         return "docx"
+    if normalized == "application/vnd.openxmlformats-officedocument.presentationml.presentation" or file_path.lower().endswith(".pptx"):
+        return "pptx"
+    if normalized == "text/csv" or file_path.lower().endswith(".csv"):
+        return "csv"
+    if normalized == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" or file_path.lower().endswith(".xlsx"):
+        return "xlsx"
     if normalized in {"image/jpeg", "image/png"} or file_path.lower().endswith(
         (".jpg", ".jpeg", ".png")
     ):

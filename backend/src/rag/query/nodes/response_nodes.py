@@ -4,20 +4,24 @@ from __future__ import annotations
 
 from time import perf_counter
 
-from ...graphrag.graphrag_synthesizer import synthesize_graphrag_response
+from ...graphrag.graphrag_synthesizer import graphrag_synthesis_steps
 from ..cancellation import cancellation_token_from_context
 from rag.query.answering.faithfulness import (
     FAITHFULNESS_CHECK_FAILED,
     attributed_sources,
     evaluate_faithfulness,
     ordered_answer_covers_question,
+    reconcile_enumerated_list_counts,
     screen_faithfulness,
     structured_retrieval_attributed_sources,
     verify_cited_claims,
 )
+from rag.query.source_revision import sources_still_available
 from rag.query.routing.routing_logs import log_faithfulness_result, log_route_outcome
+from rag.query.summarization import prepare_summary
 from ..state import QueryContext
-from rag.query.answering.synthesis import synthesize_response
+from rag.query.answering.synthesis import ANSWER_CONTEXT_LIMIT_REASON, synthesis_steps
+from rag.query.sources import source_citation
 from .node_support import (
     _mark_execution,
     _raise_if_cancelled,
@@ -31,11 +35,32 @@ _UNVERIFIED_ANSWER = (
 
 
 class ResponseNodes:
-    def synthesizer(self, ctx: QueryContext) -> QueryContext:
+    def summary_preparer(self, ctx: QueryContext) -> QueryContext:
         _raise_if_cancelled(ctx)
-        if ctx.get("graphrag_communities") and ctx["retrieved_hits"]:
-            return synthesize_graphrag_response(ctx, self.ollama, cancellation_token=cancellation_token_from_context(ctx))
-        return synthesize_response(ctx, self.ollama, cancellation_token=cancellation_token_from_context(ctx))
+        for _progress in prepare_summary(
+            ctx,
+            self.ollama,
+            model=self.reasoning_model,
+        ):
+            pass
+        return ctx
+
+    def synthesizer(self, ctx: QueryContext) -> QueryContext:
+        for _chunk in self.synthesis_steps(ctx):
+            pass
+        return ctx
+
+    def synthesis_steps(self, ctx: QueryContext, *, stream: bool = False):
+        _raise_if_cancelled(ctx)
+        synthesize = graphrag_synthesis_steps if ctx.get("graphrag_communities") and ctx["retrieved_hits"] else synthesis_steps
+        ctx = yield from synthesize(ctx, self.ollama, stream=stream,
+                                    cancellation_token=cancellation_token_from_context(ctx))
+        ctx["response"] = ctx["response"].model_copy(
+            update={
+                "answer": reconcile_enumerated_list_counts(ctx["response"].answer)
+            }
+        )
+        return ctx
 
     def faithfulness_checker(self, ctx: QueryContext) -> QueryContext:
         _raise_if_cancelled(ctx)
@@ -66,9 +91,7 @@ class ResponseNodes:
                 route_plan=plan,
                 reranker_model=self.reranker_model,
                 reranker_cache_dir=self.config.rag_reranker_cache_dir,
-                reranker_device=getattr(
-                    self.config, "rag_reranker_device", "auto"
-                ),
+                reranker_device=getattr(self.config, "rag_reranker_device", "auto"),
             )
             if result is not None:
                 execution_mode = "deterministic"
@@ -80,16 +103,11 @@ class ResponseNodes:
                 model=self.faithfulness_model,
                 reranker_model=self.reranker_model,
                 reranker_cache_dir=self.config.rag_reranker_cache_dir,
-                reranker_device=getattr(
-                    self.config, "rag_reranker_device", "auto"
-                ),
+                reranker_device=getattr(self.config, "rag_reranker_device", "auto"),
                 cancellation_token=cancellation_token_from_context(ctx),
             )
         execution_detail = None
-        ordered_coverage = ordered_answer_covers_question(
-            ctx["response"],
-            question,
-        )
+        ordered_coverage = ordered_answer_covers_question(ctx["response"], question)
         can_corroborate = (
             result.outcome == "unavailable"
             or (result.responsive and not result.missing_aspects)
@@ -101,9 +119,7 @@ class ResponseNodes:
                 route_plan=plan,
                 reranker_model=self.reranker_model,
                 reranker_cache_dir=self.config.rag_reranker_cache_dir,
-                reranker_device=getattr(
-                    self.config, "rag_reranker_device", "auto"
-                ),
+                reranker_device=getattr(self.config, "rag_reranker_device", "auto"),
             )
             sufficiency = ctx.get("evidence_sufficiency")
             if (
@@ -126,37 +142,24 @@ class ResponseNodes:
                     question=question,
                     reranker_model=self.reranker_model,
                     reranker_cache_dir=self.config.rag_reranker_cache_dir,
-                    reranker_device=getattr(
-                        self.config, "rag_reranker_device", "auto"
-                    ),
+                    reranker_device=getattr(self.config, "rag_reranker_device", "auto"),
                 )
             if fallback is not None:
-                execution_detail = (
-                    "fallback_after_unavailable"
-                    if result.outcome == "unavailable"
-                    else "fallback_after_disagreement"
-                )
+                execution_detail = "fallback_after_unavailable" if result.outcome == "unavailable" else "fallback_after_disagreement"
                 result = fallback
                 execution_mode = "deterministic"
         validation_failed = result.outcome != "pass"
         ctx["faithfulness_score"] = result.score
-        ctx["faithfulness_status"] = (
-            "failed" if result.outcome == "unavailable" else "checked"
-        )
+        ctx["faithfulness_status"] = "failed" if result.outcome == "unavailable" else "checked"
         ctx["unfounded_claims"] = result.unfounded_claims
         if validation_failed:
             ctx["degraded"] = True
             ctx["degraded_reason"] = ctx["degraded_reason"] or (
-                "answer_not_responsive"
-                if not result.responsive
-                else FAITHFULNESS_CHECK_FAILED
+                "answer_not_responsive" if not result.responsive else FAITHFULNESS_CHECK_FAILED
             )
-        recovered_evidence_outage = (
-            not validation_failed and _recover_evidence_sufficiency_outage(ctx)
-        )
-        attributed = attributed_sources(ctx["response"].sources, result)
+        recovered_evidence_outage = not validation_failed and _recover_evidence_sufficiency_outage(ctx)
         response_updates = {
-            "sources": attributed,
+            "sources": attributed_sources(ctx["response"].sources, result),
             "faithfulness_score": result.score,
             "faithfulness_status": ctx["faithfulness_status"],
             "unfounded_claims": result.unfounded_claims,
@@ -164,48 +167,59 @@ class ResponseNodes:
             "degraded_reason": ctx["degraded_reason"],
         }
         if validation_failed:
-            response_updates.update(
-                answer=_UNVERIFIED_ANSWER,
-                answer_status="partial",
-            )
-        elif (
-            recovered_evidence_outage
-            and ctx["response"].answer_status == "partial"
-        ):
+            response_updates.update(answer=_UNVERIFIED_ANSWER, answer_status="partial")
+        elif recovered_evidence_outage and ctx["response"].answer_status == "partial":
             response_updates["answer_status"] = "complete"
-        ctx["response"] = ctx["response"].model_copy(update={
-            **response_updates,
-        })
-        _mark_execution(
-            ctx,
-            "faithfulness_checker",
-            execution_mode,
-            execution_detail,
-        )
+        ctx["response"] = ctx["response"].model_copy(update=response_updates)
+        _mark_execution(ctx, "faithfulness_checker", execution_mode, execution_detail)
         log_faithfulness_result(ctx, failed=validation_failed)
         return ctx
 
     def should_run_faithfulness(self, ctx: QueryContext) -> bool:
         if "response" not in ctx:
             return False
+        if ctx.get("degraded_reason") == ANSWER_CONTEXT_LIMIT_REASON:
+            return False
         if ctx.get("force_faithfulness_check", False):
             return True
         if self.faithfulness_policy == "never":
             return False
-        return bool(ctx["response"].sources or ctx["response"].conflict_flag)
+        return bool(ctx.get("citation_evidence") or ctx["response"].sources or ctx["response"].conflict_flag)
 
     def _faithfulness_skip_reason(self, ctx: QueryContext) -> str:
+        if ctx.get("degraded_reason") == ANSWER_CONTEXT_LIMIT_REASON:
+            return ANSWER_CONTEXT_LIMIT_REASON
         if self.faithfulness_policy == "never":
             return "policy_disabled"
         if "response" in ctx and not ctx["response"].sources and not ctx["response"].conflict_flag:
             return "no_evidence_sources"
-        return "no_factual_evidence"
+        return "no_evidence_sources"
 
     def response_serializer(self, ctx: QueryContext) -> QueryContext:
         _raise_if_cancelled(ctx)
         if "response" not in ctx:
             raise RuntimeError("query graph finished without a response")
         response = ctx["response"]
+        if response.sources:
+            if not sources_still_available(response.sources, user=ctx["user"], documents=getattr(self, "document_repo", None), identities=getattr(self, "identity_repo", None)):
+                response = response.model_copy(update={
+                    "answer": "The evidence used for this answer is no longer available.",
+                    "sources": [],
+                    "answer_status": "partial",
+                    "degraded": True,
+                    "degraded_reason": "source_revision_unavailable",
+                    "faithfulness_score": 0.0,
+                    "faithfulness_status": "failed",
+                    "unfounded_claims": [],
+                })
+                ctx["degraded"] = True
+                ctx["degraded_reason"] = response.degraded_reason
+                ctx["faithfulness_score"] = 0.0
+                ctx["faithfulness_status"] = "failed"
+        keys = [{"doc_id": s.doc_id, "chunk_id": s.chunk_id, "index_generation_id": s.index_generation_id,
+                 "citation": source_citation(s)} for s in response.sources]
+        ctx["citation_source_keys"] = keys
+        ctx["response_source_keys"] = keys
         log_route_outcome(ctx)
         ctx["response"] = response.model_copy(update={
             "latency_ms": max(0, int((perf_counter() - ctx["wall_time_start"]) * 1000)),

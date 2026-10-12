@@ -140,6 +140,60 @@ body.knowledge-inspector-modal-open {
   white-space: pre-wrap;
 }
 
+.spreadsheet-review-editor,
+.spreadsheet-review-empty,
+.spreadsheet-review-sheet-body {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.spreadsheet-review-sheet {
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.6rem;
+  background: var(--color-surface-container-low);
+}
+
+.spreadsheet-review-sheet summary {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  cursor: pointer;
+  padding: 0.7rem 0.8rem;
+  color: var(--color-on-surface);
+  font-weight: 700;
+}
+
+.spreadsheet-review-sheet summary span,
+.spreadsheet-review-column legend {
+  color: var(--color-on-surface-variant);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.spreadsheet-review-sheet-body {
+  border-top: 1px solid var(--color-surface-border);
+  padding: 0.8rem;
+}
+
+.spreadsheet-review-check {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--color-on-surface);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.spreadsheet-review-column {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  padding: 0.7rem;
+}
+
 .knowledge-topic-editor {
   display: grid;
   gap: 0.75rem;

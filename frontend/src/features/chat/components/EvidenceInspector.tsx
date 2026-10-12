@@ -1,10 +1,10 @@
-import { useEffect, useId, useRef, type KeyboardEvent as ReactKeyboardEvent, type Ref } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type Ref } from "react";
 import { BookOpenText, Database, ExternalLink, FileText, X } from "lucide-react";
 
 import { Fact } from "@/components/layout/Common";
 import type { SourceAnchor } from "@/types/api";
 import { formatDate } from "@/lib/utils/format";
-import { sourceCitationLabel, sourceCitationName } from "@/features/chat/utils/sourceCitation";
+import { sourceCitationLabel } from "@/features/chat/utils/sourceCitation";
 import {
   isLiveDatabaseSource,
   isManagedAbbreviationSource,
@@ -13,10 +13,12 @@ import {
 } from "@/features/chat/utils/sourceEvidence";
 import { sourcePageLabel } from "@/features/documents/utils/sourcePage";
 import { sourceViewerHref } from "@/features/source-viewer/utils/sourceViewer";
+import { groupSourcesByDocument, type DocumentSourceGroup } from "@/features/chat/utils/sourceGroups";
 import { EvidenceWindows } from "./EvidenceWindows";
 
-export function EvidenceInspector({ onClose, source, sourceCount, sourceNumber }: Props) {
-  const sourceCountLabel = formatSourceCount(sourceCount);
+export function EvidenceInspector({ onClose, returnSessionId, returnTurnId, source, sources }: Props) {
+  const group = selectedDocumentGroup(source, sources);
+  const citationCountLabel = formatCitationCount(group.citations.length);
   const panelRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -74,20 +76,21 @@ export function EvidenceInspector({ onClose, source, sourceCount, sourceNumber }
           <div>
             <p className="sv-eyebrow">Citation Inspector</p>
             <h2 id={titleId} className="text-headline-sm text-on-surface">Evidence</h2>
-            <span className="sv-pill mt-2">{sourceCountLabel}</span>
+            <span className="sv-pill mt-2">{citationCountLabel}</span>
           </div>
           <button ref={closeRef} type="button" onClick={onClose} className="rag-evidence-close" aria-label="Close evidence panel">
             <X size={16} />
           </button>
         </div>
-        <SourceEvidence source={source} sourceNumber={sourceNumber} />
+        <SourceEvidence group={group} returnSessionId={returnSessionId} returnTurnId={returnTurnId} selectedSource={source} />
       </aside>
     </div>
   );
 }
 
-export function MobileEvidencePanel({ onClose, panelRef, source, sourceCount, sourceNumber }: Props & { panelRef?: Ref<HTMLElement> }) {
-  const sourceCountLabel = formatSourceCount(sourceCount);
+export function MobileEvidencePanel({ onClose, panelRef, returnSessionId, returnTurnId, source, sources }: Props & { panelRef?: Ref<HTMLElement> }) {
+  const group = selectedDocumentGroup(source, sources);
+  const citationCountLabel = formatCitationCount(group.citations.length);
   const closeRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
 
@@ -107,21 +110,24 @@ export function MobileEvidencePanel({ onClose, panelRef, source, sourceCount, so
         <div>
           <p className="sv-eyebrow">Citation Inspector</p>
           <h2 className="text-headline-sm text-on-surface">Evidence</h2>
-          <span className="sv-pill mt-2">{sourceCountLabel}</span>
+          <span className="sv-pill mt-2">{citationCountLabel}</span>
         </div>
         <button ref={closeRef} type="button" onClick={onClose} className="rag-evidence-close" aria-label="Close evidence panel">
           <X size={16} />
         </button>
       </div>
-      <SourceEvidence source={source} compact sourceNumber={sourceNumber} />
+      <SourceEvidence compact group={group} returnSessionId={returnSessionId} returnTurnId={returnTurnId} selectedSource={source} />
     </section>
   );
 }
 
-function SourceEvidence({ compact = false, source, sourceNumber }: { compact?: boolean; source: SourceAnchor; sourceNumber: number | null }) {
+function SourceEvidence({ compact = false, group, returnSessionId, returnTurnId, selectedSource }: { compact?: boolean; group: DocumentSourceGroup; returnSessionId?: string | null; returnTurnId?: string | null; selectedSource: SourceAnchor }) {
+  const [activeChunkId, setActiveChunkId] = useState(selectedSource.chunk_id);
+  useEffect(() => setActiveChunkId(selectedSource.chunk_id), [selectedSource.chunk_id]);
+  const activeCitation = group.citations.find((citation) => citation.source.chunk_id === activeChunkId) ?? group.citations[0];
+  const source = activeCitation.source.chunk_id === selectedSource.chunk_id ? selectedSource : activeCitation.source;
   const pageLabel = sourcePageLabel(source);
   const citationLabel = sourceCitationLabel(source);
-  const sourceName = sourceCitationName(sourceNumber);
   const matchedSpanCount = sourceMatchedSpanCount(source);
   const liveDatabase = isLiveDatabaseSource(source);
   const managedGlossary = isManagedAbbreviationSource(source);
@@ -138,23 +144,54 @@ function SourceEvidence({ compact = false, source, sourceNumber }: { compact?: b
           <p className="sv-eyebrow">{liveDatabase ? "Live database" : managedGlossary ? "Managed glossary" : "Document"}</p>
           <h3 className="rag-evidence-source-title">{source.doc_title}</h3>
           <div className="rag-evidence-source-meta">
-            {!structuredSource ? (pageLabel ? <span>{pageLabel}</span> : <span>Page unknown</span>) : null}
-            {evidenceSummary ? <span>{evidenceSummary}</span> : null}
+            {!structuredSource ? (group.pageLabel ? <span>{group.pageLabel}</span> : <span>Page unknown</span>) : null}
+            <span>{formatCitationCount(group.citations.length)}</span>
+            {group.matchedSpanCount > 0 ? <span>{formatMatchedSpanCount(group.matchedSpanCount)}</span> : null}
           </div>
         </div>
       </div>
 
       {!structuredSource ? (
-        <a className="rag-evidence-open-source" href={sourceViewerHref(source)} target="_blank" rel="noreferrer">
+        <a className="rag-evidence-open-source" href={sourceViewerHref(source, { sessionId: returnSessionId ?? null, turnId: returnTurnId ?? null, citationChunkIds: group.citations.length > 1 ? group.citations.map((citation) => citation.source.chunk_id) : undefined })} target="_blank" rel="noreferrer">
           <ExternalLink aria-hidden="true" size={15} />
-          Open original source
+          Open Citation {activeCitation.number} in document preview
         </a>
       ) : null}
 
-      <EvidenceWindows source={source} />
+      {group.citations.length > 1 ? (
+        <section className="rag-evidence-citations" aria-label="Document citations">
+          <p className="rag-evidence-section-heading">Citations</p>
+          <div className="rag-evidence-citation-tabs">
+            {group.citations.map((citation) => {
+              const citationPageLabel = sourcePageLabel(citation.source);
+              const selected = citation.source.chunk_id === activeCitation.source.chunk_id;
+              return (
+                <button
+                  key={citation.source.chunk_id}
+                  type="button"
+                  className={`rag-evidence-citation-tab ${selected ? "is-selected" : ""}`}
+                  aria-pressed={selected}
+                  onClick={() => setActiveChunkId(citation.source.chunk_id)}
+                >
+                  <span>Citation {citation.number}</span>
+                  {citationPageLabel ? <span>{citationPageLabel}</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      <div className="rag-evidence-active-citation" aria-live="polite">
+        <div className="rag-evidence-active-citation-heading">
+          <span>Citation {activeCitation.number}</span>
+          {evidenceSummary ? <span>{evidenceSummary}</span> : null}
+        </div>
+        <EvidenceWindows citationChunkIds={group.citations.length > 1 ? group.citations.map((citation) => citation.source.chunk_id) : undefined} key={source.chunk_id} returnSessionId={returnSessionId} returnTurnId={returnTurnId} source={source} />
+      </div>
 
       <dl className={`rag-evidence-facts text-body-md ${compact ? "md:grid-cols-3" : ""}`}>
-        <Fact label="Citation" value={sourceName} />
+        <Fact label="Citation" value={`Citation ${activeCitation.number} of ${group.citations.length}`} />
         {!structuredSource ? <Fact label="Page Range" value={pageLabel || "Unknown"} /> : null}
         {!structuredSource ? <Fact label="Effective" value={formatDate(source.effective_date)} /> : null}
         <Fact label="Knowledge Space" value={source.group_path} />
@@ -164,13 +201,24 @@ function SourceEvidence({ compact = false, source, sourceNumber }: { compact?: b
   );
 }
 
-function formatSourceCount(count: number): string {
-  return count === 1 ? "1 source" : `${count} sources`;
+function selectedDocumentGroup(source: SourceAnchor, sources: SourceAnchor[]): DocumentSourceGroup {
+  return groupSourcesByDocument(sources).find((group) => group.docId === source.doc_id)
+    ?? groupSourcesByDocument([source])[0];
+}
+
+function formatCitationCount(count: number): string {
+  return count === 1 ? "1 citation" : `${count} citations`;
+}
+
+function formatMatchedSpanCount(count: number): string {
+  return count === 1 ? "1 matched evidence span" : `${count} matched evidence spans`;
 }
 
 function sourceEvidenceSummary(source: SourceAnchor, legacyMatchCount: number, liveDatabase: boolean): string {
   if (source.evidence_windows !== undefined || source.attribution_status !== undefined) {
-    const verifiedCount = source.evidence_windows?.filter((window) => window.support_status === "verified").length ?? 0;
+    const verifiedCount = source.evidence_windows?.filter((window) => window.support_status === "verified" && source.citation_protocol_version === 1).length ?? 0;
+    const matchedCount = source.evidence_windows?.filter((window) => window.support_status === "source_matched").length ?? 0;
+    if (matchedCount > 0) return `${matchedCount} source text ${matchedCount === 1 ? "match" : "matches"}`;
     const fallbackCount = source.evidence_windows?.filter((window) => window.support_status === "semantic_fallback").length ?? 0;
     if (verifiedCount > 0) {
       if (liveDatabase) return verifiedCount === 1 ? "1 supported row" : `${verifiedCount} supported rows`;
@@ -188,7 +236,8 @@ function sourceEvidenceSummary(source: SourceAnchor, legacyMatchCount: number, l
 
 type Props = {
   onClose: () => void;
+  returnSessionId?: string | null;
+  returnTurnId?: string | null;
   source: SourceAnchor;
-  sourceCount: number;
-  sourceNumber: number | null;
+  sources: SourceAnchor[];
 };

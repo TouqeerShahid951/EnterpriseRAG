@@ -1,5 +1,24 @@
 import type { ISODateString } from "./common";
 
+export interface WorkspaceBranding {
+  app_name: string;
+  primary_color: string;
+  accent_color: string;
+  background_color: string;
+  login_message: string;
+  support_url: string | null;
+  theme_mode: "user" | "light" | "dark";
+  h1_size: "compact" | "standard" | "large";
+  h1_weight: "semibold" | "bold" | "extrabold";
+  h1_color: string | null;
+  h2_size: "compact" | "standard" | "large";
+  h2_weight: "semibold" | "bold" | "extrabold";
+  h2_color: string | null;
+  body_size: "compact" | "standard" | "large";
+  logo_url: string | null;
+  updated_at: ISODateString | null;
+}
+
 interface RagConfigHealth {
   status: string;
   message: string;
@@ -17,6 +36,7 @@ interface IngestWorkerState {
 
 export interface IngestConfig {
   worker_concurrency: number;
+  folder_snapshot_max_files: number;
   ocr_review_confidence_threshold: number;
   pdf_image_review_threshold: number;
   vision_layout_repair_enabled: boolean;
@@ -93,9 +113,13 @@ export interface RagConfig {
   thinking_enabled: boolean;
   json_num_predict: number;
   retrieval_token_budget: number;
+  answer_output_tokens?: number;
+  answer_context_tokens?: number;
+  context_resolver_enabled: boolean;
   query_planner_enabled: boolean;
   evidence_gate_policy: EvidenceGatePolicy;
   faithfulness_policy: FaithfulnessPolicy;
+  effective_faithfulness_policy?: FaithfulnessPolicy;
   reranker_model: string;
   chat_timeout_seconds: number;
   routing_timeout_seconds: number;
@@ -130,9 +154,13 @@ export interface RagConfigTestResult {
   thinking_enabled: boolean;
   json_num_predict: number;
   retrieval_token_budget: number;
+  answer_output_tokens?: number;
+  answer_context_tokens?: number;
+  context_resolver_enabled: boolean;
   query_planner_enabled: boolean;
   evidence_gate_policy: EvidenceGatePolicy;
   faithfulness_policy: FaithfulnessPolicy;
+  effective_faithfulness_policy?: FaithfulnessPolicy;
   reranker_model: string;
   health: RagConfigHealth;
 }

@@ -64,6 +64,7 @@ async def create_upload(
     doc_type: str | None = Form(default=None),
     description: str | None = Form(default=None),
     quality_preset: str | None = Form(default=None),
+    analyze_slide_visuals: bool = Form(default=True),
     supersedes: list[str] = Form(default_factory=list),
     shared_group_paths: list[str] = Form(default_factory=list),
     user: UserRecord = Depends(require_current_user),
@@ -99,6 +100,7 @@ async def create_upload(
                 doc_type=doc_type,
                 description=description,
                 quality_preset=quality_preset,
+                analyze_slide_visuals=analyze_slide_visuals,
                 supersedes=tuple(supersedes),
                 shared_group_paths=tuple(shared_group_paths),
             )

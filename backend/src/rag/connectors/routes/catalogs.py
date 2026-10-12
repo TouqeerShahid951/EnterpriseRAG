@@ -27,6 +27,7 @@ from .support import (
 )
 from rag.connectors.catalog.schema_catalog import (
     build_default_schema_catalog,
+    populate_schema_catalog_routing_profile,
     schema_catalog_with_shared_group_paths,
 )
 
@@ -88,7 +89,10 @@ def create_connector_schema_catalog(
                     "message": "Run connector introspection before creating a schema catalog.",
                 },
             )
-        catalog_json = build_default_schema_catalog(snapshot.schema_json)
+        catalog_json = populate_schema_catalog_routing_profile(
+            build_default_schema_catalog(snapshot.schema_json),
+            profile_name=profile.name,
+        )
     catalog_json = schema_catalog_with_shared_group_paths(
         catalog_json,
         access_group_paths[1:],

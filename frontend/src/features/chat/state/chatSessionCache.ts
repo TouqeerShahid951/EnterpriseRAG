@@ -43,8 +43,13 @@ export function compactSessionTitle(value: string): string {
   return trimmed.length > 52 ? `${trimmed.slice(0, 49).trimEnd()}...` : trimmed;
 }
 
-export function createUserTurn(content: string, createdAt = new Date().toISOString()): ChatTurn {
-  return { id: createId("user"), role: "user", content, createdAt };
+export function createUserTurn(
+  content: string,
+  createdAt = new Date().toISOString(),
+  id = createId("user"),
+  replyToTurnId: string | null = null,
+): ChatTurn {
+  return { id, role: "user", content, createdAt, replyToTurnId };
 }
 
 export function removeSessionFromPages(current: ChatHistoryQueryData | undefined, sessionId: string): ChatHistoryQueryData | undefined {

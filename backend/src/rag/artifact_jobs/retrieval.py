@@ -129,19 +129,21 @@ def _retrieve_section(
         and job.document_ids
     ):
         scan_limit = SELECTED_DOCUMENT_SCAN_LIMIT
-        scan_hits = list(
-            retriever.scan_documents(
-                _retrieval_request(
-                    job,
-                    user,
-                    query=" ".join(section.retrieval_queries),
-                ),
-                structured_only=section.retrieval_mode == "structured_rows",
-                limit=scan_limit,
-            )
+        scan_result = retriever.scan_documents(
+            _retrieval_request(
+                job,
+                user,
+                query=" ".join(section.retrieval_queries),
+            ),
+            structured_only=section.retrieval_mode == "structured_rows",
+            limit=scan_limit,
         )
+        scan_hits = list(scan_result)
+        scan_complete = getattr(scan_result, "complete", None)
         scanned = True
         hits.extend(scan_hits)
+    else:
+        scan_complete = None
     for query in section.retrieval_queries:
         query_hits = list(retriever.search(_retrieval_request(job, user, query=query)))
         top_k_hits.extend(query_hits)
@@ -156,7 +158,10 @@ def _retrieve_section(
         scanned_document_count=len(scanned_doc_ids),
         scanned_chunk_count=len(scan_hits),
         top_k_record_count=len(_dedupe_chunks(top_k_hits)),
-        scan_limit_reached=bool(scan_limit and len(scan_hits) >= scan_limit),
+        scan_limit_reached=bool(
+            scan_complete is False
+            or (scan_complete is None and scan_limit and len(scan_hits) >= scan_limit)
+        ),
         scope_scan_without_selected_docs=section.retrieval_mode == "structured_rows"
         and scanned
         and not job.document_ids,
@@ -382,6 +387,8 @@ def _record_from_chunk(
         page_end=chunk.page_end,
         content_type=chunk.content_type,
         text=chunk.text,
+        index_generation_id=chunk.index_generation_id, content_hash=chunk.content_hash,
+        provenance_kind=chunk.provenance_kind, quote_texts=list(chunk.quote_texts) if chunk.quote_texts is not None else None,
         structured_fields=dict(chunk.structured_fields),
         retrieval_score=chunk.retrieval_score,
         rerank_score=chunk.rerank_score,
@@ -398,6 +405,8 @@ def _record_as_chunk(record: EvidenceRecord) -> RetrievedChunk:
         page_end=record.page_end,
         content_type=record.content_type,
         text=record.text,
+        index_generation_id=record.index_generation_id, content_hash=record.content_hash,
+        provenance_kind=record.provenance_kind, quote_texts=tuple(record.quote_texts) if record.quote_texts is not None else None,
         structured_fields=tuple(record.structured_fields.items()),
         retrieval_score=record.retrieval_score,
         rerank_score=record.rerank_score,

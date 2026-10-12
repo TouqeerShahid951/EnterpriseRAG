@@ -11,16 +11,21 @@ export function ImageRegionDocument({
   fallbackMessage,
   regions,
   toolbarEnd,
+  sourceLabel = "Image source",
+  onImageError,
 }: {
   buffer: ArrayBuffer;
   contentType: string;
   fallbackMessage: string;
   regions: DocumentRegion[];
   toolbarEnd?: ReactNode;
+  sourceLabel?: string;
+  onImageError?: () => void;
 }) {
   const imageRef = useRef<HTMLImageElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [contentObjectUrl, setContentObjectUrl] = useState<string | null>(null);
+  const [imageSource, setImageSource] = useState<{ buffer: ArrayBuffer; url: string } | null>(null);
+  const contentObjectUrl = imageSource?.buffer === buffer ? imageSource.url : null;
   const [naturalSize, setNaturalSize] = useState<{ height: number; width: number } | null>(null);
   const [containerSize, setContainerSize] = useState<{ height: number; width: number } | null>(null);
   const [scaleMode, setScaleMode] = useState<ContentScaleMode>("fit");
@@ -54,7 +59,8 @@ export function ImageRegionDocument({
 
   useEffect(() => {
     const objectUrl = URL.createObjectURL(new Blob([buffer.slice(0)], { type: contentType || "image/jpeg" }));
-    setContentObjectUrl(objectUrl);
+    setImageSource({ buffer, url: objectUrl });
+    setNaturalSize(null);
     return () => URL.revokeObjectURL(objectUrl);
   }, [buffer, contentType]);
 
@@ -112,7 +118,8 @@ export function ImageRegionDocument({
     <div className="source-viewer-document">
       <div className="source-viewer-toolbar">
         <div className="source-viewer-toolbar-main">
-          <div className="source-viewer-file-label">Image source</div>
+          <div className="source-viewer-file-label">{sourceLabel}</div>
+          <span className="source-viewer-search-unavailable" role="status">Text search is unavailable for image-only previews.</span>
           <ViewerZoomControls
             activeMode={scaleMode}
             fitLabel="Fit image"
@@ -127,7 +134,7 @@ export function ImageRegionDocument({
         <div className="source-viewer-toolbar-end">{toolbarEnd}</div>
       </div>
 
-      {visibleRegions.length === 0 ? <FallbackNotice message={fallbackMessage} /> : null}
+      {fallbackMessage && visibleRegions.length === 0 ? <FallbackNotice message={fallbackMessage} /> : null}
 
       <div ref={scrollRef} className="source-viewer-image-scroll">
         <div
@@ -140,6 +147,7 @@ export function ImageRegionDocument({
               alt="Original source image"
               className="source-viewer-image"
               src={contentObjectUrl}
+              onError={onImageError}
               style={renderedSize ? { height: renderedSize.height, width: renderedSize.width } : undefined}
               onLoad={(event) => {
                 const image = event.currentTarget;
@@ -147,7 +155,7 @@ export function ImageRegionDocument({
               }}
             />
           ) : null}
-          {naturalSize && renderedSize ? (
+          {contentObjectUrl && naturalSize && renderedSize ? (
             <div className="source-viewer-image-overlay" aria-label="Source region highlights">
               {visibleRegions.map((region, index) => (
                 <ImageRegionHighlight

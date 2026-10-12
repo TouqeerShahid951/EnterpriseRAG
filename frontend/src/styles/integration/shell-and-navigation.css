@@ -212,7 +212,7 @@
 .Prudentia-sidenav-item-active {
   border-color: color-mix(in srgb, var(--color-primary) 36%, var(--color-surface-border));
   background: color-mix(in srgb, var(--color-primary-container) 68%, var(--color-surface-container-low));
-  color: var(--color-primary);
+  color: var(--color-primary-foreground);
   font-weight: 700;
   box-shadow: inset 2px 0 0 var(--color-primary);
 }
@@ -285,7 +285,7 @@
 
 .Prudentia-sidenav-child-active {
   background: color-mix(in srgb, var(--color-primary-container) 48%, transparent);
-  color: var(--color-primary);
+  color: var(--color-primary-foreground);
 }
 
 .Prudentia-sidenav-child small {

@@ -33,6 +33,7 @@ export const ollamaForm: RagConfigFormState = {
   vision_model: "",
   reranker_model: "jinaai/jina-reranker-v1-turbo-en",
   thinking_enabled: true,
+  context_resolver_enabled: true,
   query_planner_enabled: true,
   evidence_gate_policy: "always",
   faithfulness_policy: "always",

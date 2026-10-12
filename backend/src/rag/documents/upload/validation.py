@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from io import BytesIO
+import csv
+import io
 import json
 from typing import Literal
 import zipfile
@@ -14,6 +16,11 @@ PDF_CONTENT_TYPE = "application/pdf"
 DOCX_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
+PPTX_CONTENT_TYPE = (
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+)
+XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+CSV_CONTENT_TYPE = "text/csv"
 JPEG_CONTENT_TYPE = "image/jpeg"
 PNG_CONTENT_TYPE = "image/png"
 JSON_CONTENT_TYPE = "application/json"
@@ -98,6 +105,9 @@ def validated_document_type(
     if _looks_like_json_upload(declared, lowered_name):
         validate_json_content(content)
         return JSON_CONTENT_TYPE
+    if _looks_like_csv_upload(declared, lowered_name):
+        validate_csv_content(content)
+        return CSV_CONTENT_TYPE
     if content.startswith(b"%PDF-") and (
         declared in {"", PDF_CONTENT_TYPE, "application/octet-stream"}
         or lowered_name.endswith(".pdf")
@@ -108,6 +118,16 @@ def validated_document_type(
         or lowered_name.endswith(".docx")
     ):
         return DOCX_CONTENT_TYPE
+    if is_pptx(content) and (
+        declared in {"", PPTX_CONTENT_TYPE, "application/octet-stream"}
+        or lowered_name.endswith(".pptx")
+    ):
+        return PPTX_CONTENT_TYPE
+    if is_xlsx(content) and (
+        declared in {"", XLSX_CONTENT_TYPE, "application/octet-stream"}
+        or lowered_name.endswith(".xlsx")
+    ):
+        return XLSX_CONTENT_TYPE
     if is_jpeg(content) and (
         declared in {"", JPEG_CONTENT_TYPE, "image/pjpeg", "application/octet-stream"}
         or lowered_name.endswith((".jpg", ".jpeg"))
@@ -121,13 +141,13 @@ def validated_document_type(
     raise UploadRejected(
         category="invalid",
         code="unsupported_file_type",
-        message="Only PDF, DOCX, JPG, PNG, and JSON uploads are accepted by this endpoint.",
+        message="Only PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, and JSON uploads are accepted by this endpoint.",
     )
 
 
 def is_supported_document_name(filename: str | None) -> bool:
     lowered = (filename or "").strip().lower()
-    return lowered.endswith((".pdf", ".docx", ".jpg", ".jpeg", ".png", ".json"))
+    return lowered.endswith((".pdf", ".docx", ".pptx", ".csv", ".xlsx", ".jpg", ".jpeg", ".png", ".json"))
 
 
 def validate_json_content(content: bytes) -> None:
@@ -148,6 +168,33 @@ def validate_json_content(content: bytes) -> None:
         ) from exc
 
 
+def validate_csv_content(content: bytes) -> None:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise UploadRejected(
+            category="invalid",
+            code="invalid_csv",
+            message="CSV uploads must be valid UTF-8.",
+        ) from exc
+    try:
+        has_rows = False
+        for row in csv.reader(io.StringIO(text), strict=True):
+            has_rows = has_rows or any(cell.strip() for cell in row)
+    except csv.Error as exc:
+        raise UploadRejected(
+            category="invalid",
+            code="invalid_csv",
+            message="Uploaded CSV could not be parsed.",
+        ) from exc
+    if "\x00" in text or not has_rows:
+        raise UploadRejected(
+            category="invalid",
+            code="invalid_csv",
+            message="Uploaded CSV does not contain any readable rows.",
+        )
+
+
 def is_docx(content: bytes) -> bool:
     if not content.startswith(b"PK"):
         return False
@@ -157,6 +204,40 @@ def is_docx(content: bytes) -> bool:
     except zipfile.BadZipFile:
         return False
     return "[Content_Types].xml" in names and "word/document.xml" in names
+
+
+def is_pptx(content: bytes) -> bool:
+    if not content.startswith(b"PK"):
+        return False
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            names = set(archive.namelist())
+            if len(names) > 10_000 or sum(item.file_size for item in archive.infolist()) > 512 * 1024 * 1024:
+                return False
+            return (
+                "[Content_Types].xml" in names
+                and "ppt/presentation.xml" in names
+                and archive.testzip() is None
+            )
+    except (OSError, RuntimeError, zipfile.BadZipFile):
+        return False
+
+
+def is_xlsx(content: bytes) -> bool:
+    if not content.startswith(b"PK"):
+        return False
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            names = set(archive.namelist())
+            if len(names) > 10_000 or sum(item.file_size for item in archive.infolist()) > 250 * 1024 * 1024:
+                return False
+            return (
+                "[Content_Types].xml" in names
+                and "xl/workbook.xml" in names
+                and archive.testzip() is None
+            )
+    except (OSError, RuntimeError, zipfile.BadZipFile):
+        return False
 
 
 def is_jpeg(content: bytes) -> bool:
@@ -191,6 +272,12 @@ def scan_upload(scanner: FileScanner, content: bytes) -> None:
 def default_filename(content_type: str) -> str:
     if content_type == DOCX_CONTENT_TYPE:
         return "upload.docx"
+    if content_type == PPTX_CONTENT_TYPE:
+        return "upload.pptx"
+    if content_type == CSV_CONTENT_TYPE:
+        return "upload.csv"
+    if content_type == XLSX_CONTENT_TYPE:
+        return "upload.xlsx"
     if content_type == JPEG_CONTENT_TYPE:
         return "upload.jpg"
     if content_type == PNG_CONTENT_TYPE:
@@ -203,6 +290,12 @@ def default_filename(content_type: str) -> str:
 def default_title(content_type: str) -> str:
     if content_type == DOCX_CONTENT_TYPE:
         return "Uploaded DOCX"
+    if content_type == PPTX_CONTENT_TYPE:
+        return "Uploaded PPTX"
+    if content_type == CSV_CONTENT_TYPE:
+        return "Uploaded CSV"
+    if content_type == XLSX_CONTENT_TYPE:
+        return "Uploaded XLSX"
     if content_type == JPEG_CONTENT_TYPE:
         return "Uploaded JPG"
     if content_type == PNG_CONTENT_TYPE:
@@ -214,3 +307,7 @@ def default_title(content_type: str) -> str:
 
 def _looks_like_json_upload(declared: str, lowered_name: str) -> bool:
     return declared == JSON_CONTENT_TYPE or lowered_name.endswith(".json")
+
+
+def _looks_like_csv_upload(declared: str, lowered_name: str) -> bool:
+    return declared == CSV_CONTENT_TYPE or lowered_name.endswith(".csv")

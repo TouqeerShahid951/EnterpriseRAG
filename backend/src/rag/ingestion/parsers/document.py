@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from rag.ingestion.parsers.docling.adapter import DoclingProgressCallback
 from .document_dispatch import (
+    CSV_CONTENT_TYPE as CSV_CONTENT_TYPE,
     CONNECTOR_RECORD_CONTENT_TYPE as CONNECTOR_RECORD_CONTENT_TYPE,
     DOCX_CONTENT_TYPE as DOCX_CONTENT_TYPE,
     JPEG_CONTENT_TYPE as JPEG_CONTENT_TYPE,
     JSON_CONTENT_TYPE as JSON_CONTENT_TYPE,
     PDF_CONTENT_TYPE as PDF_CONTENT_TYPE,
     PNG_CONTENT_TYPE as PNG_CONTENT_TYPE,
+    XLSX_CONTENT_TYPE as XLSX_CONTENT_TYPE,
     DocumentParserOperations,
     PageProgressCallback as PageProgressCallback,
     PdfImageReviewRequired as PdfImageReviewRequired,
@@ -200,6 +202,8 @@ def parse_document(
     doc_id: str | None = None,
     image_asset_store: ImageAssetStore | None = None,
     image_analyzer: ImageAnalyzer | None = None,
+    analyze_slide_visuals: bool = True,
+    spreadsheet_review: dict[str, object] | None = None,
 ) -> DocumentParseResult:
     return parse_document_with_operations(
         _operations(),
@@ -229,6 +233,8 @@ def parse_document(
         doc_id=doc_id,
         image_asset_store=image_asset_store,
         image_analyzer=image_analyzer,
+        analyze_slide_visuals=analyze_slide_visuals,
+        spreadsheet_review=spreadsheet_review,
     )
 
 

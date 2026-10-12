@@ -21,7 +21,7 @@ from ...query.reranker import rerank_hits
 from ...query.state import initial_retrieval_state
 from rag.query.retrieval.temporal import add_effective_date_scope, target_date_for_query
 from ...shared.contracts.group_paths import normalize_group_path
-from ..contracts import AuthorizedCorpusRequest, RetrievedChunk
+from ..contracts import AuthorizedCorpusRequest, AuthorizedDocumentScan, RetrievedChunk
 
 
 class QueryRuntimeAuthorizedCorpusRetriever:
@@ -88,17 +88,39 @@ class QueryRuntimeAuthorizedCorpusRetriever:
         *,
         structured_only: bool,
         limit: int,
-    ) -> tuple[RetrievedChunk, ...]:
+    ) -> AuthorizedDocumentScan:
         if limit <= 0:
             raise ValueError("document scan limit must be positive")
         qdrant_filter = _authorized_filter(request, config=self._config)
-        hits = self._qdrant.retrieve_document_chunks(
-            document_ids=list(request.document_ids),
-            qdrant_filter=qdrant_filter,
-            structured_only=structured_only,
-            limit=limit,
+        if hasattr(self._qdrant, "scan_document_chunks"):
+            result = self._qdrant.scan_document_chunks(
+                document_ids=list(request.document_ids),
+                qdrant_filter=qdrant_filter,
+                structured_only=structured_only,
+                limit=limit,
+            )
+            hits = result.hits
+            complete = result.complete
+            stop_reason = result.stop_reason
+        else:
+            hits = self._qdrant.retrieve_document_chunks(
+                document_ids=list(request.document_ids),
+                qdrant_filter=qdrant_filter,
+                structured_only=structured_only,
+                limit=limit,
+            )
+            statuses = {
+                hit.payload.get("authorized_scan_complete")
+                for hit in hits
+                if "authorized_scan_complete" in hit.payload
+            }
+            complete = True if statuses == {True} else False if False in statuses else None
+            stop_reason = None if complete is True else "scan_completeness_unknown"
+        return AuthorizedDocumentScan(
+            tuple(_retrieved_chunk(hit) for hit in hits),
+            complete=complete,
+            stop_reason=stop_reason,
         )
-        return tuple(_retrieved_chunk(hit) for hit in hits)
 
 
 def _authorized_filter(
@@ -153,7 +175,9 @@ def _retrieved_chunk(hit: SearchHit) -> RetrievedChunk:
         content_type=str(
             payload.get("chunk_type") or payload.get("structured_kind") or "text"
         ),
-        text=str(payload.get("text") or ""),
+        text=str(payload.get("citation_original_text") or payload.get("text") or ""),
+        provenance_kind=str(payload.get("provenance_kind") or "unknown"),
+        quote_texts=tuple(payload["quote_texts"]) if isinstance(payload.get("quote_texts"), list) else None,
         structured_fields=_structured_fields(payload.get("structured_fields")),
         retrieval_score=float(hit.score),
         rerank_score=(
@@ -162,6 +186,17 @@ def _retrieved_chunk(hit: SearchHit) -> RetrievedChunk:
             else None
         ),
         identity_keys=_identity_keys(hit),
+        section_path=tuple(
+            str(part).strip()
+            for part in payload.get("section_path", [])
+            if str(part).strip()
+        )
+        if isinstance(payload.get("section_path"), list)
+        else (),
+        parent_section_id=str(payload.get("parent_section_id") or "") or None,
+        ordinal=_chunk_ordinal(chunk_id),
+        index_generation_id=str(payload.get("index_generation_id") or "") or None,
+        content_hash=str(payload.get("content_hash") or "") or None,
     )
 
 
@@ -192,3 +227,8 @@ def _identity_keys(hit: SearchHit) -> frozenset[str]:
 
 def _int(value: object) -> int | None:
     return int(value) if isinstance(value, int | float) else None
+
+
+def _chunk_ordinal(chunk_id: str) -> int | None:
+    tail = chunk_id.rsplit(":", 1)[-1]
+    return int(tail) if tail.isdecimal() else None

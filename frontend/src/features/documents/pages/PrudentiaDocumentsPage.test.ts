@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSpaceOverviewRows, canTransferDocumentOwner, ownershipTransferOptions, spaceAttentionCount } from "../utils/documentPageUtils";
+import { buildSpaceOverviewRows, canTransferDocumentOwner, ownershipTransferOptions, permanentDeleteConfirmation, spaceAttentionCount } from "../utils/documentPageUtils";
 import type { Document, DocumentOverviewSpace, User } from "@/types/api";
 import type { GroupOption } from "@/lib/utils/groups";
 
@@ -36,6 +36,13 @@ describe("Knowledge Space overview counts", () => {
     expect(finance.documentsCount).toBe(2);
     expect(finance.processingCount).toBe(2);
     expect(spaceAttentionCount(finance)).toBe(1);
+  });
+});
+
+describe("permanent document deletion confirmation", () => {
+  it("requires DELETE for one document and DELETE N for a bulk action", () => {
+    expect(permanentDeleteConfirmation(1)).toBe("DELETE");
+    expect(permanentDeleteConfirmation(3)).toBe("DELETE 3");
   });
 });
 

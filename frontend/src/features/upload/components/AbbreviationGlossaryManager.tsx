@@ -1,25 +1,26 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Edit3, FileText, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { Edit3, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 
 import { useToast } from "@/components/feedback/ToastProvider";
 import { EmptyPanel, InlineMessage } from "@/components/layout/Common";
 import { Modal } from "@/components/layout/Modal";
 import { abbreviationsApi } from "@/lib/api/contracts";
-import { errorMessage, formatDateTime } from "@/lib/utils/format";
-import type { AbbreviationEntry, AbbreviationSource } from "@/types/api";
+import { errorMessage } from "@/lib/utils/format";
+import type { AbbreviationEntry } from "@/types/api";
 
 type EntryDraft = { abbreviation: string; expansion: string };
 const EMPTY_DRAFT: EntryDraft = { abbreviation: "", expansion: "" };
+const GLOSSARY_PAGE_SIZE = 20;
 
 export function AbbreviationGlossaryManager({ importStatusKey }: Props) {
   const queryClient = useQueryClient();
   const { notify } = useToast();
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<AbbreviationEntry | null>(null);
   const [deleting, setDeleting] = useState<AbbreviationEntry | null>(null);
-  const [deletingSource, setDeletingSource] = useState<AbbreviationSource | null>(null);
   const [draft, setDraft] = useState<EntryDraft>(EMPTY_DRAFT);
   const queryKey = ["abbreviation-glossary"] as const;
   const glossaryQuery = useQuery({
@@ -42,6 +43,16 @@ export function AbbreviationGlossaryManager({ importStatusKey }: Props) {
       `${entry.abbreviation} ${entry.expansion}`.toLocaleLowerCase().includes(normalized),
     );
   }, [glossaryQuery.data?.items, search]);
+  const totalPages = Math.max(1, Math.ceil(visibleEntries.length / GLOSSARY_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedEntries = visibleEntries.slice(
+    (currentPage - 1) * GLOSSARY_PAGE_SIZE,
+    currentPage * GLOSSARY_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
 
   const createMutation = useMutation({
     mutationFn: abbreviationsApi.create,
@@ -70,17 +81,6 @@ export function AbbreviationGlossaryManager({ importStatusKey }: Props) {
       notify({ title: "Abbreviation deleted", tone: "success" });
     },
   });
-  const removeSourceMutation = useMutation({
-    mutationFn: (source: AbbreviationSource) => abbreviationsApi.removeSource(source.document_id),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey }),
-        queryClient.invalidateQueries({ queryKey: ["documents"] }),
-      ]);
-      setDeletingSource(null);
-      notify({ title: "PDF source removed", tone: "success" });
-    },
-  });
 
   function beginAdd() {
     setEditing(null);
@@ -106,10 +106,9 @@ export function AbbreviationGlossaryManager({ importStatusKey }: Props) {
     else createMutation.mutate(draft);
   }
 
-  const mutationError = createMutation.error ?? updateMutation.error ?? deleteMutation.error ?? removeSourceMutation.error;
-  const mutationPending = createMutation.isPending || updateMutation.isPending || deleteMutation.isPending || removeSourceMutation.isPending;
+  const mutationError = createMutation.error ?? updateMutation.error ?? deleteMutation.error;
+  const mutationPending = createMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
   const entries = glossaryQuery.data?.items ?? [];
-  const sources = glossaryQuery.data?.sources ?? [];
   const importedCount = entries.filter((entry) => entry.source_kind === "pdf").length;
   const managedCount = entries.length - importedCount;
 
@@ -141,37 +140,11 @@ export function AbbreviationGlossaryManager({ importStatusKey }: Props) {
         </dl>
       ) : null}
 
-      {sources.length > 0 ? (
-        <div className="border-b border-surface-border">
-          <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <div>
-              <h3 className="font-bold text-on-surface">PDF sources</h3>
-              <p className="text-label-md text-secondary">Each source can be replaced or removed independently.</p>
-            </div>
-            <span className="sv-pill">{sources.length} active</span>
-          </div>
-          <ul className="divide-y divide-surface-border" aria-label="Active glossary PDF sources">
-            {sources.map((source) => (
-              <li key={source.document_id} className="flex items-center gap-3 px-4 py-3 text-body-md">
-                <FileText aria-hidden="true" className="shrink-0 text-primary" size={17} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-bold text-on-surface" title={source.document_title}>{source.document_title}</p>
-                  <p className="text-label-md text-secondary">{source.entry_count} term{source.entry_count === 1 ? "" : "s"} · Activated {formatDateTime(source.activated_at)}</p>
-                </div>
-                <button type="button" className="user-row-action user-row-action-danger" disabled={mutationPending} aria-label={`Remove PDF source ${source.document_title}`} onClick={() => setDeletingSource(source)}>
-                  <Trash2 aria-hidden="true" size={15} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
       <div className="flex flex-wrap items-center gap-3 border-b border-surface-border p-4">
         <label className="relative block min-w-64 max-w-xl flex-1">
           <span className="sr-only">Search abbreviations</span>
           <Search aria-hidden="true" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
-          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search abbreviation or full term" className="sv-input sv-input-with-leading-icon" />
+          <input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search abbreviation or full term" className="sv-input sv-input-with-leading-icon" />
         </label>
         <p className="text-label-md font-bold text-secondary" role="status" aria-live="polite">
           {search ? `${visibleEntries.length} of ${entries.length} shown` : `${entries.length} total`}
@@ -183,12 +156,12 @@ export function AbbreviationGlossaryManager({ importStatusKey }: Props) {
         <div className="p-5 text-body-md text-on-surface-variant" role="status">Loading glossary entries…</div>
       ) : adding || visibleEntries.length > 0 ? (
         <form onSubmit={submitDraft}>
-          <div className="sv-table-wrap">
+          <div className="sv-table-wrap glossary-entry-table-wrap">
             <table className="sv-table abbreviation-glossary-table">
               <thead><tr><th>Abbreviation</th><th>Full term</th><th>Provenance</th><th>Actions</th></tr></thead>
               <tbody>
                 {adding ? <DraftRow draft={draft} pending={mutationPending} onCancel={cancelDraft} onChange={setDraft} /> : null}
-                {visibleEntries.map((entry) => editing?.id === entry.id ? (
+                {pagedEntries.map((entry) => editing?.id === entry.id ? (
                   <DraftRow key={entry.id} draft={draft} pending={mutationPending} onCancel={cancelDraft} onChange={setDraft} />
                 ) : (
                   <tr key={entry.id} className="sv-table-row">
@@ -196,10 +169,10 @@ export function AbbreviationGlossaryManager({ importStatusKey }: Props) {
                     <td data-label="Full term" className="text-on-surface">{entry.expansion}</td>
                     <td data-label="Provenance">
                       <span className={entry.source_kind === "pdf" ? "sv-pill sv-pill-success" : "sv-pill"}>
-                        {entry.source_kind === "pdf" ? "PDF" : "Added here"}
+                        {entry.source_kind === "pdf" ? "Imported source" : "Added here"}
                       </span>
                       {entry.source_page ? <small className="ml-2 text-secondary">Page {entry.source_page}</small> : null}
-                      {entry.source_count > 1 ? <small className="ml-2 text-secondary">{entry.source_count} PDFs</small> : null}
+                      {entry.source_count > 1 ? <small className="ml-2 text-secondary">{entry.source_count} sources</small> : null}
                       {entry.source_document_title ? <small className="mt-1 block max-w-60 truncate text-secondary" title={entry.source_document_title}>{entry.source_document_title}</small> : null}
                     </td>
                     <td data-label="Actions">
@@ -213,22 +186,23 @@ export function AbbreviationGlossaryManager({ importStatusKey }: Props) {
               </tbody>
             </table>
           </div>
+          {totalPages > 1 ? (
+            <nav className="flex flex-wrap items-center justify-between gap-3 border-t border-surface-border p-3" aria-label="Glossary pages">
+              <button type="button" className="sv-action-secondary" disabled={currentPage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</button>
+              <p className="text-label-md font-bold text-secondary" role="status">Page {currentPage} of {totalPages}</p>
+              <button type="button" className="sv-action-secondary" disabled={currentPage === totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Next</button>
+            </nav>
+          ) : null}
         </form>
       ) : null}
       {!glossaryQuery.isLoading && !glossaryQuery.isError && !adding && visibleEntries.length === 0 ? (
-        <div className="p-4"><EmptyPanel>{search ? "No definitions match this search. Try the abbreviation or any word in the full term." : "No definitions yet. Add the first abbreviation here or import a PDF below."}</EmptyPanel></div>
+        <div className="p-4"><EmptyPanel>{search ? "No definitions match this search. Try the abbreviation or any word in the full term." : "No definitions yet. Add the first abbreviation here or import a PDF or XLSX source below."}</EmptyPanel></div>
       ) : null}
 
       <Modal open={Boolean(deleting)} onClose={() => setDeleting(null)} title="Delete abbreviation" description={deleting ? `Remove ${deleting.abbreviation} from query expansion?` : undefined} size="sm">
         <div className="flex justify-end gap-2">
           <button type="button" className="sv-action-secondary" onClick={() => setDeleting(null)}>Cancel</button>
           <button type="button" className="sv-action-danger" disabled={deleteMutation.isPending} onClick={() => deleting && deleteMutation.mutate(deleting)}>Delete</button>
-        </div>
-      </Modal>
-      <Modal open={Boolean(deletingSource)} onClose={() => setDeletingSource(null)} title="Remove PDF source" description={deletingSource ? `Remove ${deletingSource.document_title} and any definitions supplied only by this PDF?` : undefined} size="sm">
-        <div className="flex justify-end gap-2">
-          <button type="button" className="sv-action-secondary" onClick={() => setDeletingSource(null)}>Cancel</button>
-          <button type="button" className="sv-action-danger" disabled={removeSourceMutation.isPending} onClick={() => deletingSource && removeSourceMutation.mutate(deletingSource)}>Remove source</button>
         </div>
       </Modal>
     </section>

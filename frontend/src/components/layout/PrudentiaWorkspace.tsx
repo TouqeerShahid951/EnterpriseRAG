@@ -17,6 +17,7 @@ import {
 import type { RouteId } from "@/routes/routes";
 import { readStoredBoolean, readStoredNumber, writeStoredBoolean, writeStoredNumber } from "@/lib/utils/uiPreferences";
 import type { User as AuthUser } from "@/types/api";
+import { useBranding } from "@/components/brand/BrandContext";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "Prudentia-sidebar-collapsed";
 const SIDEBAR_WIDTH_STORAGE_KEY = "Prudentia-sidebar-width-comfortable-v4";
@@ -74,13 +75,14 @@ export function PrudentiaWorkspace({ activeRoute, children, onLogout, onNavigate
 }
 
 export function PrudentiaBasicPage({ activeRoute, children, onLogout, onNavigate, sidebarHeaderContent, subtitle, title, user }: BasicProps) {
+  const branding = useBranding();
   return (
     <PrudentiaWorkspace activeRoute={activeRoute} onLogout={onLogout} onNavigate={onNavigate} sidebarHeaderContent={sidebarHeaderContent} user={user}>
       <main className="sv-page" id="main-content">
         <div className={`sv-page-inner ${pageInnerModeClass(activeRoute)}`}>
           <header className="sv-page-header">
             <div>
-              <p className="sv-eyebrow">Prudentia AI</p>
+              <p className="sv-eyebrow">{branding.app_name}</p>
               <h1 className="sv-page-title">{title}</h1>
               <p className="sv-page-subtitle">{subtitle}</p>
             </div>
@@ -104,7 +106,7 @@ type Props = {
 type SidebarHeaderProviderProps = {
   children: ReactNode;
   isLightMode: boolean;
-  onToggleTheme: () => void;
+  onToggleTheme?: () => void;
   value: ReactNode;
 };
 

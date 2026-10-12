@@ -1,22 +1,28 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AtSign, Database, FileText, Layers3, Loader2, Paperclip, Search, Send, Square, X } from "lucide-react";
+import { AtSign, ChevronDown, Database, FileText, Layers3, Loader2, Paperclip, Reply, Search, Send, Square, X } from "lucide-react";
 import { ingestJobsApi, queryApi, uploadApi } from "@/lib/api/contracts";
 import { canUploadToSpace } from "@/lib/auth/authz";
 import { ComposerUploadProgress } from "@/features/chat/components/ComposerUploadProgress";
 import {
   activeMentionQuery,
   composerPlaceholder,
+  documentMentionBeforeCursor,
+  hasDocumentMention,
   failedComposerUploadJob,
+  insertDocumentMention,
   localComposerUploadJob,
   mentionSuggestionsForDocuments,
-  removeActiveMention,
+  removeDocumentMention,
 } from "@/features/chat/utils/chatComposerUtils";
 import { isUploadTerminalStatus, toUploadJobView } from "@/features/upload/state/uploadJobProgress";
 import type { Props } from "@/features/chat/types/chatPageTypes";
 import type { Document, QuerySource, QuerySourceMode } from "@/types/api";
 import { DOCUMENT_UPLOAD_MAX_BYTES, isSupportedDocumentFile } from "@/lib/utils/documentUpload";
 import { errorMessage } from "@/lib/utils/format";
+import { replyLabelForTurn, replyPreviewForTurn } from "@/features/chat/utils/chatPageUtils";
+
+const COMPOSER_MAX_HEIGHT_PX = 128;
 
 export function ChatComposer({
   addScopedDocument,
@@ -27,17 +33,21 @@ export function ChatComposer({
   hasCorpus,
   hasPendingGeneration,
   onSelectedQuerySourceChange,
+  onCancelReply,
   onQuestionChange,
   onQuestionSubmit,
   onSourceModeChange,
   question,
+  replyTarget,
   removeScopedDocument,
   scopedDocumentIds,
   selectedQuerySourceId,
   sourceMode,
   user,
-}: Props & { activeDocuments: Document[]; hasCorpus: boolean }) {
+  emptyState = false,
+}: Props & { activeDocuments: Document[]; emptyState?: boolean; hasCorpus: boolean }) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const pendingCaretPositionRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
   const [uploadJob, setUploadJob] = useState<ChatUploadJob | null>(null);
@@ -124,10 +134,40 @@ export function ChatComposer({
     }
   }, [onSelectedQuerySourceChange, querySources, selectedQuerySourceId]);
 
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    resizeComposerInput(input);
+    const caretPosition = pendingCaretPositionRef.current;
+    if (caretPosition === null) return;
+    pendingCaretPositionRef.current = null;
+    input.focus();
+    input.setSelectionRange(caretPosition, caretPosition);
+  }, [question]);
+
+  useEffect(() => {
+    if (!replyTarget) return;
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [replyTarget?.id]);
+
   function handleTagDocument(document: Document) {
     addScopedDocument(document.id);
-    onQuestionChange(removeActiveMention(question));
-    window.requestAnimationFrame(() => inputRef.current?.focus());
+    const nextQuestion = insertDocumentMention(question, document.title);
+    pendingCaretPositionRef.current = nextQuestion.length;
+    onQuestionChange(nextQuestion);
+  }
+
+  function handleRemoveDocument(document: Document) {
+    removeScopedDocument(document.id);
+    onQuestionChange(removeDocumentMention(question, document.title));
+  }
+
+  function handleQuestionChange(nextQuestion: string) {
+    scopedDocuments.forEach((document) => {
+      if (!hasDocumentMention(nextQuestion, document.title)) removeScopedDocument(document.id);
+    });
+    onQuestionChange(nextQuestion);
   }
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -136,7 +176,7 @@ export function ChatComposer({
     uploadMutation.reset();
     if (!file) return;
     if (!isSupportedDocumentFile(file)) {
-      setUploadJob({ fileName: file.name, jobId: null, space: uploadSpace, errorMessage: "Only PDF, DOCX, JPG, PNG, and JSON files can be uploaded from chat." });
+      setUploadJob({ fileName: file.name, jobId: null, space: uploadSpace, errorMessage: "Only PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, and JSON files can be uploaded from chat." });
       return;
     }
     if (file.size > DOCUMENT_UPLOAD_MAX_BYTES) {
@@ -155,6 +195,19 @@ export function ChatComposer({
   }
 
   function handleQuestionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Backspace" && !event.shiftKey && event.currentTarget.selectionStart === event.currentTarget.selectionEnd) {
+      const cursor = event.currentTarget.selectionStart;
+      const currentQuestion = event.currentTarget.value;
+      const document = [...scopedDocuments].reverse().find((candidate) => documentMentionBeforeCursor(currentQuestion, candidate.title, cursor));
+      if (document) {
+        event.preventDefault();
+        const nextQuestion = removeDocumentMention(currentQuestion, document.title);
+        removeScopedDocument(document.id);
+        pendingCaretPositionRef.current = nextQuestion.length;
+        onQuestionChange(nextQuestion);
+        return;
+      }
+    }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     if (canSubmitQuestion) {
@@ -165,15 +218,6 @@ export function ChatComposer({
   return (
     <form onSubmit={onQuestionSubmit} className="rag-composer-shell">
       <div className="rag-composer-inner">
-        <ComposerSourceControls
-          dbMode={dbMode}
-          loadingSources={querySourcesQuery.isLoading}
-          onSelectedQuerySourceChange={onSelectedQuerySourceChange}
-          onSourceModeChange={onSourceModeChange}
-          querySources={querySources}
-          selectedQuerySourceId={selectedQuerySourceId}
-          sourceMode={sourceMode}
-        />
         {scopedDocuments.length > 0 ? (
           <div className="rag-composer-scope" aria-label="Scoped documents">
             <span className="rag-composer-scope-label">Search scoped to</span>
@@ -181,25 +225,47 @@ export function ChatComposer({
               <span key={document.id} className="rag-scope-chip">
                 <FileText size={13} />
                 {document.title}
-                <button type="button" onClick={() => removeScopedDocument(document.id)} aria-label={`Remove ${document.title} from scope`}>
+                <button type="button" onClick={() => handleRemoveDocument(document)} aria-label={`Remove ${document.title} from scope`}>
                   <X size={13} />
                 </button>
               </span>
             ))}
           </div>
         ) : null}
-        <div className="rag-composer-box relative">
-          <textarea ref={inputRef} value={question} onChange={(event) => onQuestionChange(event.target.value)} onKeyDown={handleQuestionKeyDown} className={`rag-composer-input ${canUploadActiveSpace ? "rag-composer-input-with-upload" : "rag-composer-input-with-send"}`} aria-label="Ask a question" placeholder={composerPlaceholder(sourceMode, hasCorpus, querySources.length)} rows={1} />
+        {replyTarget ? (
+          <div className="rag-composer-reply" role="status">
+            <Reply size={15} aria-hidden="true" />
+            <div>
+              <strong>Replying to {replyLabelForTurn(replyTarget)}</strong>
+              <span>{replyPreviewForTurn(replyTarget)}</span>
+            </div>
+            <button type="button" onClick={onCancelReply} aria-label="Cancel reply">
+              <X size={15} />
+            </button>
+          </div>
+        ) : null}
+        <div className={`rag-composer-box relative ${emptyState ? "rag-composer-box-empty" : ""} ${canUploadActiveSpace ? "rag-composer-box-has-upload" : ""}`}>
+          <textarea ref={inputRef} value={question} onChange={(event) => handleQuestionChange(event.target.value)} onKeyDown={handleQuestionKeyDown} className={`rag-composer-input ${canUploadActiveSpace ? "rag-composer-input-with-upload" : "rag-composer-input-with-send"}`} aria-label="Ask a question" placeholder={composerPlaceholder(sourceMode, hasCorpus, querySources.length)} rows={1} />
+          <ComposerSourceControls
+            compact
+            dbMode={dbMode}
+            loadingSources={querySourcesQuery.isLoading}
+            onSelectedQuerySourceChange={onSelectedQuerySourceChange}
+            onSourceModeChange={onSourceModeChange}
+            querySources={querySources}
+            selectedQuerySourceId={selectedQuerySourceId}
+            sourceMode={sourceMode}
+          />
           {canUploadActiveSpace ? (
             <>
-              <input ref={fileInputRef} className="hidden" type="file" accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png,application/json,.json" onChange={handleFileChange} tabIndex={-1} aria-hidden="true" />
+              <input ref={fileInputRef} className="hidden" type="file" accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx,text/csv,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx,image/jpeg,.jpg,.jpeg,image/png,.png,application/json,.json" onChange={handleFileChange} tabIndex={-1} aria-hidden="true" />
               <button
                 type="button"
                 disabled={uploadMutation.isPending}
                 onClick={() => fileInputRef.current?.click()}
-                className="rag-composer-icon-action absolute bottom-2 right-14"
-                aria-label="Upload PDF, DOCX, JPG, PNG, or JSON, maximum 50 MB"
-                title="Upload PDF, DOCX, JPG, PNG, or JSON, maximum 50 MB"
+                className="rag-composer-icon-action rag-composer-positioned-action absolute right-14"
+                aria-label="Upload PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, or JSON, maximum 50 MB"
+                title="Upload PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, or JSON, maximum 50 MB"
               >
                 {uploadMutation.isPending ? <Loader2 className="animate-spin" size={18} /> : <Paperclip size={18} />}
               </button>
@@ -209,7 +275,7 @@ export function ChatComposer({
             type={activeSessionHasPendingTurn ? "button" : "submit"}
             disabled={!activeSessionHasPendingTurn && !canSubmitQuestion}
             onClick={activeSessionHasPendingTurn ? cancelPendingTurn : undefined}
-            className={`rag-composer-send-action absolute bottom-2 right-2 ${activeSessionHasPendingTurn ? "rag-composer-stop-action" : "bg-primary text-on-primary"}`}
+            className={`rag-composer-send-action rag-composer-positioned-action absolute right-2 ${activeSessionHasPendingTurn ? "rag-composer-stop-action" : "bg-primary-action text-on-primary"}`}
             aria-label={activeSessionHasPendingTurn ? "Stop response generation" : pendingElsewhere ? "A response is generating in another chat" : "Send question"}
             title={activeSessionHasPendingTurn ? "Stop response generation" : pendingElsewhere ? "A response is generating in another chat" : "Send question"}
           >
@@ -251,14 +317,22 @@ export function ChatComposer({
             ? "A response is generating in another chat. You can keep browsing, then send when it finishes."
             : sourceMode === "db_only"
               ? "Live database source selected."
-              : `${canUploadActiveSpace ? "Upload PDF, DOCX, JPG, PNG, or JSON up to 50 MB. " : ""}Use @ to narrow retrieval.`}
+              : `${canUploadActiveSpace ? "Upload PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, or JSON up to 50 MB. " : ""}Use @ to narrow retrieval.`}
         </p>
       </div>
     </form>
   );
 }
 
+export function resizeComposerInput(input: HTMLTextAreaElement) {
+  input.style.height = "auto";
+  const height = Math.min(input.scrollHeight, COMPOSER_MAX_HEIGHT_PX);
+  input.style.height = `${height}px`;
+  input.style.overflowY = input.scrollHeight > COMPOSER_MAX_HEIGHT_PX ? "auto" : "hidden";
+}
+
 function ComposerSourceControls({
+  compact = false,
   dbMode,
   loadingSources,
   onSelectedQuerySourceChange,
@@ -267,6 +341,7 @@ function ComposerSourceControls({
   selectedQuerySourceId,
   sourceMode,
 }: {
+  compact?: boolean;
   dbMode: boolean;
   loadingSources: boolean;
   onSelectedQuerySourceChange: (sourceId: string) => void;
@@ -281,6 +356,38 @@ function ComposerSourceControls({
     { mode: "db_only", label: "Live DB", icon: Database },
     { mode: "hybrid", label: "Hybrid", icon: Layers3 },
   ];
+  const activeMode = modes.find((mode) => mode.mode === sourceMode) ?? modes[0];
+  const ActiveModeIcon = activeMode.icon;
+
+  if (compact) {
+    return (
+      <div className="rag-composer-source-row rag-composer-source-row-compact">
+        <label className="rag-composer-compact-source">
+          <ActiveModeIcon size={15} aria-hidden="true" />
+          <span className="sr-only">Query source mode</span>
+          <select aria-label="Query source mode" value={sourceMode} onChange={(event) => onSourceModeChange(event.target.value as QuerySourceMode)}>
+            {modes.map(({ mode, label }) => <option key={mode} value={mode}>{label}</option>)}
+          </select>
+          <ChevronDown size={14} aria-hidden="true" />
+        </label>
+        {dbMode ? (
+          <label className="rag-composer-source-select">
+            <span className="sr-only">Live database source</span>
+            <select
+              aria-label="Live database source"
+              disabled={loadingSources || querySources.length === 0}
+              value={selectedQuerySourceId}
+              onChange={(event) => onSelectedQuerySourceChange(event.target.value)}
+            >
+              <option value="">{loadingSources ? "Loading sources" : querySources.length ? "All visible DB sources" : "No DB sources"}</option>
+              {querySources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}
+            </select>
+          </label>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="rag-composer-source-row">
       <div className="rag-composer-source-segments" role="group" aria-label="Query source mode">

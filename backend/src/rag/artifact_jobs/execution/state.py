@@ -11,6 +11,7 @@ from time import perf_counter
 from rag.auth.document_access import can_read_document
 from rag.auth.identity_models import IdentityRepository, UserRecord
 from rag.documents.models import DocumentRepository
+from rag.documents.source_revision import SourceRevision
 from rag.artifact_jobs.execution.errors import (
     ArtifactJobCancelled,
     ArtifactJobLeaseLost,
@@ -61,6 +62,14 @@ class ArtifactExecutionState:
     ) -> None:
         self._check_cancelled(job.id)
         self._authorize(job, source_doc_ids)
+        evidence = getattr(self, "_citation_evidence", None)
+        if evidence is None:
+            raise ArtifactPermissionChanged("artifact source revision is unavailable")
+        repo = self.document_repo_factory()
+        for record in evidence.records:
+            document = repo.get_document(record.doc_id)
+            if document is None or not SourceRevision(record.index_generation_id, record.content_hash).matches(document):
+                raise ArtifactPermissionChanged("artifact source revision is unavailable")
 
     def _check_cancelled(self, job_id: str) -> None:
         current = self.repo_factory().get_job(job_id)

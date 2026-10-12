@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from rag.core.config import Settings
 from rag.shared.contracts.rag_defaults import (
+    DEFAULT_CONTEXT_RESOLVER_ENABLED,
     DEFAULT_EVIDENCE_GATE_POLICY,
     DEFAULT_EMBEDDING_MODEL_ID,
     DEFAULT_FAITHFULNESS_MODEL,
@@ -30,6 +31,7 @@ def test_settings_use_canonical_docker_resolved_rag_defaults() -> None:
     assert config.rag_http_timeout_seconds == DEFAULT_RAG_HTTP_TIMEOUT_SECONDS == 180.0
     assert config.rag_evidence_gate_policy == DEFAULT_EVIDENCE_GATE_POLICY == "adaptive"
     assert config.rag_faithfulness_policy == DEFAULT_FAITHFULNESS_POLICY == "adaptive"
+    assert config.rag_context_resolver_enabled is DEFAULT_CONTEXT_RESOLVER_ENABLED is True
     assert config.vllm_chat_model == DEFAULT_VLLM_CHAT_MODEL == "Qwen/Qwen3-8B-AWQ"
     assert config.vllm_vision_model_id == DEFAULT_VLLM_VISION_MODEL_ID
     assert config.embedding_model_id == DEFAULT_EMBEDDING_MODEL_ID

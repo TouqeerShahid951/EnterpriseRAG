@@ -13,7 +13,8 @@ from .state import QueryContext, active_query
 
 
 _QUERY_ABBREVIATION_RE = re.compile(
-    r"(?<!\w)([A-Z][A-Z0-9]*(?:[./&-][A-Z0-9]+)*)(?!\w)"
+    r"(?<!\w)([A-Z][A-Z0-9]*(?:[./&-][A-Z0-9]+)*)(?!\w)",
+    re.IGNORECASE,
 )
 
 
@@ -32,21 +33,25 @@ def _apply_aliases(
     query: str,
     entries: list[AbbreviationEntryRecord],
 ) -> tuple[str, list[SearchHit], bool]:
-    entries_by_abbreviation = {entry.abbreviation: entry for entry in entries}
+    entries_by_abbreviation: dict[str, list[AbbreviationEntryRecord]] = {}
+    for entry in entries:
+        entries_by_abbreviation.setdefault(entry.abbreviation.casefold(), []).append(
+            entry
+        )
     direct_matches: dict[
         str, list[tuple[int, int, str, AbbreviationEntryRecord]]
     ] = {}
-    for match in _QUERY_ABBREVIATION_RE.finditer(query):
-        entry = entries_by_abbreviation.get(match[1])
-        if entry is not None:
-            direct_matches.setdefault(entry.id, []).append(
-                (
-                    match.start(),
-                    match.end(),
-                    f"{match[1]} ({entry.expansion})",
-                    entry,
-                )
-            )
+    direct_support_ids: dict[tuple[int, int, str, str], set[str]] = {}
+    for alternatives in entries_by_abbreviation.values():
+        entry = alternatives[0]
+        expansions = list(dict.fromkeys(item.expansion for item in alternatives))
+        for match in _expansion_pattern(entry.abbreviation).finditer(query):
+            replacement = f"{match[0]} ({' OR '.join(expansions)})"
+            candidate = (match.start(), match.end(), replacement, entry)
+            direct_matches.setdefault(entry.id, []).append(candidate)
+            direct_support_ids[
+                (match.start(), match.end(), replacement, entry.id)
+            ] = {item.id for item in alternatives}
 
     entries_by_expansion: dict[str, list[AbbreviationEntryRecord]] = {}
     reverse_matches: dict[
@@ -66,7 +71,15 @@ def _apply_aliases(
                 )
             )
 
-    paired_ids = direct_matches.keys() & reverse_matches.keys()
+    paired_ids = {
+        entry_id
+        for entry_id, matches in direct_matches.items()
+        if any(
+            direct_support_ids[(start, end, replacement, entry.id)]
+            & reverse_matches.keys()
+            for start, end, replacement, entry in matches
+        )
+    }
     candidates = [
         match
         for entry_id, matches in direct_matches.items()
@@ -81,7 +94,11 @@ def _apply_aliases(
         if expansion_entries[0].id not in paired_ids
     )
     selected = _select_non_overlapping(candidates)
-    matched_ids = set(paired_ids) | {match[3].id for match in selected}
+    matched_ids = set(paired_ids)
+    for start, end, replacement, entry in selected:
+        matched_ids.update(
+            direct_support_ids.get((start, end, replacement, entry.id), {entry.id})
+        )
     if not matched_ids:
         return query, [], False
 
@@ -143,15 +160,28 @@ def _supporting_hit(entry: AbbreviationEntryRecord) -> SearchHit:
             "page_start": entry.source_page,
             "page_end": entry.source_page,
             "abbreviation_glossary_support": True,
+            "provenance_kind": "structured",
+            "quote_texts": [f"{entry.abbreviation} — {entry.expansion}"],
+            "citation_targets": [{"kind": "record", "record_id": entry.id,
+                "exact_text": f"{entry.abbreviation} — {entry.expansion}", "provenance_kind": "structured"}],
         },
     )
 
 
 def _query_abbreviations(query: str) -> list[str]:
-    return list(
-        dict.fromkeys(
-            match[1]
-            for match in _QUERY_ABBREVIATION_RE.finditer(query)
-            if 2 <= len(re.sub(r"\W", "", match[1])) <= 20
-        )
-    )
+    matches = list(_QUERY_ABBREVIATION_RE.finditer(query))
+    candidates: list[str] = []
+    for start, first in enumerate(matches):
+        candidate = first[1]
+        if 2 <= len(re.sub(r"\W", "", candidate)) <= 20:
+            candidates.append(candidate)
+        for end in range(start + 1, len(matches)):
+            previous = matches[end - 1]
+            current = matches[end]
+            if not query[previous.end() : current.start()].isspace():
+                break
+            candidate = f"{candidate} {current[1]}"
+            if len(candidate) > 20:
+                break
+            candidates.append(candidate)
+    return list(dict.fromkeys(candidates))

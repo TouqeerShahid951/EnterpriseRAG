@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from ..auth.dependencies import require_platform_admin_user
 from ..auth.identity_models import UserRecord
@@ -20,7 +20,9 @@ from .schemas import (
     VllmServiceDeploymentLimits,
 )
 from .application import VllmDeploymentApplyRejected, VllmDeploymentApplyService
-from .dependencies import get_vllm_deployment_apply_service
+from .dependencies import get_resource_reader, get_vllm_deployment_apply_service
+from .resource_metrics import ResourceReader, ResourceSnapshot
+from .resource_sampling import ResourceSampleUnavailable
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -137,3 +139,18 @@ def _service_limits_response(record: VllmServiceLimitsRecord) -> VllmServiceDepl
         max_num_seqs=record.max_num_seqs,
         max_num_batched_tokens=record.max_num_batched_tokens,
     )
+
+
+@router.get("/system-resources", response_model=ResourceSnapshot, summary="Read API-visible system resource usage",
+            responses={503: {"model": ErrorResponse, "description": "Telemetry is starting or stale"}})
+async def get_system_resources(
+    response: Response,
+    user: UserRecord = Depends(require_platform_admin_user),
+    reader: ResourceReader = Depends(get_resource_reader),
+) -> ResourceSnapshot:
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return reader.read()
+    except ResourceSampleUnavailable as exc:
+        raise HTTPException(status_code=503, detail={"code": "resource_sample_unavailable", "message": str(exc)},
+                            headers={"Retry-After": "2", "Cache-Control": "no-store"}) from exc

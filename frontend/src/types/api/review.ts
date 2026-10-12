@@ -14,6 +14,9 @@ export interface ReviewItem {
   page_start: number | null;
   page_end: number | null;
   bbox: number[] | null;
+  image_asset_id?: string | null;
+  image_source_kind?: string | null;
+  image_description?: string | null;
   quality_flags: string[];
   confidence: number | null;
   partial_text: string;

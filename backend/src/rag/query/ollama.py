@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from typing import Any
+
+from rag.shared.contracts.rag_defaults import (
+    SYNTHESIS_PROMPT_HEADROOM_TOKENS as SYNTHESIS_PROMPT_HEADROOM_TOKENS,
+)
 
 from ..shared.ollama_models import is_ollama_cloud_model
 from .cancellation import QueryCancellationToken
 from .http import ServiceRequestError, request_json, stream_json_lines
+from .model_output import ModelOutput
 
 
 ANSWER_NUM_PREDICT = 1024
 FACTUAL_ANSWER_NUM_PREDICT = ANSWER_NUM_PREDICT
 LONG_ANSWER_NUM_PREDICT = 2048
-SYNTHESIS_PROMPT_HEADROOM_TOKENS = 512
 FAITHFULNESS_NUM_PREDICT = 1024
 ROUTE_PLANNER_NUM_PREDICT = 512
 REASONING_NUM_PREDICT = 512
@@ -48,7 +53,8 @@ _BASE_ANSWER_PREFIX = (
     "Never return a citation alone, invent labels, or use ordinal source names.",
 )
 _BASE_ANSWER_SUFFIX = (
-    "If evidence lacks the answer, say the indexed sources do not contain enough information.",
+    "If evidence supports only part of the answer, answer that part and clearly identify what the evidence does not establish.",
+    "If evidence supports none of the requested answer, say the indexed sources do not contain enough information; do not present tangential evidence as the answer.",
 )
 _FACTUAL_ANSWER_INSTRUCTIONS = (
     "Answer the requested fact directly using only relevant evidence.",
@@ -150,10 +156,11 @@ class OllamaClient:
         question: str,
         contexts: list[str],
         profile: str | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
         prompt = build_answer_prompt(question=question, contexts=contexts, profile=profile)
-        num_predict = answer_num_predict_for_profile(profile)
+        num_predict = max_tokens if max_tokens is not None else answer_num_predict_for_profile(profile)
         payload = request_json(
             self.base_url,
             "/api/chat",
@@ -179,10 +186,11 @@ class OllamaClient:
         question: str,
         contexts: list[str],
         profile: str | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> Iterator[str]:
         prompt = build_answer_prompt(question=question, contexts=contexts, profile=profile)
-        num_predict = answer_num_predict_for_profile(profile)
+        num_predict = max_tokens if max_tokens is not None else answer_num_predict_for_profile(profile)
         chunks = stream_json_lines(
             self.base_url,
             "/api/chat",
@@ -211,9 +219,16 @@ class OllamaClient:
         prompt: str,
         model: str | None,
         json_schema: dict[str, object] | None = None,
+        timeout_seconds: float | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
         selected_model = model or self.chat_model
+        format_option = _json_format_option(selected_model, json_schema=json_schema)
+        if is_ollama_cloud_model(selected_model):
+            format_option = {"format": "json"}
+            if json_schema is not None:
+                prompt = "Return only JSON conforming to this schema:\n" + json.dumps(json_schema) + "\n" + prompt
         payload = request_json(
             self.base_url,
             "/api/chat",
@@ -222,11 +237,11 @@ class OllamaClient:
             payload={
                 "model": selected_model,
                 "stream": False,
-                **_json_format_option(selected_model, json_schema=json_schema),
+                **format_option,
                 "think": self.thinking_enabled,
                 "options": _ollama_options(
                     temperature=0.0,
-                    num_predict=min(self.json_num_predict, FAITHFULNESS_NUM_PREDICT),
+                    num_predict=max_tokens or min(self.json_num_predict, FAITHFULNESS_NUM_PREDICT),
                     num_ctx=self.num_ctx,
                 ),
                 "messages": [
@@ -234,10 +249,15 @@ class OllamaClient:
                     {"role": "user", "content": prompt},
                 ],
             },
-            timeout_seconds=self.chat_timeout_seconds,
+            timeout_seconds=min(timeout_seconds, self.chat_timeout_seconds) if timeout_seconds is not None else self.chat_timeout_seconds,
             cancellation_token=cancellation_token,
         )
-        return _message_content(payload, "faithfulness response did not include message content")
+        return ModelOutput(
+            _message_content(payload, "faithfulness response did not include message content"),
+            output_tokens=payload.get("eval_count"),
+            token_limit=max_tokens or min(self.json_num_predict, FAITHFULNESS_NUM_PREDICT),
+            finish_reason=payload.get("done_reason"),
+        )
 
     def verify_route(
         self,
@@ -472,12 +492,6 @@ def _json_format_option(
     json_schema: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if is_ollama_cloud_model(model):
-        if json_schema is not None:
-            raise ServiceRequestError(
-                "ollama",
-                f"model {model!r} does not support schema-constrained output",
-                400,
-            )
         return {}
     return {"format": json_schema if json_schema is not None else "json"}
 

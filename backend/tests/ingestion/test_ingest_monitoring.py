@@ -64,6 +64,53 @@ def test_summary_counts_history_but_only_latest_job_needs_attention() -> None:
     assert summary.needs_attention == 0
 
 
+def test_glossary_jobs_are_excluded_from_normal_ingestion_activity() -> None:
+    repo = InMemoryDocumentRepository()
+    document = _document(repo)
+    glossary = repo.create_document(
+        title="Glossary.pdf",
+        source_id="glossary-source",
+        group_path="/ops",
+        clearance_level="NATO_RESTRICTED",
+        doc_type="abbreviation_glossary",
+        effective_date=None,
+        expiry_date=None,
+        description=None,
+        pending_supersedes=[],
+        content_hash="glossary-hash",
+        uploaded_by="user-1",
+        file_path="memory://glossary.pdf",
+        ingest_status="queued",
+    )
+    repo.create_ingest_job(doc_id=document.id, status="complete", progress_pct=100)
+    repo.create_ingest_job(doc_id=glossary.id, status="failed", progress_pct=100)
+
+    page = search_visible_ingest_jobs(
+        repo=repo,
+        access=_access(),
+        filters=IngestJobFilters(),
+        can_view=True,
+        limit=20,
+        offset=0,
+    )
+
+    assert [item.job.doc_id for item in page.items] == [document.id]
+
+    glossary_page = search_visible_ingest_jobs(
+        repo=repo,
+        access=_access(),
+        filters=IngestJobFilters(
+            include_abbreviation_glossary=True,
+            abbreviation_glossary_only=True,
+        ),
+        can_view=True,
+        limit=20,
+        offset=0,
+    )
+
+    assert [item.job.doc_id for item in glossary_page.items] == [glossary.id]
+
+
 def test_stale_recovery_refuses_to_continue_without_worker_snapshot() -> None:
     repo = InMemoryDocumentRepository()
 

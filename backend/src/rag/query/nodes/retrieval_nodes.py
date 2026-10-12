@@ -34,11 +34,14 @@ from rag.query.retrieval.retrieval_trace import (
     RetrievalStageStatus,
     retrieval_trace_stage,
 )
+from rag.query.routing.evidence_planning import required_evidence_assignments
 from rag.query.routing.routing_models import RetrievalCapability, RoutePlan
 from rag.query.routing.routing_logs import log_retrieval_summary, log_verifier_decision
 from rag.query.sources import build_evidence_hits, dedupe_hits
 from rag.query.sources.source_evidence_selection import (
     _dedupe_keys,
+    evidence_need_ids,
+    required_evidence_assignments as hit_required_evidence_assignments,
     retrieval_query_slots,
 )
 from ..state import QueryContext
@@ -174,7 +177,11 @@ class RetrievalNodes:
         _raise_if_cancelled(ctx)
         ctx.pop("evidence_sufficiency", None)
         plan = ctx.get("route_plan")
-        if plan is not None and not plan.use_reranker:
+        if (
+            plan is not None
+            and not plan.use_reranker
+            and plan.coverage != "exhaustive"
+        ):
             _record_retrieval_stage(ctx, "rerank_input", [], status="skipped")
             _record_retrieval_stage(ctx, "reranked", ctx["retrieved_hits"])
             _record_retrieval_stage(ctx, "post_policy", ctx["retrieved_hits"])
@@ -301,6 +308,11 @@ class RetrievalNodes:
             )
         if plan is not None:
             ranked_hits = _preserve_capability_coverage(
+                list(rerank_result.ranked_candidates) or ranked_hits,
+                ranked_hits,
+                plan=plan,
+            )
+            ranked_hits = _preserve_evidence_need_coverage(
                 list(rerank_result.ranked_candidates) or ranked_hits,
                 ranked_hits,
                 plan=plan,
@@ -546,7 +558,7 @@ class RetrievalNodes:
         _raise_if_cancelled(ctx)
         plan = ctx.get("route_plan")
         exhaustive_coverage = ctx.get("exhaustive_coverage")
-        required_coverage_obligations = (
+        required_section_obligations = (
             set(exhaustive_coverage["required_obligations"])
             if exhaustive_coverage is not None
             else _coverage_obligations(ctx["retrieved_hits"])
@@ -556,8 +568,31 @@ class RetrievalNodes:
             configured_limit=plan.top_k if plan else self.config.rag_top_k,
             configured_token_budget=ctx["token_budget"],
         )
+        required_need_ids = {
+            need.id
+            for need in (plan.evidence_plan.needs if plan and plan.evidence_plan else ())
+            if any(assignment.required for assignment in need.assignments)
+        }
+        required_assignments = required_evidence_assignments(
+            plan.evidence_plan if plan is not None else None
+        )
+        required_assignment_obligations = {
+            _assignment_coverage_slot(assignment)
+            for assignment in required_assignments
+        }
+        required_coverage_obligations = (
+            required_section_obligations | required_assignment_obligations
+        )
+        if exhaustive_coverage is not None:
+            exhaustive_coverage["required_obligations"] = sorted(
+                required_coverage_obligations
+            )
         query_count = len(ctx.get("sub_queries") or [])
-        required_query_slots = set(range(query_count)) if query_count > 1 else set()
+        required_query_slots = (
+            set(range(query_count))
+            if query_count > 1 and not required_need_ids
+            else set()
+        )
         ctx["retrieved_hits"] = _final_evidence_hits(
             ctx,
             ctx["retrieved_hits"],
@@ -570,13 +605,59 @@ class RetrievalNodes:
             for hit in ctx["retrieved_hits"]
             for slot in retrieval_query_slots(hit)
         }
+        covered_need_ids = {
+            need_id
+            for hit in ctx["retrieved_hits"]
+            for need_id in evidence_need_ids(hit)
+        }
+        covered_assignments = {
+            assignment
+            for hit in ctx["retrieved_hits"]
+            for assignment in hit_required_evidence_assignments(hit)
+        }
         ctx["synthesis_source_limit"] = evidence_limit
         ctx["synthesis_token_limit"] = evidence_token_limit
-        ctx["required_query_slot_count"] = len(required_query_slots)
-        ctx["covered_query_slot_count"] = len(
-            required_query_slots & covered_query_slots
+        ctx["required_query_slot_count"] = len(
+            required_assignments
+            if required_assignments
+            else (required_need_ids or required_query_slots)
         )
-        final_coverage_obligations = _coverage_obligations(ctx["retrieved_hits"])
+        ctx["covered_query_slot_count"] = len(
+            (required_assignments & covered_assignments)
+            if required_assignments
+            else (
+                (required_need_ids & covered_need_ids)
+                if required_need_ids
+                else (required_query_slots & covered_query_slots)
+            )
+        )
+        assignment_coverage_partial = (
+            bool(required_assignments)
+            and not required_assignments <= covered_assignments
+        )
+        need_coverage_partial = (
+            not required_assignments
+            and len(required_need_ids) > 1
+            and not required_need_ids <= covered_need_ids
+        )
+        if assignment_coverage_partial or need_coverage_partial:
+            ctx["degraded"] = True
+            ctx["degraded_reason"] = (
+                ctx["degraded_reason"]
+                or (
+                    "evidence_assignment_coverage_partial"
+                    if assignment_coverage_partial
+                    else "evidence_need_coverage_partial"
+                )
+            )
+        final_section_obligations = _coverage_obligations(ctx["retrieved_hits"])
+        final_assignment_obligations = {
+            _assignment_coverage_slot(assignment)
+            for assignment in required_assignments & covered_assignments
+        }
+        final_coverage_obligations = (
+            final_section_obligations | final_assignment_obligations
+        )
         if exhaustive_coverage is not None:
             exhaustive_coverage["covered_obligations"] = sorted(
                 final_coverage_obligations
@@ -584,7 +665,14 @@ class RetrievalNodes:
         if not required_coverage_obligations <= final_coverage_obligations:
             if exhaustive_coverage is not None:
                 exhaustive_coverage["evidence_status"] = "partial"
-                if (
+                if assignment_coverage_partial and (
+                    "required_assignment_coverage_incomplete"
+                    not in exhaustive_coverage["reasons"]
+                ):
+                    exhaustive_coverage["reasons"].append(
+                        "required_assignment_coverage_incomplete"
+                    )
+                if not required_section_obligations <= final_section_obligations and (
                     "final_evidence_budget_incomplete"
                     not in exhaustive_coverage["reasons"]
                 ):
@@ -597,6 +685,10 @@ class RetrievalNodes:
             )
         _record_retrieval_stage(ctx, "final_evidence", ctx["retrieved_hits"])
         return ctx
+
+
+def _assignment_coverage_slot(assignment: tuple[str, str, str]) -> str:
+    return "assignment:" + "|".join(assignment)
 
 
 def _expand_auto_source_route(
@@ -831,6 +923,38 @@ def _preserve_capability_coverage(
 
     reserves = dedupe_hits(reserves)
     return dedupe_hits([*ranked[:1], *reserves, *ranked[1:]])[:limit]
+
+
+def _preserve_evidence_need_coverage(
+    ranked_candidates: list[SearchHit],
+    ranked: list[SearchHit],
+    *,
+    plan: RoutePlan,
+) -> list[SearchHit]:
+    if plan.evidence_plan is None or len(plan.evidence_plan.needs) < 2:
+        return ranked
+    required = {
+        need.id
+        for need in plan.evidence_plan.needs
+        if any(assignment.required for assignment in need.assignments)
+    }
+    covered = {
+        need_id for hit in ranked[: plan.top_k] for need_id in evidence_need_ids(hit)
+    }
+    reserves = [
+        next(
+            (
+                hit
+                for hit in ranked_candidates
+                if need_id in evidence_need_ids(hit)
+            ),
+            None,
+        )
+        for need_id in required - covered
+    ]
+    return dedupe_hits(
+        [*ranked[:1], *(hit for hit in reserves if hit is not None), *ranked[1:]]
+    )[: plan.top_k]
 
 
 def _with_capability_origins(

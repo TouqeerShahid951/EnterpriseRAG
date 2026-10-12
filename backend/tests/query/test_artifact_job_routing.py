@@ -1,4 +1,6 @@
 from __future__ import annotations
+from unittest.mock import Mock
+from types import SimpleNamespace
 
 import json
 
@@ -200,10 +202,58 @@ def test_ambiguous_pronoun_uses_existing_context_resolver_before_queueing() -> N
     assert submission.original_request == "Make that a PDF"
     assert artifact_jobs.calls[0]["conversation_context"] == [
         {
-            "resolved_query": "create a pdf report about quarterly risk",
+            "resolved_query": "Make a PDF report about quarterly risk",
             "antecedent_turn_ids": ["previous-user"],
         }
     ]
+
+
+def test_disabled_context_resolver_requires_an_explicit_artifact_reply() -> None:
+    artifact_jobs = _ArtifactJobService()
+    history = InMemoryChatHistoryRepository()
+    _save_exchange(history, query="What are the quarterly risks?")
+    service = _service(
+        artifact_jobs=artifact_jobs,
+        history=history,
+        ollama=_UnexpectedResolver(),
+        context_resolver_enabled=False,
+    )
+
+    response = service.answer_query(
+        QueryRequest(query="Make that a PDF", session_id="session-1"),
+        _user(),
+    )
+
+    assert response.answer_status == "clarification"
+    assert "Use Reply" in response.answer
+    assert artifact_jobs.calls == []
+
+
+def test_disabled_context_resolver_keeps_explicit_artifact_reply() -> None:
+    artifact_jobs = _ArtifactJobService()
+    history = InMemoryChatHistoryRepository()
+    _save_exchange(history, query="What are the quarterly risks?")
+    service = _service(
+        artifact_jobs=artifact_jobs,
+        history=history,
+        ollama=_UnexpectedResolver(),
+        context_resolver_enabled=False,
+    )
+
+    response = service.answer_query(
+        QueryRequest(
+            query="Make that a PDF",
+            session_id="session-1",
+            reply_to_turn_id="previous-assistant",
+        ),
+        _user(),
+    )
+
+    assert response.artifact_job is not None
+    context = artifact_jobs.calls[0]["conversation_context"]
+    assert isinstance(context, list)
+    assert context[0]["antecedent_turn_ids"] == ["previous-user"]
+    assert "Quarterly risk is elevated" in context[0]["resolved_query"]
 
 
 def test_database_scoped_artifact_request_fails_explicitly_instead_of_using_corpus() -> None:
@@ -293,8 +343,10 @@ class _Resolver:
         return json.dumps(
             {
                 "relation": "follow_up",
-                "standalone_query": "create a pdf report about quarterly risk",
+                "standalone_query": "Make a PDF report about quarterly risk",
                 "antecedent_turn_ids": ["previous-user"],
+                "dependency_targets": ["query"],
+                "ambiguity_candidates": [],
                 "clarification_question": None,
             }
         )
@@ -305,14 +357,26 @@ class _UnexpectedResolver:
         raise AssertionError("context resolver should not be called")
 
 
-def _service(*, artifact_jobs, history, ollama) -> LocalRagService:
+def _service(
+    *,
+    artifact_jobs,
+    history,
+    ollama,
+    context_resolver_enabled: bool = True,
+) -> LocalRagService:
     return LocalRagService(
-        config=Settings(document_repository="memory"),
+        config=Settings(
+            document_repository="memory",
+            rag_context_resolver_enabled=context_resolver_enabled,
+        ),
         ollama=ollama,
         qdrant=object(),
         chat_history_repo=history,
         conflict_checker=object(),
         artifact_job_service=artifact_jobs,
+        document_repo=Mock(get_document=Mock(return_value=SimpleNamespace(
+            access_group_paths=("/",), clearance_level="NATO_UNCLASSIFIED", is_current=True,
+            deleted_at=None, expiry_date=None, active_index_generation_id=None, content_hash=None))),
     )
 
 

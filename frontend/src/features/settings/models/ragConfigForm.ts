@@ -55,6 +55,7 @@ export type RagConfigFormState = {
   vision_model: string;
   reranker_model: string;
   thinking_enabled: boolean;
+  context_resolver_enabled: boolean;
   query_planner_enabled: boolean;
   evidence_gate_policy: RagConfig["evidence_gate_policy"];
   faithfulness_policy: RagConfig["faithfulness_policy"];
@@ -135,6 +136,7 @@ export const DEFAULT_RAG_FORM: RagConfigFormState = {
   vision_model: "",
   reranker_model: DEFAULT_RERANKER_MODEL,
   thinking_enabled: false,
+  context_resolver_enabled: true,
   query_planner_enabled: true,
   evidence_gate_policy: "adaptive",
   faithfulness_policy: "adaptive",
@@ -251,6 +253,7 @@ export function formFromConfig(config: RagConfig): RagConfigFormState {
     vision_model: config.vision_model ?? "",
     reranker_model: config.reranker_model || DEFAULT_RERANKER_MODEL,
     thinking_enabled: Boolean(config.thinking_enabled),
+    context_resolver_enabled: config.context_resolver_enabled ?? true,
     query_planner_enabled: config.query_planner_enabled ?? true,
     evidence_gate_policy: config.evidence_gate_policy ?? "adaptive",
     faithfulness_policy: config.faithfulness_policy ?? "adaptive",
@@ -304,6 +307,7 @@ export function requestFromForm(form: RagConfigFormState): RagConfigRequest {
     ingestion_model: form.ingestion_model.trim() || null,
     vision_model: form.vision_model.trim() || null,
     thinking_enabled: form.thinking_enabled,
+    context_resolver_enabled: form.context_resolver_enabled,
     query_planner_enabled: form.query_planner_enabled,
     evidence_gate_policy: form.evidence_gate_policy,
     faithfulness_policy: form.faithfulness_policy,

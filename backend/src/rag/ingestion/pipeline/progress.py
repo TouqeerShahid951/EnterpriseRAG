@@ -200,8 +200,18 @@ def image_progress_label(event: dict[str, object]) -> str:
     total = max(1, int_value(event.get("total")))
     page_no = int_value(event.get("page"))
     source_kind = str(event.get("source_kind") or "image")
+    if source_kind == "pptx_slide":
+        if status == "complete":
+            return f"Slide visual analysis completed {current} of {total}"
+        return f"Analyzing slide visuals: slide {min(current + 1, total)} of {total}"
     image_label = image_source_label(source_kind)
-    page_label = f" (PDF page {page_no})" if page_no else ""
+    page_label = (
+        f" (slide {page_no})"
+        if page_no and source_kind.startswith("pptx_")
+        else f" (PDF page {page_no})"
+        if page_no
+        else ""
+    )
     if status == "complete":
         return (
             f"Image analysis completed {image_label} {current} of {total}{page_label}"
@@ -218,6 +228,10 @@ def image_source_label(source_kind: str) -> str:
         return "embedded image"
     if source_kind == "docx_media":
         return "document image"
+    if source_kind == "pptx_slide":
+        return "slide visual"
+    if source_kind == "pptx_media":
+        return "slide image"
     return "image"
 
 

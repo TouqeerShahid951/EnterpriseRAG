@@ -66,6 +66,10 @@ class EvidenceRecord(ContractModel):
     page_end: int | None = None
     content_type: str = "text"
     text: str = ""
+    index_generation_id: str | None = None
+    content_hash: str | None = None
+    provenance_kind: str = "unknown"
+    quote_texts: list[str] | None = None
     structured_fields: dict[str, str] = Field(default_factory=dict)
     retrieval_score: float = 0.0
     rerank_score: float | None = None
@@ -159,6 +163,10 @@ class EvidenceCitation(ContractModel):
     page_start: int | None = None
     page_end: int | None = None
 
+    index_generation_id: str | None = None
+    content_hash: str | None = None
+    quotes: list[str] = Field(default_factory=list)
+
 
 class EvidenceBackedContent(ContractModel):
     title: str
@@ -190,6 +198,7 @@ class PresentationSpec(ContractModel):
 
 
 class ArtifactContentBundle(ContractModel):
+    citation_verification: dict[str, object] | None = None
     version: Literal["v2"] = "v2"
     content: EvidenceBackedContent
     paginated: PaginatedDocumentSpec

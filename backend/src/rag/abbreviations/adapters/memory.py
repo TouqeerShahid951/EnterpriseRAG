@@ -66,6 +66,7 @@ class InMemoryAbbreviationRepository:
         _ = actor_id
         if any(
             entry.abbreviation.casefold() == abbreviation.casefold()
+            and entry.expansion.casefold() == expansion.casefold()
             for entry in self.entries.values()
         ):
             raise DuplicateAbbreviationError(abbreviation)
@@ -104,6 +105,7 @@ class InMemoryAbbreviationRepository:
         if any(
             entry.id != entry_id
             and entry.abbreviation.casefold() == abbreviation.casefold()
+            and entry.expansion.casefold() == expansion.casefold()
             for entry in self.entries.values()
         ):
             raise DuplicateAbbreviationError(abbreviation)
@@ -178,7 +180,12 @@ class InMemoryAbbreviationRepository:
         )
         for abbreviation, expansion, source_page in entries:
             existing = next(
-                (entry for entry in self.entries.values() if entry.abbreviation.casefold() == abbreviation.casefold()),
+                (
+                    entry
+                    for entry in self.entries.values()
+                    if entry.abbreviation.casefold() == abbreviation.casefold()
+                    and entry.expansion.casefold() == expansion.casefold()
+                ),
                 None,
             )
             if existing is not None:

@@ -1,11 +1,19 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+import asyncio
+import logging
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from rag.audit import routes as audit_routes
+from rag.query.analytics import routes as query_analytics_routes
+from rag.query.analytics.repository import get_analytics_repository
+from rag.query.analytics.service import AnalyticsRecorder
+from rag.branding import routes as branding_routes
 from rag.abbreviations import routes as abbreviation_routes
 from rag.auth import routes as auth_routes
 from rag.artifact_jobs import routes as artifact_routes
@@ -15,6 +23,8 @@ from rag.documents import routes as document_routes
 from rag.documents.upload import routes as upload_routes
 from rag.connectors import routes as connector_routes
 from rag.deployment import routes as deployment_routes
+from rag.deployment.adapters.resource_metrics import OsResourceReader
+from rag.deployment.resource_sampling import ResourceSampler
 from rag.evaluations import routes as evaluation_routes
 from rag.graphrag import (
     document_routes as graphrag_document_routes,
@@ -27,6 +37,7 @@ from rag.ingestion import (
 from rag.ingestion.configuration import routes as ingest_configuration_routes
 from rag.ingestion.folders import routes as folder_schedule_routes
 from rag.ingestion.publication import routes as index_publication_routes
+from rag.ingestion.checkpoints import routes as ingest_checkpoint_routes
 from rag.ingestion.review import routes as review_routes
 from rag.query import routes as query_routes
 from rag.query.configuration import routes as rag_configuration_routes
@@ -50,6 +61,9 @@ from rag.auth.bootstrap import ensure_initial_platform_admin
 from apps.api.readiness import probe_readiness
 
 
+logger = logging.getLogger("rag.api")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ensure_postgres_schema(settings)
@@ -62,6 +76,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         name=settings.bootstrap_admin_name,
         password=settings.bootstrap_admin_password,
     )
+    sampler = ResourceSampler(OsResourceReader())
+    app.state.resource_sampler = sampler
+    sampler.start()
     try:
         warm_query_fastembed_runtime(
             app_settings=settings,
@@ -69,6 +86,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         yield
     finally:
+        await asyncio.to_thread(sampler.stop)
         close_postgres_pools()
 
 
@@ -91,7 +109,6 @@ def create_app() -> FastAPI:
     async def http_exception_handler(
         request: Request, exc: HTTPException
     ) -> JSONResponse:
-        _ = request
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         code = (
             detail.get("code")
@@ -103,6 +120,7 @@ def create_app() -> FastAPI:
             if isinstance(detail.get("message"), str)
             else str(exc.detail)
         )
+        _record_query_boundary(request, exc.status_code, code)
         return JSONResponse(
             status_code=exc.status_code,
             headers=exc.headers,
@@ -110,6 +128,13 @@ def create_app() -> FastAPI:
                 error=ErrorDetail(code=code, message=message)
             ).model_dump(),
         )
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        _record_query_boundary(request, 422, "validation_error")
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
     @app.get("/health/live", response_model=HealthResponse, tags=["health"])
     async def live() -> HealthResponse:
@@ -134,6 +159,7 @@ def create_app() -> FastAPI:
         )
 
     for router in (
+        branding_routes.router,
         auth_routes.router,
         abbreviation_routes.router,
         upload_routes.router,
@@ -148,6 +174,7 @@ def create_app() -> FastAPI:
         rag_configuration_routes.router,
         deployment_routes.router,
         audit_routes.router,
+        query_analytics_routes.router,
         review_routes.router,
         evaluation_routes.router,
         query_routes.router,
@@ -163,6 +190,7 @@ def create_app() -> FastAPI:
         document_supersession_routes.router,
         ingest_config_routes.router,
         index_publication_routes.router,
+        ingest_checkpoint_routes.router,
         ingest_status_routes.router,
         rag_config_routes.router,
         review_batch_routes.router,
@@ -170,6 +198,23 @@ def create_app() -> FastAPI:
         app.include_router(router, prefix=settings.internal_api_prefix)
 
     return app
+
+
+def _record_query_boundary(request: Request, status_code: int, reason_code: str) -> None:
+    if getattr(request.state, "query_analytics_recorded", False):
+        return
+    path = request.url.path
+    query_prefix = f"{settings.public_api_prefix}/query"
+    if not (path == query_prefix or path.startswith(f"{query_prefix}/") or path.startswith(f"{settings.public_api_prefix}/query-tracker/")):
+        return
+    try:
+        AnalyticsRecorder(get_analytics_repository()).record_boundary(
+            route_path=path,
+            status_code=status_code,
+            reason_code=reason_code,
+        )
+    except Exception:  # noqa: BLE001 - telemetry must not replace the HTTP response
+        logger.warning("query analytics boundary capture failed")
 
 
 app = create_app()

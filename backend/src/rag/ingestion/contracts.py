@@ -27,6 +27,8 @@ class IngestJobPayload:
     description: str | None = None
     content_type: str | None = None
     quality_preset: str | None = None
+    analyze_slide_visuals: bool = True
+    spreadsheet_review: dict[str, Any] | None = None
     review_batch_id: str | None = None
     image_review_batch_id: str | None = None
     delivery_id: str | None = None
@@ -57,6 +59,8 @@ class IngestJobPayload:
             description=str(payload["description"]) if payload.get("description") else None,
             content_type=str(payload["content_type"]) if payload.get("content_type") else None,
             quality_preset=normalize_ingestion_quality_preset(payload.get("quality_preset")) if payload.get("quality_preset") else None,
+            analyze_slide_visuals=_bool(payload.get("analyze_slide_visuals", True), "analyze_slide_visuals"),
+            spreadsheet_review=_object_or_none(payload.get("spreadsheet_review"), "spreadsheet_review"),
             review_batch_id=str(payload["review_batch_id"]) if payload.get("review_batch_id") else None,
             image_review_batch_id=str(payload["image_review_batch_id"]) if payload.get("image_review_batch_id") else None,
             delivery_id=_delivery_id(payload.get("delivery_id")),
@@ -85,6 +89,10 @@ class IngestJobPayload:
             payload["content_type"] = self.content_type
         if self.quality_preset:
             payload["quality_preset"] = self.quality_preset
+        if not self.analyze_slide_visuals:
+            payload["analyze_slide_visuals"] = False
+        if self.spreadsheet_review is not None:
+            payload["spreadsheet_review"] = dict(self.spreadsheet_review)
         if self.review_batch_id:
             payload["review_batch_id"] = self.review_batch_id
         if self.image_review_batch_id:
@@ -101,3 +109,17 @@ def _delivery_id(value: object) -> str | None:
         return str(UUID(str(value)))
     except ValueError as exc:
         raise ValueError("ingest payload delivery_id must be a UUID") from exc
+
+
+def _bool(value: object, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"ingest payload {field_name} must be a boolean")
+
+
+def _object_or_none(value: object, field_name: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return dict(value)
+    raise ValueError(f"ingest payload {field_name} must be an object")

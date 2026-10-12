@@ -53,14 +53,15 @@ _ORDER_CUE_RE = re.compile(
     re.IGNORECASE,
 )
 _LIST_COUNT_TOKEN = (
-    r"(?:[1-9]|1[0-2]|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"(?:[1-9]\d{0,2}|one|two|three|four|five|six|seven|eight|nine|ten|"
     r"eleven|twelve)"
 )
 _STATED_LIST_COUNT_RE = re.compile(
     rf"\b(?P<count>{_LIST_COUNT_TOKEN})\b"
     r"(?:\s+[A-Za-z][A-Za-z0-9_-]*){0,3}\s+"
-    r"(?:approaches|categories|characteristics|items|levels|phases|principles|"
-    r"requirements|stages|steps|types)\b",
+    r"(?:approaches|categories|characteristics|documents?|entries|equipment|items|"
+    r"levels|parts?|phases|principles|records?|requirements|rows?|stages|steps|"
+    r"tools?|types)\b",
     re.IGNORECASE,
 )
 _LIST_INTRO_RE = re.compile(r"\s*(?:,\s*)?are\s+", re.IGNORECASE)
@@ -79,6 +80,7 @@ _LIST_COUNT_WORDS = {
     "eleven": 11,
     "twelve": 12,
 }
+_NUMBERED_LIST_LINE_RE = re.compile(r"^\s*(?P<number>\d{1,3})[.)]\s+")
 _NEGATION_TOKENS = frozenset({"neither", "never", "no", "nor", "not", "without"})
 _REQUIRED_VERDICT_KEYS = {
     "score",
@@ -197,6 +199,27 @@ class FaithfulnessResult:
     missing_aspects: list[str] = field(default_factory=list)
     attributions: list[AttributionCandidate] = field(default_factory=list)
     evidence_windows: dict[str, list[EvidenceWindow]] = field(default_factory=dict)
+
+
+def reconcile_enumerated_list_counts(answer: str) -> str:
+    """Make a stated list total agree with its immediately following numbered list."""
+    lines = answer.splitlines(keepends=True)
+    for header_index, line in enumerate(lines):
+        count_match = _STATED_LIST_COUNT_RE.search(line)
+        if count_match is None:
+            continue
+        expected = 1
+        for item_line in lines[header_index + 1 :]:
+            item_match = _NUMBERED_LIST_LINE_RE.match(item_line)
+            if item_match is None or int(item_match.group("number")) != expected:
+                break
+            expected += 1
+        actual = expected - 1
+        if not actual or actual == _stated_list_count(line):
+            continue
+        start, end = count_match.span("count")
+        lines[header_index] = f"{line[:start]}{actual}{line[end:]}"
+    return "".join(lines)
 
 
 def evaluate_faithfulness(
@@ -987,6 +1010,10 @@ def _context_window(text: str, focus_start: int, focus_end: int) -> tuple[int, i
     if intersecting:
         first = max(0, intersecting[0] - 1)
         last = min(len(spans) - 1, intersecting[-1] + 1)
+        if last > intersecting[-1] and _LIST_MARKER_RE.fullmatch(
+            text[spans[last][0] : spans[last][1]]
+        ):
+            last -= 1
         start, end = spans[first][0], spans[last][1]
     else:
         start, end = focus_start, focus_end

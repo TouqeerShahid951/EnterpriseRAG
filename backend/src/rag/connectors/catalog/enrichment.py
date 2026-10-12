@@ -8,7 +8,10 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
-from rag.connectors.catalog.schema_catalog import normalize_table_key
+from rag.connectors.catalog.schema_catalog import (
+    normalize_table_key,
+    populate_schema_catalog_routing_profile,
+)
 
 _MAX_PROMPT_TABLES = 4
 _MAX_PROMPT_COLUMNS_PER_TABLE = 8
@@ -126,7 +129,15 @@ def enrich_schema_table_with_llm(
             )
         raise SchemaEnrichmentError(f"{last_error}; retry after invalid table enrichment also failed") from last_error
 
-    return _set_table_enrichment_status(enriched, normalized_key, status="generated")
+    enriched = _set_table_enrichment_status(
+        enriched, normalized_key, status="generated"
+    )
+    if enriched["ai_enrichment"]["status"] == "generated":
+        enriched = populate_schema_catalog_routing_profile(
+            enriched,
+            profile_name=profile_name,
+        )
+    return enriched
 
 
 def schema_catalog_with_table_enrichment_failure(

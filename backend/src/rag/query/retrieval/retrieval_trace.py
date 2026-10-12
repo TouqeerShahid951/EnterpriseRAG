@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
+from hashlib import sha256
 from typing import Any, Literal
 
 from rag.query.qdrant import SearchHit
@@ -22,6 +23,10 @@ RetrievalStageStatus = Literal["completed", "skipped"]
 class RetrievalTraceCandidate:
     rank: int
     point_id: str
+    index_generation_id: str | None
+    content_hash: str | None
+    evidence_hash: str | None
+    provenance_kind: str | None
     doc_id: str | None
     doc_title: str | None
     chunk_id: str
@@ -60,6 +65,7 @@ class RetrievalTraceCandidate:
             row["origins"] = list(self.origins)
         else:
             row.pop("origins")
+        row.pop("rerank_error", None)
         return {key: value for key, value in row.items() if value is not None}
 
 
@@ -103,6 +109,10 @@ def _trace_candidate(hit: SearchHit, *, rank: int) -> RetrievalTraceCandidate:
     return RetrievalTraceCandidate(
         rank=rank,
         point_id=hit.point_id,
+        index_generation_id=_optional_str(payload.get("index_generation_id")),
+        content_hash=_optional_str(payload.get("content_hash")),
+        evidence_hash=_evidence_hash(payload),
+        provenance_kind=_optional_str(payload.get("provenance_kind")),
         doc_id=_optional_str(payload.get("doc_id")),
         doc_title=_optional_str(payload.get("doc_title")),
         chunk_id=_optional_str(payload.get("chunk_id")) or hit.point_id,
@@ -126,6 +136,13 @@ def _trace_candidate(hit: SearchHit, *, rank: int) -> RetrievalTraceCandidate:
         origins=_origins(payload),
         evidence_text=_optional_str(payload.get("text")) or "",
     )
+
+
+def _evidence_hash(payload: dict[str, Any]) -> str | None:
+    excerpt = payload.get("citation_original_text", payload.get("text"))
+    if not isinstance(excerpt, str) or not excerpt:
+        return None
+    return sha256(excerpt.encode("utf-8")).hexdigest()
 
 
 def _origins(payload: dict[str, Any]) -> tuple[str, ...]:

@@ -23,6 +23,7 @@ async def get_internal_ingest_config(
     config = effective_ingest_config(repo=repo)
     return IngestRuntimeConfigResponse(
         worker_concurrency=config.worker_concurrency,
+        folder_snapshot_max_files=config.folder_snapshot_max_files,
         ocr_review_confidence_threshold=config.ocr_review_confidence_threshold,
         pdf_image_review_threshold=config.pdf_image_review_threshold,
         vision_layout_repair_enabled=config.vision_layout_repair_enabled,

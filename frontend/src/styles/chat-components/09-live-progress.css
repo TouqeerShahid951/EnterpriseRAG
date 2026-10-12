@@ -146,8 +146,24 @@
   color: var(--color-primary);
 }
 
-.rag-progress-dot.is-active-dot svg {
+.rag-progress-icon {
+  display: inline-grid;
+  place-items: center;
+}
+
+.rag-progress-icon > * {
+  grid-area: 1 / 1;
+}
+
+.rag-progress-icon-spinner {
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
   animation: rag-spin 0.9s linear infinite;
+}
+
+.rag-progress-icon-static {
+  display: none;
 }
 
 .rag-progress-dot.is-source-dot {
@@ -227,4 +243,3 @@
 .rag-answer-skeleton span:nth-child(3) {
   width: min(20rem, 58%);
 }
-

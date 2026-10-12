@@ -50,6 +50,14 @@ EXPECTED_OPERATIONS: dict[OperationKey, OperationContract] = {
         ("documents",),
         frozenset({"200", "404", "422"}),
     ),
+    ("GET", "/api/v1/docs/{document_id}/slides/{slide_number}/content"): (
+        ("documents",),
+        frozenset({"200", "404", "422"}),
+    ),
+    ("GET", "/api/v1/docs/{document_id}/slides"): (
+        ("documents",),
+        frozenset({"200", "404", "422"}),
+    ),
     ("PATCH", "/api/v1/docs/{document_id}/owner"): (
         ("documents",),
         frozenset({"200", "403", "404", "409", "422", "502"}),
@@ -61,6 +69,14 @@ EXPECTED_OPERATIONS: dict[OperationKey, OperationContract] = {
     ("POST", "/api/v1/docs/{document_id}/reingest"): (
         ("documents",),
         frozenset({"202", "403", "404", "409", "422", "503"}),
+    ),
+    ("GET", "/api/v1/docs/{document_id}/spreadsheet-review"): (
+        ("documents",),
+        frozenset({"200", "404", "409", "422"}),
+    ),
+    ("PUT", "/api/v1/docs/{document_id}/spreadsheet-review"): (
+        ("documents",),
+        frozenset({"202", "403", "404", "409", "422"}),
     ),
     ("POST", "/api/v1/docs/{document_id}/restore"): (
         ("documents",),

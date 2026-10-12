@@ -56,9 +56,9 @@ def _walk_json(value: Any, path: tuple[object, ...], items: list[ParsedPdfItem])
             headers=headers,
             rows=rows,
             quality_flags=["source:json", "json_table"],
-            row_paths=[_format_path((*path, "rows", index)) for index in range(len(rows))],
+            row_paths=[(*path, "rows", index) for index in range(len(rows))],
         )
-        return
+        # Keep the source leaves as well as the table view, including sibling metadata.
 
     if isinstance(value, dict):
         if not value:
@@ -89,60 +89,41 @@ def _walk_json(value: Any, path: tuple[object, ...], items: list[ParsedPdfItem])
                 headers=headers,
                 rows=rows,
                 quality_flags=["source:json", "json_array_table"],
-                row_paths=[_format_path((*path, index)) for index in range(len(rows))],
+                row_paths=[(*path, index) for index in range(len(rows))],
             )
         if value and all(_is_scalar(item) for item in value):
             _append_array_item(items, path, value)
             return
         for index, child in enumerate(value):
-            if not _is_scalar(child):
-                _walk_json(child, (*path, index), items)
+            _walk_json(child, (*path, index), items)
         return
 
     _append_leaf_item(items, path, value)
 
 
 def _append_record_item(items: list[ParsedPdfItem], path: tuple[object, ...], fields: list[tuple[str, Any]]) -> None:
-    scoped = fields[:_MAX_RECORD_FIELDS]
-    lines = [f"JSON path: {_format_path(path)}"]
-    for key, value in scoped:
-        display_key = _display_key(key)
-        lines.append(f"{display_key}: {_format_scalar(value)}")
-        if display_key != key:
-            lines.append(f"JSON key for {display_key}: {key}")
-        lines.append(f"JSON path for {display_key}: {_format_path((*path, key))}")
-    if len(fields) > len(scoped):
-        lines.append(f"Additional fields omitted: {len(fields) - len(scoped)}")
-    items.append(
-        _item(
-            text="\n".join(lines),
-            item_type="text",
-            path=path,
-            quality_flags=["source:json", "form_like_layout", "json_object"],
-        )
-    )
+    for start in range(0, len(fields), _MAX_RECORD_FIELDS):
+        lines = [f"JSON path: {_format_path(path)}"]
+        for key, value in fields[start : start + _MAX_RECORD_FIELDS]:
+            display_key = _display_key(key)
+            lines.append(f"{display_key}: {_format_scalar(value)}")
+            if display_key != key:
+                lines.append(f"JSON key for {display_key}: {key}")
+            lines.append(f"JSON path for {display_key}: {_format_path((*path, key))}")
+        items.append(_item(text="\n".join(lines), item_type="text", path=path,
+                           quality_flags=["source:json", "form_like_layout", "json_object"]))
 
 
 def _append_array_item(items: list[ParsedPdfItem], path: tuple[object, ...], values: list[Any]) -> None:
-    scoped = values[:_MAX_ARRAY_VALUES]
-    lines = [
-        f"JSON path: {_format_path(path)}",
-        "Values: " + " | ".join(_format_scalar(value) for value in scoped),
-    ]
-    lines.extend(
-        f"JSON path for value {index}: {_format_path((*path, index))}"
-        for index, _ in enumerate(scoped)
-    )
-    if len(values) > len(scoped):
-        lines.append(f"Additional values omitted: {len(values) - len(scoped)}")
-    items.append(
-        _item(
-            text="\n".join(lines),
-            item_type="text",
-            path=path,
-            quality_flags=["source:json", "form_like_layout", "json_array"],
+    for start in range(0, len(values), _MAX_ARRAY_VALUES):
+        scoped = values[start : start + _MAX_ARRAY_VALUES]
+        lines = [f"JSON path: {_format_path(path)}"]
+        lines.extend(
+            f"JSON path: {_format_path((*path, index))} Value: {_format_scalar(value)}"
+            for index, value in enumerate(scoped, start=start)
         )
-    )
+        items.append(_item(text="\n".join(lines), item_type="text", path=path,
+                           quality_flags=["source:json", "form_like_layout", "json_array"]))
 
 
 def _append_leaf_item(items: list[ParsedPdfItem], path: tuple[object, ...], value: Any) -> None:
@@ -163,7 +144,7 @@ def _append_table_item(
     headers: list[str],
     rows: list[list[Any]],
     quality_flags: list[str],
-    row_paths: list[str] | None = None,
+    row_paths: list[tuple[object, ...]] | None = None,
 ) -> None:
     if not headers or not rows:
         return
@@ -175,10 +156,15 @@ def _append_table_item(
     ]
     if not normalized_rows_with_paths:
         return
+    normalized_row_paths = [
+        row_paths[index]
+        for index, _ in normalized_rows_with_paths
+        if row_paths and index < len(row_paths)
+    ]
     if row_paths:
         normalized_headers = [*normalized_headers, "JSON path"]
         normalized_rows = [
-            [*row, _clean_cell(row_paths[index]) if index < len(row_paths) else ""]
+            [*row, _clean_cell(_format_path(row_paths[index])) if index < len(row_paths) else ""]
             for index, row in normalized_rows_with_paths
         ]
     else:
@@ -186,7 +172,7 @@ def _append_table_item(
     markdown_rows = [
         "| " + " | ".join(normalized_headers) + " |",
         "| " + " | ".join("---" for _ in normalized_headers) + " |",
-        *["| " + " | ".join(row) + " |" for row in normalized_rows[:200]],
+        *["| " + " | ".join(row) + " |" for row in normalized_rows],
     ]
     items.append(
         _item(
@@ -194,7 +180,12 @@ def _append_table_item(
             item_type="table",
             path=path,
             quality_flags=quality_flags,
-            table_json={"caption": _format_path(path), "rows": [normalized_headers, *normalized_rows]},
+            table_json={
+                "caption": _format_path(path),
+                "rows": [normalized_headers, *normalized_rows],
+                "json_pointer": _json_pointer(path),
+                "row_pointers": [_json_pointer(row_path) for row_path in normalized_row_paths],
+            },
         )
     )
 
@@ -264,7 +255,7 @@ def _item(
         parent_section_id=path_text,
         parser="json",
         quality_flags=quality_flags,
-        table_json=table_json,
+        table_json={**(table_json or {}), "json_pointer": _json_pointer(path)},
         extraction_method="json_path",
     )
 
@@ -285,6 +276,10 @@ def _format_path(path: tuple[object, ...]) -> str:
         else:
             result += "[" + json.dumps(key, ensure_ascii=False) + "]"
     return result or "$"
+
+
+def _json_pointer(path: tuple[object, ...]) -> str:
+    return "".join(f"/{str(part).replace('~', '~0').replace('/', '~1')}" for part in path)
 
 
 def _format_scalar(value: Any) -> str:

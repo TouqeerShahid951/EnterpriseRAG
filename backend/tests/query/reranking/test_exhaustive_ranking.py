@@ -64,8 +64,8 @@ class RerankHitsTests(unittest.TestCase):
         )
         self.assertTrue(
             any(
-                item.payload["page_start"] == 51
-                and item.payload["page_end"] == 53
+                item.payload["context_page_start"] == 51
+                and item.payload["context_page_end"] == 53
                 for item in target_candidates
             )
         )

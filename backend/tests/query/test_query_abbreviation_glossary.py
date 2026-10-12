@@ -28,6 +28,28 @@ def test_authorized_glossary_expands_query_and_keeps_supporting_hit() -> None:
     assert supporting_hits[0].payload["doc_title"] == "Managed Abbreviation Glossary"
 
 
+def test_lowercase_abbreviation_expands_without_changing_user_spelling() -> None:
+    resolved, supporting_hits, attempted = resolve_abbreviation_query(
+        _context("What does abvn mean?"),
+        service=_service_with_entry("ABVN", "Abbreviation"),
+    )
+
+    assert attempted is True
+    assert resolved == "What does abvn (Abbreviation) mean?"
+    assert supporting_hits[0].payload["text"] == "ABVN — Abbreviation"
+
+
+def test_spaced_abbreviation_expands_as_one_phrase() -> None:
+    resolved, supporting_hits, attempted = resolve_abbreviation_query(
+        _context("How are spec ops approved?"),
+        service=_service_with_entry("SPEC OPS", "Special operations"),
+    )
+
+    assert attempted is True
+    assert resolved == "How are spec ops (Special operations) approved?"
+    assert supporting_hits[0].payload["text"] == "SPEC OPS — Special operations"
+
+
 def test_full_definition_adds_abbreviation_for_retrieval() -> None:
     service = _service_with_entry("AD", "Assistant Director")
 
@@ -89,6 +111,23 @@ def test_ambiguous_full_definition_is_not_rewritten() -> None:
     assert attempted is False
     assert resolved == "What approvals can the Assistant Director grant?"
     assert supporting_hits == []
+
+
+def test_ambiguous_abbreviation_expands_to_all_definitions() -> None:
+    resolved, supporting_hits, attempted = resolve_abbreviation_query(
+        _context("What does TDN mean?"),
+        service=_service_with_entries(
+            ("TDN", "Tradesman"),
+            ("TDN", "Tradesmen"),
+        ),
+    )
+
+    assert attempted is True
+    assert resolved == "What does TDN (Tradesman OR Tradesmen) mean?"
+    assert {hit.payload["text"] for hit in supporting_hits} == {
+        "TDN — Tradesman",
+        "TDN — Tradesmen",
+    }
 
 
 def test_longest_full_definition_wins_when_aliases_overlap() -> None:

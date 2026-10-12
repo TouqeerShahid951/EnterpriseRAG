@@ -5,6 +5,10 @@ from rag.connectors.catalog.enrichment import (
     initialize_schema_catalog_enrichment,
     schema_catalog_with_table_enrichment_failure,
 )
+from rag.connectors.catalog.schema_catalog import (
+    populate_schema_catalog_routing_profile,
+    schema_catalog_routing_card,
+)
 
 
 class FakeSchemaEnrichmentLlm:
@@ -167,3 +171,70 @@ def test_schema_table_enrichment_requires_descriptions_for_every_column() -> Non
     assert enriched["tables"][0]["columns"][1]["description"] == ""
     assert enriched["ai_enrichment"]["status"] == "partial"
     assert enriched["ai_enrichment"]["failed_tables"] == 1
+
+
+def test_routing_profile_is_derived_from_schema_without_replacing_admin_edits() -> None:
+    catalog = populate_schema_catalog_routing_profile(
+        {
+            "routing_profile": {"domains": ["Admin-owned domain"]},
+            "verified_queries": [
+                {"question": "Which cases have an outstanding balance?", "sql": "SELECT 1"}
+            ],
+            "tables": [
+                {
+                    "name": "case_inventory",
+                    "allowed": True,
+                    "description": "Cases by workflow state and balance.",
+                    "synonyms": ["case tracker"],
+                    "columns": [
+                        {
+                            "name": "case_id",
+                            "data_type": "text",
+                            "allowed": True,
+                            "description": "Stable case identifier.",
+                            "synonyms": ["case number"],
+                        },
+                        {
+                            "name": "outstanding_amount",
+                            "data_type": "numeric",
+                            "allowed": True,
+                            "description": "Unpaid balance.",
+                            "synonyms": ["amount due"],
+                        },
+                        {
+                            "name": "opened_on",
+                            "data_type": "date",
+                            "allowed": True,
+                            "description": "Case opening date.",
+                            "synonyms": [],
+                        },
+                    ],
+                }
+            ],
+            "relationships": [],
+        },
+        profile_name="Prudentia Cases",
+    )
+
+    profile = catalog["routing_profile"]
+    assert profile["domains"] == ["Admin-owned domain"]
+    assert profile["entities"] == ["case inventory"]
+    assert profile["metrics"] == ["outstanding amount"]
+    assert profile["synonyms"] == ["case tracker", "case number", "amount due"]
+    assert profile["example_questions"] == [
+        "Which cases have an outstanding balance?"
+    ]
+    assert profile["capabilities"] == [
+        "exact_lookup",
+        "filtering",
+        "aggregation",
+        "temporal_filtering",
+    ]
+    assert profile["freshness"] == "unspecified"
+    assert profile["data_origin"] == "unspecified"
+    assert profile["provenance"] == "connector_introspection"
+    assert catalog["name"] == "Prudentia Cases structured data"
+    assert "case inventory" in catalog["description"]
+    assert "Cases by workflow state and balance." in schema_catalog_routing_card(
+        catalog
+    )["schema_terms"]

@@ -1,0 +1,11 @@
+# Optional NVIDIA monitoring for Windows Docker Desktop (WSL2) or NVIDIA Linux.
+# Keeps the existing application images and CPU inference configuration.
+services:
+  api:
+    gpus: all
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+  query-api:
+    gpus: all
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility

@@ -2,22 +2,26 @@ import { Activity, AlertTriangle, CheckCircle2, Clock3, FilePlus2, FolderOpen, H
 
 import { clearanceLevelLabel } from "@/lib/auth/authz";
 import type { NavigateOptions, RouteId } from "@/routes/routes";
-import type { Document, DocumentIngestStatus, IngestJob, UploadJobState } from "@/types/api";
+import type { DocumentOverview, DocumentIngestStatus, IngestJob, UploadJobState } from "@/types/api";
 import { formatDateTime } from "@/lib/utils/format";
 
 type NavigateToRoute = (route: RouteId, options?: NavigateOptions) => void;
 
-export function AttentionList({ documents, onNavigate }: { documents: Array<Pick<Document, "group_path" | "id" | "ingest_status" | "title">>; onNavigate: NavigateToRoute }) {
+export function AttentionList({ documents, onNavigate, canViewJobs = false }: { documents: DocumentOverview["attention_documents"]; onNavigate: NavigateToRoute; canViewJobs?: boolean }) {
   return (
     <div className="knowledge-action-list p-4">
       {documents.map((doc) => (
-        <button type="button" key={doc.id} onClick={() => onNavigate("documents", { search: `?doc=${encodeURIComponent(doc.id)}` })}>
-          <span>
-            <strong>{doc.title}</strong>
-            <small className="block text-secondary">{doc.group_path}</small>
-          </span>
-          <IngestStatusBadge status={doc.ingest_status} />
-        </button>
+        <div className="knowledge-attention-item" key={doc.id}>
+          <button type="button" onClick={() => onNavigate("documents", { search: `?doc=${encodeURIComponent(doc.id)}` })}>
+            <span className="knowledge-attention-copy"><strong>{doc.title}</strong><small>{doc.group_path}</small></span>
+            <IngestStatusBadge status={doc.ingest_status} />
+          </button>
+          <p>{doc.error_message ?? (doc.ingest_status === "human_review" ? "Human review is required before processing can continue." : doc.ingest_status === "unknown" ? "No confirmed ingestion outcome. Inspect the document and its activity." : "No failure detail was recorded. Inspect ingestion activity.")}</p>
+          {doc.error_code ? <small>Error: {doc.error_code}</small> : null}
+          {doc.latest_job_status && doc.latest_job_status !== doc.ingest_status ? <p role="status">Latest job: {ingestStatusLabel(doc.latest_job_status as DocumentIngestStatus)}. Document state has not yet matched this outcome.</p> : null}
+          {doc.updated_at ? <small>Updated {formatDateTime(doc.updated_at)}</small> : null}
+          {canViewJobs && doc.latest_job_id ? <button className="sv-action-secondary" type="button" onClick={() => onNavigate("ingestion-jobs", { search: `?job_q=${encodeURIComponent(doc.latest_job_id!)}` })}>Inspect job and recovery options</button> : null}
+        </div>
       ))}
     </div>
   );
@@ -66,10 +70,10 @@ export function LifecycleStrip({ items, loading, onNavigate }: LifecycleStripPro
   );
 }
 
-export function OverviewStatus({ indexedCurrentCount, needsAttention, nextStep, onNavigate, processingCount }: OverviewStatusProps) {
+export function OverviewStatus({ nextStep, onNavigate }: OverviewStatusProps) {
   const StatusIcon = statusIcon(nextStep.tone);
   return (
-    <section className="knowledge-overview-status" data-tone={nextStep.tone}>
+    <section className="sv-panel knowledge-overview-status" data-tone={nextStep.tone}>
       <div className="knowledge-overview-status-main">
         <p className="sv-metadata">Recommended next step</p>
         <h2><StatusIcon size={19} /> {nextStep.title}</h2>
@@ -79,11 +83,7 @@ export function OverviewStatus({ indexedCurrentCount, needsAttention, nextStep, 
           {nextStep.secondaryRoute ? <button type="button" onClick={() => onNavigate(nextStep.secondaryRoute!, { search: nextStep.secondarySearch })} className="sv-action-secondary">{nextStep.secondaryLabel}</button> : null}
         </div>
       </div>
-      <div className="knowledge-overview-flow" aria-label="Document library readiness">
-        <FlowMetric icon={CheckCircle2} label="Indexed current" value={indexedCurrentCount} />
-        <FlowMetric icon={Activity} label="Processing" value={processingCount} />
-        <FlowMetric icon={AlertTriangle} label="Attention" tone={needsAttention > 0 ? "warning" : "success"} value={needsAttention} />
-      </div>
+
     </section>
   );
 }
@@ -116,6 +116,8 @@ export function RecentActivityList({ isLoading, jobs, onNavigate }: RecentActivi
         <button type="button" key={job.job_id} onClick={() => onNavigate("ingestion-jobs", { search: `?job_q=${encodeURIComponent(job.job_id)}` })}>
           <span className="knowledge-activity-main">
             <strong>{job.document_title}</strong>
+            <small>{job.stage_label}{job.stage_detail ? ` · ${job.stage_detail}` : ""}</small>
+            {job.error_message ? <small>{job.error_message}</small> : null}
             <small>{job.group_path} - {clearanceLevelLabel(job.clearance_level)} - {labelize(job.origin)} - {formatDateTime(job.created_at)}</small>
           </span>
           <span className="knowledge-activity-meta">
@@ -138,7 +140,7 @@ export function SpaceList({ rows, onNavigate }: { rows: SpaceRow[]; onNavigate: 
             <small className="block text-secondary">{row.count} documents - {row.attention} attention</small>
           </span>
           <span className="knowledge-row-trailing">
-            <span className={row.attention > 0 ? "sv-pill sv-pill-warning" : "sv-pill sv-pill-success"}>{row.attention > 0 ? "Needs review" : "Healthy"}</span>
+            <span className={row.attention > 0 ? "sv-pill sv-pill-warning" : "sv-pill sv-pill-success"}>{row.attention > 0 ? "Needs attention" : "No ingestion issues"}</span>
             <FolderOpen size={16} />
           </span>
         </button>
@@ -147,7 +149,7 @@ export function SpaceList({ rows, onNavigate }: { rows: SpaceRow[]; onNavigate: 
   );
 }
 
-export function StatusShortcutGrid({ loading, onNavigate, shortcuts }: StatusShortcutGridProps) {
+export function StatusShortcutGrid({ loading, onNavigate, shortcuts, total }: StatusShortcutGridProps) {
   if (!shortcuts.length) return null;
   return (
     <section className="knowledge-status-shortcuts" aria-label="Document status shortcuts">
@@ -161,6 +163,7 @@ export function StatusShortcutGrid({ loading, onNavigate, shortcuts }: StatusSho
               <small>{shortcut.detail}</small>
             </span>
             {loading ? <CountSkeleton label={shortcut.label} /> : <b>{shortcut.value}</b>}
+            {!loading && total !== undefined ? <svg className="document-state-bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true"><rect className="overview-bar-track" width="100" height="4" rx="2" /><rect className="overview-bar-fill" width={total > 0 ? shortcut.value / total * 100 : 0} height="4" rx="2" /></svg> : null}
           </button>
         );
       })}
@@ -174,10 +177,6 @@ function CountSkeleton({ label }: { label: string }) {
       <span className="sr-only">Loading {label.toLowerCase()}</span>
     </span>
   );
-}
-
-function FlowMetric({ icon: Icon, label, tone, value }: { icon: LucideIcon; label: string; tone?: "success" | "warning"; value: number }) {
-  return <div data-tone={tone}><span><Icon size={13} /> {label}</span><strong>{value}</strong></div>;
 }
 
 function IngestStatusBadge({ status, warnings = [] }: { status: DocumentIngestStatus | UploadJobState; warnings?: string[] }) {
@@ -223,9 +222,9 @@ type EmptyProps = { actionLabel?: string; actionRoute?: RouteId; actionSearch?: 
 export type LifecycleItem = { detail: string; icon: LucideIcon; label: string; route?: RouteId; search?: string; tone?: "active" | "success" | "warning"; value: number };
 type LifecycleStripProps = { items: LifecycleItem[]; loading: boolean; onNavigate: NavigateToRoute };
 export type NextStep = { detail: string; primaryLabel: string; primaryRoute: RouteId; primarySearch?: string; secondaryLabel?: string; secondaryRoute?: RouteId; secondarySearch?: string; title: string; tone: "active" | "empty" | "success" | "warning" };
-type OverviewStatusProps = { indexedCurrentCount: number; needsAttention: number; nextStep: NextStep; onNavigate: NavigateToRoute; processingCount: number };
+type OverviewStatusProps = { nextStep: NextStep; onNavigate: NavigateToRoute };
 type PanelHeaderProps = { actionIcon: LucideIcon; actionLabel: string; actionRoute: RouteId; actionSearch?: string; countLabel: string; description: string; onNavigate: NavigateToRoute; title: string };
 type RecentActivityListProps = { isLoading: boolean; jobs: IngestJob[]; onNavigate: NavigateToRoute };
 export type SpaceRow = { attention: number; count: number; path: string };
 export type StatusShortcut = { detail: string; icon: LucideIcon; label: string; route: RouteId; search?: string; tone?: "active" | "success" | "warning"; value: number };
-type StatusShortcutGridProps = { loading: boolean; onNavigate: NavigateToRoute; shortcuts: StatusShortcut[] };
+type StatusShortcutGridProps = { total?: number; loading: boolean; onNavigate: NavigateToRoute; shortcuts: StatusShortcut[] };

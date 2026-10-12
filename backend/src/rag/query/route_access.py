@@ -1,6 +1,9 @@
 """Shared HTTP authorization and scope preparation for query routes."""
 
-from fastapi import HTTPException, status
+import logging
+from uuid import uuid4
+
+from fastapi import HTTPException, Request, status
 
 from ..auth.abac import normalize_group_path
 from ..auth.context import UserContext
@@ -9,7 +12,37 @@ from ..auth.permissions import can_query, has_exact_group_scope, is_global_admin
 from ..connectors.repositories import ConnectorProfileRepository
 from ..ingestion.folders.models import FolderScheduleRepository
 from .schemas import QueryRequest
+from .analytics.models import AnalyticsOrigin
+from .analytics.repository import get_analytics_repository
+from .analytics.service import AnalyticsRecorder
 from rag.query.sources.source_resolution import QuerySourceAccessError, validate_query_source_access
+
+logger = logging.getLogger(__name__)
+
+
+def authorize_query_request(
+    payload: QueryRequest, request: Request, user: UserRecord,
+    identity_repo: IdentityRepository, schedule_repo: FolderScheduleRepository,
+    connector_profile_repo: ConnectorProfileRepository, *, origin: AnalyticsOrigin = "chat",
+) -> tuple[QueryRequest, UserContext]:
+    """Prepare authorized query scope and account for eligible authorization denials."""
+    try:
+        scoped_payload = query_request_for_user(payload, user, identity_repo)
+        scoped_user = user_context(user, identity_repo)
+        validate_query_source_for_user(scoped_payload, scoped_user, schedule_repo, connector_profile_repo)
+        return scoped_payload, scoped_user
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN and not getattr(request.state, "query_analytics_recorded", False):
+            request.state.query_analytics_recorded = True
+            try:
+                AnalyticsRecorder(get_analytics_repository()).record_denial(
+                    user=UserContext(user_id=user.id, email=user.email, permission_version=user.permission_version),
+                    request=payload, origin=origin, reason_code=exc.detail["code"],
+                    execution_id=str(uuid4()),
+                )
+            except Exception:  # noqa: BLE001 - preserve the original authorization response
+                logger.warning("query analytics denial capture failed")
+        raise
 
 
 def query_request_for_user(
@@ -79,12 +112,13 @@ def validate_query_source_for_user(
             permission_version=user_context.permission_version,
         )
     try:
-        validate_query_source_access(
-            source_id=payload.query_source_id,
-            user=user_context,
-            schedule_repo=schedule_repo,
-            connector_profile_repo=connector_profile_repo,
-        )
+        for source_id in payload.effective_query_source_ids:
+            validate_query_source_access(
+                source_id=source_id,
+                user=user_context,
+                schedule_repo=schedule_repo,
+                connector_profile_repo=connector_profile_repo,
+            )
     except QuerySourceAccessError as exc:
         status_code = (
             status.HTTP_400_BAD_REQUEST

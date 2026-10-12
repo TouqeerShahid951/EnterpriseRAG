@@ -7,7 +7,7 @@ export function stageIcon(job: UploadJobView) {
   if (job.status === "failed") return <XCircle aria-hidden="true" size={18} />;
   if (job.status === "cancelled") return <XCircle aria-hidden="true" size={18} />;
   if (job.status === "human_review") return <AlertTriangle aria-hidden="true" size={18} />;
-  return <Loader2 aria-hidden="true" className="animate-spin" size={18} />;
+  return <ActiveIngestionIcon size={18} />;
 }
 
 export function jobPanelClass(status: UploadJobView["status"] | "processing") {
@@ -130,7 +130,7 @@ export function stepStateIcon(step: UploadJobStep) {
   if (step.state === "failed") return <XCircle aria-hidden="true" size={12} />;
   if (step.state === "cancelled") return <XCircle aria-hidden="true" size={12} />;
   if (step.state === "needs_review") return <AlertTriangle aria-hidden="true" size={12} />;
-  if (step.state === "active") return <Loader2 aria-hidden="true" className="animate-spin" size={12} />;
+  if (step.state === "active") return <ActiveIngestionIcon size={12} />;
   return <span aria-hidden="true" className="h-2 w-2 rounded-full bg-current opacity-40" />;
 }
 
@@ -140,6 +140,15 @@ export function terminalDetailIcon(job: UploadJobView) {
   if (job.status === "cancelled") return <XCircle aria-hidden="true" size={13} />;
   if (job.status === "human_review") return <AlertTriangle aria-hidden="true" size={13} />;
   return <Activity aria-hidden="true" size={13} />;
+}
+
+function ActiveIngestionIcon({ size }: { size: number }) {
+  return (
+    <span aria-hidden="true" className="ingestion-active-icon">
+      <Loader2 className="ingestion-active-icon-spinner animate-spin" size={size} />
+      <Activity className="ingestion-active-icon-static" size={size} />
+    </span>
+  );
 }
 
 function relativeAge(value: string | null): { seconds: number; label: string } | null {

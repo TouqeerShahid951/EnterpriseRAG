@@ -13,6 +13,8 @@ from rag.connectors.repositories import (
 )
 from rag.connectors.catalog.schema_catalog import (
     column_allowed,
+    schema_catalog_routing_card,
+    schema_catalog_routing_text,
     schema_catalog_visible_group_path,
     table_allowed,
 )
@@ -41,6 +43,7 @@ class VisibleQuerySource:
     group_path: str
     clearance_level: str
     match_text: str
+    routing_card: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -197,11 +200,13 @@ def _source_from_catalog(
         )
         or catalog.group_path
     )
+    routing_card = schema_catalog_routing_card(catalog.catalog_json)
     match_text = " ".join(
         item
         for item in (
             name,
             profile_name,
+            schema_catalog_routing_text(catalog.catalog_json),
             _catalog_match_text(catalog.catalog_json),
         )
         if item
@@ -217,6 +222,7 @@ def _source_from_catalog(
         group_path=group_path,
         clearance_level=catalog.clearance_level,
         match_text=match_text,
+        routing_card=routing_card,
     )
 
 

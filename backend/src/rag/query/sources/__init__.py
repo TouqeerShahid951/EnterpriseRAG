@@ -9,10 +9,10 @@ from rag.shared.contracts.clearance import (
     normalize_clearance_level as normalize_clearance_level,
 )
 from rag.shared.contracts.evidence import (
+    CitationTarget as CitationTarget,
     EvidenceField as EvidenceField,
     HighlightRange as HighlightRange,
     SourceAnchor as SourceAnchor,
-    SourceRegion as SourceRegion,
 )
 from rag.query.qdrant import SearchHit as SearchHit
 from rag.query.sources.source_context_budget import _hits_within_budget as _hits_within_budget
@@ -50,7 +50,7 @@ from rag.query.sources.source_mapping import (
     payload_text as payload_text,
     source_citation as source_citation,
     source_from_hit as source_from_hit,
-    source_regions_from_payload as source_regions_from_payload,
+    citation_targets_from_payload as citation_targets_from_payload,
     structured_fields_from_payload as structured_fields_from_payload,
 )
 from rag.query.sources.source_parent_promotion import (
@@ -70,7 +70,7 @@ __all__ = [
     "PARENT_PROMOTION_MAX_CHARS",
     "SearchHit",
     "SourceAnchor",
-    "SourceRegion",
+    "CitationTarget",
     "build_evidence_hits",
     "build_highlights",
     "citation_label",
@@ -85,7 +85,7 @@ __all__ = [
     "re",
     "source_citation",
     "source_from_hit",
-    "source_regions_from_payload",
+    "citation_targets_from_payload",
     "sources_from_hits",
     "structured_fields_from_payload",
 ]

@@ -76,13 +76,14 @@ class OpenAICompatibleClient:
         question: str,
         contexts: list[str],
         profile: str | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
         return self._chat(
             prompt=build_answer_prompt(question=question, contexts=contexts, profile=profile),
             model=self.chat_model,
             system=ANSWER_SYSTEM_MESSAGE,
-            max_tokens=answer_num_predict_for_profile(profile),
+            max_tokens=max_tokens if max_tokens is not None else answer_num_predict_for_profile(profile),
             temperature=0.1,
             json_response=False,
             cancellation_token=cancellation_token,
@@ -94,9 +95,10 @@ class OpenAICompatibleClient:
         question: str,
         contexts: list[str],
         profile: str | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> Iterator[str]:
-        max_tokens = answer_num_predict_for_profile(profile)
+        max_tokens = max_tokens if max_tokens is not None else answer_num_predict_for_profile(profile)
         chunks = stream_sse_json(
             self.base_url,
             _openai_path(self.base_url, "/v1/chat/completions"),
@@ -132,6 +134,8 @@ class OpenAICompatibleClient:
         prompt: str,
         model: str | None,
         json_schema: dict[str, object] | None = None,
+        timeout_seconds: float | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
         return self._chat(
@@ -139,7 +143,8 @@ class OpenAICompatibleClient:
             model=model or self.chat_model,
             base_url=self.faithfulness_base_url,
             system="You are a strict RAG faithfulness judge.",
-            max_tokens=min(self.json_num_predict, FAITHFULNESS_NUM_PREDICT),
+            max_tokens=max_tokens or min(self.json_num_predict, FAITHFULNESS_NUM_PREDICT),
+            timeout_seconds=min(timeout_seconds, self.chat_timeout_seconds) if timeout_seconds is not None else None,
             temperature=0,
             json_response=True,
             json_schema=json_schema,

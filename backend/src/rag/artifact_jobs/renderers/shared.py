@@ -42,7 +42,12 @@ def _reference_line(index: int, citation: EvidenceCitation) -> str:
         page = f", pages {citation.page_start}-{citation.page_end}"
     elif citation.page_start is not None:
         page = f", page {citation.page_start}"
-    return f"[{index}] {citation.doc_title}{page} ({citation.doc_id}:{citation.chunk_id})"
+    identity = f"[{index}] {citation.doc_title}{page} ({citation.doc_id}:{citation.chunk_id})"
+    if citation.index_generation_id:
+        identity += f"; generation {citation.index_generation_id}"
+    if citation.content_hash:
+        identity += f"; SHA-256 {citation.content_hash}"
+    return identity + "".join(f" — “{quote}”" for quote in citation.quotes)
 
 
 def _safe_filename(value: str) -> str:

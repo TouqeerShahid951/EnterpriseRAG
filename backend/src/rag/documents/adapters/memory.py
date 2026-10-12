@@ -122,6 +122,7 @@ class InMemoryDocumentRepository(
         state: Literal["active", "deleted"] = "active",
         clearance_levels: tuple[ClearanceLevel, ...],
         group_paths: tuple[str, ...] | None,
+        exclude_abbreviation_glossary: bool = False,
     ) -> dict[str, int]:
         normalized_groups = (
             None
@@ -130,6 +131,8 @@ class InMemoryDocumentRepository(
         )
         counts: dict[str, int] = {}
         for document in self.list_documents(state=state):
+            if exclude_abbreviation_glossary and document.doc_type == "abbreviation_glossary":
+                continue
             if document.clearance_level not in clearance_levels:
                 continue
             if normalized_groups is not None and not normalized_groups.intersection(
@@ -147,12 +150,14 @@ class InMemoryDocumentRepository(
         expiring_from: date,
         expiring_to: date,
         attention_limit: int,
+        exclude_abbreviation_glossary: bool = False,
     ) -> DocumentOverviewSnapshot:
         visible_groups = None if group_paths is None else set(group_paths)
         documents = [
             document
             for state in ("active", "deleted")
             for document in self.list_documents(state=state)
+            if not exclude_abbreviation_glossary or document.doc_type != "abbreviation_glossary"
             if document.clearance_level in clearance_levels
             and (
                 visible_groups is None
@@ -222,6 +227,7 @@ class InMemoryDocumentRepository(
             unknown_current=sum(
                 document.ingest_status == "unknown" for document in current
             ),
+            cancelled_current=sum(document.ingest_status == "cancelled" for document in current),
             needs_attention=len(attention),
             superseded_versions=sum(not document.is_current for document in active),
             expiring_soon_current=sum(
@@ -312,6 +318,24 @@ class InMemoryDocumentRepository(
             document,
             topics=tuple(_unique_text(topics)),
             llm_topics=tuple(_unique_text(llm_topics)),
+            updated_at=datetime.now(UTC),
+        )
+        self._documents[document_id] = updated
+        return updated
+
+    def update_document_metadata_flag(
+        self,
+        document_id: str,
+        *,
+        key: str,
+        value: Any,
+    ) -> DocumentRecord | None:
+        document = self.get_document(document_id)
+        if document is None:
+            return None
+        updated = replace(
+            document,
+            metadata_flags={**document.metadata_flags, key: value},
             updated_at=datetime.now(UTC),
         )
         self._documents[document_id] = updated

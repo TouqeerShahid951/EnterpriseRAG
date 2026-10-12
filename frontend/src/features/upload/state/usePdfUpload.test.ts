@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { IngestJob } from "@/types/api";
 import { ABBREVIATION_GLOSSARY_DOC_TYPE } from "./pdfUploadBatch";
-import { ingestJobToUploadBatchItem, parseDismissedUploadJobIds, uploadHistoryBelongsOnPage } from "./usePdfUpload";
+import { ingestJobToUploadBatchItem, parseDismissedUploadJobIds, recentUploadJobsQueryKey } from "./usePdfUpload";
 
 describe("upload job hydration", () => {
-  it("keeps generic upload history off the glossary page", () => {
-    expect(uploadHistoryBelongsOnPage(ABBREVIATION_GLOSSARY_DOC_TYPE)).toBe(false);
-    expect(uploadHistoryBelongsOnPage(null)).toBe(true);
+  it("keeps document and glossary upload histories in separate caches", () => {
+    expect(recentUploadJobsQueryKey("user-1", null)).not.toEqual(
+      recentUploadJobsQueryKey("user-1", ABBREVIATION_GLOSSARY_DOC_TYPE),
+    );
   });
 
   it("turns a backend upload job into an intake progress row", () => {

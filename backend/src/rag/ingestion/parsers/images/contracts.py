@@ -37,6 +37,10 @@ class ImageAnalyzer(Protocol):
         self, *, content: bytes, content_type: str
     ) -> ImageAnalysisResult: ...
 
+    def analyze_slide(
+        self, *, content: bytes, content_type: str
+    ) -> ImageAnalysisResult: ...
+
 
 ImageProgressCallback = Callable[[dict[str, object]], None]
 

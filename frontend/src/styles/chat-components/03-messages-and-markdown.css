@@ -12,6 +12,83 @@
   box-shadow: 0 0.75rem 1.5rem -1.5rem color-mix(in srgb, black 42%, transparent);
 }
 
+.rag-chat-message-row.is-user {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 0.375rem;
+}
+
+.rag-chat-message-row.is-assistant {
+  display: grid;
+  gap: 0.375rem;
+  justify-items: start;
+}
+
+.rag-message-reply-action {
+  display: inline-flex;
+  min-width: 2rem;
+  min-height: 2rem;
+  align-items: center;
+  border-radius: 0.375rem;
+  padding: 0 0.55rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  opacity: 0.62;
+  transition: color 160ms ease, background-color 160ms ease, opacity 160ms ease;
+}
+
+.rag-message-reply-label {
+  max-width: 0;
+  margin-inline-start: 0;
+  overflow: hidden;
+  opacity: 0;
+  white-space: nowrap;
+  transition: max-width 160ms ease, margin-inline-start 160ms ease, opacity 120ms ease;
+}
+
+.rag-message-reply-action:hover,
+.rag-message-reply-action:focus-visible {
+  background: var(--color-surface-container-high);
+  color: var(--color-primary);
+  opacity: 1;
+}
+
+.rag-message-reply-action:hover .rag-message-reply-label,
+.rag-message-reply-action:focus-visible .rag-message-reply-label {
+  max-width: 3rem;
+  margin-inline-start: 0.3rem;
+  opacity: 1;
+}
+
+.rag-message-reply-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.rag-message-reply-quote {
+  display: grid;
+  gap: 0.125rem;
+  margin-bottom: 0.5rem;
+  border-left: 2px solid var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary-container) 38%, transparent);
+  padding: 0.4rem 0.55rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.75rem;
+}
+
+.rag-message-reply-quote strong {
+  color: var(--color-primary);
+  font-size: 0.6875rem;
+}
+
+.rag-message-reply-quote span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .rag-assistant-turn,
 .rag-assistant-error {
   width: 100%;
@@ -209,4 +286,3 @@
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
-

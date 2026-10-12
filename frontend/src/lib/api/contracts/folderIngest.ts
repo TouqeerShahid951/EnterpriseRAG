@@ -24,6 +24,7 @@ export interface CreateSnapshotScheduleRequest {
   timezone: string;
   scheduled_at?: string | null;
   recurrence?: RecurrenceWindow | null;
+  analyze_slide_visuals?: boolean;
 }
 
 export interface CreateLocalFolderScheduleRequest {
@@ -39,6 +40,7 @@ export interface CreateLocalFolderScheduleRequest {
   timezone: string;
   scheduled_at?: string | null;
   recurrence?: RecurrenceWindow | null;
+  analyze_slide_visuals?: boolean;
 }
 
 interface LocalFolderDirectory {
@@ -110,6 +112,7 @@ export const folderIngestApi = {
     formData.set("timezone", request.timezone);
     if (request.scheduled_at) formData.set("scheduled_at", request.scheduled_at);
     formData.set("recurrence_json", JSON.stringify(request.recurrence ?? {}));
+    if (request.analyze_slide_visuals !== undefined) formData.set("analyze_slide_visuals", String(request.analyze_slide_visuals));
     return apiClient.postForm<FolderSchedule>("/api/v1/folder-ingest/schedules/snapshot", formData);
   },
   createLocalFolder: (request: CreateLocalFolderScheduleRequest) =>

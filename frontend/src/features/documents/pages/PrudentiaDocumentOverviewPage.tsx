@@ -1,3 +1,4 @@
+import { DocumentRecoveryActivity } from "@/features/documents/components/DocumentRecoveryActivity";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Archive, CalendarClock, CheckCircle2, FileCheck2, FileClock, FilePlus2, FileSearch, FolderOpen, History, Hourglass, Trash2, Upload, XCircle } from "lucide-react";
 
@@ -7,6 +8,7 @@ import { PrudentiaWorkspace } from "@/components/layout/PrudentiaWorkspace";
 import { AttentionList, Empty, LifecycleStrip, OverviewStatus, PanelHeader, PanelSkeleton, RecentActivityList, SpaceList, StatusShortcutGrid, type LifecycleItem, type NextStep, type SpaceRow, type StatusShortcut } from "@/features/documents/components/DocumentOverviewPanels";
 import { canAccessRoute, type NavigateOptions, type RouteId } from "@/routes/routes";
 import type { DocumentIngestStatus, DocumentOverview, User as AuthUser } from "@/types/api";
+import { UsageRing } from "@/components/charts/UsageRing";
 import { errorMessage } from "@/lib/utils/format";
 
 const EXPIRING_SOON_DAYS = 30;
@@ -25,7 +27,7 @@ export function PrudentiaDocumentOverviewPage({ onLogout, onNavigate, user }: Pr
     queryKey: ["ingest-jobs", "recent", "overview"],
     queryFn: () => ingestJobsApi.list({ limit: 5, offset: 0 }),
     enabled: canViewJobs,
-    refetchInterval: (query) => query.state.data?.items.some((job) => isActiveJobStatus(job.status)) ? 2500 : false,
+    refetchInterval: (query) => query.state.data?.items.some((job) => isActiveJobStatus(job.status)) ? 2500 : 15000,
     staleTime: 4000,
     retry: false,
   });
@@ -36,6 +38,8 @@ export function PrudentiaDocumentOverviewPage({ onLogout, onNavigate, user }: Pr
   const processingCount = overview?.processing_current ?? 0;
   const reviewCount = overview?.review_current ?? 0;
   const failedCount = overview?.failed_current ?? 0;
+  const unknownCount = overview?.unknown_current ?? 0;
+  const cancelledCount = overview?.cancelled_current ?? 0;
   const needsAttention = overview?.needs_attention ?? 0;
   const attentionDocs = overview?.attention_documents ?? [];
   const spaceRows = overviewSpaces(overview);
@@ -56,9 +60,9 @@ export function PrudentiaDocumentOverviewPage({ onLogout, onNavigate, user }: Pr
     documentsCount: libraryDocuments,
     indexedCurrentCount,
     needsAttention,
-    processingCount,
+    processingCount, failedCount, reviewCount, unknownCount, cancelledCount,
   });
-  const statusShortcuts = buildStatusShortcuts({ canViewDocuments, failedCount, indexedCurrentCount, processingCount, reviewCount, user });
+  const statusShortcuts = buildStatusShortcuts({ canViewDocuments, cancelledCount, unknownCount, failedCount, indexedCurrentCount, processingCount, reviewCount, user });
   const lifecycleItems = buildLifecycleItems({
     currentCount,
     expiringSoonCount: overview?.expiring_soon_current ?? 0,
@@ -69,7 +73,7 @@ export function PrudentiaDocumentOverviewPage({ onLogout, onNavigate, user }: Pr
   return (
     <PrudentiaWorkspace activeRoute="document-overview" onLogout={onLogout} onNavigate={onNavigate} user={user}>
       <main className="sv-page" id="main-content">
-        <div className="sv-page-inner sv-page-inner-dashboard max-w-none">
+        <div className="sv-page-inner sv-page-inner-dashboard max-w-none overview-dashboard document-dashboard">
           <header className="sv-page-header">
             <div>
               <p className="sv-eyebrow">Document Library</p>
@@ -100,33 +104,45 @@ export function PrudentiaDocumentOverviewPage({ onLogout, onNavigate, user }: Pr
             />
           ) : (
             <>
-              <section className="sv-panel overflow-hidden">
-                <div className="knowledge-job-metrics" aria-label="Document workspace summary">
-                  <Metric label="Library documents" loading={overviewQuery.isLoading} value={libraryDocuments} />
-                  <Metric label="Current versions" loading={overviewQuery.isLoading} value={currentCount} tone="success" />
-                  <Metric label="Active processing" loading={overviewQuery.isLoading} value={processingCount} />
-                  <Metric label="Needs attention" loading={overviewQuery.isLoading} value={needsAttention} tone={needsAttention > 0 ? "warning" : "success"} />
-                  <Metric label="Trash" loading={overviewQuery.isLoading} value={overview?.trash ?? 0} />
+              <section className="document-dashboard-summary">
+                <div className="document-dashboard-metrics" aria-label="Document workspace summary">
+                  <Metric icon={FileSearch} detail="Visible library content" label="Library documents" loading={overviewQuery.isLoading} value={libraryDocuments} />
+                  <Metric icon={FileCheck2} detail="Latest active versions" label="Current versions" loading={overviewQuery.isLoading} value={currentCount} tone="success" />
+                  <Metric icon={Hourglass} detail="Queued or running" label="Active processing" loading={overviewQuery.isLoading} value={processingCount} />
+                  <Metric icon={AlertTriangle} detail="Failed, review or unknown" label="Needs attention" loading={overviewQuery.isLoading} value={needsAttention} tone={needsAttention > 0 ? "warning" : "success"} />
+                  <Metric icon={Trash2} detail="Deleted library items" label="Trash" loading={overviewQuery.isLoading} value={overview?.trash ?? 0} />
                 </div>
-                <OverviewStatus
-                  indexedCurrentCount={indexedCurrentCount}
-                  needsAttention={needsAttention}
+                <div className="document-dashboard-readiness">
+                  <section className="sv-panel overview-panel document-readiness-chart" aria-labelledby="document-readiness-title">
+                    <header className="overview-panel-heading"><div><h2 id="document-readiness-title">Retrieval readiness</h2><p>Share of current documents indexed</p></div></header>
+                    <div className="document-readiness-visual">
+                      {overviewQuery.isLoading ? <Skeleton className="h-28 w-28" /> : <UsageRing value={currentCount ? indexedCurrentCount / currentCount * 100 : null} label="Current documents indexed" detail="indexed" tone="success" />}
+                      <div><strong>{overviewQuery.isLoading ? "—" : indexedCurrentCount.toLocaleString()}</strong><p>of {overviewQuery.isLoading ? "—" : currentCount.toLocaleString()} current documents</p><small>Based on recorded ingestion status</small></div>
+                    </div>
+                  </section>
+                {overviewQuery.isLoading ? <section className="sv-panel"><PanelSkeleton rows={2} /></section> : <OverviewStatus
                   nextStep={nextStep}
                   onNavigate={onNavigate}
-                  processingCount={processingCount}
-                />
-                <StatusShortcutGrid loading={overviewQuery.isLoading} onNavigate={onNavigate} shortcuts={statusShortcuts} />
-                <LifecycleStrip loading={overviewQuery.isLoading} onNavigate={onNavigate} items={lifecycleItems} />
+                />}
+                </div>
+                <div className="sv-panel document-state-panel">
+                <header className="overview-panel-heading"><div><h2>Current document states</h2><p>Each current document appears in exactly one category. Select a state to inspect it.</p></div><span className="overview-status">{overviewQuery.isLoading ? "Loading" : `${currentCount} total`}</span></header>
+                <p className="px-4 py-2 text-label-md text-secondary">All documents visible to your account · Current versions only · {overviewQuery.dataUpdatedAt ? `Updated ${new Date(overviewQuery.dataUpdatedAt).toLocaleTimeString()}` : "Loading snapshot"}</p>
+                <StatusShortcutGrid total={currentCount} loading={overviewQuery.isLoading} onNavigate={onNavigate} shortcuts={statusShortcuts} />
+                </div>
+                <section className="sv-panel document-lifecycle-panel" aria-label="Version and retention overview"><LifecycleStrip loading={overviewQuery.isLoading} onNavigate={onNavigate} items={lifecycleItems} /></section>
               </section>
 
-              <div className={canViewJobs ? "mt-4 grid gap-4 xl:grid-cols-3" : "mt-4 grid gap-4 lg:grid-cols-2"}>
+              {canViewJobs ? <DocumentRecoveryActivity onNavigate={onNavigate} /> : null}
+
+              <div className="document-dashboard-panels">
                 <section className="sv-panel overflow-hidden">
-                  <PanelHeader actionIcon={FileSearch} actionLabel="Open Attention" actionRoute="documents" actionSearch="?ingest=active" countLabel={overviewQuery.isLoading ? "Loading" : `${attentionDocs.length} shown`} description="Current failed, unknown, and review-required documents appear here." onNavigate={onNavigate} title="Needs Attention" />
-                  {overviewQuery.isLoading ? <PanelSkeleton /> : attentionDocs.length ? <AttentionList documents={attentionDocs} onNavigate={onNavigate} /> : <Empty icon={CheckCircle2} title="No document issues" text="The visible current library has no failed, unknown, or review-required documents." />}
+                  <PanelHeader actionIcon={FileSearch} actionLabel="Open Attention" actionRoute="documents" actionSearch="?lifecycle=current&ingest=attention" countLabel={overviewQuery.isLoading ? "Loading" : `${attentionDocs.length} of ${needsAttention} affected`} description="Inspect the cause and follow the next recovery step." onNavigate={onNavigate} title="Needs attention" />
+                  {overviewQuery.isLoading ? <PanelSkeleton /> : attentionDocs.length ? <AttentionList documents={attentionDocs} onNavigate={onNavigate} canViewJobs={canViewJobs} /> : <Empty icon={CheckCircle2} title="No document issues" text="The visible current library has no failed, unknown, or review-required documents." />}
                 </section>
                 {canViewJobs ? (
                   <section className="sv-panel overflow-hidden">
-                    <PanelHeader actionIcon={History} actionLabel="Open Activity" actionRoute="ingestion-jobs" countLabel={recentActivityQuery.isLoading ? "Loading" : `${recentActivityQuery.data?.items.length ?? 0} latest`} description="Latest intake, folder, restore, and reingestion runs across visible spaces." onNavigate={onNavigate} title="Recent Activity" />
+                    <PanelHeader actionIcon={History} actionLabel="Open Activity" actionRoute="ingestion-jobs" countLabel={recentActivityQuery.isLoading ? "Loading" : `${recentActivityQuery.data?.items.length ?? 0} latest`} description="Latest confirmed ingestion outcomes across visible spaces." onNavigate={onNavigate} title="Recent Activity" />
                     <RecentActivityList isLoading={recentActivityQuery.isLoading} jobs={recentActivityQuery.data?.items ?? []} onNavigate={onNavigate} />
                   </section>
                 ) : null}
@@ -203,16 +219,23 @@ export function isDocumentWorkspaceEmpty({ jobHistoryKnown, jobHistoryTotal, lib
     && trash === 0;
 }
 
-function Metric({ label, loading, tone, value }: { label: string; loading: boolean; tone?: "success" | "warning"; value: number }) {
-  const className = tone === "success" ? "knowledge-context-metric knowledge-context-metric-success" : "knowledge-context-metric";
-  return <div className={className} data-tone={tone}><span>{label}</span>{loading ? <Skeleton className="mt-1 h-6 w-12" /> : <strong>{value}</strong>}</div>;
+function Metric({ detail, icon: Icon, label, loading, tone, value }: { detail: string; icon: typeof FileSearch; label: string; loading: boolean; tone?: "success" | "warning"; value: number }) {
+  return <div className="sv-panel overview-summary-card" data-tone={tone} aria-busy={loading}>
+    <span className="overview-summary-icon" aria-hidden="true"><Icon size={19} /></span><p className="overview-summary-label">{label}</p>
+    {loading ? <Skeleton className="my-3 h-9 w-16" /> : <p className="overview-summary-value">{value.toLocaleString()}</p>}
+    <p className="overview-caption">{detail}</p>
+  </div>;
 }
 
-function buildNextStep({ canOpenFolderSources, canUpload, canViewJobs, documentsCount, indexedCurrentCount, needsAttention, processingCount }: NextStepInput): NextStep {
-  if (needsAttention > 0) return { detail: `${needsAttention} current document${needsAttention === 1 ? " needs" : "s need"} review before the library is fully healthy.`, primaryLabel: "Review Documents", primaryRoute: "documents", primarySearch: "?ingest=active", secondaryLabel: canViewJobs ? "Open Activity" : undefined, secondaryRoute: canViewJobs ? "ingestion-jobs" : undefined, title: "Attention needed", tone: "warning" };
+export function buildNextStep({ canOpenFolderSources, canUpload, canViewJobs, documentsCount, indexedCurrentCount, needsAttention, processingCount, failedCount, reviewCount, unknownCount, cancelledCount }: NextStepInput): NextStep {
+  if (needsAttention > 0) {
+    const filter = failedCount === needsAttention ? "failed" : reviewCount === needsAttention ? "human_review" : unknownCount === needsAttention ? "unknown" : "attention";
+    return { detail: `${failedCount} failed · ${reviewCount} awaiting human review · ${unknownCount} unknown. ${processingCount} processing; ${cancelledCount} cancelled.`, primaryLabel: filter === "failed" ? "Investigate failures" : filter === "human_review" ? "Inspect review documents" : filter === "unknown" ? "Inspect unknown states" : "Inspect affected documents", primaryRoute: "documents", primarySearch: `?lifecycle=current&ingest=${filter}`, secondaryLabel: canViewJobs ? "Open Activity" : undefined, secondaryRoute: canViewJobs ? "ingestion-jobs" : undefined, title: filter === "failed" ? `${failedCount} document${failedCount === 1 ? "" : "s"} failed ingestion` : "Ingestion attention needed", tone: "warning" };
+  }
   if (processingCount > 0) return { detail: `${processingCount} current document${processingCount === 1 ? " is" : "s are"} still moving into the library.`, primaryLabel: canViewJobs ? "Track Activity" : "Open Processing", primaryRoute: canViewJobs ? "ingestion-jobs" : "documents", primarySearch: canViewJobs ? "?status=processing" : "?ingest=processing", secondaryLabel: "Open Documents", secondaryRoute: "documents", secondarySearch: "?ingest=processing", title: "Intake is running", tone: "active" };
+  if (cancelledCount > 0) return { title: "Ingestion cancelled", detail: `${cancelledCount} current document${cancelledCount === 1 ? " has" : "s have"} cancelled ingestion. ${indexedCurrentCount} indexed; no failed or review-required documents.`, primaryLabel: "Inspect cancelled documents", primaryRoute: "documents", primarySearch: "?lifecycle=current&ingest=cancelled", tone: "empty" };
   if (documentsCount === 0) return { detail: canOpenFolderSources ? "Start intake by adding files or setting up a folder source." : canUpload ? "Start intake by adding files to a writable Knowledge Space." : "Browse Knowledge Spaces to confirm where library content should appear.", primaryLabel: canUpload ? "Add Files" : "Open Knowledge Spaces", primaryRoute: canUpload ? "upload" : "knowledge-spaces", secondaryLabel: canOpenFolderSources ? "Folder Sources" : undefined, secondaryRoute: canOpenFolderSources ? "document-extraction" : undefined, title: "Library is empty", tone: "empty" };
-  return { detail: `${indexedCurrentCount} current document${indexedCurrentCount === 1 ? " is" : "s are"} indexed and ready for library work.`, primaryLabel: "Open Indexed", primaryRoute: "documents", primarySearch: "?lifecycle=current&ingest=indexed", secondaryLabel: "Manage Spaces", secondaryRoute: "knowledge-spaces", title: "Library ready", tone: "success" };
+  return { detail: `${indexedCurrentCount} current document${indexedCurrentCount === 1 ? " is" : "s are"} indexed and ready for library work.`, primaryLabel: "Open Indexed", primaryRoute: "documents", primarySearch: "?lifecycle=current&ingest=indexed", secondaryLabel: "Manage Spaces", secondaryRoute: "knowledge-spaces", title: "No ingestion issues detected", tone: "success" };
 }
 
 function buildLifecycleItems({ currentCount, expiringSoonCount, supersededCount, trashCount, user }: LifecycleInput): LifecycleItem[] {
@@ -225,11 +248,13 @@ function buildLifecycleItems({ currentCount, expiringSoonCount, supersededCount,
   return items.filter((item) => !item.route || canAccessRoute(user, item.route));
 }
 
-function buildStatusShortcuts({ canViewDocuments, failedCount, indexedCurrentCount, processingCount, reviewCount, user }: StatusShortcutInput): StatusShortcut[] {
+function buildStatusShortcuts({ canViewDocuments, cancelledCount, unknownCount, failedCount, indexedCurrentCount, processingCount, reviewCount, user }: StatusShortcutInput): StatusShortcut[] {
   const shortcuts: StatusShortcut[] = [
     { detail: "current and searchable", icon: CheckCircle2, label: "Indexed", route: "documents", search: "?lifecycle=current&ingest=indexed", tone: "success", value: indexedCurrentCount },
     { detail: "current queued library items", icon: Hourglass, label: "Processing", route: "documents", search: "?lifecycle=current&ingest=processing", tone: "active", value: processingCount },
-    { detail: "human review required", icon: AlertTriangle, label: "Needs Review", route: "documents", search: "?ingest=human_review", tone: reviewCount > 0 ? "warning" : undefined, value: reviewCount },
+    { detail: "human review required", icon: AlertTriangle, label: "Needs Review", route: "documents", search: "?lifecycle=current&ingest=human_review", tone: reviewCount > 0 ? "warning" : undefined, value: reviewCount },
+    { detail: "ingestion status unavailable", icon: AlertTriangle, label: "Unknown", route: "documents", search: "?lifecycle=current&ingest=unknown", tone: unknownCount > 0 ? "warning" : undefined, value: unknownCount },
+    { detail: "stopped without completion", icon: XCircle, label: "Cancelled", route: "documents", search: "?lifecycle=current&ingest=cancelled", value: cancelledCount },
     { detail: "current failed documents", icon: XCircle, label: "Failed", route: "documents", search: "?lifecycle=current&ingest=failed", tone: failedCount > 0 ? "warning" : undefined, value: failedCount },
   ];
   return shortcuts.filter((item) => (item.route === "documents" ? canViewDocuments : canAccessRoute(user, item.route)));
@@ -253,5 +278,5 @@ type Props = { onLogout: () => void; onNavigate: (route: RouteId, options?: Navi
 type DocumentEmptyWorkspaceProps = { canOpenFolderSources: boolean; canOpenSpaces: boolean; canUpload: boolean; onNavigate: Props["onNavigate"] };
 type DocumentWorkspaceEmptyInput = { jobHistoryKnown: boolean; jobHistoryTotal: number; libraryDocuments: number; overviewKnown: boolean; trash: number };
 type LifecycleInput = { currentCount: number; expiringSoonCount: number; supersededCount: number; trashCount: number; user: AuthUser };
-type NextStepInput = { canOpenFolderSources: boolean; canUpload: boolean; canViewJobs: boolean; documentsCount: number; indexedCurrentCount: number; needsAttention: number; processingCount: number };
-type StatusShortcutInput = { canViewDocuments: boolean; failedCount: number; indexedCurrentCount: number; processingCount: number; reviewCount: number; user: AuthUser };
+type NextStepInput = { failedCount: number; reviewCount: number; unknownCount: number; cancelledCount: number; canOpenFolderSources: boolean; canUpload: boolean; canViewJobs: boolean; documentsCount: number; indexedCurrentCount: number; needsAttention: number; processingCount: number };
+type StatusShortcutInput = { cancelledCount: number; unknownCount: number; canViewDocuments: boolean; failedCount: number; indexedCurrentCount: number; processingCount: number; reviewCount: number; user: AuthUser };

@@ -382,6 +382,40 @@ def heading_matched_exhaustive_unit_keys(
     return {unit.key for unit in units if unit_tokens[unit.key] & query_tokens}
 
 
+def exact_heading_matched_exhaustive_unit_keys(
+    query: str,
+    units: list[ExhaustiveUnit],
+) -> set[str]:
+    normalized = normalized_text(query)
+    if (
+        not re.search(r"\b(?:how many|number of)\b", normalized)
+        or has_inverse_scope_language(normalized)
+        or any(
+            phrase in normalized
+            for phrase in _BROADENING_SECTION_SCOPE_PHRASES
+        )
+        or requires_full_section_coverage(normalized)
+        or requires_document_summary_coverage(normalized)
+    ):
+        return set()
+    ignored = {
+        _canonical_category_token(token)
+        for token in _EXHAUSTIVE_CATEGORY_CONTROL_TOKENS
+    }
+    query_tokens = {
+        _canonical_category_token(token)
+        for token in match_tokens(query)
+    } - ignored
+    matches_by_specificity: dict[int, set[str]] = {}
+    for unit in units:
+        heading_tokens = _unit_heading_match_tokens(unit) - ignored
+        if len(heading_tokens) >= 2 and heading_tokens <= query_tokens:
+            matches_by_specificity.setdefault(len(heading_tokens), set()).add(unit.key)
+    if not matches_by_specificity:
+        return set()
+    return matches_by_specificity[max(matches_by_specificity)]
+
+
 def _unit_heading_match_tokens(unit: ExhaustiveUnit) -> set[str]:
     first = unit.children[0]
     values: list[str] = []
@@ -448,8 +482,23 @@ def requires_document_summary_coverage(query: str) -> bool:
     if has_inverse_scope_language(normalized):
         return False
     query_tokens = tokens(normalized)
-    return bool(
-        {"summary", "summaries", "summarize"} & query_tokens
-        and {"document", "documents", "file", "files", "source", "sources"}
-        & query_tokens
-    )
+    if not {
+        "summary",
+        "summaries",
+        "summarize",
+        "summarise",
+    } & query_tokens:
+        return False
+    if {
+        "appendix",
+        "chapter",
+        "clause",
+        "clauses",
+        "page",
+        "pages",
+        "paragraph",
+        "section",
+        "sections",
+    } & query_tokens:
+        return False
+    return True

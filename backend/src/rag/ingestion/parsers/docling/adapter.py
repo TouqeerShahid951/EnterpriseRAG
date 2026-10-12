@@ -124,6 +124,13 @@ def parse_docling_docx(file_bytes: bytes) -> list[ParsedPdfItem]:
     return structured_docling_items(result.document)
 
 
+def parse_docling_pptx(file_bytes: bytes) -> list[ParsedPdfItem]:
+    converter, stream_type = _docling_imports(allow_ocr=False, input_format="pptx")
+    stream = stream_type(name="document.pptx", stream=BytesIO(file_bytes))
+    result = _convert_docling(converter, stream, {})
+    return structured_docling_items(result.document)
+
+
 def structured_docling_items(document: Any, *, pages: set[int] | None = None) -> list[ParsedPdfItem]:
     blocks = docling_layout_blocks(document, pages=pages)
     return blocks_to_items(blocks, parser="docling")
@@ -195,6 +202,15 @@ def _docling_imports(*, allow_ocr: bool, input_format: str) -> tuple[Any, type[A
         if docx_format is None:
             raise ImportError("Docling DOCX input format is not available.")
         options[docx_format] = WordFormatOption()
+    elif input_format == "pptx":
+        try:
+            from docling.document_converter import PowerpointFormatOption
+        except ImportError as exc:
+            raise ImportError("Docling PowerPoint support is not installed.") from exc
+        pptx_format = getattr(InputFormat, "PPTX", None)
+        if pptx_format is None:
+            raise ImportError("Docling PPTX input format is not available.")
+        options[pptx_format] = PowerpointFormatOption()
     else:
         raise ValueError(f"unsupported docling input format: {input_format}")
     converter = DocumentConverter(
@@ -399,6 +415,7 @@ def _block_from_docling_item(item: Any, document: Any, *, depth: int | None) -> 
         role=role,
         page_no=page_no,
         bbox=_bbox(item, document),
+        source_spans=_source_spans(item, document),
         source="docling",
         confidence=_confidence(item),
         quality_flags=flags,
@@ -427,6 +444,7 @@ def _table_block(table: Any, document: Any, *, depth: int | None) -> LayoutBlock
         role="table",
         page_no=page_no,
         bbox=_bbox(table, document),
+        source_spans=_source_spans(table, document),
         source="docling",
         confidence=_confidence(table),
         table_rows=rows,
@@ -627,8 +645,8 @@ def _page_no(item: Any) -> int | None:
     return None
 
 
-def _bbox(item: Any, document: Any | None = None) -> BBox | None:
-    for prov in getattr(item, "prov", []) or []:
+def _bbox(item: Any, document: Any | None = None, *, provenance: list[Any] | None = None) -> BBox | None:
+    for prov in (provenance if provenance is not None else getattr(item, "prov", []) or []):
         bbox = getattr(prov, "bbox", None)
         if bbox is None:
             continue
@@ -686,3 +704,23 @@ def _int_or_none(value: Any) -> int | None:
 def _self_ref(item: Any) -> str | None:
     value = getattr(item, "self_ref", None)
     return value if isinstance(value, str) else None
+
+
+def _source_spans(item: Any, document: Any) -> list[dict[str, Any]]:
+    spans: list[dict[str, Any]] = []
+    raw_text = str(getattr(item, "text", "") or "")
+    for prov in getattr(item, "prov", []) or []:
+        page = getattr(prov, "page_no", None)
+        bbox = _bbox(item, document, provenance=[prov])
+        if type(page) is not int or page < 1 or bbox is None:
+            continue
+        charspan = getattr(prov, "charspan", None)
+        text = ""
+        if isinstance(charspan, (tuple, list)) and len(charspan) == 2:
+            start, end = charspan
+            if type(start) is int and type(end) is int and 0 <= start < end <= len(raw_text):
+                text = raw_text[start:end]
+        if not text and len(getattr(item, "prov", [])) == 1:
+            text = raw_text
+        spans.append({"page": page, "bbox": list(bbox), "exact_text": text})
+    return spans

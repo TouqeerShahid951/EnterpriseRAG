@@ -59,6 +59,7 @@ class FakeRagService:
         *,
         capture_retrieval_trace: bool = False,
         force_faithfulness_check: bool = False,
+        **_: object,
     ) -> QueryExecutionResult:
         self.calls += 1
         assert request.query == "What evidence is relevant?"

@@ -2,13 +2,16 @@ import type { DocumentRegion } from "@/features/documents/components/DocumentReg
 import type { ImageReviewBatch, ImageReviewCandidate, ReviewItem } from "@/types/api";
 
 export function reviewRegionFromItem(item: ReviewItem): DocumentRegion {
-  return {
+  const region: DocumentRegion = {
     bbox: normalizeBBox(item.bbox),
     confidence: item.confidence,
     page: item.page_start ?? item.page_end,
     regionType: item.item_type,
     text: item.partial_text,
   };
+  if (item.image_asset_id) region.imageAssetId = item.image_asset_id;
+  if (item.image_source_kind) region.imageSourceKind = item.image_source_kind;
+  return region;
 }
 
 export function groupReviewItemsByDocument(items: ReviewItem[]): ReviewDocumentGroup[] {
@@ -19,6 +22,27 @@ export function groupReviewItemsByDocument(items: ReviewItem[]): ReviewDocumentG
     groups.set(item.doc_id, group);
   }
   return [...groups.values()];
+}
+
+export function bulkReviewTargets(
+  items: ReviewItem[],
+  selectedItemIds: string[],
+  decision: "approve" | "reject",
+): ReviewItem[] {
+  const selected = new Set(selectedItemIds);
+  const targets = selected.size > 0 ? items.filter((item) => selected.has(item.id)) : items;
+  if (decision === "approve") return targets;
+
+  const batches = new Set<string>();
+  return targets.filter((item) => {
+    if (batches.has(item.batch_id)) return false;
+    batches.add(item.batch_id);
+    return true;
+  });
+}
+
+export function reviewApprovalText(item: ReviewItem): string {
+  return (item.corrected_text ?? item.partial_text).trim();
 }
 
 export function reviewDocumentCount(
@@ -51,6 +75,18 @@ export function confidencePillClass(item: ReviewItem): string {
 export function confidencePercent(item: ReviewItem): number {
   if (item.confidence === null) return 0;
   return Math.max(0, Math.min(100, Math.round(item.confidence * 100)));
+}
+
+export function proportionalScrollTop(
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number,
+  targetScrollHeight: number,
+  targetClientHeight: number,
+): number {
+  const sourceRange = Math.max(0, scrollHeight - clientHeight);
+  const targetRange = Math.max(0, targetScrollHeight - targetClientHeight);
+  return sourceRange > 0 ? (scrollTop / sourceRange) * targetRange : 0;
 }
 
 export function pageRange(item: ReviewItem): string {

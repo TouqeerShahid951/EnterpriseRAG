@@ -18,6 +18,9 @@ from rag.ingestion.job_models import IngestJobRecord, IngestJobRepository
 from rag.shared.persistence import PostgresConnectionMixin
 
 from .adapters.http import ServiceRequestError
+from .checkpoints.adapters.postgres import PostgresCheckpointRepository
+from .checkpoints.adapters.storage import CheckpointObjectStorage
+from .config import MinioConfig
 from .delivery.service import IngestDeliveryService, dispatch_pending_deliveries
 from .indexing.qdrant import QdrantClient
 from .publication.dependencies import publication_repository_for
@@ -204,3 +207,29 @@ def retire_index_generations(
         if publication.mark_retired(generation.id):
             retired += 1
     return retired
+
+
+def cleanup_ingestion_checkpoints(*, now: datetime | None = None, retention_days: int = 7, limit: int = 100) -> int:
+    """Delete registered checkpoint objects for old terminal jobs."""
+    if settings.document_repository != "postgres" or limit <= 0:
+        return 0
+    repository = PostgresCheckpointRepository(settings.database_url)
+    storage = CheckpointObjectStorage(
+        MinioConfig(
+            endpoint=settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            bucket=settings.minio_bucket,
+            secure=settings.minio_secure,
+        )
+    )
+    cutoff = (now or datetime.now(UTC)) - timedelta(days=max(0, retention_days))
+    deleted = 0
+    for descriptor in repository.expired(before=cutoff, limit=limit):
+        try:
+            storage.delete(object_key=descriptor.object_key)
+        except Exception:  # noqa: BLE001 - leave the registry for a retry
+            logger.warning("ingestion checkpoint cleanup deferred job_id=%s stage=%s", descriptor.job_id, descriptor.stage_key)
+            continue
+        deleted += int(repository.delete(job_id=descriptor.job_id, stage_key=descriptor.stage_key))
+    return deleted

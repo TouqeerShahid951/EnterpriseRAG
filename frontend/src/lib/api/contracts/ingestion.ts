@@ -23,6 +23,7 @@ export interface UploadDocumentRequest {
   doc_type?: string | null;
   description?: string | null;
   supersedes?: string[];
+  analyze_slide_visuals?: boolean;
 }
 
 export interface IngestJobListRequest {
@@ -34,6 +35,7 @@ export interface IngestJobListRequest {
   created_from?: string;
   created_to?: string;
   uploaded_by_me?: boolean;
+  abbreviation_glossary_only?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -48,6 +50,7 @@ export const uploadApi = {
     if (request.expiry_date) formData.set("expiry_date", request.expiry_date);
     if (request.doc_type) formData.set("doc_type", request.doc_type);
     if (request.description) formData.set("description", request.description);
+    if (request.analyze_slide_visuals !== undefined) formData.set("analyze_slide_visuals", String(request.analyze_slide_visuals));
 
     for (const groupPath of request.shared_group_paths ?? []) {
       formData.append("shared_group_paths", groupPath);
@@ -87,6 +90,7 @@ function ingestJobListPath(basePath: string, request: IngestJobListRequest): str
   if (request.created_from) params.set("created_from", request.created_from);
   if (request.created_to) params.set("created_to", request.created_to);
   if (request.uploaded_by_me) params.set("uploaded_by_me", "true");
+  if (request.abbreviation_glossary_only) params.set("abbreviation_glossary_only", "true");
   if (request.limit !== undefined) params.set("limit", String(request.limit));
   if (request.offset !== undefined) params.set("offset", String(request.offset));
   const query = params.toString();

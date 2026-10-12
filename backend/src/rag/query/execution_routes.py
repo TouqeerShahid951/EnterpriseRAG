@@ -24,16 +24,13 @@ from .cancellation import (
 from .chat_history_models import ChatHistoryRequestConflict
 from .http import ServiceRequestError
 from .query_stream import format_sse
-from .route_access import (
-    query_request_for_user,
-    user_context,
-    validate_query_source_for_user,
-)
+from .route_access import authorize_query_request
 from .schemas import QueryRequest, QueryStreamEvent, RAGResponse
 from .service import LocalRagService, get_local_rag_service
 
 
 router = APIRouter()
+_STREAM_KEEPALIVE_SECONDS = 15.0
 
 
 @router.post(
@@ -55,17 +52,13 @@ async def run_query(
     rag_service: LocalRagService = Depends(get_local_rag_service),
 ) -> RAGResponse:
     require_csrf(request)
-    payload = query_request_for_user(payload, user, identity_repo)
-    validate_query_source_for_user(
-        payload,
-        user_context(user, identity_repo),
-        schedule_repo,
-        connector_profile_repo,
+    payload, scoped_user = authorize_query_request(
+        payload, request, user, identity_repo, schedule_repo, connector_profile_repo,
     )
     try:
         response = rag_service.answer_query(
             payload,
-            user_context(user, identity_repo),
+            scoped_user,
         )
         return response
     except ServiceRequestError as exc:
@@ -105,13 +98,8 @@ async def stream_query(
     rag_service: LocalRagService = Depends(get_local_rag_service),
 ):
     require_csrf(request)
-    payload = query_request_for_user(payload, user, identity_repo)
-    scoped_user = user_context(user, identity_repo)
-    validate_query_source_for_user(
-        payload,
-        scoped_user,
-        schedule_repo,
-        connector_profile_repo,
+    payload, scoped_user = authorize_query_request(
+        payload, request, user, identity_repo, schedule_repo, connector_profile_repo,
     )
 
     async def stream():
@@ -123,6 +111,9 @@ async def stream_query(
             scoped_user,
         )
         next_task: asyncio.Task[QueryStreamEvent | None] | None = None
+        next_task_completed = False
+        loop = asyncio.get_running_loop()
+        last_sent = loop.time()
         try:
             while True:
                 if await request.is_disconnected():
@@ -132,11 +123,26 @@ async def stream_query(
                 next_task = asyncio.create_task(
                     asyncio.to_thread(_next_stream_event, iterator)
                 )
-                event = await next_task
+                while not next_task.done():
+                    if await request.is_disconnected():
+                        cancellation_token.cancel()
+                        with suppress(QueryCancelled, asyncio.CancelledError, TimeoutError):
+                            await asyncio.wait_for(asyncio.shield(next_task), timeout=1.0)
+                        next_task_completed = next_task.done()
+                        return
+                    await asyncio.sleep(0.05)
+                    if loop.time() - last_sent >= _STREAM_KEEPALIVE_SECONDS:
+                        yield ": keepalive\n\n"
+                        last_sent = loop.time()
+                try:
+                    event = await next_task
+                finally:
+                    next_task_completed = True
                 next_task = None
                 if event is None:
                     return
                 yield format_sse(event)
+                last_sent = loop.time()
         except QueryCancelled:
             return
         except asyncio.CancelledError:
@@ -172,7 +178,7 @@ async def stream_query(
                 next_task.cancel()
                 with suppress(asyncio.CancelledError, TimeoutError):
                     await asyncio.wait_for(next_task, timeout=1.0)
-            if next_task is None or next_task.done():
+            if next_task is None or next_task_completed:
                 close = getattr(iterator, "close", None)
                 if close is not None:
                     with suppress(Exception):
@@ -181,6 +187,7 @@ async def stream_query(
     return StreamingResponse(
         stream(),
         media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

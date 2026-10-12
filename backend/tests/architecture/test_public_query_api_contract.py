@@ -88,11 +88,14 @@ EXPECTED_SCHEMAS: dict[str, SchemaContract] = {
                 "query",
                 "session_id",
                 "client_request_id",
+                "reply_to_turn_id",
                 "group_path",
                 "document_ids",
                 "source_mode",
                 "query_source_id",
+                "query_source_ids",
                 "allow_source_expansion",
+                "continue_source_clarification",
             }
         ),
         frozenset({"query"}),
@@ -117,43 +120,8 @@ EXPECTED_SCHEMAS: dict[str, SchemaContract] = {
         frozenset({"total"}),
     ),
     "RAGResponse": (
-        frozenset(
-            {
-                "trace_id",
-                "answer",
-                "answer_status",
-                "coverage",
-                "sources",
-                "artifacts",
-                "artifact_job",
-                "conflict_flag",
-                "conflict_detail",
-                "faithfulness_score",
-                "faithfulness_status",
-                "unfounded_claims",
-                "intent",
-                "session_id",
-                "latency_ms",
-                "node_timings",
-                "degraded",
-                "degraded_reason",
-                "source_mode",
-                "source_decision_reason",
-                "source_expansion",
-            }
-        ),
-        frozenset(
-            {
-                "trace_id",
-                "answer",
-                "conflict_flag",
-                "faithfulness_score",
-                "intent",
-                "session_id",
-                "latency_ms",
-                "degraded",
-            }
-        ),
+        frozenset(['answer', 'answer_status', 'artifact_job', 'artifacts', 'citation_verification', 'conflict_detail', 'conflict_flag', 'coverage', 'degraded', 'degraded_reason', 'faithfulness_score', 'faithfulness_status', 'intent', 'latency_ms', 'node_timings', 'operational_failures', 'query_source_id', 'session_id', 'source_clarification', 'source_decision_reason', 'source_expansion', 'source_mode', 'sources', 'trace_id', 'unfounded_claims']),
+        frozenset(['answer', 'conflict_flag', 'degraded', 'faithfulness_score', 'intent', 'latency_ms', 'session_id', 'trace_id']),
     ),
     "QueryCoverage": (
         frozenset(
@@ -165,6 +133,10 @@ EXPECTED_SCHEMAS: dict[str, SchemaContract] = {
             }
         ),
         frozenset(),
+    ),
+    "QueryOperationalFailure": (
+        frozenset({"stage", "code", "retryable", "source_id", "message"}),
+        frozenset({"stage", "code", "retryable", "message"}),
     ),
     "ChatSession": (
         frozenset({"id", "title", "created_at", "updated_at", "turns"}),
@@ -182,20 +154,33 @@ EXPECTED_SCHEMAS: dict[str, SchemaContract] = {
         frozenset({"start", "end"}),
         frozenset({"start", "end"}),
     ),
-    "SourceRegion": (
-        frozenset(
-            {
-                "page",
-                "bbox",
-                "text",
-                "region_type",
-                "confidence",
-                "image_asset_id",
-                "image_source_kind",
-                "extraction_method",
-            }
-        ),
-        frozenset(),
+    "TextCitationTarget": (
+        frozenset(['exact_text', 'kind', 'occurrence', 'prefix', 'provenance_kind', 'suffix']),
+        frozenset(['exact_text']),
+    ),
+    "PageCitationTarget": (
+        frozenset(['bbox', 'confidence', 'exact_text', 'extraction_method', 'image_asset_id', 'image_source_kind', 'kind', 'page', 'provenance_kind', 'region_type']),
+        frozenset(['bbox', 'page']),
+    ),
+    "SlideCitationTarget": (
+        frozenset(['bbox', 'confidence', 'exact_text', 'extraction_method', 'image_asset_id', 'image_source_kind', 'kind', 'page', 'provenance_kind', 'region_type']),
+        frozenset(['bbox', 'page']),
+    ),
+    "ImageCitationTarget": (
+        frozenset(['bbox', 'confidence', 'exact_text', 'extraction_method', 'image_asset_id', 'image_source_kind', 'kind', 'provenance_kind']),
+        frozenset([]),
+    ),
+    "SpreadsheetCitationTarget": (
+        frozenset(['end_column', 'end_row', 'exact_text', 'kind', 'provenance_kind', 'sheet_name', 'start_column', 'start_row']),
+        frozenset(['end_column', 'end_row', 'sheet_name', 'start_column', 'start_row']),
+    ),
+    "JsonCitationTarget": (
+        frozenset(['exact_text', 'kind', 'pointer', 'provenance_kind']),
+        frozenset(['pointer']),
+    ),
+    "RecordCitationTarget": (
+        frozenset(['exact_text', 'fields', 'kind', 'provenance_kind', 'record_id']),
+        frozenset(['record_id']),
     ),
     "EvidenceField": (
         frozenset({"label", "value", "supports_claim"}),
@@ -234,25 +219,8 @@ EXPECTED_SCHEMAS: dict[str, SchemaContract] = {
         ),
     ),
     "SourceAnchor-Output": (
-        frozenset(
-            {
-                "doc_id",
-                "doc_title",
-                "chunk_id",
-                "page",
-                "page_start",
-                "page_end",
-                "excerpt",
-                "group_path",
-                "clearance_level",
-                "effective_date",
-                "highlight_ranges",
-                "source_regions",
-                "evidence_windows",
-                "attribution_status",
-            }
-        ),
-        frozenset({"doc_id", "doc_title", "chunk_id", "excerpt", "group_path"}),
+        frozenset(['attribution_status', 'chunk_id', 'citation_protocol_version', 'citation_targets', 'clearance_level', 'content_hash', 'doc_id', 'doc_title', 'effective_date', 'evidence_hash', 'evidence_windows', 'excerpt', 'group_path', 'highlight_ranges', 'index_generation_id', 'page', 'page_end', 'page_start', 'provenance_kind']),
+        frozenset(['chunk_id', 'doc_id', 'doc_title', 'excerpt', 'group_path']),
     ),
     "ConflictPair-Output": (
         frozenset(
@@ -294,6 +262,14 @@ EXPECTED_SCHEMAS: dict[str, SchemaContract] = {
         frozenset({"available", "reason", "suggested_source_mode"}),
         frozenset({"reason"}),
     ),
+    "QuerySourceClarification": (
+        frozenset({"question", "options"}),
+        frozenset({"question"}),
+    ),
+    "QuerySourceClarificationOption": (
+        frozenset({"source_id", "name", "description"}),
+        frozenset({"source_id", "name"}),
+    ),
     "QueryNodeTiming": (
         frozenset(
             {
@@ -308,6 +284,12 @@ EXPECTED_SCHEMAS: dict[str, SchemaContract] = {
     ),
 }
 
+
+EXPECTED_SCHEMAS.update({
+    'EvidenceQuote': (frozenset(['source_end', 'source_label', 'source_start', 'text']), frozenset(['source_end', 'source_label', 'source_start', 'text'])),
+    'CitationClaim': (frozenset(['answer_end', 'answer_start', 'claim_id', 'quotes', 'reason', 'source_labels', 'text', 'verdict']), frozenset(['answer_end', 'answer_start', 'claim_id', 'text'])),
+    'CitationVerification': (frozenset(['answer_sha256', 'claims', 'offset_unit', 'repair_count', 'status', 'version']), frozenset(['answer_sha256', 'status'])),
+})
 
 def test_public_query_openapi_contract() -> None:
     """Keep query paths and contracts stable across feature ownership moves."""
@@ -325,6 +307,10 @@ def test_public_query_openapi_contract() -> None:
     )
     assert _operation_contracts(paths) == EXPECTED_OPERATIONS
     schemas = openapi["components"]["schemas"]
+    assert {"source_matched", "unverified", "verified"} <= set(
+        schemas["CitationVerification"]["properties"]["status"]["enum"]
+    )
+    assert "source_matched" in schemas["EvidenceWindow"]["properties"]["support_status"]["enum"]
     assert {
         name: (
             frozenset(schemas[name]["properties"]),
@@ -341,11 +327,17 @@ def test_public_query_openapi_contract() -> None:
         "minLength": 1,
         "maxLength": 120,
     }
+    assert query_request["reply_to_turn_id"]["anyOf"][0] == {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 160,
+    }
     assert query_request["query_source_id"]["anyOf"][0] == {
         "type": "string",
         "minLength": 1,
         "maxLength": 240,
     }
+    assert query_request["query_source_ids"]["maxItems"] == 3
     assert query_request["source_mode"]["enum"] == [
         "auto",
         "corpus_only",

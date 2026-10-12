@@ -53,8 +53,10 @@ BEGIN
 END
 $migration$;
 
-CREATE UNIQUE INDEX IF NOT EXISTS abbreviation_entries_abbreviation_uidx
-    ON abbreviation_glossary_entries (upper(abbreviation));
+DROP INDEX IF EXISTS abbreviation_entries_abbreviation_uidx;
+
+CREATE UNIQUE INDEX IF NOT EXISTS abbreviation_entries_abbreviation_expansion_uidx
+    ON abbreviation_glossary_entries (upper(abbreviation), lower(expansion));
 
 CREATE TABLE IF NOT EXISTS abbreviation_glossary_sources (
     document_id UUID PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
@@ -74,32 +76,17 @@ CREATE INDEX IF NOT EXISTS abbreviation_entry_sources_document_idx
     ON abbreviation_glossary_entry_sources (source_document_id);
 
 DO $migration$
-DECLARE
-    conflicting_definitions BOOLEAN;
 BEGIN
     IF to_regclass('public.abbreviation_glossary_entries_scoped') IS NOT NULL THEN
-        EXECUTE '
-            SELECT EXISTS (
-                SELECT 1
-                FROM abbreviation_glossary_entries_scoped
-                GROUP BY upper(abbreviation)
-                HAVING count(DISTINCT lower(expansion)) > 1
-            )'
-        INTO conflicting_definitions;
-        IF conflicting_definitions THEN
-            RAISE EXCEPTION
-                'Scoped abbreviation definitions conflict; resolve them before migrating to the global glossary.';
-        END IF;
-
         EXECUTE '
             INSERT INTO abbreviation_glossary_entries
                 (id, abbreviation, expansion, source_kind, source_document_id,
                  source_page, revision, created_by, updated_by, created_at, updated_at)
-            SELECT DISTINCT ON (upper(abbreviation))
+            SELECT DISTINCT ON (upper(abbreviation), lower(expansion))
                 id, abbreviation, expansion, source_kind, source_document_id,
                 NULL, revision, created_by, updated_by, created_at, updated_at
             FROM abbreviation_glossary_entries_scoped
-            ORDER BY upper(abbreviation), updated_at DESC, id DESC
+            ORDER BY upper(abbreviation), lower(expansion), updated_at DESC, id DESC
             ON CONFLICT DO NOTHING';
         DROP TABLE abbreviation_glossary_entries_scoped;
     END IF;

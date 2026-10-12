@@ -70,6 +70,7 @@ function buildSource(overrides: Partial<SourceAnchor> = {}): SourceAnchor {
     group_path: "/legal",
     effective_date: "2026-01-01",
     highlight_ranges: [],
+    citation_targets: [],
     ...overrides,
   };
 }

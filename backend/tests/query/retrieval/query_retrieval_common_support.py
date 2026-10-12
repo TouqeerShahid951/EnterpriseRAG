@@ -6,7 +6,12 @@ from rag.query.qdrant import SearchHit
 
 from rag.query.retrieval.query_retrieval import retrieve_candidates
 
-from rag.query.routing.routing_models import RoutePlan
+from rag.query.routing.routing_models import (
+    EvidenceNeed,
+    EvidencePlan,
+    RoutePlan,
+    SourceAssignment,
+)
 
 from rag.query.state import initial_retrieval_state, initial_state
 

@@ -1,3 +1,4 @@
+import type { SourceRevision } from "@/types/query";
 import type {
   ClearanceLevel,
   DeleteDocumentResponse,
@@ -9,7 +10,10 @@ import type {
   DocumentReingestRequest,
   DocumentReingestResponse,
   DocumentSharesResponse,
+  DocumentSlidesResponse,
   SourceAnchor,
+  SpreadsheetReviewRequest,
+  SpreadsheetReviewResponse,
   VersionChainResponse,
 } from "@/types/api";
 import { getConfiguredBaseUrl, normalizeBaseUrl } from "../url";
@@ -50,16 +54,20 @@ export const documentsApi = {
   summary: () => apiClient.get<DocumentCatalogSummary>("/api/v1/docs/summary"),
   overview: () => apiClient.get<DocumentOverview>("/api/v1/docs/overview"),
   get: async (documentId: string) => normalizeDocument(await apiClient.get<Document>(`/api/v1/docs/${encodeURIComponent(documentId)}`)),
-  source: (documentId: string, chunkId: string) =>
-    apiClient.get<SourceAnchor>(`/api/v1/docs/${encodeURIComponent(documentId)}/sources/${encodeURIComponent(chunkId)}`),
+  source: (documentId: string, chunkId: string, revision?: SourceRevision) =>
+    apiClient.get<SourceAnchor>(`/api/v1/docs/${encodeURIComponent(documentId)}/sources/${encodeURIComponent(chunkId)}${revisionQuery(revision, true)}`),
   contentPath: documentContentPath,
-  contentUrl: (documentId: string) => `${normalizeBaseUrl(getConfiguredBaseUrl())}${documentContentPath(documentId)}`,
-  content: (documentId: string, init?: RequestInit) => apiClient.fetchRaw(documentContentPath(documentId), init),
+  contentUrl: (documentId: string, revision?: SourceRevision) => `${normalizeBaseUrl(getConfiguredBaseUrl())}${documentContentPath(documentId)}${revisionQuery(revision)}`,
+  content: (documentId: string, init?: RequestInit, revision?: SourceRevision) => apiClient.fetchRaw(documentContentPath(documentId) + revisionQuery(revision), init),
   imageAssetContentPath: documentImageAssetContentPath,
-  imageAssetContentUrl: (documentId: string, assetId: string) =>
-    `${normalizeBaseUrl(getConfiguredBaseUrl())}${documentImageAssetContentPath(documentId, assetId)}`,
-  imageAssetContent: (documentId: string, assetId: string, init?: RequestInit) =>
-    apiClient.fetchRaw(documentImageAssetContentPath(documentId, assetId), init),
+  imageAssetContentUrl: (documentId: string, assetId: string, revision?: SourceRevision) =>
+    `${normalizeBaseUrl(getConfiguredBaseUrl())}${documentImageAssetContentPath(documentId, assetId)}${revisionQuery(revision)}`,
+  imageAssetContent: (documentId: string, assetId: string, init?: RequestInit, revision?: SourceRevision) =>
+    apiClient.fetchRaw(documentImageAssetContentPath(documentId, assetId) + revisionQuery(revision), init),
+  presentationSlideContent: (documentId: string, slideNumber: number, init?: RequestInit, revision?: SourceRevision) =>
+    apiClient.fetchRaw(documentPresentationSlideContentPath(documentId, slideNumber) + revisionQuery(revision), init),
+  presentationSlides: (documentId: string, revision?: SourceRevision) =>
+    apiClient.get<DocumentSlidesResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/slides${revisionQuery(revision)}`),
   versions: (documentId: string) =>
     apiClient.get<VersionChainResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/versions`),
   shares: (documentId: string) =>
@@ -84,6 +92,14 @@ export const documentsApi = {
     apiClient.delete<DeleteDocumentResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/permanent`),
   reingest: (documentId: string, request: DocumentReingestRequest | null = null) =>
     apiClient.postJson<DocumentReingestResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/reingest`, request),
+  spreadsheetReview: (documentId: string) =>
+    apiClient.get<SpreadsheetReviewResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/spreadsheet-review`),
+  updateSpreadsheetReview: (documentId: string, request: SpreadsheetReviewRequest) =>
+    apiClient.request<DocumentReingestResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/spreadsheet-review`, {
+      method: "PUT",
+      body: JSON.stringify(request),
+      headers: { "Content-Type": "application/json" },
+    }),
   enrichGraph: (documentId: string) =>
     apiClient.postJson<DocumentGraphEnrichmentResponse>(`/api/v1/docs/${encodeURIComponent(documentId)}/graph-enrichment`, null),
   restore: (documentId: string) =>
@@ -117,6 +133,10 @@ function documentImageAssetContentPath(documentId: string, assetId: string) {
   return `/api/v1/docs/${encodeURIComponent(documentId)}/image-assets/${encodeURIComponent(assetId)}/content`;
 }
 
+function documentPresentationSlideContentPath(documentId: string, slideNumber: number) {
+  return `/api/v1/docs/${encodeURIComponent(documentId)}/slides/${slideNumber}/content`;
+}
+
 const DOCUMENT_INGEST_STATUSES: DocumentIngestStatus[] = ["scheduled", "queued", "processing", "complete", "failed", "human_review", "cancelled", "unknown"];
 
 function normalizeDocument(document: Document): Document {
@@ -141,4 +161,12 @@ function normalizeDocument(document: Document): Document {
     ingest_status: status,
     deleted_at: document.deleted_at ?? null,
   };
+}
+
+function revisionQuery(revision?: SourceRevision, includeEvidence = false): string {
+  const params = new URLSearchParams();
+  if (revision?.index_generation_id) params.set("generation_id", revision.index_generation_id);
+  if (revision?.content_hash) params.set("content_hash", revision.content_hash);
+  if (includeEvidence && revision?.evidence_hash) params.set("evidence_hash", revision.evidence_hash);
+  return params.size ? `?${params}` : "";
 }

@@ -67,8 +67,8 @@ export function PrudentiaIngestionHealthPage({ onLogout, onNavigate, user }: Pro
         <div className="sv-page-inner sv-page-inner-dashboard max-w-6xl">
           <header className="sv-page-header">
             <div>
-              <p className="sv-eyebrow">System Overview</p>
-              <h1 className="sv-page-title">Ingestion Health</h1>
+              <p className="sv-eyebrow">Document Intake</p>
+              <h1 className="sv-page-title">Pipeline Health</h1>
               <p className="sv-page-subtitle">Operational status for document processing, review queues, failures, and scheduled folder sources.</p>
             </div>
             <button type="button" onClick={() => onNavigate("ingestion-jobs")} className="sv-action-secondary">
@@ -76,7 +76,7 @@ export function PrudentiaIngestionHealthPage({ onLogout, onNavigate, user }: Pro
             </button>
           </header>
 
-          {summaryQuery.isError ? <InlineMessage tone="error">{errorMessage(summaryQuery.error, "Unable to load ingestion health.")}</InlineMessage> : null}
+          {summaryQuery.isError ? <InlineMessage tone="error">{errorMessage(summaryQuery.error, "Unable to load pipeline health.")}</InlineMessage> : null}
           <section className="ingestion-health-metrics">
             <HealthMetric icon={<Activity size={18} />} label="Active pipeline" value={String(processingCount)} detail="Scheduled, queued, or processing" loading={summaryQuery.isLoading} tone={processingCount > 0 ? "active" : "neutral"} />
             <HealthMetric icon={<ShieldAlert size={18} />} label="Needs review" value={String(reviewCount)} detail="Human intervention required" loading={summaryQuery.isLoading} tone={reviewCount > 0 ? "warning" : "neutral"} />

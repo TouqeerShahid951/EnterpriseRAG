@@ -26,6 +26,12 @@ from rag.ingestion.parsers.pdf.image_processing import (
 from rag.ingestion.parsers.pdf.layout_repair import VisionLayoutProgressCallback
 from .provenance import base_report
 from rag.ingestion.parsers.word import DOCX_CONTENT_TYPE, parse_word_document
+from rag.ingestion.parsers.presentation import PPTX_CONTENT_TYPE, parse_presentation_document
+from rag.ingestion.parsers.spreadsheet import (
+    CSV_CONTENT_TYPE,
+    XLSX_CONTENT_TYPE,
+    parse_spreadsheet_document,
+)
 
 PDF_CONTENT_TYPE = "application/pdf"
 JPEG_CONTENT_TYPE = "image/jpeg"
@@ -96,6 +102,8 @@ def parse_document_with_operations(
     doc_id: str | None = None,
     image_asset_store: ImageAssetStore | None = None,
     image_analyzer: ImageAnalyzer | None = None,
+    analyze_slide_visuals: bool = True,
+    spreadsheet_review: dict[str, object] | None = None,
 ) -> DocumentParseResult:
     kind = document_kind(content_type, file_path)
     if kind == "connector_record":
@@ -135,6 +143,21 @@ def parse_document_with_operations(
             image_context=image_context,
             image_items_factory=operations.image_sources_to_items,
             image_progress_callback=image_progress_callback,
+        )
+    if kind == "pptx":
+        return parse_presentation_document(
+            file_bytes,
+            analyze_slide_visuals=analyze_slide_visuals,
+            image_context=image_context,
+            image_items_factory=operations.image_sources_to_items,
+            image_progress_callback=image_progress_callback,
+        )
+    if kind in {"csv", "xlsx"}:
+        return parse_spreadsheet_document(
+            file_bytes,
+            content_type=content_type,
+            file_path=file_path,
+            spreadsheet_review=spreadsheet_review,
         )
     if kind == "image":
         if image_context is None:
@@ -204,6 +227,8 @@ def _parse_pdf_document(
             docling_progress_callback=docling_progress_callback,
         )
     except Exception as exc:
+        if isinstance(exc, WorkerStepError) and exc.code == "pdf_incomplete":
+            raise
         fallback = operations.parse_pdf_with_vision_fallback(
             file_bytes,
             image_context=image_context,
@@ -331,6 +356,12 @@ def document_kind(content_type: str | None, file_path: str) -> str:
         return "pdf"
     if normalized == DOCX_CONTENT_TYPE:
         return "docx"
+    if normalized == PPTX_CONTENT_TYPE:
+        return "pptx"
+    if normalized == CSV_CONTENT_TYPE:
+        return "csv"
+    if normalized == XLSX_CONTENT_TYPE:
+        return "xlsx"
     if normalized in {JPEG_CONTENT_TYPE, PNG_CONTENT_TYPE}:
         return "image"
     if normalized == JSON_CONTENT_TYPE:
@@ -342,6 +373,12 @@ def document_kind(content_type: str | None, file_path: str) -> str:
         return "image"
     if lowered_path.endswith(".docx"):
         return "docx"
+    if lowered_path.endswith(".pptx"):
+        return "pptx"
+    if lowered_path.endswith(".csv"):
+        return "csv"
+    if lowered_path.endswith(".xlsx"):
+        return "xlsx"
     if lowered_path.endswith(".json"):
         return "json"
     return "pdf" if lowered_path.endswith(".pdf") or not normalized else "unsupported"

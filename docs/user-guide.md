@@ -13,6 +13,9 @@ For standalone handoff documentation, use the manual set in
 - [Administrator Manual](manuals/administrator-manual.md)
 - [Operator Manual](manuals/operator-manual.md)
 
+For a visual explanation of what happens during upload and question answering,
+see [Ingestion and Query Flows](architecture-flows.md).
+
 For offline Windows deployment and runtime setup, see
 [Windows Airgapped Runtime Runbook](windows-airgap-runbook.md) and
 [Airgap Runtime Mode](airgap-runtime.md).
@@ -95,11 +98,15 @@ The Query Intelligence composer can use four source modes:
 - **Documents**: uses only indexed documents in the active Knowledge Space and
   any documents selected with `@` tags.
 - **Live DB**: runs generated, validated, read-only SQL against approved
-  database scopes. No document scope is used.
+  database scopes. No document scope is used. Prudentia selects exactly one
+  authorized database before SQL generation.
 - **Hybrid**: combines indexed document evidence with live database results.
 
 Live database sources only appear when a schema catalog is approved for a
 Knowledge Space and clearance level you can access.
+When more than one source remains plausible, Prudentia asks you to choose one
+instead of querying every database. The router uses the provider, endpoint, and
+model assigned to the Routing role in Runtime Settings.
 
 ### Optional GraphRAG Enrichment
 
@@ -248,6 +255,7 @@ Every signed-in user can open **Account Management** from the sidebar footer.
 Use it to:
 
 - Confirm your email, Knowledge Spaces, and permission version.
+- Change your email after confirming your current password. Other signed-in sessions are ended.
 - Change your password. New passwords must be at least 8 characters.
 - Sign out.
 
@@ -272,6 +280,15 @@ Use **Query Intelligence** to ask questions against indexed documents.
    evidence, and drafts the answer.
 7. Review citations before relying on the answer.
 
+Completed answers include **Copy response** and **Reply** controls beneath them.
+Copy preserves the answer text, including Markdown and citation markers. The
+footer shows the saved response start date and time in your local timezone; hover
+over it for seconds. If clipboard access fails, select and copy the text manually.
+
+If Prudentia cannot distinguish between two approved databases, select the
+correct database from the choices shown in the answer. A follow-up question in
+the same conversation reuses that database while it remains authorized.
+
 If there are no current indexed documents in the active space, upload or index a
 document first.
 
@@ -283,6 +300,22 @@ chip above the composer.
 
 Document tags apply to Documents, Auto, and Hybrid questions. Live DB mode does
 not use tagged document IDs.
+
+### Summarize Documents
+
+For a whole-document or chapter summary, tag the document and ask for the
+summary directly. Prudentia reads the authorized indexed content in document
+order, groups it by section where structure is available, and cites the original
+pages or chunks. Large documents are summarized in bounded stages before the
+final answer; ordinary relevance ranking does not choose which parts of a known
+document are included.
+
+Topic requests such as **Summarize authentication** search a larger, diverse set
+of relevant sections. Requests such as **Summarize everything related to
+authentication** require broader coverage and may report partial or unknown
+coverage when the authorized scan reaches its time or size limit. A coverage
+warning means the answer is supported by its citations but may omit parts of the
+requested scope.
 
 ### Choose Documents, Live Data, or Both
 
@@ -324,6 +357,7 @@ open the evidence inspector. Depending on the source, the viewer can show:
 
 - PDF page highlights.
 - DOCX text highlights.
+- Rendered PPTX slide evidence. Use Previous/Next, the slide selector, or the left/right arrow keys to browse while keeping your zoom. Sources open on the cited slide and offer **Return to cited slide** (keyboard: C). Documents use the same viewer without citation warnings. If a preview fails, retry it; if rendered slides are missing, reingest the presentation.
 - Image highlights.
 - Extracted image evidence from PDFs or DOCX files.
 - Live database rows labeled with the approved database scope and generated
@@ -365,7 +399,7 @@ Chat history is saved for the current user and permission version.
 ### Upload From Chat
 
 If your role can upload to the active Knowledge Space, use the paperclip in the
-composer to upload one PDF, DOCX, JPG, PNG, or JSON file up to 50 MB. The upload
+composer to upload one PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, or JSON file up to 50 MB. The upload
 is indexed into the active Knowledge Space and shows document-ingestion and,
 when applicable, graph-enrichment progress in the composer.
 
@@ -389,12 +423,28 @@ Uploads support:
 
 - PDF
 - DOCX
+- PPTX
+- CSV
+- XLSX
 - JPG / JPEG
 - PNG
 - JSON
 
 Each file must be non-empty and no larger than 50 MB. Each selected file creates
 its own ingestion job.
+
+For PPTX files, **Analyze slide visuals** is enabled by default. It renders every
+slide and interprets diagrams, charts, images, and spatial relationships in
+addition to Docling text extraction and native chart data. Disable it only when
+visual meaning is not needed. PPTX retrieval chunks never cross slide boundaries;
+simple slides stay together while dense text and tables split within their slide.
+
+CSV files are indexed as one table. Each visible, non-empty XLSX worksheet is
+indexed as one table. Ingestion detects title rows and grouped headers. Formula
+expressions are preserved for retrieval but are never executed. After ingestion,
+the document inspector's **Tables** tab lets authorized users exclude sheets,
+correct header rows, rename tables and columns, and edit generated descriptions
+or aliases. Saving queues reindexing without changing the original file.
 
 ### Upload Documents
 
@@ -418,8 +468,8 @@ finalizes each document.
 ### Abbreviation Glossary
 
 Platform and System Administrators can open **Document Intake > Abbreviation
-Glossary** and manage the single global glossary in the **Terms in use**
-table. Use **Add term** to create a row, or the row
+Glossary** and manage the single global glossary under **Terms & sources**.
+Use **Add term** to create a row, or the row
 actions to edit or delete one. Search filters the current table. No Knowledge
 Space, sharing, or clearance selection is required. UI changes are available
 to every query as soon as they are saved and do not generate a PDF.
@@ -428,9 +478,14 @@ The same page can import multiple PDFs containing abbreviation and expansion
 pairs. PDFs can use two-column tables or lines such as
 `AD — Assistant Director`. Their definitions merge into the global glossary,
 while provenance identifies the supplying PDF and page. Each PDF source can be
-replaced or removed independently. Identical definitions can be supplied by
+replaced or moved to Trash independently. Identical definitions can be supplied by
 more than one source; conflicting definitions fail activation for review. Raw
 glossary chunks are not embedded or returned as ordinary corpus evidence.
+
+Use the glossary **Activity** section to inspect queued, running, completed,
+cancelled, and failed imports. Failed imports can be retried or moved to the
+shared Trash. Trash retains the source for restoration; permanent deletion is
+available only to authorized administrators.
 
 After ingestion completes, all queries use the definitions immediately;
 the existing document corpus does not need reingestion. The original question
@@ -451,8 +506,11 @@ Space Admins and global admins can open **Folder Sources** to upload local
 folder snapshots for bulk ingestion.
 
 Choose a folder from the browser to stage a point-in-time snapshot. Supported
-PDF, DOCX, JPG, PNG, and JSON files are uploaded with their relative paths, and
+PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, and JSON files are uploaded with their relative paths, and
 unsupported files are recorded as skipped.
+
+The folder schedule's **Analyze slide visuals** setting applies to every PPTX in
+that run and defaults to enabled.
 
 Folder snapshots are one-time schedules. To ingest later local edits, choose the
 folder again and create a new snapshot. The page lists schedules, runs, and run
@@ -467,8 +525,11 @@ connector workflow supports SQL Server and PostgreSQL.
 Database connectors do not copy database rows into the document corpus and do
 not create recurring record-sync schedules. Those schedules are retired. At
 question time, Prudentia generates a read-only SQL query, validates it against
-an approved schema catalog, applies result limits and a timeout, and then uses
-the returned rows as answer evidence.
+one approved schema catalog, binds filter values as query parameters, applies
+result limits and a timeout, and then uses the returned rows as answer evidence.
+Each attempt performs one SQL generation and one execution; failed validation or
+execution returns a controlled fallback instead of starting an automatic repair
+loop.
 
 ### Create and Test a Connection Profile
 
@@ -499,9 +560,12 @@ stored credentials.
    metadata, one table at a time. Completed work is saved if enrichment pauses.
 4. Follow **Summary**, **Tables**, **Joins**, and **Access** using the guided
    Back and Next actions.
-5. Correct the catalog name, business rules, table and column descriptions, and
-   synonyms. Mark tables and columns as allowed or disallowed, and flag
-   sensitive fields.
+5. Correct the catalog name and database description. Add its business domains,
+   main entities, metrics, synonyms, example questions, and exclusions so the
+   router can distinguish it from other approved databases. Then review business
+   rules, table and column descriptions, allowed fields, and sensitivity flags.
+   Add verified question/SQL pairs for stable recurring questions that should
+   bypass model SQL generation.
 6. In **Access**, choose the owner Knowledge Space, optional shared Knowledge
    Spaces, and clearance level that govern who can see this source.
 7. If enrichment is incomplete, select **Continue AI Enrichment** before final
@@ -528,7 +592,7 @@ Disabling a catalog removes it from Live DB source selection without deleting
 the profile. Deleting a profile should be treated as a governance change because
 future live questions can no longer use any catalog tied to that connection.
 
-## Activity and Ingestion Health
+## Activity and Pipeline Health
 
 ### Activity
 
@@ -550,9 +614,13 @@ Use filters for:
 The table shows origin, status, progress, started time, stage details, warnings,
 attempt count, and parser provenance. Writable active jobs can be cancelled.
 
-### Ingestion Health
+### Pipeline Health
 
-Open **System Overview > Ingestion Health** to monitor:
+Pipeline Health is available from the Activity header and the System Overview
+shortcut. It has no separate sidebar entry; existing `/ingestion-health` links
+continue to work with the same permissions.
+
+Open **Document Intake > Activity > Pipeline Health** to monitor:
 
 - Active pipeline count.
 - Needs-review count.
@@ -624,6 +692,7 @@ The inspector can show:
 - Cross references.
 - Extracted claims.
 - Version chain.
+- Spreadsheet table and column review for CSV and XLSX documents.
 - Download link for the original source file.
 
 Available actions depend on your role and scope:
@@ -833,6 +902,9 @@ Runtime behavior includes:
 - **Evidence token budget** for evidence passed into answer synthesis.
 - **Chat timeout** and **Embed timeout**.
 - **Model thinking**, which applies only to Ollama language roles.
+- **Context resolver**, which uses recent chat history for implicit follow-ups.
+  When disabled, normal questions are standalone; replying to a specific answer
+  still uses that selected exchange.
 - **Query planner**, which breaks complex retrieval questions into focused
   subqueries. Keep it enabled for multi-part, comparison, and multi-hop
   questions; GraphRAG global routing bypasses the planner automatically.
@@ -870,6 +942,8 @@ enrichment behavior for new ingestion jobs. Controls are:
 - **Worker concurrency**: 1-10 per worker replica. One is recommended for the
   default 8 GB Docker environment. The page warns above 2 and requires hazard
   confirmation above 4.
+- **Folder snapshot file limit**: 1-10000 supported files per browser folder
+  snapshot. The separate 5 GB total-size limit still applies.
 - **OCR review threshold**: 0-100 percent. Blocks below the selected confidence
   pause in Review Queue.
 - **PDF image review threshold**: 0-10000 selected image candidates. Set it to
@@ -912,7 +986,7 @@ source cannot answer the question, use **Search all sources** when offered.
 
 Check that:
 
-- The file is PDF, DOCX, JPG, JPEG, PNG, or JSON.
+- The file is PDF, DOCX, PPTX, CSV, XLSX, JPG, JPEG, PNG, or JSON.
 - The file is not empty.
 - The file is 50 MB or smaller.
 - You selected a writable Knowledge Space.
@@ -928,7 +1002,7 @@ resolved.
 
 ### A Job Looks Stuck
 
-Open Ingestion Health and Activity. Global admins can inspect stale processing
+Open Pipeline Health and Activity. Global admins can inspect stale processing
 runs and requeue recoverable jobs. For repeated failures, review the job error,
 parser provenance, worker health, and runtime model health.
 
@@ -936,7 +1010,7 @@ parser provenance, worker health, and runtime model health.
 
 Document indexing and optional GraphRAG enrichment are separate. A completed
 document is searchable even when its opted-in graph task is queued or running.
-Check **Ingestion Health > GraphRAG activity** for queue depth, worker status,
+Check **Pipeline Health > GraphRAG activity** for queue depth, worker status,
 and active tasks. If GraphRAG was not selected for the document, no graph task
 is expected.
 
@@ -1001,7 +1075,7 @@ expectations, then retry the run.
 2. Change the bootstrap password.
 3. Confirm **Runtime Settings** runtime health, role assignments, query planner,
    and ingestion controls.
-4. Confirm GraphRAG queue and worker health in Ingestion Health when GraphRAG is
+4. Confirm GraphRAG queue and worker health in Pipeline Health when GraphRAG is
    enabled.
 5. Create top-level Knowledge Spaces.
 6. Create System Admin, Space Admin, Document Contributor, Chat Member, and
@@ -1017,7 +1091,7 @@ expectations, then retry the run.
 
 1. Confirm users and spaces are ready.
 2. Upload or schedule documents.
-3. Monitor Activity and Ingestion Health.
+3. Monitor Activity and Pipeline Health.
 4. Resolve failed or stale ingestion jobs.
 5. Resolve Review Queue items when needed.
 6. Test and review database connector scopes when live data is in use.

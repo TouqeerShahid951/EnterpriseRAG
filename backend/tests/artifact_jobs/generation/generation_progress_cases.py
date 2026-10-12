@@ -8,6 +8,8 @@ from rag.artifact_jobs.adapters.storage import LocalGeneratedArtifactStorage
 from rag.artifact_jobs.generation.composition import compose_document_bundle
 from rag.artifact_jobs.execution import ArtifactJobExecutor
 from rag.core.config import Settings
+from generation_inference_support import FailingInference
+from generation_optimization_support import document_plan
 
 from generation_execution_support import DocumentRepository, IdentityRepository
 from generation_inference_support import CapturingSectionInference
@@ -16,7 +18,6 @@ from generation_optimization_support import (
     content_bundle,
     evidence_manifest,
     evidence_record,
-    document_plan,
 )
 
 
@@ -142,11 +143,12 @@ def test_artifact_job_renderer_uses_shared_renderer_for_all_formats(tmp_path) ->
             job.permission_version,
         ),
         document_repo_factory=DocumentRepository,
-        inference=object(),
+        inference=FailingInference(),
         retriever=object(),  # type: ignore[arg-type]
         model_name="test-model",
     )
 
+    job = job_repo.update_job(job.id, {"plan_json": document_plan().model_dump(mode="json")})
     failures = executor._render_formats(
         job,
         evidence_manifest([evidence_record()]),

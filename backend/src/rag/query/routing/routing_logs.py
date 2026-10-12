@@ -52,6 +52,13 @@ def log_route_decision(*, trace_id: str, session_id: str, user_id: str, permissi
         "coverage": plan.coverage,
         "temporal_scope": plan.temporal_scope,
         "sub_query_count": len(plan.sub_queries),
+        "evidence_need_count": len(
+            plan.evidence_plan.needs if plan.evidence_plan is not None else ()
+        ),
+        "source_assignment_count": sum(
+            len(need.assignments)
+            for need in (plan.evidence_plan.needs if plan.evidence_plan else ())
+        ),
         "route_method": plan.route_method,
         "risk_level": plan.risk_level,
         "retrieval_strategy": plan.retrieval_strategy,
@@ -79,7 +86,15 @@ def log_conversation_resolution(ctx: QueryContext) -> None:
             "method": resolution.method,
             "context_turn_count": resolution.context_turn_count,
             "antecedent_turn_ids": list(resolution.antecedent_turn_ids),
+            "dependency_targets": list(resolution.dependency_targets),
+            "ambiguity_candidate_count": len(resolution.ambiguity_candidates),
             "clarification": resolution.relation == "ambiguous",
+            "decision_reason": resolution.decision_reason,
+            "model_attempt_count": resolution.model_attempt_count,
+            "fallback_error_code": resolution.fallback_error_code,
+            "query_changed": (
+                resolution.effective_query != ctx["request"].query.strip()
+            ),
             "effective_query_hash": _query_hash(resolution.effective_query),
             "effective_query_length": len(resolution.effective_query),
         }
@@ -131,6 +146,7 @@ def log_verifier_decision(ctx: QueryContext) -> None:
 
 
 def log_faithfulness_result(ctx: QueryContext, *, failed: bool) -> None:
+    diagnostics = ctx.get("citation_diagnostics", {})
     payload = {
         **_context_fields(ctx),
         "event": "rag.faithfulness_result",
@@ -140,7 +156,22 @@ def log_faithfulness_result(ctx: QueryContext, *, failed: bool) -> None:
         "unfounded_claim_count": len(ctx["unfounded_claims"]),
         "degraded": ctx["degraded"],
         "degraded_reason": ctx["degraded_reason"],
+        "citation_diagnostics": {
+            key: diagnostics[key]
+            for key in ("mode", "provider_calls", "timeout_seconds", "verification_calls",
+                        "repair_count", "repair_outcome", "repair_failure", "latency_ms",
+                        "format_retries", "format_failures", "format_failure_details")
+            if key in diagnostics
+        },
     }
+    # Source labels may originate in model output; log only fixed diagnostic fields.
+    payload["citation_diagnostics"]["attempts"] = [
+        {key: attempt[key] for key in (
+            "claim_count", "claim_results", "supported", "unsupported", "unknown",
+            "valid_quotes", "missing_quotes", "invalid_quotes", "reasons",
+        ) if key in attempt}
+        for attempt in diagnostics.get("attempts", [])
+    ]
     _log_info(payload)
 
 
@@ -319,6 +350,8 @@ def _runtime_budget_fields(ctx: QueryContext) -> dict[str, object]:
         "reranker_stop_reason": ctx.get("reranker_stop_reason"),
         "synthesis_source_limit": ctx.get("synthesis_source_limit"),
         "synthesis_token_limit": ctx.get("synthesis_token_limit"),
+        "answer_output_tokens": ctx.get("answer_output_tokens"),
+        "answer_context_tokens": ctx.get("answer_context_tokens"),
         "synthesis_context_count": ctx.get("synthesis_context_count"),
         "synthesis_estimated_prompt_tokens": ctx.get(
             "synthesis_estimated_prompt_tokens"
@@ -336,12 +369,22 @@ def _source_routing_fields(ctx: QueryContext) -> dict[str, object]:
             "resolved_source_mode": None,
         }
     reason = str(getattr(decision, "reason", "") or "")
+    database_route = getattr(decision, "database_route", None)
     return {
         "requested_source_mode": getattr(decision, "requested_mode", ctx["request"].source_mode),
         "resolved_source_mode": getattr(decision, "resolved_mode", None),
         "source_routing_reason": reason,
         "source_routing_confidence": _round(getattr(decision, "routing_confidence", None)),
         "source_router_mode": getattr(decision, "router_mode", None),
+        "selected_query_source_id": getattr(decision, "query_source_id", None),
+        "selected_query_source_ids": list(
+            getattr(decision, "query_source_ids", ())
+        ),
+        "database_route_outcome": getattr(database_route, "outcome", None),
+        "database_route_reason": getattr(database_route, "reason", None),
+        "database_route_candidate_count": len(
+            getattr(database_route, "candidates", ())
+        ),
         "preferred_source": getattr(decision, "preferred_source", None),
         "source_expansion_performed": ":evidence_expansion" in reason,
         "source_signal_scores": {

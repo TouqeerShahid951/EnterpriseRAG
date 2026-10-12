@@ -18,6 +18,7 @@ def effective_ingest_config(
     repository = repo or ingest_config_repository_from_settings(config)
     return repository.get_active() or IngestConfigRecord(
         worker_concurrency=config.ingest_worker_boot_concurrency,
+        folder_snapshot_max_files=config.folder_snapshot_max_files,
         ocr_review_confidence_threshold=config.ocr_review_confidence_threshold,
         pdf_image_review_threshold=config.pdf_image_review_threshold,
         vision_layout_repair_enabled=False,

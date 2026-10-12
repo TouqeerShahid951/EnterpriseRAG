@@ -9,4 +9,5 @@ export const defaultPdfUploadDraft: PdfUploadDraft = {
   expiryDate: "",
   description: "",
   supersedesText: "",
+  analyzeSlideVisuals: true,
 };

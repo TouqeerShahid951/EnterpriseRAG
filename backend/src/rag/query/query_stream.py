@@ -7,22 +7,13 @@ from collections.abc import Generator, Iterator
 from time import perf_counter
 
 from .schemas import QueryStreamEvent, RAGResponse
-from .cancellation import call_with_optional_cancellation, cancellation_token_from_context
+from .cancellation import cancellation_token_from_context
 from .state import QueryContext, active_query, finalize_response_node_timings, record_node_timing
-from .graph import route_conversation, route_intent, route_verifier
+from .graph import route_conversation, route_intent, route_source, route_verifier
 from .nodes import QueryNodes
 from rag.query.routing.routing_logs import log_node_timing
 from rag.query.sources import sources_from_hits
-from rag.query.answering.synthesis import (
-    build_conflict_answer,
-    build_rag_response,
-    conflict_sources,
-    ensure_answer_has_citation,
-    merge_sources,
-    prepare_synthesis_input,
-    response_sources,
-    validate_synthesized_answer,
-)
+from rag.query.summarization import prepare_summary, should_prepare_summary
 
 
 def format_sse(event: QueryStreamEvent) -> str:
@@ -31,6 +22,7 @@ def format_sse(event: QueryStreamEvent) -> str:
 
 def stream_graph(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEvent]:
     _raise_if_cancelled(ctx)
+    retrieval_trace_offset = 0
     yield QueryStreamEvent(event="trace", data={"trace_id": ctx["trace_id"], "session_id": ctx["session_id"]})
     yield _node_event("session_memory")
     ctx = _run("session_memory", ctx, nodes.session_memory)
@@ -49,6 +41,16 @@ def stream_graph(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEv
         return
     yield _node_event("source_resolver")
     ctx = _run("source_resolver", ctx, nodes.source_resolver)
+    if route_source(ctx) == "clarify":
+        yield _node_event("source_clarifier")
+        ctx = _run("source_clarifier", ctx, nodes.source_clarifier)
+        yield _node_event("response_serializer")
+        ctx = _run("response_serializer", ctx, nodes.response_serializer)
+        ctx = _refresh_response_metadata(ctx)
+        response = ctx["response"]
+        yield QueryStreamEvent(event="token", data={"text": response.answer})
+        yield QueryStreamEvent(event="done", data=response.model_dump())
+        return
     yield _node_event("intent_router")
     ctx = _run("intent_router", ctx, nodes.intent_router)
     yield QueryStreamEvent(event="intent", data={"intent": ctx["intent"]})
@@ -66,8 +68,31 @@ def stream_graph(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEv
     while True:
         yield _node_event("abac_retriever")
         ctx = _run("abac_retriever", ctx, nodes.abac_retriever)
+        stage_events, retrieval_trace_offset = _new_retrieval_stage_events(ctx, retrieval_trace_offset)
+        yield from stage_events
+        if should_prepare_summary(ctx.get("route_plan")):
+            ctx = _run("temporal_resolver", ctx, nodes.temporal_resolver)
+            yield _node_event("temporal_resolver", ctx=ctx)
+            yield _node_event("summary_preparer")
+            started = perf_counter()
+            ctx["node_trace"].append({"node": "summary_preparer", "agent": None})
+            for progress in prepare_summary(
+                ctx,
+                nodes.ollama,
+                model=nodes.reasoning_model,
+            ):
+                yield QueryStreamEvent(
+                    event="trace",
+                    data={"node": "summary_preparer", **progress},
+                )
+            duration_ms = int((perf_counter() - started) * 1000)
+            record_node_timing(ctx, "summary_preparer", duration_ms)
+            log_node_timing(ctx, node="summary_preparer", duration_ms=duration_ms)
+            break
         yield _node_event("reranker")
         ctx = _run("reranker", ctx, nodes.reranker)
+        stage_events, retrieval_trace_offset = _new_retrieval_stage_events(ctx, retrieval_trace_offset)
+        yield from stage_events
         ctx = _run("verifier", ctx, nodes.verifier)
         yield _node_event("verifier", ctx=ctx)
         if route_verifier(ctx) == "retry":
@@ -78,6 +103,8 @@ def stream_graph(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEv
             yield _node_event("temporal_resolver", ctx=ctx)
         yield _node_event("evidence_builder")
         ctx = _run("evidence_builder", ctx, nodes.evidence_builder)
+        stage_events, retrieval_trace_offset = _new_retrieval_stage_events(ctx, retrieval_trace_offset)
+        yield from stage_events
         ctx = _run("evidence_gate", ctx, nodes.evidence_gate)
         yield _node_event("evidence_gate", ctx=ctx)
         if route_verifier(ctx) == "retry":
@@ -87,7 +114,7 @@ def stream_graph(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEv
             ctx = _run("contradiction_detector", ctx, nodes.contradiction_detector)
             yield _node_event("contradiction_detector", ctx=ctx)
         break
-    for source in sources_from_hits(ctx["retrieved_hits"], query=active_query(ctx)):
+    for source in sources_from_hits(ctx["retrieved_hits"], query=active_query(ctx))[:20]:
         yield QueryStreamEvent(event="source", data=source.model_dump())
     yield _node_event("synthesizer")
     ctx = yield from _stream_timed_synthesizer(ctx, nodes)
@@ -101,7 +128,8 @@ def _stream_response_tail(ctx: QueryContext, nodes: QueryNodes) -> Generator[Que
     ctx = _run("response_serializer", ctx, nodes.response_serializer)
     ctx = _refresh_response_metadata(ctx)
     response = ctx["response"]
-    yield QueryStreamEvent(event="token", data={"text": response.answer})
+    if not ctx.get("answer_streamed"):
+        yield QueryStreamEvent(event="token", data={"text": response.answer})
     yield from _terminal_warnings(response)
     yield QueryStreamEvent(event="done", data=response.model_dump())
     return ctx
@@ -128,51 +156,16 @@ def _stream_timed_synthesizer(ctx: QueryContext, nodes: QueryNodes) -> Iterator[
 
 
 def _stream_synthesizer(ctx: QueryContext, nodes: QueryNodes) -> Iterator[QueryStreamEvent]:
-    yield from ()
     _raise_if_cancelled(ctx)
     ctx["node_trace"].append({"node": "synthesizer", "agent": None})
-    if ctx.get("graphrag_communities") and ctx["retrieved_hits"]:
-        ctx = nodes.synthesizer(ctx)
-        return ctx
-    evidence_sources = sources_from_hits(ctx["retrieved_hits"], query=active_query(ctx))
-    plan = ctx.get("route_plan")
-    prepared = prepare_synthesis_input(ctx, evidence_sources)
-    ctx["synthesis_profile"] = prepared.profile
-    if plan is not None and not plan.needs_retrieval:
-        available_sources = []
-        answer = "I can only answer questions grounded in the indexed documents."
-        ctx["degraded"] = True
-        ctx["degraded_reason"] = ctx["degraded_reason"] or "out_of_scope"
-    elif ctx["conflict_flag"]:
-        ctx["synthesis_profile"] = "conflict_check"
-        available_sources = merge_sources(evidence_sources, conflict_sources(ctx["conflict_pairs"]))
-        answer = build_conflict_answer(ctx["conflict_pairs"])
-    elif evidence_sources:
-        available_sources = prepared.sources
-        chunks: list[str] = []
-        chunk_stream = call_with_optional_cancellation(
-            nodes.ollama.stream_answer,
-            cancellation_token_from_context(ctx),
-            question=prepared.question,
-            contexts=prepared.contexts,
-            profile=prepared.profile,
-        )
-        for chunk in chunk_stream:
-            _raise_if_cancelled(ctx)
-            chunks.append(chunk)
-        raw_answer = "".join(chunks)
-        answer = validate_synthesized_answer(ctx, raw_answer, available_sources)
-    else:
-        available_sources = []
-        answer = "No accessible current sources were found for this query."
-        ctx["degraded"] = True
-        ctx["degraded_reason"] = ctx["degraded_reason"] or "no_indexed_sources"
-    answer = ensure_answer_has_citation(answer, available_sources)
-    ctx["response"] = build_rag_response(
-        ctx,
-        answer=answer,
-        sources=response_sources(answer, available_sources),
-    )
+    ctx["streamed_answer"] = ""
+    if not hasattr(nodes, "synthesis_steps"):
+        return nodes.synthesizer(ctx)
+    for chunk in nodes.synthesis_steps(ctx, stream=True):
+        _raise_if_cancelled(ctx)
+        ctx["answer_streamed"] = True
+        ctx["streamed_answer"] += chunk
+        yield QueryStreamEvent(event="token", data={"text": chunk})
     return ctx
 
 
@@ -200,6 +193,30 @@ def _node_event(node: str, agent: str | None = None, ctx: QueryContext | None = 
         if detail:
             data["detail"] = detail
     return QueryStreamEvent(event="trace", data=data)
+
+
+def _new_retrieval_stage_events(
+    ctx: QueryContext,
+    offset: int,
+) -> tuple[list[QueryStreamEvent], int]:
+    stages = ctx.get("retrieval_trace", [])
+    events = [
+        QueryStreamEvent(
+            event="retrieval_stage",
+            data={
+                "name": stage.name,
+                "attempt": stage.attempt,
+                "status": stage.status,
+                "candidate_count": len(stage.candidates),
+                "candidates": [
+                    {**candidate.to_row(), "excerpt": candidate.evidence_text}
+                    for candidate in stage.candidates
+                ],
+            },
+        )
+        for stage in stages[offset:]
+    ]
+    return events, len(stages)
 
 
 def _raise_if_cancelled(ctx: QueryContext) -> None:

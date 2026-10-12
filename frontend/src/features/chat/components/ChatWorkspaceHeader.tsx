@@ -1,10 +1,12 @@
 import { Database, MessageSquare } from "lucide-react";
+import { useBranding } from "@/components/brand/BrandContext";
 
 export function ChatWorkspaceHeader({ onOpenHistory, savedSessionsTotal }: HeaderProps) {
+  const branding = useBranding();
   return (
     <header className="rag-chat-header">
       <div>
-        <p className="sv-eyebrow">Prudentia AI</p>
+        <p className="sv-eyebrow">{branding.app_name}</p>
         <h1 className="sv-page-title">Query Intelligence</h1>
         <p className="mt-1 max-w-3xl text-body-md text-on-surface-variant">
           Ask evidence-grounded questions across your Knowledge Space. Use @ to scope a query to specific documents.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { connectorFlowStep, nextConnectorAction, type ConnectorNextAction } from "./connectorPanelUtils";
+import { connectorFlowStep, nextConnectorAction, normalizeCatalogJson, type ConnectorNextAction } from "./connectorPanelUtils";
 import type { ConnectorProfile, ConnectorSchemaCatalog } from "@/types/api";
 
 describe("nextConnectorAction", () => {
@@ -29,5 +29,25 @@ describe("connectorFlowStep", () => {
     expect(connectorFlowStep({ last_test_status: "ok" } as ConnectorProfile, null)).toBe(2);
     expect(connectorFlowStep({ last_test_status: "ok" } as ConnectorProfile, { status: "draft" } as ConnectorSchemaCatalog)).toBe(3);
     expect(connectorFlowStep({ last_test_status: "ok" } as ConnectorProfile, { status: "approved" } as ConnectorSchemaCatalog)).toBe(4);
+  });
+});
+
+describe("normalizeCatalogJson", () => {
+  it("keeps generated routing metadata editable", () => {
+    const catalog = normalizeCatalogJson({
+      routing_profile: {
+        capabilities: ["exact_lookup", "filtering"],
+        data_origin: "document_extraction",
+        freshness: "batch",
+        provenance: "connector_introspection",
+      },
+    });
+
+    expect(catalog.routing_profile).toMatchObject({
+      capabilities: ["exact_lookup", "filtering"],
+      data_origin: "document_extraction",
+      freshness: "batch",
+      provenance: "connector_introspection",
+    });
   });
 });

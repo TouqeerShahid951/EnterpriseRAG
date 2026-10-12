@@ -26,6 +26,13 @@ def test_document_overview_counts_visible_current_documents_once() -> None:
     repo.replace_document_shares(shared.id, group_paths=["/ops"], actor_id=user.id)
     deleted = _document(repo, user, status="failed")
     repo.soft_delete_document(deleted.id)
+    deleted_glossary = _document(
+        repo,
+        user,
+        status="failed",
+        doc_type="abbreviation_glossary",
+    )
+    repo.soft_delete_document(deleted_glossary.id)
     _document(repo, user, status="failed", group_path="/hidden")
     _document(
         repo,
@@ -43,10 +50,12 @@ def test_document_overview_counts_visible_current_documents_once() -> None:
     assert overview.review_current == 1
     assert overview.failed_current == 2
     assert overview.unknown_current == 1
+    assert overview.cancelled_current == 1
+    assert overview.current_versions == (overview.indexed_current + overview.processing_current + overview.review_current + overview.failed_current + overview.unknown_current + overview.cancelled_current)
     assert overview.needs_attention == 4
     assert overview.superseded_versions == 1
     assert overview.expiring_soon_current == 1
-    assert overview.trash == 1
+    assert overview.trash == 2
     assert {document.id for document in overview.attention_documents} == {
         failed.id,
         review.id,
@@ -91,6 +100,10 @@ def test_retry_replaces_failure_attention_instead_of_stacking_it() -> None:
     unrelated = build_document_overview(user=user, repository=repo)
     assert unrelated.needs_attention == 1
     assert unrelated.processing_current == 1
+    repo.update_ingest_job(retry.id, status="complete", progress_pct=100)
+    completed = build_document_overview(user=user, repository=repo)
+    assert completed.needs_attention == 0
+    assert completed.indexed_current == 1
 
 
 def _document(
@@ -100,6 +113,7 @@ def _document(
     status: str,
     group_path: str = "/ops",
     clearance_level: str = "NATO_RESTRICTED",
+    doc_type: str | None = None,
     expiry_date: date | None = None,
 ):
     return repo.create_document(
@@ -107,7 +121,7 @@ def _document(
         source_id=f"upload:{uuid4()}",
         group_path=group_path,
         clearance_level=clearance_level,
-        doc_type=None,
+        doc_type=doc_type,
         effective_date=None,
         expiry_date=expiry_date,
         description=None,
@@ -132,3 +146,18 @@ def _user() -> UserRecord:
         permission_version=1,
         group_paths=("/ops",),
     )
+
+
+def test_attention_diagnostics_use_latest_visible_document_job():
+    repo = InMemoryDocumentRepository()
+    user = _user()
+    document = _document(repo, user, status="failed")
+    job = repo.create_ingest_job(doc_id=document.id, status="failed", progress_pct=25, origin="upload")
+    repo.update_ingest_job(job.id, status="failed", progress_pct=25, error_code="parse_failed", error_message_safe="Parser could not read the file.")
+    hidden = _document(repo, user, status="failed", group_path="/hidden")
+    repo.create_ingest_job(doc_id=hidden.id, status="failed", progress_pct=0, origin="upload")
+    snapshot = build_document_overview(user=user, repository=repo, job_repository=repo)
+    response = document_overview_to_schema(snapshot)
+    assert len(response.attention_documents) == 1
+    assert response.attention_documents[0].latest_job_id == job.id
+    assert response.attention_documents[0].error_message == "Parser could not read the file."

@@ -6,6 +6,8 @@ from dataclasses import dataclass, replace
 import hashlib
 import re
 
+from rag.ingestion.sections import section_identifier
+
 from .context import is_table_title
 from .models import ParsedPdfItem
 
@@ -21,7 +23,16 @@ class SectionNode:
 def apply_hierarchy(items: list[ParsedPdfItem]) -> list[ParsedPdfItem]:
     stack: list[SectionNode] = []
     enriched: list[ParsedPdfItem] = []
+    caption: str | None = None
     for item in items:
+        if item.item_type == "heading" and is_table_title(item.text):
+            caption = item.text
+            enriched.append(_with_hierarchy(replace(item, item_type="caption"), stack, stack[-1].level if stack else None))
+            continue
+        if item.item_type == "table" and caption:
+            item = replace(item, table_json={**(item.table_json or {}), "caption": (item.table_json or {}).get("caption") or caption})
+        elif item.item_type not in {"caption", "table"}:
+            caption = None
         if item.item_type == "heading":
             node, flags = _heading_node(item, stack)
             stack = _replace_stack(stack, node)
@@ -35,11 +46,19 @@ def apply_hierarchy(items: list[ParsedPdfItem]) -> list[ParsedPdfItem]:
 
 def _heading_node(item: ParsedPdfItem, stack: list[SectionNode]) -> tuple[SectionNode, set[str]]:
     text = item.text
+    authored = "source:docx_structured" in item.quality_flags or "heading_level:bookmark" in item.quality_flags
+    identifier = section_identifier(text)
+    if identifier and not authored:
+        kind, number = identifier
+        if kind == "section":
+            parent = next((node for node in reversed(stack) if
+                           (section_identifier(node.title) or ("", ""))[0] in {"chapter", "part", "appendix", "annex"}), None)
+            level = (parent.level if parent else 0) + number.count(".") + 1
+        else:
+            level = 1
+        return SectionNode(text, level), {"heading_level:numbering"}
     if item.section_level is not None and item.section_level > 0:
         return SectionNode(text, item.section_level), set()
-    if is_table_title(text):
-        level = (stack[-1].level + 1) if stack else 1
-        return SectionNode(text, level), set()
     return SectionNode(text, 1), {"section_hierarchy_ambiguous"}
 
 

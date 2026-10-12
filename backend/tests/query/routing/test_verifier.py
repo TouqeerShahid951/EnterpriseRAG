@@ -3,7 +3,12 @@ from time import perf_counter
 from rag.auth.context import UserContext
 from rag.query.nodes import QueryNodes
 from rag.query.qdrant import SearchHit
-from rag.query.routing.routing_models import RoutePlan
+from rag.query.routing.routing_models import (
+    EvidenceNeed,
+    EvidencePlan,
+    RoutePlan,
+    SourceAssignment,
+)
 from rag.query.sources.source_resolution import SourceDecision
 from rag.query.state import initial_state
 from rag.query.schemas import QueryRequest
@@ -190,3 +195,106 @@ def test_evidence_builder_keeps_aggregation_rows_exact() -> None:
     result = QueryNodes.evidence_builder(object.__new__(QueryNodes), ctx)
 
     assert result["retrieved_hits"][0].payload["text"] == "Crime: robbery"
+
+
+def test_evidence_builder_marks_missing_required_database_assignment_partial() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="Compare the target with current results"),
+        user=UserContext(
+            user_id="user", email="user@example.com", group_paths=("/admin",)
+        ),
+        started=perf_counter(),
+    )
+    ctx["route_plan"] = RoutePlan(
+        original_query=ctx["request"].query,
+        resolved_query=ctx["request"].query,
+        intent="comparison",
+        top_k=4,
+        evidence_plan=EvidencePlan(
+            needs=(
+                EvidenceNeed(
+                    id="comparison",
+                    query=ctx["request"].query,
+                    assignments=(
+                        SourceAssignment(
+                            source_id="indexed_corpus",
+                            capability="indexed_search",
+                        ),
+                        SourceAssignment(
+                            source_id="connector_catalog:results",
+                            capability="connector_query",
+                        ),
+                    ),
+                ),
+            )
+        ),
+    )
+    ctx["retrieved_hits"] = [
+        hit(
+            "target",
+            doc_id="strategy",
+            doc_title="Strategy",
+            text="The target is 50.",
+            _evidence_need_ids=["comparison"],
+            _required_evidence_assignments=[
+                ["comparison", "indexed_corpus", "indexed_search"]
+            ],
+        )
+    ]
+
+    result = QueryNodes.evidence_builder(object.__new__(QueryNodes), ctx)
+
+    assert result["required_query_slot_count"] == 2
+    assert result["covered_query_slot_count"] == 1
+    assert result["degraded"] is True
+    assert result["degraded_reason"] == "evidence_assignment_coverage_partial"
+
+
+def test_evidence_builder_fails_closed_when_assignment_lineage_is_missing() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="List every repair tool"),
+        user=UserContext(
+            user_id="user", email="user@example.com", group_paths=("/admin",)
+        ),
+        started=perf_counter(),
+    )
+    ctx["route_plan"] = RoutePlan(
+        original_query=ctx["request"].query,
+        resolved_query=ctx["request"].query,
+        intent="aggregation",
+        coverage="exhaustive",
+        top_k=4,
+        evidence_plan=EvidencePlan(
+            needs=(
+                EvidenceNeed(
+                    id="tools",
+                    query="Retrieve the complete tools section",
+                    assignments=(
+                        SourceAssignment(
+                            source_id="indexed_corpus",
+                            capability="indexed_search",
+                        ),
+                    ),
+                ),
+            )
+        ),
+    )
+    ctx["retrieved_hits"] = [
+        hit(
+            "tools",
+            doc_id="manual",
+            doc_title="Repair manual",
+            text="Safety Goggles",
+        )
+    ]
+
+    result = QueryNodes.evidence_builder(object.__new__(QueryNodes), ctx)
+
+    assert result["required_query_slot_count"] == 1
+    assert result["covered_query_slot_count"] == 0
+    assert result["degraded"] is True
+    assert result["degraded_reason"] == "evidence_assignment_coverage_partial"

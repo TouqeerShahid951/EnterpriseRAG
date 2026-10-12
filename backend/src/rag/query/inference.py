@@ -19,6 +19,7 @@ class InferenceClient(Protocol):
         question: str,
         contexts: list[str],
         profile: str | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str: ...
 
@@ -28,6 +29,7 @@ class InferenceClient(Protocol):
         question: str,
         contexts: list[str],
         profile: str | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> Iterator[str]: ...
 
@@ -37,6 +39,8 @@ class InferenceClient(Protocol):
         prompt: str,
         model: str | None,
         json_schema: dict[str, object] | None = None,
+        timeout_seconds: float | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str: ...
 
@@ -136,12 +140,14 @@ class RoleRoutedInferenceClient:
         question: str,
         contexts: list[str],
         profile: str | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
         return self.chat_client.answer(
             question=question,
             contexts=contexts,
             profile=profile,
+            **({"max_tokens": max_tokens} if max_tokens is not None else {}),
             cancellation_token=cancellation_token,
         )
 
@@ -151,12 +157,14 @@ class RoleRoutedInferenceClient:
         question: str,
         contexts: list[str],
         profile: str | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> Iterator[str]:
         return self.chat_client.stream_answer(
             question=question,
             contexts=contexts,
             profile=profile,
+            **({"max_tokens": max_tokens} if max_tokens is not None else {}),
             cancellation_token=cancellation_token,
         )
 
@@ -166,6 +174,8 @@ class RoleRoutedInferenceClient:
         prompt: str,
         model: str | None,
         json_schema: dict[str, object] | None = None,
+        timeout_seconds: float | None = None,
+        max_tokens: int | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> str:
         if json_schema is None:
@@ -178,6 +188,8 @@ class RoleRoutedInferenceClient:
             prompt=prompt,
             model=model,
             json_schema=json_schema,
+            **({"timeout_seconds": timeout_seconds} if timeout_seconds is not None else {}),
+            **({"max_tokens": max_tokens} if max_tokens is not None else {}),
             cancellation_token=cancellation_token,
         )
 
@@ -344,6 +356,7 @@ def _build_provider_client(
     config: RagConfigRecord,
     settings: Settings,
     chat_timeout_seconds: float | None = None,
+    context_tokens: int | None = None,
 ) -> InferenceClient:
     if provider == "vllm":
         from .openai_compatible import OpenAICompatibleClient
@@ -374,7 +387,7 @@ def _build_provider_client(
         embed_timeout_seconds=config.embed_timeout_seconds,
         thinking_enabled=config.thinking_enabled,
         json_num_predict=config.json_num_predict,
-        num_ctx=settings.ollama_num_ctx,
+        num_ctx=context_tokens if context_tokens is not None else settings.ollama_num_ctx,
     )
 
 

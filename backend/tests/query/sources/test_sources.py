@@ -11,7 +11,11 @@ from rag.query.sources import (
     parse_citation_tokens,
     source_citation,
 )
-from rag.query.sources.source_evidence_selection import retrieval_query_slots
+from rag.query.sources.source_evidence_selection import (
+    evidence_need_ids,
+    required_evidence_assignments,
+    retrieval_query_slots,
+)
 
 
 def hit(point_id: str, score: float, text: str, **payload: object) -> SearchHit:
@@ -140,6 +144,25 @@ class EvidenceBuilderTests(unittest.TestCase):
         self.assertEqual(evidence[0].payload["chunk_id"], "contact-row")
         self.assertIn("Name(s): Sajjad Hussain", evidence[0].payload["text"])
         self.assertIn("Contact Numbers: 03009876543", evidence[0].payload["text"])
+
+    def test_page_less_document_can_promote_parent_context(self) -> None:
+        evidence = build_evidence_hits(
+            [
+                hit(
+                    "docx-heading",
+                    0.80,
+                    "Working Time",
+                    parent_text="Working Time\nThe employee works forty hours each week.",
+                    parent_chunk_id="docx-parent",
+                )
+            ],
+            token_budget=4000,
+            limit=1,
+            broader_table_context=True,
+        )
+
+        self.assertIn("forty hours", evidence[0].payload["text"])
+        self.assertNotIn("page", evidence[0].payload)
 
     def test_parent_promotion_keeps_the_duplicate_with_complete_obligations(
         self,
@@ -484,6 +507,52 @@ class EvidenceBuilderTests(unittest.TestCase):
 
         self.assertEqual(len(evidence), 1)
         self.assertEqual(retrieval_query_slots(evidence[0]), (0, 1))
+
+    def test_duplicate_origin_fact_merges_cross_storage_evidence(self) -> None:
+        evidence = dedupe_hits(
+            [
+                hit(
+                    "indexed",
+                    1.0,
+                    "Temperature 87 C.",
+                    doc_id="inspection-pdf",
+                    evidence_lineage_id="inspection:42:temperature",
+                    _evidence_need_ids=["reported_temperature"],
+                    _required_evidence_assignments=[
+                        ["reported_temperature", "indexed_corpus", "indexed_search"]
+                    ],
+                ),
+                hit(
+                    "sql",
+                    0.9,
+                    "Temperature 87 C.",
+                    doc_id="inspection-database",
+                    evidence_lineage_id="inspection:42:temperature",
+                    _evidence_need_ids=["reported_temperature"],
+                    _required_evidence_assignments=[
+                        [
+                            "reported_temperature",
+                            "connector_catalog:telemetry",
+                            "connector_query",
+                        ]
+                    ],
+                ),
+            ]
+        )
+
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence_need_ids(evidence[0]), ("reported_temperature",))
+        self.assertEqual(
+            set(required_evidence_assignments(evidence[0])),
+            {
+                ("reported_temperature", "indexed_corpus", "indexed_search"),
+                (
+                    "reported_temperature",
+                    "connector_catalog:telemetry",
+                    "connector_query",
+                ),
+            },
+        )
 
     def test_final_evidence_reserves_each_available_subquery(self) -> None:
         evidence = build_evidence_hits(

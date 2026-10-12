@@ -14,6 +14,7 @@ export function UserPanel({
   createdUserEmail,
   draft,
   accountTypes,
+  canEditEmail,
   groupOptions,
   isCreate,
   isPending,
@@ -34,7 +35,7 @@ export function UserPanel({
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      {isCreate ? (
+      {isCreate || canEditEmail ? (
         <TextField
           autoComplete="off"
           disabled={createComplete || isPending}
@@ -246,6 +247,7 @@ export function ReadOnlyField({ label, value }: { label: string; value: string }
 
 export type UserPanelProps = {
   accountTypes: AccountType[];
+  canEditEmail: boolean;
   clearanceLevels: ClearanceLevel[];
   copyState: CopyState;
   createdUserEmail: string | null;

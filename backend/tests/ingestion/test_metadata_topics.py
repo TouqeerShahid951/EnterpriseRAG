@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from rag.ingestion.config import DEFAULT_TOPIC_TAXONOMY, _topic_taxonomy
 from rag.ingestion.chunking import TextChunk
-from rag.ingestion.indexing.metadata_text import metadata_prefix, metadata_terms_for_chunk
+from rag.ingestion.indexing.metadata_text import (
+    metadata_prefix,
+    metadata_terms_for_chunk,
+)
 from rag.ingestion.metadata.topics import classify_topics
 
 
@@ -18,20 +21,24 @@ def test_topic_taxonomy_uses_only_configured_topics() -> None:
 
 
 def test_classifier_uses_configured_taxonomy_without_topic_hints() -> None:
-    topics, scores = classify_topics("OCR tools improve text extraction.", ("ocr_tools",))
+    topics, scores = classify_topics(
+        "OCR tools improve text extraction.", ("ocr_tools",)
+    )
 
     assert topics == ["ocr_tools"]
     assert scores == {"ocr_tools": 1.0}
 
 
 def test_classifier_does_not_treat_it_as_topic_evidence() -> None:
-    topics, scores = classify_topics("It extracts text from scanned documents.", ("it_policy",))
+    topics, scores = classify_topics(
+        "It extracts text from scanned documents.", ("it_policy",)
+    )
 
     assert topics == []
     assert scores == {}
 
 
-def test_embedding_metadata_excludes_topics() -> None:
+def test_embedding_prefix_contains_only_local_retrieval_context() -> None:
     chunk = TextChunk(
         index=0,
         page=1,
@@ -45,6 +52,8 @@ def test_embedding_metadata_excludes_topics() -> None:
     )
     metadata = {
         "summary": "A document about forms.",
+        "doc_type": "report",
+        "named_entities": [{"text": "Global Forms Incorporated"}],
         "topics": ["OCR"],
         "llm_topics": ["Handwriting recognition"],
     }
@@ -53,5 +62,10 @@ def test_embedding_metadata_excludes_topics() -> None:
     terms = metadata_terms_for_chunk(title="Report.pdf", chunk=chunk, metadata=metadata)
 
     assert "Topics:" not in prefix
+    assert "A document about forms" not in prefix
+    assert "Global Forms Incorporated" not in prefix
+    assert "Document type" not in prefix
+    assert "Document title: Report.pdf" in prefix
+    assert "Section: Findings" in prefix
     assert "OCR" not in terms
     assert "Handwriting" not in terms

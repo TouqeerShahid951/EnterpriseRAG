@@ -8,6 +8,7 @@ export * from "./api/audit";
 export * from "./api/documents";
 export * from "./api/review";
 export * from "./api/evaluations";
+export * from "./api/analytics";
 export type {
   ArtifactJobDetail,
   ArtifactJobSummary,
@@ -17,9 +18,15 @@ export type {
   HighlightRange,
   QueryIntent,
   QueryRequest,
+  RetrievalStage,
+  RetrievalStageCandidate,
+  RetrievalStageName,
   QuerySource,
+  QuerySourceClarification,
+  QuerySourceClarificationOption,
   QuerySourceMode,
   RAGResponse,
   RagSseEvent,
   SourceAnchor,
 } from "./query";
+export type { ResourceSnapshot } from "./api/deployment";

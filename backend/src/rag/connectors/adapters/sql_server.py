@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ..models import ConnectorQueryResult, ConnectorTestResult
@@ -65,6 +66,7 @@ class SqlServerConnector:
         config: dict[str, Any],
         secrets: dict[str, Any],
         query: str,
+        parameters: dict[str, Any] | None = None,
         row_limit: int,
         timeout_seconds: int,
     ) -> ConnectorQueryResult:
@@ -83,7 +85,19 @@ class SqlServerConnector:
                 cursor.timeout = max(1, min(timeout_seconds, 300))
             except Exception:
                 pass
-            cursor.execute(query)
+            if parameters:
+                parameter_names = re.findall(
+                    r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)", query
+                )
+                parameter_query = re.sub(
+                    r"(?<!:):[A-Za-z_][A-Za-z0-9_]*", "?", query
+                )
+                cursor.execute(
+                    parameter_query,
+                    tuple(parameters[name] for name in parameter_names),
+                )
+            else:
+                cursor.execute(query)
             rows = cursor.fetchmany(max(1, row_limit))
             result = ConnectorQueryResult(
                 query=query,

@@ -46,7 +46,7 @@ accessibility, and responsive behavior have been checked together.
 | --- | --- | --- |
 | Sign in | Enter the governed workspace | Complete at 320/768/1440/2400px; focus and service-error states verified |
 | Query Intelligence | Ask questions and inspect evidence | Complete at 320/768/1024/1440/2400px; empty, history, populated answer, citation, and evidence states verified |
-| Workspace Summary | Understand system state and next actions | Complete at 320/768/1024/1440/2400px; metrics, priority flow, and destination semantics verified |
+| System Overview | Understand system state and next actions | Complete at 320/768/1024/1440/2400px; metrics, priority flow, and destination semantics verified |
 | Document Overview | Understand corpus readiness | Complete at 320/768/1024/1440/2400px; populated health dashboard and first-run setup journey verified |
 | Documents | Find and govern documents | Complete at 320/768/1024/1440/2400px; filters, actions, empty state, and responsive inspector verified |
 | Knowledge Spaces | Browse and manage retrieval spaces | Complete at 320/768/1024/1440/2400px; directory, drill-in, no-space state, and actions verified |
@@ -80,7 +80,7 @@ accessibility, and responsive behavior have been checked together.
   mobile history, citation focus, inline mobile evidence, and the desktop
   evidence dialog. The 320px header and composer remain readable with no
   horizontal overflow, and selected mobile evidence opens at its heading.
-- Workspace Summary retains a clear primary workflow and bounded reading width
+- System Overview retains a clear primary workflow and bounded reading width
   from phone through extra-large desktop. Its workspace destinations now use
   native links while preserving in-app navigation for ordinary clicks.
 - Document Library browser checks cover the overview, active documents,

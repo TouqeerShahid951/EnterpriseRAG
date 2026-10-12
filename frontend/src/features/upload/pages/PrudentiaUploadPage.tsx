@@ -1,22 +1,24 @@
-import { useEffect, useMemo, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ChevronDown, CloudUpload, FileClock, FileSearch, FileText, Loader2, ShieldCheck, TimerReset, X } from "lucide-react";
+import { Activity, BookOpen, CheckCircle2, ChevronDown, CloudUpload, FileClock, FileSearch, FileText, Loader2, ShieldCheck, TimerReset, Trash2, X } from "lucide-react";
 
 import { abbreviationsApi, adminApi, documentsApi, ingestJobsApi } from "@/lib/api/contracts";
 import { canManageSpaces, canUploadToSpace, canWriteDocument, clearanceLevelsAssignableBy, hasExactGroupScope, isGlobalAdmin } from "@/lib/auth/authz";
 import { useToast } from "@/components/feedback/ToastProvider";
-import { InlineMessage } from "@/components/layout/Common";
+import { EmptyPanel, InlineMessage } from "@/components/layout/Common";
+import { Modal } from "@/components/layout/Modal";
 import { PrudentiaWorkspace } from "@/components/layout/PrudentiaWorkspace";
 import type { RouteId } from "@/routes/routes";
 import { formatFileSize, mergeDocumentFiles } from "@/features/upload/state/pdfUploadBatch";
 import { graphEnrichmentTaskForJob } from "@/features/upload/state/uploadJobProgress";
-import type { Document, User as AuthUser } from "@/types/api";
+import type { AbbreviationSource, Document, User as AuthUser } from "@/types/api";
 import type { PdfUploadDraft, UploadBatchItemView } from "@/types/chat";
-import { errorMessage } from "@/lib/utils/format";
+import { errorMessage, formatDateTime } from "@/lib/utils/format";
 import { flattenGroups, userSpacesFromPaths } from "@/lib/utils/groups";
 import { ClearanceSelect, Guardrail, SelectField, SharedSpacesField } from "@/features/upload/components/UploadFormFields";
 import { BatchUploadStatus } from "@/features/upload/components/BatchUploadStatus";
 import { AbbreviationGlossaryManager } from "@/features/upload/components/AbbreviationGlossaryManager";
+import { GlossaryFailedImports } from "@/features/upload/components/GlossaryFailedImports";
 
 
 export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocuments, currentUser, mode = "documents", onCancelIngestJob, onClearUploadJobs, onLogout, onNavigate, onPdfDraftChange, onPdfSubmit, pdfDraft, selectionError, uploadPending }: Props) {
@@ -24,6 +26,9 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
   const IntakeContainer = isGlossary ? "details" : "div";
   const queryClient = useQueryClient();
   const { notify } = useToast();
+  const [recentRetryJobIds, setRecentRetryJobIds] = useState<string[]>([]);
+  const [glossarySection, setGlossarySection] = useState<"manage" | "activity">("manage");
+  const [deletingGlossarySource, setDeletingGlossarySource] = useState<AbbreviationSource | null>(null);
   const canLoadSpaceDirectory = canManageSpaces(currentUser);
   const groupsQuery = useQuery({ queryKey: ["admin", "groups"], queryFn: adminApi.listGroups, retry: false, enabled: canLoadSpaceDirectory });
   const uploadSpaceOptions = useMemo(
@@ -77,6 +82,7 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
     },
     onSuccess: async (response, item) => {
       onClearUploadJobs([item.id]);
+      setRecentRetryJobIds((current) => [...new Set([...current, response.job_id])].slice(-10));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["documents"] }),
         queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] }),
@@ -90,6 +96,49 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
       tone: "error",
     }),
   });
+  const deleteFailedGlossaryMutation = useMutation({
+    mutationFn: (item: UploadBatchItemView) => {
+      if (!item.job?.documentId) throw new Error("This glossary import has no source to delete.");
+      return documentsApi.remove(item.job.documentId);
+    },
+    onSuccess: async (_response, item) => {
+      onClearUploadJobs([item.id]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["abbreviation-glossary"] }),
+        queryClient.invalidateQueries({ queryKey: ["documents"] }),
+        queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] }),
+        queryClient.invalidateQueries({ queryKey: ["upload"] }),
+      ]);
+      notify({ title: "Failed glossary source moved to Trash", description: `${item.fileName} can now be uploaded again or restored from Trash.`, tone: "success" });
+    },
+    onError: (error) => notify({
+      title: "Delete failed",
+      description: errorMessage(error, "Unable to delete this failed glossary source."),
+      tone: "error",
+    }),
+  });
+  const removeGlossarySourceMutation = useMutation({
+    mutationFn: (source: AbbreviationSource) => abbreviationsApi.removeSource(source.document_id),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["abbreviation-glossary"] }),
+        queryClient.invalidateQueries({ queryKey: ["documents"] }),
+        queryClient.invalidateQueries({ queryKey: ["ingest-jobs"] }),
+      ]);
+      setDeletingGlossarySource(null);
+      notify({ title: "Glossary source moved to Trash", description: "Restore or permanently delete it from Document Library → Trash.", tone: "success" });
+    },
+    onError: (error) => notify({
+      title: "Unable to move glossary source",
+      description: errorMessage(error, "The glossary source could not be moved to Trash."),
+      tone: "error",
+    }),
+  });
+  const statusItems = isGlossary
+    ? batchItems
+      .filter((item) => item.job?.status !== "failed")
+      .map((item) => recentRetryJobIds.includes(item.job?.jobId ?? "") ? { ...item, isCurrentSession: true } : item)
+    : batchItems;
 
   useEffect(() => {
     if (isGlossary) return;
@@ -145,13 +194,13 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
             <div>
               <p className="sv-eyebrow">Document Intake</p>
               <h1 className="sv-page-title">{isGlossary ? "Abbreviation Glossary" : "Add Files"}</h1>
-              <p className="sv-page-subtitle">{isGlossary ? "Define the language Prudentia uses to match queries. Add terms directly or manage several governed PDF sources." : "Upload PDF, DOCX, JPG, PNG, and JSON files into governed Knowledge Spaces, then follow each file through indexing."}</p>
+              <p className="sv-page-subtitle">{isGlossary ? "Define the language Prudentia uses to match queries. Add terms directly or manage governed PDF and XLSX sources outside RAG indexing." : "Upload PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, and JSON files into governed Knowledge Spaces, then follow each file through indexing."}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => onNavigate("ingestion-jobs")} className="sv-action-secondary">
+              {!isGlossary ? <button type="button" onClick={() => onNavigate("ingestion-jobs")} className="sv-action-secondary">
                 <FileClock size={16} />
-                {isGlossary ? "All intake activity" : "Activity"}
-              </button>
+                Activity
+              </button> : null}
               {!isGlossary ? (
                 <button type="button" onClick={() => onNavigate("knowledge-spaces")} className="sv-action-secondary">
                   <FileText size={16} />
@@ -162,22 +211,78 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
           </header>
 
           {isGlossary ? (
+            <GlossarySourceFiles
+              error={glossaryQuery.isError ? errorMessage(glossaryQuery.error, "Unable to load glossary source files.") : null}
+              loading={glossaryQuery.isLoading}
+              movingDocumentId={removeGlossarySourceMutation.isPending ? removeGlossarySourceMutation.variables?.document_id ?? null : null}
+              onMoveToTrash={setDeletingGlossarySource}
+              onViewTrash={() => onNavigate("document-trash")}
+              sources={currentGlossarySources}
+            />
+          ) : null}
+
+          {isGlossary ? (
+            <nav className="mb-4 flex flex-wrap gap-2" aria-label="Glossary sections">
+              <button type="button" aria-pressed={glossarySection === "manage"} className={glossarySection === "manage" ? "sv-action-primary" : "sv-action-secondary"} onClick={() => setGlossarySection("manage")}>
+                <BookOpen aria-hidden="true" size={16} /> Terms
+              </button>
+              <button type="button" aria-pressed={glossarySection === "activity"} className={glossarySection === "activity" ? "sv-action-primary" : "sv-action-secondary"} onClick={() => setGlossarySection("activity")}>
+                <Activity aria-hidden="true" size={16} /> Import activity ({batchItems.length})
+              </button>
+            </nav>
+          ) : null}
+
+          {isGlossary && glossarySection === "manage" ? (
             <AbbreviationGlossaryManager
               importStatusKey={batchItems.map((item) => `${item.job?.jobId ?? item.id}:${item.job?.status ?? "queued"}`).join("|")}
             />
           ) : null}
 
-          <IntakeContainer className={isGlossary ? "group mt-4" : undefined}>
+          {isGlossary && glossarySection === "activity" ? (
+            <div role="region" aria-label="Glossary import activity">
+              <p className="mb-3 text-body-md text-on-surface-variant">Dismissing completed activity does not remove glossary source files. Source documents remain managed above until moved to Trash.</p>
+              <GlossaryFailedImports
+                deletingDocumentId={deleteFailedGlossaryMutation.isPending ? deleteFailedGlossaryMutation.variables?.job?.documentId ?? null : null}
+                items={batchItems}
+                onDelete={(item) => deleteFailedGlossaryMutation.mutate(item)}
+                onRetry={(item) => retryMutation.mutate(item)}
+                retryingJobId={retryMutation.isPending ? retryMutation.variables?.job?.jobId ?? null : null}
+              />
+              {statusItems.length > 0 ? (
+                <section className="sv-card mt-4 p-5">
+                  <BatchUploadStatus
+                    cancelingJobId={cancelingJobId}
+                    currentUser={currentUser}
+                    dismissible={false}
+                    graphStatus={undefined}
+                    graphStatusError={null}
+                    hideActivityLink
+                    hideGovernance
+                    items={statusItems}
+                    onCancelIngestJob={onCancelIngestJob}
+                    onClearUploadJobs={onClearUploadJobs}
+                    onRetryIngestJob={(item) => retryMutation.mutate(item)}
+                    onViewActivity={() => undefined}
+                    retryingJobId={retryMutation.isPending ? retryMutation.variables?.job?.jobId ?? null : null}
+                    showCompletedHistory
+                    title="Glossary import activity"
+                  />
+                </section>
+              ) : batchItems.length === 0 ? <EmptyPanel>No glossary imports yet.</EmptyPanel> : null}
+            </div>
+          ) : null}
+
+          {!isGlossary || glossarySection === "manage" ? <IntakeContainer className={isGlossary ? "group mt-4" : undefined}>
             {isGlossary ? (
               <summary className="sv-panel flex min-h-16 cursor-pointer list-none flex-col items-start justify-between gap-3 p-4 text-left sm:flex-row sm:items-center [&::-webkit-details-marker]:hidden">
                 <div className="min-w-0">
                   <p className="sv-eyebrow">Governed source</p>
-                  <h2 className="sv-section-title mt-1">Manage PDF sources</h2>
-                  <p className="mt-1 text-body-md text-on-surface-variant">Add several governed PDFs at once, or replace one active source without affecting the others.</p>
+                  <h2 className="sv-section-title mt-1">Manage glossary sources</h2>
+                  <p className="mt-1 text-body-md text-on-surface-variant">Add governed PDF or XLSX sources, or replace one active source without affecting the others.</p>
                 </div>
                 <div className="flex w-full min-w-0 items-center justify-between gap-3 sm:w-auto sm:shrink-0">
                   <span className={`${currentGlossarySources.length > 0 ? "sv-pill sv-pill-success" : "sv-pill"} min-w-0 max-w-full truncate`}>
-                    {currentGlossarySources.length > 0 ? `${currentGlossarySources.length} active PDF source${currentGlossarySources.length === 1 ? "" : "s"}` : "No PDF sources"}
+                    {currentGlossarySources.length > 0 ? `${currentGlossarySources.length} active source${currentGlossarySources.length === 1 ? "" : "s"}` : "No glossary sources"}
                   </span>
                   <ChevronDown aria-hidden="true" className="text-secondary transition-transform group-open:rotate-180" size={18} />
                 </div>
@@ -188,16 +293,16 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
             <form onSubmit={onPdfSubmit} className="sv-panel p-5">
               <div className="mb-5 flex flex-col items-start justify-between gap-3 border-b border-surface-border pb-4 sm:flex-row sm:gap-4">
                 <div>
-                  <h2 className="sv-section-title">{isGlossary ? "PDF source files" : "Source package"}</h2>
-                  <p className="mt-1 text-body-md text-on-surface-variant">{isGlossary ? "Select one or more PDFs containing abbreviation and full-term pairs." : "Select a document batch and attach the metadata used by retrieval filters."}</p>
+                  <h2 className="sv-section-title">{isGlossary ? "Glossary source files" : "Source package"}</h2>
+                  <p className="mt-1 text-body-md text-on-surface-variant">{isGlossary ? "Select PDF or XLSX tables with Short Word and Full Expression columns." : "Select a document batch and attach the metadata used by retrieval filters."}</p>
                 </div>
-                <span className="sv-pill sv-pill-success shrink-0">{pdfDraft.files.length > 0 ? `${pdfDraft.files.length} selected` : isGlossary ? "PDF only" : "Live pipeline"}</span>
+                <span className="sv-pill sv-pill-success shrink-0">{pdfDraft.files.length > 0 ? `${pdfDraft.files.length} selected` : isGlossary ? "PDF or XLSX" : "Live pipeline"}</span>
               </div>
 
               <label className="sv-field">
-                <span className="sv-label">{isGlossary ? "Glossary PDF" : "Document Files"}</span>
+                <span className="sv-label">{isGlossary ? "Glossary files" : "Document Files"}</span>
                 <input
-                  accept={isGlossary ? "application/pdf,.pdf" : "application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png,application/json,.json"}
+                  accept={isGlossary ? "application/pdf,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx" : "application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx,text/csv,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsx,image/jpeg,.jpg,.jpeg,image/png,.png,application/json,.json"}
                   type="file"
                   multiple
                   disabled={uploadPending}
@@ -205,9 +310,9 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
                     handleFilesSelected(event.target.files);
                     event.target.value = "";
                   }}
-                  className="sv-input file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-bold file:text-on-primary"
+                  className="sv-input file:mr-3 file:rounded-md file:border-0 file:bg-primary-action file:px-3 file:py-1.5 file:text-sm file:font-bold file:text-on-primary"
                 />
-                <small className="text-secondary">{isGlossary ? "Select multiple PDFs up to 50 MB each. Tables and lines such as “AD — Assistant Director” are supported." : "Select multiple PDF, DOCX, JPG, PNG, or JSON files, up to 50 MB each. Every file receives its own ingestion job."}</small>
+                <small className="text-secondary">{isGlossary ? "Select PDF or XLSX files up to 50 MB each. The first two table columns must be Short Word and Full Expression." : "Select multiple PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, or JSON files, up to 50 MB each. Every file receives its own ingestion job."}</small>
               </label>
               {pdfDraft.files.length > 0 ? (
                 <ul className="mt-3 grid gap-2" aria-label="Selected documents">
@@ -230,6 +335,12 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
                 </ul>
               ) : null}
               {selectionError ? <InlineMessage tone="warning">{selectionError}</InlineMessage> : null}
+              {!isGlossary && pdfDraft.files.some((file) => file.name.toLowerCase().endsWith(".pptx")) ? (
+                <label className="mt-4 flex min-h-11 items-start gap-3 rounded-md border border-surface-border bg-surface-container-low px-3 py-2">
+                  <input type="checkbox" checked={pdfDraft.analyzeSlideVisuals} disabled={uploadPending} onChange={(event) => onPdfDraftChange({ analyzeSlideVisuals: event.target.checked })} className="mt-1" />
+                  <span><strong className="block text-body-md text-on-surface">Analyze slide visuals</strong><small className="text-secondary">Interpret diagrams, charts, images, and spatial relationships from each rendered slide.</small></span>
+                </label>
+              ) : null}
               {!isGlossary ? (
                 <div className="mt-5 grid items-start gap-4 md:grid-cols-2">
                   <SelectField disabled={uploadPending} label="Owner Knowledge Space" value={pdfDraft.groupPath} onChange={(value) => onPdfDraftChange({ groupPath: value, sharedGroupPaths: pdfDraft.sharedGroupPaths.filter((path) => path !== value) })} options={["", ...writableSpacePaths]} emptyLabel={groupsQuery.isLoading && canLoadSpaceDirectory ? "Loading spaces" : "Select upload space"} helper="Primary owner space for governance and retrieval filtering." />
@@ -265,16 +376,16 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
                 <label className="sv-field mt-4">
                   <span className="sv-label">Import action</span>
                   <select disabled={uploadPending || pdfDraft.files.length > 1} value={pdfDraft.supersedesText} onChange={(event) => onPdfDraftChange({ supersedesText: event.target.value })} className="sv-input">
-                    <option value="">Add as new PDF source</option>
+                    <option value="">Add as new glossary source</option>
                     {currentGlossarySources.map((source) => <option key={source.document_id} value={source.document_id}>Replace {source.document_title}</option>)}
                   </select>
-                  <small className="text-secondary">Replacement is available when one PDF is selected. Other active sources remain unchanged.</small>
+                  <small className="text-secondary">Replacement is available when one source is selected. Other active sources remain unchanged.</small>
                 </label>
               ) : null}
               <label className="sv-field mt-4">
                 <span className="sv-label">Description</span>
                 <textarea disabled={uploadPending} value={pdfDraft.description} onChange={(event) => onPdfDraftChange({ description: event.target.value })} placeholder={isGlossary ? "Optional context about the source or terminology standard" : "Optional shared context for library display and reviewer notes"} className="sv-input min-h-24" />
-                <small className="text-secondary">{isGlossary ? "Optional context for the imported PDF." : "Shared context appears with the document for reviewers and library users."}</small>
+                <small className="text-secondary">{isGlossary ? "Optional context for the imported glossary source." : "Shared context appears with the document for reviewers and library users."}</small>
               </label>
               {groupsQuery.isError && canLoadSpaceDirectory ? <InlineMessage tone="error">{errorMessage(groupsQuery.error, isGlossary ? "Unable to prepare PDF storage." : "Unable to load writable Knowledge Spaces.")}</InlineMessage> : null}
               {!groupsQuery.isLoading && writableSpacePaths.length === 0 ? <InlineMessage tone="warning">{isGlossary ? "PDF import is unavailable until document storage is configured. Direct editing remains available below." : "No writable Knowledge Spaces are available for this account."}</InlineMessage> : null}
@@ -288,14 +399,15 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
                       ? pdfDraft.supersedesText ? "Replace PDF source" : `Add ${pdfDraft.files.length} PDF source${pdfDraft.files.length === 1 ? "" : "s"}`
                       : `Upload ${pdfDraft.files.length} document${pdfDraft.files.length === 1 ? "" : "s"}`}
               </button>
-              {batchItems.length > 0 ? (
+              {!isGlossary && batchItems.length > 0 ? (
                 <BatchUploadStatus
                   cancelingJobId={cancelingJobId}
                   currentUser={currentUser}
                   graphStatus={graphStatusQuery.data}
                   graphStatusError={graphStatusError}
                   hideGovernance={isGlossary}
-                  items={batchItems}
+                  hideActivityLink={isGlossary}
+                  items={statusItems}
                   onCancelIngestJob={onCancelIngestJob}
                   onClearUploadJobs={onClearUploadJobs}
                   onRetryIngestJob={(item) => retryMutation.mutate(item)}
@@ -319,14 +431,22 @@ export function PrudentiaUploadPage({ batchItems, cancelingJobId, currentDocumen
                   <FileSearch className="mt-0.5 text-primary" size={18} />
                   <div>
                     <h2 className="sv-section-title">Hybrid extraction</h2>
-                    <p className="mt-2 text-body-md text-on-surface-variant">Layered PyMuPDF and Docling parsing handles PDFs, Docling parses DOCX, and low-confidence OCR waits for review.</p>
+                    <p className="mt-2 text-body-md text-on-surface-variant">Layered PDF extraction, Docling document parsing, and full-slide PPTX analysis preserve text, charts, images, and layout meaning.</p>
                   </div>
                 </div>
               </section>
             </aside> : null}
           </div>
-          </IntakeContainer>
+          </IntakeContainer> : null}
         </div>
+        <Modal open={Boolean(deletingGlossarySource)} onClose={() => setDeletingGlossarySource(null)} title="Move glossary source to Trash" description={deletingGlossarySource ? `Move ${deletingGlossarySource.document_title} to Trash and remove definitions supplied only by this source? You can restore the source later.` : undefined} size="sm">
+          <div className="flex justify-end gap-2">
+            <button type="button" className="sv-action-secondary" onClick={() => setDeletingGlossarySource(null)}>Cancel</button>
+            <button type="button" className="sv-action-danger" disabled={removeGlossarySourceMutation.isPending} onClick={() => deletingGlossarySource && removeGlossarySourceMutation.mutate(deletingGlossarySource)}>
+              <Trash2 aria-hidden="true" size={15} /> {removeGlossarySourceMutation.isPending ? "Moving…" : "Move to Trash"}
+            </button>
+          </div>
+        </Modal>
       </main>
     </PrudentiaWorkspace>
   );
@@ -343,6 +463,55 @@ export function uploadShareTargetPaths(user: AuthUser, ownerGroupPath: string, s
   if (isGlobalAdmin(user)) return targets.map((space) => space.path);
   return targets.filter((space) => hasExactGroupScope(user, space.path)).map((space) => space.path);
 }
+
+export function GlossarySourceFiles({ error, loading, movingDocumentId, onMoveToTrash, onViewTrash, sources }: GlossarySourceFilesProps) {
+  return (
+    <section className="sv-card mb-4 overflow-hidden" aria-labelledby="glossary-source-files-title" aria-busy={loading}>
+      <div className="flex flex-wrap items-start justify-between gap-3 p-4">
+        <div>
+          <p className="sv-eyebrow">Persistent documents</p>
+          <h2 id="glossary-source-files-title" className="sv-section-title mt-1">Glossary source files</h2>
+          <p className="mt-1 text-body-md text-on-surface-variant">These records remain here when import activity is dismissed.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={sources.length > 0 ? "sv-pill sv-pill-success" : "sv-pill"}>{sources.length} active</span>
+          <button type="button" className="sv-action-secondary" onClick={onViewTrash}><Trash2 aria-hidden="true" size={15} /> View Trash</button>
+        </div>
+      </div>
+      {error ? <InlineMessage tone="error">{error}</InlineMessage> : null}
+      {loading ? <p className="border-t border-surface-border p-4 text-body-md text-on-surface-variant" role="status">Loading glossary source files…</p> : null}
+      {!loading && sources.length === 0 ? <div className="border-t border-surface-border p-4"><EmptyPanel>No active glossary source files. Add a PDF or XLSX source below, or restore one from Trash.</EmptyPanel></div> : null}
+      {sources.length > 0 ? (
+        <ul className="divide-y divide-surface-border border-t border-surface-border" aria-label="Active glossary source files">
+          {sources.map((source) => {
+            const moving = movingDocumentId === source.document_id;
+            return (
+              <li key={source.document_id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-body-md">
+                <FileText aria-hidden="true" className="shrink-0 text-primary" size={18} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-bold text-on-surface" title={source.document_title}>{source.document_title}</p>
+                  <p className="text-label-md text-secondary">{source.entry_count} term{source.entry_count === 1 ? "" : "s"} · Activated {formatDateTime(source.activated_at)}</p>
+                </div>
+                <button type="button" className="sv-action-danger" disabled={Boolean(movingDocumentId)} onClick={() => onMoveToTrash(source)}>
+                  <Trash2 aria-hidden="true" size={15} /> {moving ? "Moving…" : "Move to Trash"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+type GlossarySourceFilesProps = {
+  error: string | null;
+  loading: boolean;
+  movingDocumentId: string | null;
+  onMoveToTrash: (source: AbbreviationSource) => void;
+  onViewTrash: () => void;
+  sources: AbbreviationSource[];
+};
 type Props = {
   batchItems: UploadBatchItemView[]; cancelingJobId: string | null; currentDocuments: Document[]; currentUser: AuthUser;
   mode?: "documents" | "glossary";

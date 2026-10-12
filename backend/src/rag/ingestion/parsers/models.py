@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Iterator
+import math
 
 BBox = tuple[float, float, float, float]
 
@@ -28,6 +29,8 @@ class ParsedPdfItem:
     image_source_kind: str | None = None
     image_content_type: str | None = None
     extraction_method: str | None = None
+    source_spans: list[dict[str, Any]] = field(default_factory=list)
+    quote_texts: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -90,10 +93,15 @@ def parsed_item_to_dict(item: ParsedPdfItem) -> dict[str, Any]:
         "image_source_kind": item.image_source_kind,
         "image_content_type": item.image_content_type,
         "extraction_method": item.extraction_method,
+        "source_spans": item.source_spans,
+        "quote_texts": item.quote_texts,
     }
 
 
 def parsed_item_from_dict(payload: dict[str, Any]) -> ParsedPdfItem:
+    raw_quotes = payload.get("quote_texts")
+    if raw_quotes is not None and (not isinstance(raw_quotes, list) or any(not isinstance(text, str) for text in raw_quotes)):
+        raise ValueError("quote_texts must contain original text strings")
     raw_bbox = payload.get("bbox")
     bbox: BBox | None = None
     if isinstance(raw_bbox, (list, tuple)) and len(raw_bbox) == 4:
@@ -121,6 +129,8 @@ def parsed_item_from_dict(payload: dict[str, Any]) -> ParsedPdfItem:
         image_source_kind=str(payload["image_source_kind"]) if payload.get("image_source_kind") is not None else None,
         image_content_type=str(payload["image_content_type"]) if payload.get("image_content_type") is not None else None,
         extraction_method=str(payload["extraction_method"]) if payload.get("extraction_method") is not None else None,
+        source_spans=source_spans_from_dict(payload.get("source_spans", [])),
+        quote_texts=raw_quotes,
     )
 
 
@@ -149,3 +159,21 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def source_spans_from_dict(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ValueError("source_spans must be a list")
+    result = []
+    for span in value:
+        if not isinstance(span, dict) or type(span.get("page")) is not int or span["page"] < 1:
+            raise ValueError("source span requires a positive page number")
+        bbox = span.get("bbox")
+        if not isinstance(bbox, (list, tuple)) or len(bbox) != 4 or not all(
+            type(x) in {int, float} and math.isfinite(x) for x in bbox
+        ) or bbox[2] < bbox[0] or bbox[3] < bbox[1]:
+            raise ValueError("source span requires a valid bounding box")
+        if not isinstance(span.get("exact_text"), str):
+            raise ValueError("source span requires exact_text")
+        result.append({"page": span["page"], "bbox": list(bbox), "exact_text": span["exact_text"]})
+    return result

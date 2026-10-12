@@ -8,6 +8,7 @@ from time import perf_counter
 from .state import QueryContext, finalize_response_node_timings, record_node_timing
 from .nodes import QueryNodes
 from rag.query.routing.routing_logs import log_node_timing
+from rag.query.summarization import should_prepare_summary
 
 
 class QueryGraphRunner:
@@ -34,6 +35,16 @@ def route_conversation(ctx: QueryContext) -> str:
     return "clarify" if resolution is not None and resolution.relation == "ambiguous" else "continue"
 
 
+def route_source(ctx: QueryContext) -> str:
+    decision = ctx.get("source_decision")
+    database_route = decision.database_route if decision is not None else None
+    return (
+        "clarify"
+        if database_route is not None and database_route.outcome != "selected"
+        else "continue"
+    )
+
+
 def route_verifier(ctx: QueryContext) -> str:
     return ctx["verifier_decision"]
 
@@ -48,6 +59,9 @@ def _invoke(ctx: QueryContext, nodes: QueryNodes) -> QueryContext:
         )
         return _run_timed_node("response_serializer", ctx, nodes.response_serializer)
     ctx = _run_timed_node("source_resolver", ctx, nodes.source_resolver)
+    if route_source(ctx) == "clarify":
+        ctx = _run_timed_node("source_clarifier", ctx, nodes.source_clarifier)
+        return _run_timed_node("response_serializer", ctx, nodes.response_serializer)
     ctx = _run_timed_node("intent_router", ctx, nodes.intent_router)
     intent_route = route_intent(ctx)
     if intent_route == "respond":
@@ -59,6 +73,10 @@ def _invoke(ctx: QueryContext, nodes: QueryNodes) -> QueryContext:
         ctx = _run_timed_node("query_planner", ctx, nodes.query_planner)
     while True:
         ctx = _run_timed_node("abac_retriever", ctx, nodes.abac_retriever)
+        if should_prepare_summary(ctx.get("route_plan")):
+            ctx = _run_timed_node("temporal_resolver", ctx, nodes.temporal_resolver)
+            ctx = _run_timed_node("summary_preparer", ctx, nodes.summary_preparer)
+            break
         ctx = _run_timed_node("reranker", ctx, nodes.reranker)
         ctx = _run_timed_node("verifier", ctx, nodes.verifier)
         decision = route_verifier(ctx)
@@ -79,7 +97,7 @@ def _invoke(ctx: QueryContext, nodes: QueryNodes) -> QueryContext:
                     nodes.contradiction_detector,
                 )
         break
-    if not evidence_built:
+    if not evidence_built and not should_prepare_summary(ctx.get("route_plan")):
         ctx = _run_timed_node("evidence_builder", ctx, nodes.evidence_builder)
     ctx = _run_timed_node("synthesizer", ctx, nodes.synthesizer)
     ctx = _run_timed_node("faithfulness_checker", ctx, nodes.faithfulness_checker)

@@ -5,6 +5,7 @@ import json
 from billiard.exceptions import SoftTimeLimitExceeded
 
 from rag.artifact_jobs.generation import ArtifactGenerationError
+from rag.artifact_jobs.adapters.query_generation import QueryRuntimeArtifactJsonGenerator
 
 
 class CapturingSectionInference:
@@ -68,6 +69,18 @@ class CountingPlannerInference:
 
 
 class FailingInference:
+    # Composition must stay unused in seeded jobs; evidence validation still runs.
+    def validate_evidence(self, *args, **kwargs):
+        return QueryRuntimeArtifactJsonGenerator(self).validate_evidence(*args, **kwargs)
+
+    def judge_faithfulness(self, *, prompt, **kwargs):
+        data = json.loads(prompt[prompt.index('{"question"'):])
+        return json.dumps({"responsive": True, "missing_aspects": [], "claims": [
+            {"claim_id": c["claim_id"], "verdict": "supported", "quotes": [
+                {"source_label": label, "quote": data["evidence"][label][0]} for label in c["sources"]
+            ]} for c in data["claims"]
+        ]})
+
     def generate_json(self, **_kwargs) -> str:
         raise TimeoutError("composition call failed")
 

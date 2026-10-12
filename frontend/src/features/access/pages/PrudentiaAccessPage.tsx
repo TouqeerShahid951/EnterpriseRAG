@@ -103,8 +103,9 @@ export function PrudentiaAccessPage({ currentUser, onAuthChanged, onLogout, onNa
   });
 
   const updateUserMutation = useMutation({
-    mutationFn: ({ draft, userId }: { draft: UserDraft; userId: string }) =>
-      adminApi.updateUser(userId, {
+    mutationFn: ({ draft, user }: { draft: UserDraft; user: UserAdmin }) =>
+      adminApi.updateUser(user.id, {
+        email: draft.email.trim() === user.email ? undefined : draft.email.trim(),
         name: draft.name.trim(),
         account_type: draft.accountType,
         group_paths: draft.groupPaths,
@@ -275,7 +276,7 @@ export function PrudentiaAccessPage({ currentUser, onAuthChanged, onLogout, onNa
       createUserMutation.mutate(userDraft);
       return;
     }
-    updateUserMutation.mutate({ draft: userDraft, userId: panel.user.id });
+    updateUserMutation.mutate({ draft: userDraft, user: panel.user });
   }
 
   return (
@@ -326,6 +327,7 @@ export function PrudentiaAccessPage({ currentUser, onAuthChanged, onLogout, onNa
             draft={userDraft}
             accountTypes={assignableAccountTypes}
             clearanceLevels={assignableClearanceLevels}
+            canEditEmail={panel.kind === "create-user" || (currentUser.account_type === "platform_admin" && panel.user.id !== currentUser.user_id)}
             groupOptions={groupOptions}
             isCreate={panel.kind === "create-user"}
             isPending={createUserMutation.isPending || updateUserMutation.isPending}

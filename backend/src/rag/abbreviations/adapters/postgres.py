@@ -140,9 +140,11 @@ class PostgresAbbreviationRepository(PostgresConnectionMixin):
             duplicate = conn.execute(
                 """
                 SELECT 1 FROM abbreviation_glossary_entries
-                WHERE upper(abbreviation) = upper(%s) AND id <> %s::uuid
+                WHERE upper(abbreviation) = upper(%s)
+                  AND lower(expansion) = lower(%s)
+                  AND id <> %s::uuid
                 """,
-                (abbreviation, entry_id),
+                (abbreviation, expansion, entry_id),
             ).fetchone()
             if duplicate is not None:
                 raise DuplicateAbbreviationError(abbreviation)

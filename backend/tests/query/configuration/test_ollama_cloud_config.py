@@ -34,32 +34,58 @@ def test_ollama_chat_probe_only_omits_format_for_exact_cloud_suffix(
 
     payload = calls[0][2]["payload"]
     assert payload["model"] == model
+    assert payload["options"]["num_predict"] == 64
     assert ("format" in payload) is expects_format
     assert payload["messages"][0]["content"].endswith("Return JSON only.")
     assert payload["messages"][1]["content"] == 'Return {"status":"ok"}.'
 
 
-def test_structured_output_probe_rejects_cloud_before_request(monkeypatch) -> None:
-    called = False
+def test_structured_output_probe_uses_prompt_only_json_for_cloud(monkeypatch) -> None:
+    calls = []
 
-    def fake_request_json(*_args, **_kwargs):
-        nonlocal called
-        called = True
+    def fake_request_json(*_args, **kwargs):
+        calls.append(kwargs["payload"])
         return {"message": {"content": '{"status":"ok"}'}}
 
     monkeypatch.setattr(rag_config_service, "request_json", fake_request_json)
+    rag_config_service._ollama_chat_probe(
+        _config_record(),
+        model="nemotron-3-super:cloud",
+        structured_output=True,
+    )
 
-    with pytest.raises(
-        RagConfigValidationError,
-        match="does not support schema-constrained output",
-    ):
+    assert "format" not in calls[0]
+    assert calls[0]["options"]["num_predict"] == 128
+
+
+def test_structured_cloud_probe_rejects_thinking_without_json(monkeypatch) -> None:
+    monkeypatch.setattr(
+        rag_config_service,
+        "request_json",
+        lambda *_args, **_kwargs: {
+            "message": {"content": "", "thinking": "Still reasoning."}
+        },
+    )
+
+    with pytest.raises(RagConfigValidationError, match="chat health response was invalid"):
         rag_config_service._ollama_chat_probe(
             _config_record(),
-            model="nemotron-3-super:cloud",
+            model="gpt-oss:120b-cloud",
             structured_output=True,
         )
 
-    assert called is False
+
+def test_ollama_cloud_thinking_response_passes_chat_probe(monkeypatch) -> None:
+    monkeypatch.setattr(
+        rag_config_service,
+        "request_json",
+        lambda *_args, **_kwargs: {"message": {"content": "", "thinking": "Checking."}},
+    )
+
+    rag_config_service._ollama_chat_probe(
+        _config_record(),
+        model="minimax-m3:cloud",
+    )
 
 
 def test_structured_output_probe_sends_schema_to_local_model(monkeypatch) -> None:

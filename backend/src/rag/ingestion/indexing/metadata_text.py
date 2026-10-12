@@ -12,36 +12,40 @@ from ..chunking import TextChunk
 _TERM_RE = re.compile(r"[a-z0-9][a-z0-9_-]{1,}")
 
 
-def build_embedding_texts(*, file_path: str, chunks: list[TextChunk], metadata: dict[str, Any]) -> list[str]:
+def build_embedding_texts(
+    *, file_path: str, chunks: list[TextChunk], metadata: dict[str, Any]
+) -> list[str]:
     title = title_from_path(file_path)
-    return [embedding_text_for_chunk(title=title, chunk=chunk, metadata=metadata) for chunk in chunks]
+    return [
+        embedding_text_for_chunk(title=title, chunk=chunk, metadata=metadata)
+        for chunk in chunks
+    ]
 
 
-def embedding_text_for_chunk(*, title: str, chunk: TextChunk, metadata: dict[str, Any]) -> str:
+def embedding_text_for_chunk(
+    *, title: str, chunk: TextChunk, metadata: dict[str, Any]
+) -> str:
     prefix = metadata_prefix(title=title, chunk=chunk, metadata=metadata)
     return f"{prefix}\n\n{chunk.text}" if prefix else chunk.text
 
 
 def metadata_prefix(*, title: str, chunk: TextChunk, metadata: dict[str, Any]) -> str:
     lines: list[str] = []
-    doc_type = _doc_type(metadata)
-    entities = _entity_texts(metadata.get("named_entities"))[:8]
-    summary = compact_summary(metadata.get("summary"))
     section = " / ".join([*chunk.section_path, chunk.section_title or ""]).strip(" /")
     if title:
         lines.append(f"Document title: {title}")
-    if doc_type:
-        lines.append(f"Document type: {doc_type}")
-    if entities:
-        lines.append(f"Key entities: {', '.join(entities)}")
     if section:
         lines.append(f"Section: {section}")
-    if summary:
-        lines.append(f"Summary: {summary}")
+    if chunk.table_title and chunk.table_title not in section:
+        lines.append(f"Table: {chunk.table_title}")
+    if chunk.table_column_headers:
+        lines.append(f"Columns: {' | '.join(chunk.table_column_headers)}")
     return "\n".join(lines)
 
 
-def metadata_terms_for_chunk(*, title: str, chunk: TextChunk, metadata: dict[str, Any]) -> list[str]:
+def metadata_terms_for_chunk(
+    *, title: str, chunk: TextChunk, metadata: dict[str, Any]
+) -> list[str]:
     values: list[str] = [
         title,
         _doc_type(metadata),

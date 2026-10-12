@@ -13,9 +13,11 @@ from rag.graphrag.task_execution import (
     run_partition_rebuild,
 )
 from rag.ingestion.execution import IngestDeliveryRetry, run_ingest_document
+from rag.abbreviations.task_execution import run_glossary_source_import
 from rag.shared.contracts.task_names import (
     DEFAULT_GRAPHRAG_INDEX_TASK_NAME,
     DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME,
+    DEFAULT_GLOSSARY_IMPORT_TASK_NAME,
     DEFAULT_INGEST_TASK_NAME,
     REEXTRACT_DOCUMENT_CLAIMS_TASK_NAME,
     REEXTRACT_DOCUMENT_METADATA_TASK_NAME,
@@ -47,6 +49,12 @@ def _run_ingest_delivery(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
             max_retries=retry.max_retries,
             headers=headers,
         )
+
+
+def _run_glossary_import_delivery(task: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    headers = dict(getattr(getattr(task, "request", None), "headers", None) or {})
+    run_token = str(headers.get(_RUN_TOKEN_HEADER) or "").strip() or str(uuid4())
+    return run_glossary_source_import(payload, run_token=run_token)
 
 
 def _index_document_graphrag(
@@ -109,6 +117,10 @@ ingest_document = _register_compatible_task(
     config.ingest_task_name,
     DEFAULT_INGEST_TASK_NAME,
     _run_ingest_delivery,
+)
+import_glossary_source = _register_task(
+    DEFAULT_GLOSSARY_IMPORT_TASK_NAME,
+    _run_glossary_import_delivery,
 )
 reextract_document_metadata = _register_task(
     REEXTRACT_DOCUMENT_METADATA_TASK_NAME,

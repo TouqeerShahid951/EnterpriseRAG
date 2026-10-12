@@ -99,7 +99,9 @@ issued.
 
 Existing sessions for that user are signed out. The user must change the
 temporary password at next sign-in. You cannot reset your own password from User
-Management; use **Account Management** for your own password.
+Management; use **Account Management** for your own password or email address.
+Platform Admins can update another user's email from **User Management**; that
+ends the user's signed-in sessions.
 
 ### Disable Or Delete A User
 
@@ -176,20 +178,33 @@ sharing, or clearance selection is required. Saved changes become available to
 all queries immediately and do not re-index the document corpus.
 
 To import governed sources, upload one or more PDFs containing abbreviation and
-expansion pairs, either in two-column tables or as lines such as
-`AD — Assistant Director`. Definitions from active PDFs merge into the global
-glossary. Each PDF can be replaced or removed independently, and replacements
-do not affect other sources. Identical definitions may be shared by several
-PDFs; conflicting definitions fail activation and remain visible in ingestion
-activity for review. Source PDFs remain available for governance and audit,
+expansion pairs, either in two-column tables—with or without headers—or as lines
+such as `AD — Assistant Director`. Headerless rows may use whitespace between
+the abbreviation and expansion, such as `AD Assistant Director`. Definitions
+from active PDFs merge into the global glossary. Each PDF can be replaced or
+moved to Trash independently, and replacements
+do not affect other sources. A single abbreviation can have multiple
+definitions; ambiguous abbreviations expand in Chat with each definition joined
+by `OR`.
+Identical definitions may be shared by several PDFs. Source PDFs remain available for governance and audit,
 but are not embedded or searched as ordinary corpus documents.
+Their processing status stays in the Abbreviation Glossary workflow and does
+not appear in normal ingestion activity or health summaries.
 
 Query
 expansion works in both directions: `AD` adds `Assistant Director`, while
 `Assistant Director` adds `AD`. The original user text remains unchanged for
-display and audit. Ambiguous definitions are not expanded automatically. When
+display and audit. Ambiguous abbreviations include every definition joined by
+`OR`. When
 a PDF definition supports an answer, its evidence records the source PDF and
 page without exposing unrelated glossary content to retrieval.
+
+Glossary PDFs and their processing status remain in the **Abbreviation
+Glossary** workflow. Use **Terms & sources** for active definitions and source
+files, and **Activity** for queued, running, completed, cancelled, or failed
+imports. They do not appear in the ordinary document list or normal ingestion
+Activity. Removed and failed sources appear in the shared **Trash**, where an
+authorized administrator can restore or permanently delete them.
 
 ## 8. Folder Sources
 
@@ -200,12 +215,22 @@ Folder snapshots are one-time schedules. They do not continuously watch the
 local folder. To ingest later file edits, choose the folder again and create a
 new snapshot.
 
+PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, and JSON files are accepted. **Analyze slide visuals**
+defaults to enabled and is saved with the schedule, so PPTX slides retain diagram,
+chart, image, and layout meaning during ingestion.
+
+Spreadsheet ingestion detects title rows and grouped headers, indexes each
+visible, non-empty worksheet, and skips hidden worksheets. Authorized users can
+correct the result from the document inspector's **Tables** tab; saving queues
+reindexing while preserving the original file. Spreadsheet formulas are
+preserved as source expressions and are never calculated by ingestion.
+
 Use run details to review queued, skipped, cancelled, and failed files.
 Unsupported files are recorded as skipped.
 
 ### Document Health Count Semantics
 
-Document Overview, Knowledge Spaces, Workspace Summary, and the Trash badge use
+Document Overview, Knowledge Spaces, System Overview, and the Trash badge use
 the same access- and clearance-filtered document snapshot. Counts are grouped by
 persisted document identity, not by ingestion attempts or browser upload rows.
 Needs attention is the distinct set of visible current documents in failed,
@@ -248,9 +273,12 @@ remain selectable for review, and **All Connections** returns to the overview.
 5. Prudentia creates an editable review and proposes descriptions, synonyms,
    join context, and business rules from schema metadata, one table at a time.
    Completed tables are saved; use **Continue AI Enrichment** after an interruption.
-6. Follow the guided Summary, Tables, Joins, and Access review. Correct table
-   and column descriptions, synonyms, relationships, business
-   rules, allowed fields, and sensitivity flags.
+6. Follow the guided Summary, Tables, Joins, and Access review. Add a clear
+   database description, business domains, entities, metrics, synonyms,
+   representative questions, and exclusions. Correct table and column
+   descriptions, relationships, business rules, allowed fields, and sensitivity
+   flags. Add verified exact-question/read-only-SQL pairs for recurring canonical
+   questions that should bypass model SQL generation.
 7. Assign the owner Knowledge Space, optional shared Knowledge Spaces, and
    clearance.
 8. Select **Save Review** to preserve the current review state.
@@ -264,6 +292,12 @@ access.
 Only approved, non-sensitive tables, columns, and relationships can be queried.
 Write statements, wildcard column selection, unapproved joins, system schemas,
 and chained SQL statements are blocked.
+
+Live DB routes only across sources already authorized for the requesting user
+and selects one catalog before SQL generation. The configured Routing role may
+use a cloud model, vLLM, or Ollama. Generated filter values are bound as query
+parameters. A request performs one SQL generation and one execution; there is no
+automatic SQL repair or result-verifier loop.
 
 ## 10. Review Queue Administration
 
@@ -324,7 +358,24 @@ the case **Checks and diagnostic JSON** as `answer_content.llm_verifier`.
 ## 12. Runtime Settings
 
 Runtime Settings is Platform Admin-only under **Govern > Runtime Settings**. It
-includes **Models & Roles**, **Inference Services**, and **Ingestion Controls**.
+includes **Models & Roles**, **Inference Services**, **Ingestion Controls**, and
+**Branding**.
+
+### Branding
+
+Use **Branding** to set the workspace application name, primary and accent
+colors, theme background tint, sign-in message, optional support URL, and a PNG or JPEG logo (up to
+1 MB). You can let users choose their theme or force light or dark mode for the
+whole workspace. Choose compact, standard, or large presets for workspace H1,
+H2, and body text, with semibold, bold, or extra-bold heading weights. The live
+preview shows the selected colors, headings, body text, primary action, link,
+selected navigation, and keyboard focus treatment; it warns when primary or
+focus colors may be hard to see in dark mode. You can optionally set a separate
+color for H1 and H2, or keep either heading on its theme default. Changes apply immediately to the
+sign-in screen, navigation, page labels, assistant labels, browser title, and
+application icon. **Use
+default logo** removes only the custom logo; **Restore defaults** removes every
+workspace branding override. Each branding change is recorded in System Audit.
 
 The Evidence token budget is a workspace maximum. Query routes use smaller
 source-count and token limits for factual, comparison, and multi-hop answers to
@@ -383,9 +434,10 @@ is the expected provider until vLLM is deliberately enabled.
 
 ### Ingestion Controls
 
-Use **Ingestion Controls** to set worker concurrency, OCR review threshold, PDF
-image review threshold, vision layout repair, and graph-enrichment visibility
-for new ingestion jobs.
+Use **Ingestion Controls** to set worker concurrency, the browser-folder
+snapshot file limit, OCR review threshold, PDF image review threshold, vision
+layout repair, and graph-enrichment visibility for new ingestion jobs. Folder
+snapshots retain the separate 5 GB total-size limit.
 
 One worker-concurrency slot is recommended for the default 8 GB Docker
 environment. Increasing concurrency can improve throughput only if CPU, memory,

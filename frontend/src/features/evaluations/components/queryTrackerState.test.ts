@@ -35,6 +35,29 @@ describe("query tracker state", () => {
     expect(state.timeline[0]).toMatchObject({ kind: "source", detail: "Policy.pdf / page 4", status: "complete" });
   });
 
+  it("keeps retrieval candidates from every streamed stage", () => {
+    const candidate = {
+      rank: 1,
+      point_id: "policy:1",
+      chunk_id: "policy:1",
+      doc_id: "policy",
+      doc_title: "Policy.pdf",
+      group_path: "/ops",
+      retrieval_score: 0.91,
+      excerpt: "Approved policy excerpt.",
+    };
+    const stages = [
+      { name: "retrieved", candidate_count: 1 },
+      { name: "reranked", candidate_count: 1 },
+    ].reduce((state, stage) => reduceQueryTrackerEvent(state, {
+      event: "retrieval_stage",
+      data: { ...stage, attempt: 0, status: "completed", candidates: [candidate] },
+    } as RagSseEvent), createQueryTrackerState());
+
+    expect(stages.retrievalStages.map((stage) => stage.name)).toEqual(["retrieved", "reranked"]);
+    expect(stages.retrievalStages[0].candidates[0].excerpt).toBe("Approved policy excerpt.");
+  });
+
   it("surfaces warnings and errors", () => {
     const warned = reduceQueryTrackerEvent(createQueryTrackerState(), { event: "warning", data: { code: "low_faithfulness" } }, "2026-07-01T00:00:01.000Z");
     const failed = reduceQueryTrackerEvent(warned, { event: "error", data: { code: "failed", message: "Model timed out" } }, "2026-07-01T00:00:02.000Z");
@@ -108,6 +131,7 @@ function sourceAnchor(overrides: Partial<SourceAnchor> = {}): SourceAnchor {
     excerpt: "Approved policy excerpt.",
     group_path: "/ops",
     highlight_ranges: [],
+    citation_targets: [],
     page: null,
     page_end: null,
     page_start: 1,

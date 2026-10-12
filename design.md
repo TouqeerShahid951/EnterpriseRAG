@@ -1,6 +1,6 @@
 # Prudentia AI / AgenticRAG Design
 
-Last updated: 2026-06-18
+Last updated: 2026-08-30
 
 ## Purpose
 
@@ -31,11 +31,12 @@ artifacts are missing.
 ```mermaid
 flowchart LR
     Browser["React/Vite frontend"] --> API["FastAPI API<br/>/api/v1"]
-    API --> Postgres["Postgres<br/>metadata, users, jobs, audit"]
+    API --> Postgres["Postgres<br/>metadata, users, jobs, audit,<br/>approved connector catalogs"]
     API --> Redis["Redis<br/>Celery broker, sessions"]
     API --> MinIO["MinIO<br/>uploads and generated files"]
-    API --> Qdrant["Qdrant<br/>dense and sparse retrieval vectors"]
+    API --> Qdrant["Qdrant<br/>governed document and table-row vectors"]
     API --> Models["Ollama or vLLM<br/>chat, embeddings, vision"]
+    API --> LiveSQL["Approved live SQL sources<br/>PostgreSQL and SQL Server"]
 
     API --> Internal["FastAPI internal API<br/>/internal"]
     Internal --> Workers["Celery and loop workers"]
@@ -68,7 +69,7 @@ flowchart LR
 
 | Store | Contents |
 | --- | --- |
-| Postgres | Users, groups, document metadata, ingestion jobs, folder schedules, audit log, claims, conflicts, OCR review batches, chat history, artifact jobs, generated artifact metadata, evaluation datasets, and evaluation runs. |
+| Postgres | Users, groups, document metadata, ingestion jobs, folder schedules, connector profiles and approved schema catalogs, audit log, claims, conflicts, OCR review batches, chat history, artifact jobs, generated artifact metadata, evaluation datasets, and evaluation runs. |
 | Qdrant | Retrieval points for document chunks, including dense vectors, sparse vectors, ABAC payload fields, source anchors, metadata, claim markers, and current/superseded state. |
 | MinIO | Uploaded source files, document image assets, folder snapshot files, and generated artifact binaries. |
 | Redis | Celery broker state, refresh sessions, and query session cache when configured. |
@@ -211,17 +212,33 @@ flowchart TD
     Start["Query request"] --> Artifact{"Artifact request?"}
     Artifact -->|yes| Queue["Queue artifact job"]
     Artifact -->|no| Memory["Load session memory"]
-    Memory --> Source["Resolve explicit source scope"]
-    Source --> Planner["Typed capability planner"]
-    Planner --> Compile["Compile retrieval capabilities"]
-    Compile --> Retrieve["ABAC retrieval fan-out"]
-    Retrieve --> Rerank["Reranker"]
+    Memory --> Scope["Resolve explicit scope and follow-up context"]
+    Scope --> Auth["Apply RBAC and ABAC source filtering"]
+    Auth --> Candidates["Discover authorized source cards<br/>content, capabilities, freshness, provenance"]
+    Candidates --> Planner["Fast path or typed decomposition<br/>EvidenceNeed 1..N"]
+    Planner --> Assign["Bounded evidence-source plan<br/>need to required source assignments"]
+    Assign --> Compile["Deterministic capability compiler"]
+    subgraph Retrieval["Execution adapters — parallel when multiple are required"]
+        DocumentSearch["indexed_search<br/>ABAC vector, sparse, and table-row retrieval"]
+        Schema["connector_query<br/>rank approved tables and columns"]
+        SQL["legacy live_sql executor<br/>one validated read-only query per connector"]
+        Graph["graph_query<br/>authorized relationship retrieval"]
+    end
+    Compile --> DocumentSearch
+    Compile --> Schema
+    Compile --> Graph
+    Schema --> SQL
+    DocumentSearch --> Merge["Normalize provenance-aware evidence"]
+    SQL --> Merge
+    Graph --> Merge
+    Merge --> Dedupe["Deduplicate shared evidence lineage"]
+    Dedupe --> Rerank["Rerank while preserving each required need"]
     Rerank --> Verify["Retrieval availability check"]
-    Verify -->|rewrite once| Retrieve
+    Verify -->|rewrite once| Compile
     Verify --> Temporal["Temporal resolver"]
     Temporal --> Evidence["Evidence builder"]
     Evidence --> Gate["Semantic relevance and sufficiency gate"]
-    Gate -->|correct once| Retrieve
+    Gate -->|correct once| Compile
     Gate -->|partial or abstain| Synthesis["Synthesizer"]
     Gate -->|sufficient| Conflict["Contradiction detector"]
     Conflict --> Synthesis
@@ -235,6 +252,21 @@ session memory, typed capability planning, compiled multi-path retrieval,
 reranking, bounded correction, temporal resolution, semantic evidence
 sufficiency, conflict detection, evidence construction, answer synthesis,
 support and responsiveness validation, and response serialization.
+
+The source resolver supplies only authorized source cards to the planner. The
+planner describes evidence needs and assigns logical sources by their content,
+capabilities, freshness, provenance, examples, and exclusions; physical
+storage does not define the evidence category. A deterministic compiler maps
+those assignments onto the established indexed-search, connector-query, and
+graph executors. `live_sql` remains only as the compatibility name of the SQL
+executor and does not imply that connector data is current.
+
+One request can assign up to three approved connector catalogs. Each connector
+receives only its assigned evidence query and approved schema, then executes one
+validated read-only statement in bounded parallel fan-out. Results retain
+evidence-need and optional administrator-declared lineage identifiers so the
+reranker preserves required coverage and duplicate facts retrieved through
+different storage paths are not treated as independent corroboration.
 
 Streaming queries use SSE events from `/api/v1/query/stream`. Disconnects
 trigger a cancellation token so long-running graph work can stop where

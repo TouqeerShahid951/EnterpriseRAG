@@ -14,6 +14,7 @@ const source: SourceAnchor = {
   clearance_level: "NATO_RESTRICTED",
   group_path: "/admin",
   highlight_ranges: [],
+  citation_targets: [],
   page: 1,
   page_end: 1,
   page_start: 1,

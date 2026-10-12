@@ -21,6 +21,7 @@ export type RouteId =
   | "knowledge-spaces"
   | "login"
   | "overview"
+  | "operational-analytics"
   | "review"
   | "security-audit"
   | "settings"
@@ -48,6 +49,7 @@ export const routePaths: Record<RouteId, string> = {
   "knowledge-spaces": "/knowledge-spaces",
   login: "/login",
   overview: "/overview",
+  "operational-analytics": "/operational-analytics",
   review: "/review",
   "security-audit": "/security-audit",
   settings: "/settings",
@@ -71,11 +73,12 @@ export const routeTitles: Record<RouteId, string> = {
   "document-trash": "Document Trash",
   documents: "Documents",
   evaluations: "RAG Evaluation",
-  "ingestion-health": "Ingestion Health",
+  "ingestion-health": "Pipeline Health",
   "ingestion-jobs": "Ingestion Activity",
   "knowledge-spaces": "Knowledge Spaces",
   login: "Sign in",
-  overview: "Workspace Summary",
+  overview: "System Overview",
+  "operational-analytics": "Analytics",
   review: "Review Queue",
   "security-audit": "System Audit",
   settings: "Runtime Settings",
@@ -94,6 +97,7 @@ const routeAliases: Partial<Record<RouteId, RouteId>> = {
 
 const platformOnlyRoutes = new Set<RouteId>([
   "analytics",
+  "operational-analytics",
   "evaluations",
   "settings",
   "workspace-settings",
@@ -152,17 +156,9 @@ export function routeFromLocation(pathname = location.pathname, search = locatio
 }
 
 const workspaceNavigation: WorkspaceNavigationItem[] = [
-  {
-    children: [
-      { label: "Workspace Summary", route: "overview" },
-      { label: "Ingestion Health", route: "ingestion-health" },
-    ],
-    icon: "overview",
-    id: "overview",
-    label: "System Overview",
-    section: "Operate",
-  },
+  { icon: "overview", id: "overview", label: "System Overview", route: "overview", section: "Operate" },
   { icon: "query", id: "query", label: "Query Intelligence", route: "chat", section: "Operate" },
+  { icon: "analytics", id: "operational-analytics", label: "Analytics", route: "operational-analytics", section: "Operate" },
   {
     children: [
       { label: "Add Files", route: "upload" },
@@ -206,6 +202,7 @@ export function visibleNavigation(user: AuthUser): WorkspaceNavigationItem[] {
 }
 
 export function navigationGroupForRoute(route: RouteId): string | null {
+  if (route === "ingestion-health") return "document-intake";
   return workspaceNavigation.find((item) => item.route === route || item.children?.some((child) => child.route === route))?.id ?? null;
 }
 
@@ -219,7 +216,7 @@ function legacyKnowledgeSpaceRoute(pathname: string, search: string): RouteId | 
 }
 
 export type NavigationBadge = "review" | "trash";
-export type NavigationIcon = "audit" | "documents" | "evaluations" | "overview" | "query" | "review" | "settings" | "spaces" | "users";
+export type NavigationIcon = "analytics" | "audit" | "documents" | "evaluations" | "overview" | "query" | "review" | "settings" | "spaces" | "users";
 export type NavigateOptions = { replace?: boolean; search?: string | URLSearchParams };
 type WorkspaceNavigationChild = { badge?: NavigationBadge; label: string; route: RouteId };
 export type WorkspaceNavigationItem = {

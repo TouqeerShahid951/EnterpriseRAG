@@ -21,6 +21,7 @@ describe("PDF upload batches", () => {
       expiryDate: "2026-12-31",
       description: "Shared batch context",
       supersedesText: "old-document-id",
+      analyzeSlideVisuals: true,
     };
 
     const requests = toUploadRequests(draft);
@@ -47,6 +48,7 @@ describe("PDF upload batches", () => {
       expiryDate: "",
       description: "",
       supersedesText: "first-id, second-id",
+      analyzeSlideVisuals: false,
     });
 
     expect(requests[0]?.supersedes).toEqual(["first-id", "second-id"]);
@@ -62,15 +64,19 @@ describe("PDF upload batches", () => {
       expiryDate: "",
       description: "",
       supersedesText: "",
+      analyzeSlideVisuals: true,
     });
 
     expect(requests[0]?.effective_date).toBeNull();
   });
 
-  it("creates typed glossary requests for multiple PDFs and rejects non-PDF files", () => {
+  it("creates typed glossary requests for PDF/XLSX sources and rejects other files", () => {
     const pdf = new File(["%PDF-1.7"], "glossary.pdf", { type: "application/pdf" });
     const docx = new File(["docx"], "glossary.docx", {
       type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    const xlsx = new File(["xlsx"], "glossary.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
     const draft: PdfUploadDraft = {
       files: [pdf, new File(["%PDF-1.7"], "operations.pdf", { type: "application/pdf" })],
@@ -81,6 +87,7 @@ describe("PDF upload batches", () => {
       expiryDate: "",
       description: "Authoritative abbreviations",
       supersedesText: "current-glossary-id",
+      analyzeSlideVisuals: true,
     };
 
     const requests = toUploadRequests(draft, ABBREVIATION_GLOSSARY_DOC_TYPE);
@@ -88,6 +95,7 @@ describe("PDF upload batches", () => {
     expect(requests.every((request) => request.doc_type === ABBREVIATION_GLOSSARY_DOC_TYPE)).toBe(true);
     expect(requests.every((request) => request.supersedes?.length === 0)).toBe(true);
     expect(validateGlossaryPdfFiles([docx]).accepted).toEqual([]);
+    expect(validateGlossaryPdfFiles([xlsx]).accepted).toEqual([xlsx]);
     expect(validateGlossaryPdfFiles(draft.files).accepted).toEqual(draft.files);
   });
 
@@ -96,15 +104,17 @@ describe("PDF upload batches", () => {
     const jpg = new File(["jpeg"], "receipt.jpg", { type: "image/jpeg", lastModified: 3 });
     const png = new File(["png"], "diagram.png", { type: "image/png", lastModified: 4 });
     const json = new File(['{"case_id":"FIR-001"}'], "records.json", { type: "application/json", lastModified: 5 });
+    const csv = new File(["id,name\n1,Ada"], "people.csv", { type: "text/csv", lastModified: 6 });
+    const xlsx = new File(["xlsx"], "people.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", lastModified: 7 });
     const text = new File(["notes"], "notes.txt", { type: "text/plain", lastModified: 2 });
     const oversized = { name: "large.pdf", type: "application/pdf", size: 50 * 1024 * 1024 + 1 } as File;
 
     expect(mergeDocumentFiles([pdf], [pdf])).toEqual([pdf]);
 
-    const validation = validateDocumentFiles([pdf, jpg, png, json, text, oversized]);
-    expect(validation.accepted).toEqual([pdf, jpg, png, json]);
+    const validation = validateDocumentFiles([pdf, jpg, png, json, csv, xlsx, text, oversized]);
+    expect(validation.accepted).toEqual([pdf, jpg, png, json, csv, xlsx]);
     expect(validation.rejectedMessages).toEqual([
-      "notes.txt is not a PDF, DOCX, JPG, PNG, or JSON file.",
+      "notes.txt is not a PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, or JSON file.",
       "large.pdf exceeds the 50 MB upload limit.",
     ]);
   });

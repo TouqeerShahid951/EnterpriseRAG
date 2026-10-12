@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { PrudentiaBrandMark } from "@/components/brand/PrudentiaBrand";
+import { useBranding } from "@/components/brand/BrandContext";
 import {
   navigationGroupForRoute,
   visibleNavigation,
@@ -46,6 +47,7 @@ export function PrudentiaSidebar({
   sidebarWidth,
   user,
 }: Props) {
+  const branding = useBranding();
   const userGroupPaths = user.group_paths ?? [];
   const userEmail = user.email ?? "Unknown user";
   const primarySpace = formatKnowledgeSpace(userGroupPaths);
@@ -86,7 +88,7 @@ export function PrudentiaSidebar({
         <div className="Prudentia-mobile-brand">
           <PrudentiaBrandMark className="Prudentia-mobile-brand-mark" />
           <span>
-            <strong>Prudentia AI</strong>
+            <strong>{branding.app_name}</strong>
             <small>{items.find((item) => item.id === navigationGroupForRoute(activeRoute))?.label ?? "Workspace"}</small>
           </span>
         </div>
@@ -110,7 +112,7 @@ export function PrudentiaSidebar({
         <div className="Prudentia-sidebar-mobile-heading">
           <span className="Prudentia-sidebar-mobile-heading-brand">
             <PrudentiaBrandMark className="Prudentia-mobile-brand-mark" />
-            <strong>Prudentia AI</strong>
+            <strong>{branding.app_name}</strong>
           </span>
           <button type="button" onClick={drawer.closeAndRestoreFocus} aria-label="Close workspace navigation">
             <X size={16} />
@@ -122,7 +124,7 @@ export function PrudentiaSidebar({
               <div className="Prudentia-sidebar-context-heading">
                 <PrudentiaBrandMark />
                 <div className="min-w-0">
-                  <h2>Prudentia AI</h2>
+                  <h2>{branding.app_name}</h2>
                 </div>
                 <SidebarCollapseButton
                   collapsed={sidebarCollapsed}
@@ -135,7 +137,7 @@ export function PrudentiaSidebar({
             <div className="Prudentia-sidebar-product">
               <PrudentiaBrandMark />
               <div className="min-w-0">
-                <h2 className="truncate text-label-md font-bold uppercase text-on-surface">Prudentia AI</h2>
+                <h2 className="truncate text-label-md font-bold uppercase text-on-surface">{branding.app_name}</h2>
                 <p className="truncate text-[11px] font-semibold text-on-surface-variant">{primarySpace}</p>
               </div>
               <SidebarCollapseButton

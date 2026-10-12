@@ -136,7 +136,7 @@ def test_expired_document_scan_deadline_avoids_storage_io(monkeypatch) -> None:
         timeout_seconds=30,
     )
 
-    hits = client.retrieve_document_chunks(
+    result = client.scan_document_chunks(
         document_ids=["doc"],
         qdrant_filter={},
         structured_only=False,
@@ -144,8 +144,36 @@ def test_expired_document_scan_deadline_avoids_storage_io(monkeypatch) -> None:
         deadline=0.0,
     )
 
-    assert hits == []
+    assert result.hits == ()
+    assert result.complete is False
+    assert result.stop_reason == "deadline_exceeded"
     assert called is False
+
+
+def test_empty_document_scan_reports_complete(monkeypatch) -> None:
+    monkeypatch.setattr(
+        qdrant_module,
+        "request_json",
+        lambda *_args, **_kwargs: {
+            "result": {"points": [], "next_page_offset": None}
+        },
+    )
+    client = QdrantClient(
+        base_url="http://qdrant.test",
+        collection="documents",
+        timeout_seconds=1,
+    )
+
+    result = client.scan_document_chunks(
+        document_ids=["doc"],
+        qdrant_filter={},
+        structured_only=False,
+        limit=10,
+    )
+
+    assert result.hits == ()
+    assert result.complete is True
+    assert result.stop_reason is None
 
 
 def test_generation_fence_returns_only_the_active_published_points(monkeypatch) -> None:

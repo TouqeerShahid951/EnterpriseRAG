@@ -118,6 +118,7 @@ class PostgresIdentityRepository(PostgresConnectionMixin):
         self,
         user_id: str,
         *,
+        email: str | None = None,
         name: str | None = None,
         group_paths: list[str] | None = None,
         is_active: bool | None = None,
@@ -127,6 +128,7 @@ class PostgresIdentityRepository(PostgresConnectionMixin):
         current = self.get_user_by_id(user_id)
         if current is None:
             return None
+        next_email = current.email if email is None else email.strip().lower()
         groups = None if group_paths is None else self._normalize_existing_groups(group_paths)
         next_groups = current.group_paths if groups is None else tuple(groups)
         next_account_type = current.account_type if account_type is None else normalize_account_type(account_type, next_groups)
@@ -140,19 +142,23 @@ class PostgresIdentityRepository(PostgresConnectionMixin):
         ) or next_account_type != current.account_type or next_clearance != current.clearance_level
         with self._connect() as conn:
             with conn.transaction():
-                conn.execute(
+                result = conn.execute(
                     """
                     UPDATE users
-                    SET name = COALESCE(%s, name),
+                    SET email = %s,
+                        name = COALESCE(%s, name),
                         is_active = COALESCE(%s, is_active),
                         account_type = %s,
                         clearance_level = %s,
                         permission_version = permission_version + %s,
                         updated_at = NOW()
                     WHERE id = %s
+                      AND NOT EXISTS (SELECT 1 FROM users WHERE lower(email) = lower(%s) AND id <> %s)
                     """,
-                    (name.strip() if name is not None else None, is_active, next_account_type, next_clearance, 1 if permission_changed else 0, user_id),
+                    (next_email, name.strip() if name is not None else None, is_active, next_account_type, next_clearance, 1 if permission_changed else 0, user_id, next_email, user_id),
                 )
+                if not result.rowcount:
+                    raise ValueError("email already exists")
                 if groups is not None:
                     conn.execute("DELETE FROM user_groups WHERE user_id = %s", (user_id,))
                     for group_path in groups:
@@ -166,6 +172,24 @@ class PostgresIdentityRepository(PostgresConnectionMixin):
         with self._connect() as conn:
             result = conn.execute("DELETE FROM users WHERE id = %s", (user_id,))
             return result.rowcount > 0
+
+    def set_user_email(self, user_id: str, email: str) -> UserRecord | None:
+        normalized = email.strip().lower()
+        with self._connect() as conn:
+            result = conn.execute(
+                """
+                UPDATE users
+                SET email = %s, updated_at = NOW()
+                WHERE id = %s
+                  AND NOT EXISTS (SELECT 1 FROM users WHERE lower(email) = lower(%s) AND id <> %s)
+                """,
+                (normalized, user_id, normalized, user_id),
+            )
+        if result.rowcount:
+            return self.get_user_by_id(user_id)
+        if self.get_user_by_id(user_id) is not None:
+            raise ValueError("email already exists")
+        return None
 
     def set_user_password(self, user_id: str, password_hash: str, *, must_change_password: bool = False) -> UserRecord | None:
         with self._connect() as conn:

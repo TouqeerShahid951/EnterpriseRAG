@@ -100,6 +100,7 @@ class EvaluationCaseExecutor:
                 force_faithfulness_check=(
                     case.must_cite_source or case.min_faithfulness_score > 0
                 ),
+                analytics_origin="evaluation",
             )
             response = execution.response
             retrieval_trace = execution.retrieval_trace

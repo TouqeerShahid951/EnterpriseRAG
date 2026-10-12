@@ -3,4 +3,5 @@
 @import "./source-viewer/image-and-assets.css";
 @import "./source-viewer/docx.css";
 @import "./source-viewer/json.css";
+@import "./source-viewer/spreadsheet.css";
 @import "./source-viewer/responsive-and-motion.css";

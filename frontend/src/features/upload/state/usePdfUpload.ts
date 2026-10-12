@@ -60,9 +60,14 @@ export function usePdfUpload(currentUser: AuthUser | null, enabled = true, docTy
   });
 
   const recentUploadJobsQuery = useQuery({
-    queryKey: ["ingest-jobs", "recent-uploads", "mine", currentUser?.user_id],
-    queryFn: () => ingestJobsApi.list({ uploaded_by_me: true, limit: RECENT_UPLOAD_JOB_LIMIT, offset: 0 }),
-    enabled: Boolean(currentUser) && enabled && uploadHistoryBelongsOnPage(docType),
+    queryKey: recentUploadJobsQueryKey(currentUser?.user_id, docType),
+    queryFn: () => ingestJobsApi.list({
+      uploaded_by_me: docType === ABBREVIATION_GLOSSARY_DOC_TYPE ? undefined : true,
+      abbreviation_glossary_only: docType === ABBREVIATION_GLOSSARY_DOC_TYPE,
+      limit: RECENT_UPLOAD_JOB_LIMIT,
+      offset: 0,
+    }),
+    enabled: Boolean(currentUser) && enabled,
     refetchInterval: (query) => query.state.data?.items?.some((job) => !isUploadTerminalStatus(job.status)) ? 2500 : false,
     retry: false,
     staleTime: 1000,
@@ -152,7 +157,7 @@ export function usePdfUpload(currentUser: AuthUser | null, enabled = true, docTy
   });
   const submissionJobIds = new Set(submissions.map((submission) => submission.jobId).filter(Boolean));
   const recentJobs = (recentUploadJobsQuery.data?.items ?? [])
-    .filter((job) => job.origin === "upload" || job.retry_of_job_id);
+    .filter((job) => docType === ABBREVIATION_GLOSSARY_DOC_TYPE || job.origin === "upload" || job.retry_of_job_id);
   const retriedJobIds = new Set(recentJobs.map((job) => job.retry_of_job_id).filter(Boolean));
   const backendItems = recentJobs
     .filter((job) => !submissionJobIds.has(job.job_id) && !retriedJobIds.has(job.job_id))
@@ -205,10 +210,6 @@ export interface UploadSubmission {
 
 type UploadSubmissionClearanceLevel = PdfUploadDraft["clearanceLevel"];
 
-export function uploadHistoryBelongsOnPage(docType: string | null): boolean {
-  return docType !== ABBREVIATION_GLOSSARY_DOC_TYPE;
-}
-
 function normalizeError(error: unknown): Error {
   return error instanceof Error ? error : new Error("Document upload failed.");
 }
@@ -237,6 +238,10 @@ export function parseDismissedUploadJobIds(value: string | null): Set<string> {
   } catch {
     return new Set();
   }
+}
+
+export function recentUploadJobsQueryKey(userId: string | undefined, docType: string | null) {
+  return ["ingest-jobs", "recent-uploads", "mine", userId, docType === ABBREVIATION_GLOSSARY_DOC_TYPE ? "glossary" : "documents"] as const;
 }
 
 function readDismissedUploadJobIds(userId: string | undefined): Set<string> {

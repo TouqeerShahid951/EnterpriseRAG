@@ -85,6 +85,8 @@ class DocumentOverviewSnapshot:
     superseded_versions: int = 0
     expiring_soon_current: int = 0
     trash: int = 0
+    cancelled_current: int = 0
+    attention_jobs: tuple[IngestJobRecord, ...] = ()
     attention_documents: tuple[DocumentRecord, ...] = ()
     spaces: tuple[DocumentOverviewSpaceRecord, ...] = ()
 
@@ -138,6 +140,7 @@ class DocumentRepository(Protocol):
         state: Literal["active", "deleted"] = "active",
         clearance_levels: tuple[ClearanceLevel, ...],
         group_paths: tuple[str, ...] | None,
+        exclude_abbreviation_glossary: bool = False,
     ) -> dict[str, int]: ...
     def summarize_document_overview(
         self,
@@ -147,6 +150,7 @@ class DocumentRepository(Protocol):
         expiring_from: date,
         expiring_to: date,
         attention_limit: int,
+        exclude_abbreviation_glossary: bool = False,
     ) -> DocumentOverviewSnapshot: ...
     def get_document(self, document_id: str, *, include_deleted: bool = False) -> DocumentRecord | None: ...
     def replace_document_shares(
@@ -171,6 +175,13 @@ class DocumentRepository(Protocol):
         *,
         topics: list[str],
         llm_topics: list[str],
+    ) -> DocumentRecord | None: ...
+    def update_document_metadata_flag(
+        self,
+        document_id: str,
+        *,
+        key: str,
+        value: Any,
     ) -> DocumentRecord | None: ...
     def save_document_metadata(
         self,

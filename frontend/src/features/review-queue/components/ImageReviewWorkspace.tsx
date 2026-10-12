@@ -93,7 +93,23 @@ export function ImageReviewWorkspace({
   const canDecide = Boolean(selectedBatch) && !previewMode && !isMutating;
 
   return (
-    <div className="review-layout review-image-layout" id="review-panel-images" role="tabpanel" aria-labelledby="review-tab-images" tabIndex={0}>
+    <div className="review-image-workspace" id="review-panel-images" role="tabpanel" aria-labelledby="review-tab-images" tabIndex={0}>
+      <section className="sv-card review-image-top-actions" aria-label="Quick PDF image review decisions">
+        <div>
+          <p className="sv-eyebrow">Quick decision</p>
+          <p className="review-image-top-actions-summary" aria-live="polite">
+            {selectedBatch ? `${selectedPendingIds.length} selected from ${selectedBatch.pending_count} pending` : "No batch selected."}
+          </p>
+        </div>
+        <DecisionActions
+          canDecide={canDecide}
+          isMutating={isMutating}
+          pendingCount={pendingCandidates.length}
+          selectedPendingIds={selectedPendingIds}
+          onDecide={decide}
+        />
+      </section>
+      <div className="review-layout review-image-layout">
       <section className="sv-card review-image-batch-panel" aria-label="PDF image review batches">
         <div className="review-panel-header">
           <div>
@@ -203,39 +219,64 @@ export function ImageReviewWorkspace({
           <ReviewFact label="Analyze" value={String(selectedBatch?.approved_count ?? 0)} />
           <ReviewFact label="Skipped" value={String(selectedBatch?.skipped_count ?? 0)} />
         </dl>
-        <div className="review-actions">
-          <button
-            type="button"
-            onClick={() => decide({ approve_candidate_ids: selectedPendingIds, skip_remaining: true })}
-            disabled={!canDecide || selectedPendingIds.length === 0}
-            className="sv-action-primary"
-          >
-            {isMutating ? <Loader2 aria-hidden="true" className="animate-spin" size={16} /> : <CheckCircle2 aria-hidden="true" size={16} />}
-            Analyze selected
-          </button>
-          <button type="button" onClick={() => decide({ approve_recommended: true, skip_remaining: true })} disabled={!canDecide} className="sv-action-secondary">
-            <CheckSquare aria-hidden="true" size={16} />
-            Analyze recommended
-          </button>
-          <button
-            type="button"
-            onClick={() => decide({ skip_candidate_ids: selectedPendingIds })}
-            disabled={!canDecide || selectedPendingIds.length === 0}
-            className="sv-action-secondary"
-          >
-            <XCircle aria-hidden="true" size={16} />
-            Skip selected
-          </button>
-          <button type="button" onClick={() => decide({ skip_remaining: true })} disabled={!canDecide || pendingCandidates.length === 0} className="sv-action-danger">
-            <XCircle aria-hidden="true" size={16} />
-            Skip all pending
-          </button>
-        </div>
+        <DecisionActions
+          canDecide={canDecide}
+          isMutating={isMutating}
+          pendingCount={pendingCandidates.length}
+          selectedPendingIds={selectedPendingIds}
+          onDecide={decide}
+        />
         <p className="review-helper-text" role="status">
           <AlertTriangle aria-hidden="true" size={14} />
           The job resumes when no candidates remain pending.
         </p>
       </aside>
+      </div>
+    </div>
+  );
+}
+
+function DecisionActions({
+  canDecide,
+  isMutating,
+  pendingCount,
+  selectedPendingIds,
+  onDecide,
+}: {
+  canDecide: boolean;
+  isMutating: boolean;
+  pendingCount: number;
+  selectedPendingIds: string[];
+  onDecide: (request: Parameters<typeof reviewApi.decideImageBatch>[1]) => void;
+}) {
+  return (
+    <div className="review-actions">
+      <button
+        type="button"
+        onClick={() => onDecide({ approve_candidate_ids: selectedPendingIds, skip_remaining: true })}
+        disabled={!canDecide || selectedPendingIds.length === 0}
+        className="sv-action-primary"
+      >
+        {isMutating ? <Loader2 aria-hidden="true" className="animate-spin" size={16} /> : <CheckCircle2 aria-hidden="true" size={16} />}
+        Analyze selected
+      </button>
+      <button type="button" onClick={() => onDecide({ approve_recommended: true, skip_remaining: true })} disabled={!canDecide} className="sv-action-secondary">
+        <CheckSquare aria-hidden="true" size={16} />
+        Analyze recommended
+      </button>
+      <button
+        type="button"
+        onClick={() => onDecide({ skip_candidate_ids: selectedPendingIds })}
+        disabled={!canDecide || selectedPendingIds.length === 0}
+        className="sv-action-secondary"
+      >
+        <XCircle aria-hidden="true" size={16} />
+        Skip selected
+      </button>
+      <button type="button" onClick={() => onDecide({ skip_remaining: true })} disabled={!canDecide || pendingCount === 0} className="sv-action-danger">
+        <XCircle aria-hidden="true" size={16} />
+        Skip all pending
+      </button>
     </div>
   );
 }

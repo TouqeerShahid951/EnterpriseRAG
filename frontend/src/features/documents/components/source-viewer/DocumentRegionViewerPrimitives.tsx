@@ -1,3 +1,4 @@
+import { useSourceRevision } from "./SourceRevisionContext";
 import { AlertTriangle, Image as ImageIcon, Maximize2, Minimize2, ZoomIn, ZoomOut } from "lucide-react";
 
 import { documentsApi } from "@/lib/api/contracts";
@@ -101,7 +102,7 @@ export function ViewerZoomControls({
   );
 }
 
-export function ImageAssetStrip({ documentId, regions }: { documentId: string; regions: DocumentRegion[] }) {
+export function ImageAssetStrip({ documentId, fallbackPage, onOpenPage, regions }: { documentId: string; fallbackPage?: number; onOpenPage?: (page: number) => void; regions: DocumentRegion[] }) {
   const assetRegions = imageAssetRegions(regions);
   if (assetRegions.length === 0) return null;
   return (
@@ -110,6 +111,8 @@ export function ImageAssetStrip({ documentId, regions }: { documentId: string; r
         <ImageAssetPreview
           key={region.imageAssetId}
           documentId={documentId}
+          fallbackPage={fallbackPage}
+          onOpenPage={onOpenPage}
           region={region}
         />
       ))}
@@ -117,10 +120,12 @@ export function ImageAssetStrip({ documentId, regions }: { documentId: string; r
   );
 }
 
-function ImageAssetPreview({ documentId, region }: { documentId: string; region: DocumentRegion }) {
+function ImageAssetPreview({ documentId, fallbackPage, onOpenPage, region }: { documentId: string; fallbackPage?: number; onOpenPage?: (page: number) => void; region: DocumentRegion }) {
+  const revision = useSourceRevision();
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const assetId = region.imageAssetId ?? "";
+  const page = region.page ?? fallbackPage;
 
   useEffect(() => {
     if (!assetId) return undefined;
@@ -131,7 +136,7 @@ function ImageAssetPreview({ documentId, region }: { documentId: string; region:
       try {
         setError(null);
         setObjectUrl(null);
-        const response = await documentsApi.imageAssetContent(documentId, assetId, { signal: controller.signal });
+        const response = await documentsApi.imageAssetContent(documentId, assetId, { signal: controller.signal }, revision);
         if (!response.ok) throw new Error(`Image evidence could not be opened (${response.status}).`);
         const blob = await response.blob();
         if (controller.signal.aborted) return;
@@ -147,7 +152,23 @@ function ImageAssetPreview({ documentId, region }: { documentId: string; region:
       controller.abort();
       if (nextObjectUrl) URL.revokeObjectURL(nextObjectUrl);
     };
-  }, [assetId, documentId]);
+  }, [assetId, documentId, revision]);
+
+  if (page != null && onOpenPage) {
+    return (
+      <button className="source-viewer-asset-item" type="button" onClick={() => onOpenPage(page)} aria-label={`Open image on page ${page}`}>
+        <span className="source-viewer-asset-frame">
+          {objectUrl ? <img alt="Extracted image evidence" src={objectUrl} /> : null}
+          {!objectUrl && !error ? <ImageIcon aria-hidden="true" size={20} /> : null}
+          {error ? <span>{error}</span> : null}
+        </span>
+        <span className="source-viewer-asset-caption">
+          <strong>{sourceKindLabel(region.imageSourceKind)}</strong>
+          {region.text ? <span>{region.text}</span> : null}
+        </span>
+      </button>
+    );
+  }
 
   return (
     <figure className="source-viewer-asset-item">

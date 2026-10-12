@@ -30,6 +30,7 @@ _TASK_SAFE_ERROR_MESSAGES = {
     "artifact_authorization_changed": "Authorization changed while the document was being generated.",
     "artifact_context_rejected": "The generation context was rejected by the backend.",
     "artifact_generation_failed": "Document generation failed. You can retry the job.",
+    "artifact_citation_verification_failed": "Supporting citations could not be verified.",
     "artifact_no_evidence": "No authorized evidence was found for this document generation request.",
     "artifact_timeout": "Document generation timed out. You can retry the job.",
 }
@@ -180,8 +181,8 @@ def run_artifact_job(
             repository,
             job_id,
             run_token=run_token,
-            stage="retrieving",
-            code="artifact_no_evidence",
+            stage=exc.stage,
+            code=exc.code,
         )
         repository.transition_job(
             job_id,
@@ -191,7 +192,7 @@ def run_artifact_job(
                 "stage": "failed",
                 "progress_pct": 100,
                 "stage_progress": None,
-                "error_code": "artifact_no_evidence",
+                "error_code": exc.code,
                 "error_message_safe": exc.safe_message,
                 "completed_at": datetime.now(UTC),
             },

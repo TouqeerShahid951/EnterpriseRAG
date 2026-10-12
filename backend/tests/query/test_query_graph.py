@@ -7,6 +7,8 @@ from rag.query.nodes import QueryNodes
 from rag.query.routing.routing_models import RoutePlan
 from rag.query.routing.conversation_resolution import ConversationResolution
 from rag.query.schemas import QueryRequest, RAGResponse
+from rag.query.sources.database_router import DatabaseRouteDecision
+from rag.query.sources.source_resolution import SourceDecision
 from rag.query.state import QueryContext, initial_state
 
 
@@ -93,6 +95,52 @@ def test_query_runner_preserves_planning_retry_and_response_order() -> None:
     )
 
 
+class SummaryRecordingNodes(RecordingNodes):
+    def intent_router(self, ctx: QueryContext) -> QueryContext:
+        self.calls.append("intent_router")
+        ctx["intent"] = "multi_hop"
+        ctx["route_plan"] = RoutePlan(
+            original_query=ctx["request"].query,
+            resolved_query=ctx["request"].query,
+            intent="summarization",
+            capabilities=("general_search", "document_search"),
+            response_mode="summary",
+            scope="document",
+            coverage="exhaustive",
+            summary_mode="document",
+            public_intent="multi_hop",
+        )
+        return ctx
+
+
+def test_query_runner_uses_summary_path_before_qa_ranking() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="Summarize this document"),
+        user=UserContext(
+            user_id="user", email="user@example.com", group_paths=("/admin",)
+        ),
+        started=perf_counter(),
+    )
+    nodes = SummaryRecordingNodes()
+
+    QueryGraphRunner(cast(QueryNodes, nodes)).invoke(ctx)
+
+    assert nodes.calls == [
+        "session_memory",
+        "conversation_resolver",
+        "source_resolver",
+        "intent_router",
+        "abac_retriever",
+        "temporal_resolver",
+        "summary_preparer",
+        "synthesizer",
+        "faithfulness_checker",
+        "response_serializer",
+    ]
+
+
 class ClarificationNodes(RecordingNodes):
     def conversation_resolver(self, ctx: QueryContext) -> QueryContext:
         self.calls.append("conversation_resolver")
@@ -146,6 +194,72 @@ def test_query_runner_clarifies_without_routing_or_retrieval() -> None:
         "session_memory",
         "conversation_resolver",
         "conversation_clarifier",
+        "response_serializer",
+    ]
+    assert result["response"].answer_status == "clarification"
+
+
+class SourceClarificationNodes(RecordingNodes):
+    def source_resolver(self, ctx: QueryContext) -> QueryContext:
+        self.calls.append("source_resolver")
+        ctx["source_decision"] = SourceDecision(
+            requested_mode="db_only",
+            resolved_mode="db_only",
+            semantic_query=ctx["request"].query,
+            explicit=True,
+            reason="composer_selected_database:database_clarification",
+            database_route=DatabaseRouteDecision(
+                outcome="clarification",
+                selected_catalog_id=None,
+                candidates=(),
+                reason="multiple_sources",
+                clarification_question="Which database should I use?",
+            ),
+        )
+        return ctx
+
+    def source_clarifier(self, ctx: QueryContext) -> QueryContext:
+        self.calls.append("source_clarifier")
+        ctx["response"] = RAGResponse(
+            trace_id=ctx["trace_id"],
+            answer="Which database should I use?",
+            answer_status="clarification",
+            conflict_flag=False,
+            faithfulness_score=0.0,
+            faithfulness_status="skipped",
+            intent="conversational",
+            session_id=ctx["session_id"],
+            latency_ms=0,
+            degraded=False,
+        )
+        return ctx
+
+    def response_serializer(self, ctx: QueryContext) -> QueryContext:
+        self.calls.append("response_serializer")
+        return ctx
+
+
+def test_query_runner_clarifies_database_before_sql_or_retrieval() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="Show totals", source_mode="db_only"),
+        user=UserContext(
+            user_id="user",
+            email="user@example.com",
+            group_paths=("/admin",),
+        ),
+        started=perf_counter(),
+    )
+    nodes = SourceClarificationNodes()
+
+    result = QueryGraphRunner(cast(QueryNodes, nodes)).invoke(ctx)
+
+    assert nodes.calls == [
+        "session_memory",
+        "conversation_resolver",
+        "source_resolver",
+        "source_clarifier",
         "response_serializer",
     ]
     assert result["response"].answer_status == "clarification"

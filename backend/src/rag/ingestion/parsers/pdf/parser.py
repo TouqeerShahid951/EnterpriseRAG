@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from rag.ingestion.errors import UnsupportedPdfError
+from rag.ingestion.errors import UnsupportedPdfError, IncompletePdfError
 from rag.ingestion.parsers.docling.adapter import DoclingProgressCallback
 from rag.ingestion.parsers.pdf.layered import parse_layered_pdf
 from rag.ingestion.parsers.models import DocumentParseResult, ParsedPdfItem
@@ -39,8 +39,13 @@ def parse_pdf_document(
         page_progress_callback=page_progress_callback,
         docling_progress_callback=docling_progress_callback,
     )
+    failed_pages = [entry["page"] for entry in result.provenance.get("page_statuses", []) if entry["status"] == "failed"]
+    if failed_pages:
+        raise IncompletePdfError(result.provenance)
     items = result.items
-    page_count = int(result.provenance.get("page_count") or 0)
+    page_count = int(result.provenance.get("page_count") or 0) - sum(
+        entry["status"] == "confirmed_blank" for entry in result.provenance.get("page_statuses", [])
+    )
     _validate_native_text(items, min_chars_per_page=min_chars_per_page, page_count=page_count)
     return result
 

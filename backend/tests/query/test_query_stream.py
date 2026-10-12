@@ -3,11 +3,15 @@ from types import SimpleNamespace
 from time import perf_counter
 
 from rag.auth.context import UserContext
-from rag.graphrag.graphrag_synthesizer import synthesize_graphrag_response
+from rag.graphrag.graphrag_synthesizer import synthesize_graphrag_response, graphrag_synthesis_steps
 from rag.graphrag.models import CommunitySummary, SourceRef
 from rag.graphrag.qdrant import CommunitySearchHit
 from rag.query.qdrant import SearchHit
-from rag.query.query_stream import _stream_response_tail, _stream_synthesizer, stream_graph
+from rag.query.answering.synthesis import synthesize_response, synthesis_steps
+from rag.query.http import ServiceRequestError
+from rag.query.nodes.response_nodes import ResponseNodes
+from rag.query.query_stream import _new_retrieval_stage_events, _stream_response_tail, _stream_synthesizer, stream_graph
+from rag.query.retrieval.retrieval_trace import retrieval_trace_stage
 from rag.query.routing.routing_models import RoutePlan
 from rag.query.routing.conversation_resolution import ConversationResolution
 from rag.query.state import QueryContext, initial_state
@@ -60,6 +64,15 @@ class FakeStreamingLlm:
         return "".join(self.chunks)
 
 
+class ContextLimitedStreamingLlm(FakeStreamingLlm):
+    def answer(self, **_: object):
+        raise ServiceRequestError("ollama", "input prompt is too long", 400)
+
+    def stream_answer(self, **_: object):
+        yield from self.chunks
+        raise ServiceRequestError("ollama", "input prompt is too long", 400)
+
+
 class FakeSynthesizerNodes:
     def __init__(self, chunks: list[str], *, faithfulness_answer: str | None = None) -> None:
         self.ollama = FakeStreamingLlm(chunks)
@@ -68,8 +81,16 @@ class FakeSynthesizerNodes:
         self.faithfulness_answer = faithfulness_answer
 
     def synthesizer(self, ctx: QueryContext) -> QueryContext:
-        self.specialized_synthesizer_called = True
-        return synthesize_graphrag_response(ctx, self.ollama)
+        if ctx.get("graphrag_communities"):
+            self.specialized_synthesizer_called = True
+            return synthesize_graphrag_response(ctx, self.ollama)
+        return synthesize_response(ctx, self.ollama)
+
+    def synthesis_steps(self, ctx: QueryContext, *, stream: bool = False):
+        if ctx.get("graphrag_communities"):
+            self.specialized_synthesizer_called = True
+            return (yield from graphrag_synthesis_steps(ctx, self.ollama, stream=stream))
+        return (yield from synthesis_steps(ctx, self.ollama, stream=stream))
 
     def faithfulness_checker(self, ctx: QueryContext) -> QueryContext:
         if self.faithfulness_answer is not None:
@@ -269,6 +290,55 @@ def test_stream_graph_retries_after_evidence_gate_before_synthesis() -> None:
     assert [event.data["text"] for event in events if event.event == "token"] == [ctx["response"].answer]
 
 
+class FakeSummaryNodes(FakeEvidenceGateNodes):
+    reasoning_model = None
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ollama = FakeStreamingLlm(["Finding A. [report-a:1]"])
+
+    def intent_router(self, ctx: QueryContext) -> QueryContext:
+        self._record("intent_router", ctx)
+        ctx["intent"] = "multi_hop"
+        ctx["route_plan"] = RoutePlan(
+            original_query=ctx["request"].query,
+            resolved_query=ctx["request"].query,
+            intent="summarization",
+            capabilities=("general_search", "document_search"),
+            response_mode="summary",
+            scope="document",
+            coverage="exhaustive",
+            summary_mode="document",
+            public_intent="multi_hop",
+        )
+        return ctx
+
+
+def test_stream_graph_emits_summary_progress_and_skips_qa_ranking() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="Summarize this document"),
+        user=UserContext(
+            user_id="user", email="user@example.com", group_paths=("/admin",)
+        ),
+        started=perf_counter(),
+    )
+    nodes = FakeSummaryNodes()
+
+    events = list(stream_graph(ctx, nodes))
+    traces = [event.data for event in events if event.event == "trace"]
+
+    assert any(
+        event.get("node") == "summary_preparer"
+        and event.get("stage") == "summary_ready"
+        for event in traces
+    )
+    assert not any(event.get("node") in {"reranker", "evidence_builder"} for event in traces)
+    assert len([event for event in events if event.event == "source"]) == 1
+    assert next(event for event in events if event.event == "done").data["sources"]
+
+
 class FakeClarificationNodes(FakeSynthesizerNodes):
     def __init__(self) -> None:
         super().__init__([])
@@ -339,33 +409,57 @@ def test_stream_graph_clarifies_without_source_or_retrieval_events() -> None:
     ] == "clarification"
 
 
-def test_stream_synthesizer_emits_only_validated_citation_rewrite() -> None:
+def test_stream_synthesizer_streams_draft_then_replaces_citation_rewrite() -> None:
     ctx = context_with_evidence()
-    nodes = FakeSynthesizerNodes(["Finding A ", "[wrong:source]."])
+    nodes = FakeSynthesizerNodes(["Finding A ", "[wrong:source]."], faithfulness_answer="Finding A. [report-a:1]")
 
     events = list(_stream_synthesizer(ctx, nodes))
     events.extend(_stream_response_tail(ctx, nodes))
 
     token_text = "".join(str(event.data["text"]) for event in events if event.event == "token")
     done = next(event for event in events if event.event == "done")
-    assert token_text == "Finding A. [report-a:1]"
+    assert token_text == "Finding A [wrong:source]."
     assert done.data["answer"] == "Finding A. [report-a:1]"
     assert ctx["response"].answer == done.data["answer"]
 
 
-def test_stream_synthesizer_emits_one_authoritative_answer_token() -> None:
+def test_stream_synthesizer_emits_model_chunks_without_duplicate_final_token() -> None:
     ctx = context_with_evidence()
-    nodes = FakeSynthesizerNodes(["Finding A."])
+    nodes = FakeSynthesizerNodes(["Finding ", "A."], faithfulness_answer="Finding A. [report-a:1]")
 
     events = list(_stream_synthesizer(ctx, nodes))
     events.extend(_stream_response_tail(ctx, nodes))
 
-    token_texts = [event.data["text"] for event in events if event.event == "token"]
-    assert token_texts == ["Finding A. [report-a:1]"]
-    assert token_texts[0] == ctx["response"].answer
+    token_events = [event.data for event in events if event.event == "token"]
+    assert token_events == [{"text": "Finding "}, {"text": "A."}]
+    assert ctx["response"].answer == "Finding A. [report-a:1]"
 
 
-def test_stream_synthesizer_does_not_leak_answer_rejected_by_faithfulness() -> None:
+def test_never_policy_skips_faithfulness_for_grounded_answers() -> None:
+    ctx = {"response": SimpleNamespace(sources=[object()], conflict_flag=False)}
+
+    assert ResponseNodes.should_run_faithfulness(
+        SimpleNamespace(faithfulness_policy="never"), ctx
+    ) is False
+
+
+def test_stream_synthesizer_finishes_a_partial_answer_when_ollama_hits_its_context_limit() -> None:
+    ctx = context_with_evidence()
+    nodes = FakeSynthesizerNodes(["Finding A."])
+    nodes.ollama = ContextLimitedStreamingLlm(["Finding A."])
+
+    events = list(_stream_synthesizer(ctx, nodes))
+    events.extend(_stream_response_tail(ctx, nodes))
+
+    done = next(event for event in events if event.event == "done")
+    assert [event.data["text"] for event in events if event.event == "token"] == ["Finding A."]
+    assert done.data["answer_status"] == "partial"
+    assert done.data["degraded_reason"] == "answer_context_limit_reached"
+    assert str(done.data["answer"]).startswith("Finding A.")
+    assert "model's token limit" in str(done.data["answer"])
+
+
+def test_stream_synthesizer_replaces_rejected_draft_in_done_event() -> None:
     ctx = context_with_evidence()
     nodes = FakeSynthesizerNodes(
         ["An unsupported answer. [report-a:1]"],
@@ -375,7 +469,7 @@ def test_stream_synthesizer_does_not_leak_answer_rejected_by_faithfulness() -> N
     events.extend(_stream_response_tail(ctx, nodes))
 
     assert [event.data["text"] for event in events if event.event == "token"] == [
-        "I could not verify this answer."
+        "An unsupported answer. [report-a:1]"
     ]
     assert next(event for event in events if event.event == "done").data["answer"] == (
         "I could not verify this answer."
@@ -425,9 +519,24 @@ def test_stream_synthesizer_replaces_citation_only_database_answer() -> None:
 
     token_text = "".join(str(event.data["text"]) for event in events if event.event == "token")
     done = next(event for event in events if event.event == "done")
-    assert token_text == done.data["answer"]
+    assert token_text == citation
     assert done.data["answer"] == (
         "case_id: DEMO-ALPHA; status: Escalated; assigned_team: Phoenix; "
         f"outstanding_amount: 1250.75 {citation}."
     )
     assert done.data["answer_status"] == "complete"
+
+
+def test_retrieval_stage_event_includes_permitted_chunk_text() -> None:
+    ctx = context_with_evidence()
+    ctx["retrieval_trace"] = [
+        retrieval_trace_stage("retrieved", ctx["retrieved_hits"], attempt=0)
+    ]
+
+    events, offset = _new_retrieval_stage_events(ctx, 0)
+
+    assert offset == 1
+    assert events[0].event == "retrieval_stage"
+    assert events[0].data["name"] == "retrieved"
+    assert events[0].data["candidates"][0]["chunk_id"] == "report-a:1"
+    assert events[0].data["candidates"][0]["excerpt"] == "Finding A."

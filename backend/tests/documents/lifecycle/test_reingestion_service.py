@@ -20,6 +20,15 @@ class FakeStorage:
         )
 
 
+class SpreadsheetStorage:
+    def read(self, _object_path: str) -> StoredUploadContent:
+        return StoredUploadContent(
+            content=b"header\nvalue\n",
+            content_type="text/csv",
+            filename="source.csv",
+        )
+
+
 class FakeQueue:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
@@ -102,6 +111,37 @@ def test_reingest_links_failed_retry_job() -> None:
     created = repo.get_ingest_job(result.job_id)
     assert created is not None and created.retry_of_job_id == retry.id
     assert queue.messages[0].job_id == created.id
+
+
+def test_spreadsheet_review_is_persisted_and_queued_with_reingestion() -> None:
+    _, repo, queue, user, document = _fixture()
+    service = DocumentReingestionService(
+        document_repo=repo,
+        job_repo=repo,
+        storage=SpreadsheetStorage(),  # type: ignore[arg-type]
+        queue=queue,  # type: ignore[arg-type]
+    )
+    review = {
+        "sheets": [
+            {
+                "source_name": "source",
+                "table_name": "Assets",
+                "header_rows": [1],
+                "excluded": False,
+                "columns": [],
+            }
+        ]
+    }
+
+    service.reingest(
+        document.id,
+        actor=user,
+        retry_of_job_id=None,
+        spreadsheet_review=review,
+    )
+
+    assert service.get_spreadsheet_review(document.id, actor=user) == review
+    assert queue.messages[0].spreadsheet_review == review
 
 
 def _fixture(*, queue_fail: bool = False):

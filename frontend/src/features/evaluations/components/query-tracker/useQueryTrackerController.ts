@@ -1,11 +1,11 @@
 import { type FormEventHandler, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { queryApi } from "@/lib/api/contracts";
+import { queryApi, ragEvaluationsApi } from "@/lib/api/contracts";
 import { isGlobalAdmin } from "@/lib/auth/authz";
 import { errorMessage } from "@/lib/utils/format";
 import { isDocumentInSpace, userSpacesFromPaths } from "@/lib/utils/groups";
-import type { Document, QuerySource, QuerySourceMode, RAGResponse, User as AuthUser } from "@/types/api";
+import type { Document, QueryRequest, QuerySource, QuerySourceMode, RAGResponse, User as AuthUser } from "@/types/api";
 import type { QueryNodeTiming } from "@/types/query";
 import {
   createQueryTrackerState,
@@ -60,8 +60,8 @@ export interface QueryTrackerControlsViewModel {
     items: QuerySource[];
     mode: QuerySourceMode;
     onModeChange: (mode: QuerySourceMode) => void;
-    onQuerySourceChange: (sourceId: string) => void;
-    selectedQuerySourceId: string;
+    onQuerySourcesChange: (sourceIds: string[]) => void;
+    selectedQuerySourceIds: string[];
     sourcesLoading: boolean;
   };
   spaces: {
@@ -76,6 +76,8 @@ export interface QueryTrackerControlsViewModel {
 
 export interface QueryTrackerResultsViewModel {
   finalResponse: RAGResponse | null;
+  onChooseQuerySource: (sourceId: string) => void;
+  onExpandSourceSearch: () => void;
   runtime: string;
   slowTimings: QueryNodeTiming[];
   state: QueryTrackerState;
@@ -101,7 +103,7 @@ export function useQueryTrackerController({
   const [isRunning, setIsRunning] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
-  const [selectedQuerySourceId, setSelectedQuerySourceId] = useState("");
+  const [selectedQuerySourceIds, setSelectedQuerySourceIds] = useState<string[]>([]);
   const [sourceMode, setSourceMode] = useState<QuerySourceMode>("auto");
   const [trackerState, setTrackerState] = useState<QueryTrackerState>(() => createQueryTrackerState());
 
@@ -147,50 +149,24 @@ export function useQueryTrackerController({
   }, [scopedDocumentIdSet]);
 
   useEffect(() => {
-    if (selectedQuerySourceId && !querySources.some((source) => source.id === selectedQuerySourceId)) {
-      setSelectedQuerySourceId("");
-    }
-  }, [querySources, selectedQuerySourceId]);
+    setSelectedQuerySourceIds((current) => current.filter((sourceId) => querySources.some((source) => source.id === sourceId)));
+  }, [querySources]);
 
   const handleSubmit: FormEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
     const trimmedQuery = query.trim();
     if (!trimmedQuery || !canSubmit) return;
 
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    cancelledRef.current = false;
-    setIsRunning(true);
-    setTrackerState(createQueryTrackerState(new Date().toISOString()));
-
-    try {
-      for await (const streamEvent of queryApi.stream({
-        query: trimmedQuery,
-        session_id: null,
-        client_request_id: createClientRequestId(),
-        group_path: activeSpacePath,
-        document_ids: sourceMode === "db_only" || selectedDocumentIds.length === 0 ? undefined : selectedDocumentIds,
-        source_mode: sourceMode,
-        query_source_id: dbMode ? selectedQuerySourceId || null : null,
-        allow_source_expansion: allowSourceExpansion,
-      }, { signal: controller.signal })) {
-        setTrackerState((current) => reduceQueryTrackerEvent(current, streamEvent));
-      }
-    } catch (error) {
-      if (isAbortError(error)) {
-        if (!cancelledRef.current) {
-          setTrackerState((current) => markQueryTrackerCancelled(current));
-        }
-        return;
-      }
-      setTrackerState((current) => reduceQueryTrackerEvent(current, {
-        event: "error",
-        data: { code: "request_failed", message: errorMessage(error, "The tracker query failed.") }
-      }));
-    } finally {
-      abortControllerRef.current = null;
-      setIsRunning(false);
-    }
+    void streamTrackerQuery({
+      query: trimmedQuery,
+      session_id: null,
+      client_request_id: createClientRequestId(),
+      group_path: activeSpacePath,
+      document_ids: sourceMode === "db_only" || selectedDocumentIds.length === 0 ? undefined : selectedDocumentIds,
+      source_mode: sourceMode,
+      query_source_ids: dbMode && selectedQuerySourceIds.length ? selectedQuerySourceIds : undefined,
+      allow_source_expansion: allowSourceExpansion,
+    });
   };
 
   function handleCancel() {
@@ -198,6 +174,63 @@ export function useQueryTrackerController({
     abortControllerRef.current?.abort();
     setTrackerState((current) => markQueryTrackerCancelled(current));
     setIsRunning(false);
+  }
+
+  async function streamTrackerQuery(request: QueryRequest) {
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    cancelledRef.current = false;
+    setIsRunning(true);
+    setTrackerState(createQueryTrackerState(new Date().toISOString(), request.client_request_id ?? null, request.query));
+
+    try {
+      for await (const streamEvent of ragEvaluationsApi.streamQueryTracker(request, { signal: controller.signal })) {
+        setTrackerState((current) => reduceQueryTrackerEvent(current, streamEvent));
+      }
+    } catch (error) {
+      if (isAbortError(error)) {
+        if (!cancelledRef.current) setTrackerState((current) => markQueryTrackerCancelled(current));
+        return;
+      }
+      setTrackerState((current) => reduceQueryTrackerEvent(current, {
+        event: "error",
+        data: { code: "request_failed", message: errorMessage(error, "The tracker query failed.") },
+      }));
+    } finally {
+      abortControllerRef.current = null;
+      setIsRunning(false);
+    }
+  }
+
+  function chooseQuerySource(sourceId: string) {
+    const response = trackerState.verifiedResponse ?? trackerState.finalResponse;
+    if (!response?.source_clarification || !trackerState.sessionId || !trackerState.clientRequestId || isRunning) return;
+    if (!response.source_clarification.options.some((option) => option.source_id === sourceId)) return;
+    const nextMode = response.source_mode === "hybrid" ? "hybrid" : "db_only";
+    void streamTrackerQuery({
+      query: trackerState.queryText,
+      session_id: trackerState.sessionId,
+      client_request_id: trackerState.clientRequestId,
+      group_path: activeSpacePath,
+      document_ids: nextMode === "hybrid" && selectedDocumentIds.length ? selectedDocumentIds : undefined,
+      source_mode: nextMode,
+      query_source_id: sourceId,
+      continue_source_clarification: true,
+    });
+  }
+
+  function expandSourceSearch() {
+    const response = trackerState.verifiedResponse ?? trackerState.finalResponse;
+    if (!response?.source_expansion?.available || isRunning || !trackerState.queryText) return;
+    void streamTrackerQuery({
+      query: trackerState.queryText,
+      session_id: null,
+      client_request_id: createClientRequestId(),
+      group_path: activeSpacePath,
+      document_ids: selectedDocumentIds.length ? selectedDocumentIds : undefined,
+      source_mode: "hybrid",
+      allow_source_expansion: true,
+    });
   }
 
   return {
@@ -227,8 +260,8 @@ export function useQueryTrackerController({
         items: querySources,
         mode: sourceMode,
         onModeChange: setSourceMode,
-        onQuerySourceChange: setSelectedQuerySourceId,
-        selectedQuerySourceId,
+        onQuerySourcesChange: (sourceIds) => setSelectedQuerySourceIds(sourceIds.slice(0, 3)),
+        selectedQuerySourceIds,
         sourcesLoading: querySourcesQuery.isLoading,
       },
       spaces: {
@@ -242,6 +275,8 @@ export function useQueryTrackerController({
     },
     results: {
       finalResponse,
+      onChooseQuerySource: chooseQuerySource,
+      onExpandSourceSearch: expandSourceSearch,
       runtime: trackerRuntime(trackerState),
       slowTimings: slowestNodeTimings(finalResponse),
       state: trackerState,

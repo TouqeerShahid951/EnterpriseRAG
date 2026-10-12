@@ -252,7 +252,7 @@ def _dispatch_local_folder(
                 size_bytes=source_object.size_bytes,
                 status="skipped",
                 skip_code="unsupported_file_type",
-                skip_message=("Only PDF, DOCX, JPG, PNG, and JSON files are accepted."),
+                skip_message=("Only PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, and JSON files are accepted."),
             )
             continue
         if source_object.size_bytes > config.upload_max_bytes:
@@ -428,7 +428,7 @@ def _dispatch_minio_prefix(
                 size_bytes=source_object.size_bytes,
                 status="skipped",
                 skip_code="unsupported_file_type",
-                skip_message=("Only PDF, DOCX, JPG, PNG, and JSON files are accepted."),
+                skip_message=("Only PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, and JSON files are accepted."),
             )
             continue
         if source_object.size_bytes > config.upload_max_bytes:
@@ -624,6 +624,10 @@ def _queue_item(
         ),
         description=schedule.description,
         content_type=item.content_type,
+        analyze_slide_visuals=schedule.source_config.get(
+            "analyze_slide_visuals", True
+        )
+        is not False,
     )
     mutation = delivery.queue_existing_job(
         item.job_id,

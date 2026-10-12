@@ -7,7 +7,9 @@ import {
   clampSourcePage,
   fitPdfPageScale,
   fitPdfWidthScale,
+  highlightPdfTextLayer,
   sourcePageFromInput,
+  sourceTextMatchPages,
   stepSourceZoom,
 } from "@/features/source-viewer/utils/sourceViewer";
 import {
@@ -17,6 +19,7 @@ import {
   ViewerZoomControls,
   type PdfScaleMode,
 } from "@/features/documents/components/source-viewer/DocumentRegionViewerPrimitives";
+import { SourceViewerSearch } from "@/features/documents/components/source-viewer/SourceViewerSearch";
 import type { DocumentRegion } from "@/features/documents/components/DocumentRegionViewer";
 import {
   isRenderCancellation,
@@ -40,7 +43,9 @@ export function PdfRegionDocument({
   toolbarEnd?: ReactNode;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textLayerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const searchRequestRef = useRef(0);
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(initialPage);
   const [pageCount, setPageCount] = useState(0);
@@ -49,6 +54,11 @@ export function PdfRegionDocument({
   const [scaleMode, setScaleMode] = useState<PdfScaleMode>("fit-page");
   const [customScale, setCustomScale] = useState(1);
   const [pageInput, setPageInput] = useState(`${initialPage}`);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchPages, setSearchPages] = useState<number[]>([]);
+  const [searchIndex, setSearchIndex] = useState(-1);
+  const [searchStatus, setSearchStatus] = useState<string | undefined>();
+  const [isSearching, setIsSearching] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [isRendering, setIsRendering] = useState(true);
   const citedRegions = regions.filter((region) => region.page === initialPage && region.bbox !== null);
@@ -79,6 +89,56 @@ export function PdfRegionDocument({
     setScaleMode("custom");
   };
 
+  function clearSearchResults() {
+    searchRequestRef.current += 1;
+    setSearchPages([]);
+    setSearchIndex(-1);
+    setSearchStatus(undefined);
+    setIsSearching(false);
+  }
+
+  async function searchDocument() {
+    const query = searchQuery.trim();
+    if (!query) {
+      clearSearchResults();
+      return;
+    }
+    const activeDocument = pdfDocument;
+    if (!activeDocument) return;
+    const requestId = searchRequestRef.current + 1;
+    searchRequestRef.current = requestId;
+    setIsSearching(true);
+    setSearchPages([]);
+    setSearchIndex(-1);
+    setSearchStatus(undefined);
+    try {
+      const pageTexts = await Promise.all(Array.from({ length: activeDocument.numPages }, async (_, index) => {
+        const page = await activeDocument.getPage(index + 1);
+        const content = await page.getTextContent();
+        return content.items.map((item) => "str" in item ? item.str : "").join(" ");
+      }));
+      if (requestId !== searchRequestRef.current) return;
+      const matches = sourceTextMatchPages(pageTexts, query);
+      const nextIndex = matches.findIndex((page) => page >= pageNumber);
+      const activeIndex = nextIndex >= 0 ? nextIndex : 0;
+      setSearchPages(matches);
+      setSearchIndex(matches.length ? activeIndex : -1);
+      setSearchStatus(matches.length ? undefined : "No matches");
+      if (matches.length) setPageNumber(matches[activeIndex]);
+    } catch (searchError) {
+      if (requestId === searchRequestRef.current) setSearchStatus(readableError(searchError, "The PDF text could not be searched."));
+    } finally {
+      if (requestId === searchRequestRef.current) setIsSearching(false);
+    }
+  }
+
+  function goToSearchResult(direction: -1 | 1) {
+    if (!searchPages.length) return;
+    const nextIndex = (searchIndex + direction + searchPages.length) % searchPages.length;
+    setSearchIndex(nextIndex);
+    setPageNumber(searchPages[nextIndex]);
+  }
+
   useEffect(() => {
     let disposed = false;
     let openedDocument: PDFDocumentProxy | null = null;
@@ -86,6 +146,12 @@ export function PdfRegionDocument({
     async function openPdf() {
       try {
         setRenderError(null);
+        setSearchQuery("");
+        setSearchPages([]);
+        setSearchIndex(-1);
+        setSearchStatus(undefined);
+        setIsSearching(false);
+        searchRequestRef.current += 1;
         const pdfjs = await import("pdfjs-dist");
         pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
         const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer.slice(0)) });
@@ -182,6 +248,7 @@ export function PdfRegionDocument({
     const measuredContainerSize = fitContainerSize;
     let disposed = false;
     let renderTask: RenderTask | null = null;
+    let cancelTextLayer: (() => void) | undefined;
 
     async function renderPage(documentToRender: PDFDocumentProxy, targetCanvas: HTMLCanvasElement) {
       try {
@@ -217,6 +284,21 @@ export function PdfRegionDocument({
           transform: outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0],
         });
         await renderTask.promise;
+        const textLayerContainer = textLayerRef.current;
+        if (textLayerContainer) {
+          textLayerContainer.replaceChildren();
+          const { TextLayer } = await import("pdfjs-dist");
+          const textLayer = new TextLayer({
+            container: textLayerContainer,
+            textContentSource: page.streamTextContent({ disableNormalization: true }),
+            viewport: nextViewport,
+          });
+          cancelTextLayer = () => textLayer.cancel();
+          await textLayer.render();
+          if (!disposed) {
+            highlightPdfTextLayer(textLayer.textDivs, searchQuery, searchPages.includes(pageNumber));
+          }
+        }
         if (!disposed) {
           setViewport({ height: nextViewport.height, scale, width: nextViewport.width });
           setIsRendering(false);
@@ -232,8 +314,9 @@ export function PdfRegionDocument({
     return () => {
       disposed = true;
       renderTask?.cancel();
+      cancelTextLayer?.();
     };
-  }, [customScale, fitContainerSize?.height, fitContainerSize?.width, pageNumber, pdfDocument, scaleMode]);
+  }, [customScale, fitContainerSize?.height, fitContainerSize?.width, pageNumber, pdfDocument, scaleMode, searchPages, searchQuery]);
 
   function commitPageInput() {
     const nextPage = sourcePageFromInput(pageInput, pageNumber, pageCount || pageNumber);
@@ -291,22 +374,36 @@ export function PdfRegionDocument({
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
           />
-        </div>
+          <SourceViewerSearch
+            disabled={!pdfDocument}
+            isSearching={isSearching}
+            onNext={() => goToSearchResult(1)}
+            onPrevious={() => goToSearchResult(-1)}
+            onQueryChange={(query) => {
+              setSearchQuery(query);
+              clearSearchResults();
+            }}
+            onSearch={() => { void searchDocument(); }}
+            query={searchQuery}
+            resultLabel={searchPages.length ? `${searchIndex + 1} of ${searchPages.length}` : undefined}
+            status={isSearching ? "Searching…" : searchStatus}
+          />
 
-        <div className="source-viewer-toolbar-end">
-          {pageNumber !== citedPage ? (
-            <button className="source-viewer-jump" type="button" onClick={returnToCitedPage}>
-              <RotateCcw aria-hidden="true" size={15} />
-              Return to cited page
-            </button>
-          ) : toolbarEnd ? (
-            toolbarEnd
-          ) : null}
+          <div className="source-viewer-toolbar-end">
+            {pageNumber !== citedPage ? (
+              <button className="source-viewer-jump" type="button" onClick={returnToCitedPage}>
+                <RotateCcw aria-hidden="true" size={15} />
+                Return to cited page
+              </button>
+            ) : toolbarEnd ? (
+              toolbarEnd
+            ) : null}
+          </div>
         </div>
       </div>
 
       {citedRegions.length === 0 ? <FallbackNotice message={fallbackMessage} /> : null}
-      <ImageAssetStrip documentId={documentId} regions={regions} />
+      <ImageAssetStrip documentId={documentId} fallbackPage={initialPage} onOpenPage={(page) => setPageNumber(clampSourcePage(page, pageCount || page))} regions={regions} />
       {renderError ? <SourceViewerError message={renderError} /> : null}
 
       <div ref={scrollRef} className="source-viewer-pdf-scroll">
@@ -315,6 +412,7 @@ export function PdfRegionDocument({
           style={viewport ? { height: viewport.height, width: viewport.width } : undefined}
         >
           <canvas ref={canvasRef} aria-label={`PDF page ${pageNumber}`} />
+          <div ref={textLayerRef} className="source-viewer-pdf-text-layer textLayer" aria-label="PDF text layer" />
           {viewport ? (
             <div className="source-viewer-pdf-overlay" aria-label="Source region highlights">
               {visibleRegions.map((region, index) => (

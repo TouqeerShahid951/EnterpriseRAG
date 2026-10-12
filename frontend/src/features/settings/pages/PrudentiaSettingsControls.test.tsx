@@ -32,6 +32,19 @@ describe("inference settings helpers", () => {
     expect(markup).toContain("Faithfulness checker");
     expect(markup).toContain('aria-label="Faithfulness checker policy"');
     expect(markup).toContain("local reranker");
+    expect(markup).toContain(">Adaptive</option>");
+    expect(markup).toContain(">Always</option>");
+    expect(markup).toContain(">Never</option>");
+  });
+
+  it("explains that Reply remains available when the context resolver is disabled", () => {
+    const markup = renderToStaticMarkup(
+      <RuntimeAdvancedSettings form={ollamaForm} onChange={() => undefined} />,
+    );
+
+    expect(markup).toContain("Context resolver");
+    expect(markup).toContain("Explicit Reply targets always remain available");
+    expect(markup).toContain('aria-label="Enable automatic context resolver for conversational follow-ups"');
   });
 
   it("renders an accessible adaptive Evidence Gate policy", () => {

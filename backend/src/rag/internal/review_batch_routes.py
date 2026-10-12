@@ -8,6 +8,7 @@ from ..ingestion.review.dependencies import (
     get_human_review_repository,
     get_image_review_repository,
 )
+from ..ingestion.review.corrections import apply_review_correction
 from ..ingestion.review.models import (
     HumanReviewRepository,
     ImageReviewRepository,
@@ -66,12 +67,9 @@ async def get_review_batch_parsed_items(
     items = [dict(item) for item in batch.parsed_items]
     for review_item in review_repo.list_review_items_for_batch(batch.id):
         if review_item.status == "approved" and review_item.corrected_text is not None:
-            for parsed in items:
+            for index, parsed in enumerate(items):
                 if int(parsed.get("index", -1)) == review_item.item_index:
-                    parsed["text"] = review_item.corrected_text
-                    flags = parsed.get("quality_flags")
-                    flag_list = [str(item) for item in flags] if isinstance(flags, list) else []
-                    parsed["quality_flags"] = sorted({*flag_list, "ocr_review_approved"})
+                    items[index] = apply_review_correction(parsed, review_item.corrected_text)
                     break
     return ReviewBatchParsedItemsResponse(parsed_items=items)
 

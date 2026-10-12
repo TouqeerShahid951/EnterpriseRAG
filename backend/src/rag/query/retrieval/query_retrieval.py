@@ -90,8 +90,17 @@ from rag.query.retrieval.retrieval_structured import (
 from rag.query.sources import dedupe_hits
 from rag.query.sources.source_evidence_selection import (
     _dedupe_keys,
+    with_evidence_need_ids,
+    with_required_evidence_assignments,
     with_retrieval_query_slot,
 )
+from rag.query.routing.evidence_planning import (
+    INDEXED_CORPUS_SOURCE_ID,
+    evidence_need_ids_for_query,
+    required_evidence_assignments,
+    required_evidence_assignments_for_query,
+)
+from rag.query.routing.routing_models import RoutePlan
 from rag.query.state import QueryContext, scoped_user_context, timed_retrieval_phase
 from rag.query.retrieval.temporal import add_effective_date_scope
 
@@ -195,8 +204,36 @@ def retrieve_candidates(
     qdrant_filter = add_expiry_scope(qdrant_filter)
     if not getattr(config, "connector_include_stale_in_retrieval", False):
         qdrant_filter = add_stale_scope(qdrant_filter)
-    qdrant_filter = add_document_scope(qdrant_filter, ctx["request"].document_ids)
-    for query_slot, query in enumerate(ctx["sub_queries"] or [active_query]):
+    inherited_document_ids = tuple(
+        getattr(ctx.get("source_decision"), "inherited_document_ids", ())
+    )
+    planned_document_ids = tuple(
+        assignment.source_id.removeprefix("document:")
+        for need in (plan.evidence_plan.needs if plan and plan.evidence_plan else ())
+        for assignment in need.assignments
+        if assignment.capability == "indexed_search"
+        and assignment.source_id.startswith("document:")
+    )
+    document_scope_ids = (
+        list(ctx["request"].document_ids)
+        if ctx["request"].document_ids
+        else list(inherited_document_ids or planned_document_ids)
+    )
+    qdrant_filter = add_document_scope(qdrant_filter, document_scope_ids)
+    enumerate_without_search = bool(
+        plan is not None
+        and plan.coverage == "exhaustive"
+        and plan.summary_mode in {"document", "section", "multi_document"}
+        and document_scope_ids
+    )
+    for query_slot, query in enumerate(
+        [] if enumerate_without_search else (ctx["sub_queries"] or [active_query])
+    ):
+        need_ids = evidence_need_ids_for_query(
+            plan.evidence_plan if plan is not None else None,
+            query,
+            "indexed_search",
+        )
         if cancellation_token is not None:
             cancellation_token.raise_if_cancelled()
         with timed_retrieval_phase(ctx, "embeddings"):
@@ -209,18 +246,25 @@ def retrieve_candidates(
             )
         if not prepared:
             continue
+        query_hits = _search_query(
+            query,
+            dense_vector=dense_vector,
+            limit=search_limit,
+            qdrant_filter=qdrant_filter,
+            config=config,
+            qdrant=qdrant,
+            cancellation_token=cancellation_token,
+            ctx=ctx,
+        )
         hits.extend(
-            with_retrieval_query_slot(hit, query_slot)
-            for hit in _search_query(
-                    query,
-                    dense_vector=dense_vector,
-                    limit=search_limit,
-                    qdrant_filter=qdrant_filter,
-                    config=config,
-                    qdrant=qdrant,
-                    cancellation_token=cancellation_token,
-                    ctx=ctx,
+            _with_indexed_evidence_lineage(
+                hit,
+                plan=plan,
+                query=query,
+                query_slot=query_slot,
+                need_ids=need_ids,
             )
+            for hit in query_hits
         )
     ranked = prioritize_language(dedupe_hits(hits), query_language(active_query))
     ranked = metadata_boost_hits(active_query, ranked)
@@ -241,7 +285,7 @@ def retrieve_candidates(
         plan,
     )
     if should_expand_document_scope:
-        requested_doc_ids = set(ctx["request"].document_ids)
+        requested_doc_ids = set(document_scope_ids)
         global_document_scope = _requires_global_document_scope_scan(
             active_query,
             ranked,
@@ -256,6 +300,7 @@ def retrieve_candidates(
             or global_document_scope
             or target_doc_ids
             or _has_explicit_document_scope(active_query)
+            or hasattr(qdrant, "retrieve_document_chunks")
             or hasattr(qdrant, "retrieve_authorized_chunks")
         )
     else:
@@ -267,7 +312,23 @@ def retrieve_candidates(
             "exhaustive_deadline",
             exhaustive_retrieval_deadline(ctx["wall_time_start"]),
         )
-        if target_doc_ids and hasattr(qdrant, "retrieve_document_chunks"):
+        scope_scan_complete: bool | None = None
+        scope_scan_stop_reason: str | None = None
+        if target_doc_ids and hasattr(qdrant, "scan_document_chunks"):
+            scan_result = call_with_optional_cancellation(
+                qdrant.scan_document_chunks,
+                cancellation_token,
+                document_ids=sorted(target_doc_ids),
+                qdrant_filter=qdrant_filter,
+                structured_only=False,
+                limit=_DOCUMENT_SCOPE_SCAN_LIMIT,
+                deadline=ctx.get("exhaustive_deadline"),
+            )
+            scope_hits = list(scan_result.hits)
+            scope_scan_complete = scan_result.complete
+            scope_scan_stop_reason = scan_result.stop_reason
+            resolved_scope_doc_ids: set[str] | None = target_doc_ids
+        elif target_doc_ids and hasattr(qdrant, "retrieve_document_chunks"):
             scope_hits = call_with_optional_cancellation(
                 qdrant.retrieve_document_chunks,
                 cancellation_token,
@@ -278,6 +339,19 @@ def retrieve_candidates(
                 deadline=ctx.get("exhaustive_deadline"),
             )
             resolved_scope_doc_ids: set[str] | None = target_doc_ids
+        elif hasattr(qdrant, "scan_authorized_chunks"):
+            scan_result = call_with_optional_cancellation(
+                qdrant.scan_authorized_chunks,
+                cancellation_token,
+                qdrant_filter=qdrant_filter,
+                structured_only=False,
+                limit=_DOCUMENT_SCOPE_SCAN_LIMIT,
+                deadline=ctx.get("exhaustive_deadline"),
+            )
+            scope_hits = list(scan_result.hits)
+            scope_scan_complete = scan_result.complete
+            scope_scan_stop_reason = scan_result.stop_reason
+            resolved_scope_doc_ids = None
         elif hasattr(qdrant, "retrieve_authorized_chunks"):
             scope_hits = call_with_optional_cancellation(
                 qdrant.retrieve_authorized_chunks,
@@ -312,8 +386,25 @@ def retrieve_candidates(
             scope_hits,
             target_doc_ids=resolved_scope_doc_ids,
         )
+        for query_slot, query in enumerate(ctx["sub_queries"] or [active_query]):
+            need_ids = evidence_need_ids_for_query(
+                plan.evidence_plan if plan is not None else None,
+                query,
+                "indexed_search",
+            )
+            document_scope_hits = [
+                _with_indexed_evidence_lineage(
+                    hit,
+                    plan=plan,
+                    query=query,
+                    query_slot=query_slot,
+                    need_ids=need_ids,
+                )
+                for hit in document_scope_hits
+            ]
         scan_incomplete = (
-            any(
+            scope_scan_complete is False
+            or any(
                 hit.payload.get("authorized_scan_complete") is False
                 for hit in scope_hits
             )
@@ -341,7 +432,7 @@ def retrieve_candidates(
             ctx["exhaustive_coverage"] = {
                 "candidate_status": "partial",
                 "evidence_status": "unknown",
-                "reasons": ["scope_scan_incomplete"],
+                "reasons": [scope_scan_stop_reason or "scope_scan_incomplete"],
                 "required_obligations": [],
                 "covered_obligations": [],
             }
@@ -401,6 +492,41 @@ def retrieve_candidates(
         if recall_hits:
             ranked = _merge_recall_hits_preserving_scope(ranked, recall_hits)
     return apply_route_retrieval_policy(ranked, plan)
+
+
+def _with_indexed_evidence_lineage(
+    hit: SearchHit,
+    *,
+    plan: RoutePlan | None,
+    query: str,
+    query_slot: int,
+    need_ids: tuple[str, ...],
+) -> SearchHit:
+    doc_id = str(hit.payload.get("doc_id") or "").strip()
+    source_ids = {INDEXED_CORPUS_SOURCE_ID}
+    if doc_id:
+        source_ids.add(f"document:{doc_id}")
+    annotated = with_evidence_need_ids(
+        with_retrieval_query_slot(hit, query_slot), need_ids
+    )
+    assignments = set(
+        required_evidence_assignments_for_query(
+            plan.evidence_plan if plan is not None else None,
+            query,
+            "indexed_search",
+            source_ids=source_ids,
+        )
+    )
+    if plan is not None and plan.coverage == "exhaustive":
+        assignments.update(
+            assignment
+            for assignment in required_evidence_assignments(plan.evidence_plan)
+            if assignment[2] == "indexed_search" and assignment[1] in source_ids
+        )
+    return with_required_evidence_assignments(
+        annotated,
+        tuple(sorted(assignments)),
+    )
 
 
 def _merge_recall_hits_preserving_scope(

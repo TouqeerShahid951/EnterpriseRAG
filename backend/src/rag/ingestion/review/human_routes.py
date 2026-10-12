@@ -13,6 +13,8 @@ from rag.ingestion.review.schemas import (
     ReviewQueueResponse,
 )
 from rag.ingestion.contracts import IngestJobPayload
+from rag.ingestion.parsers.images.analysis import image_item_description
+from rag.ingestion.parsers.models import parsed_item_from_dict
 from rag.ingestion.delivery.service import (
     IngestDeliveryService,
     dispatch_pending_deliveries,
@@ -40,11 +42,55 @@ async def list_review_queue(
     document_repo: DocumentRepository = Depends(get_document_repository),
     review_repo: HumanReviewRepository = Depends(get_human_review_repository),
 ) -> ReviewQueueResponse:
-    items = [
-        review_item_response(item)
+    visible_items = [
+        item
         for item in review_repo.list_review_items(status="pending")
         if can_review_document(user, document_repo, item.doc_id)
     ]
+    assets_by_document = {
+        item.doc_id: document_repo.list_document_image_assets(item.doc_id)
+        for item in visible_items
+    }
+    parsed_items_by_batch = {
+        batch_id: {
+            str(parsed_item.get("index")): parsed_item
+            for parsed_item in batch.parsed_items
+            if isinstance(parsed_item, dict)
+        }
+        for batch_id in {item.batch_id for item in visible_items}
+        if (batch := review_repo.get_review_batch(batch_id)) is not None
+    }
+    items = []
+    for item in visible_items:
+        parsed_item = parsed_items_by_batch.get(item.batch_id, {}).get(
+            str(item.item_index)
+        )
+        image_asset_id = parsed_item.get("image_asset_id") if parsed_item else None
+        image_asset = next(
+            (
+                asset
+                for asset in assets_by_document[item.doc_id]
+                if asset.id == image_asset_id
+            ),
+            None,
+        )
+        slide_asset = image_asset or next(
+            (
+                asset
+                for asset in assets_by_document[item.doc_id]
+                if asset.source_kind == "pptx_slide" and asset.page in {item.page_start, item.page_end}
+            ),
+            None,
+        )
+        items.append(
+            review_item_response(
+                item,
+                image_asset_id=slide_asset.id if slide_asset else None,
+                image_source_kind=slide_asset.source_kind if slide_asset else None,
+                image_description=image_item_description(parsed_item_from_dict(parsed_item))
+                if parsed_item and "ocr_image_consolidated" in item.quality_flags else None,
+            )
+        )
     return ReviewQueueResponse(items=items, total=len(items))
 
 

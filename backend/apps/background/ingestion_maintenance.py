@@ -8,6 +8,7 @@ import time
 from apps.background.watchdog import heartbeat
 from rag.core.config import settings
 from rag.ingestion.maintenance import (
+    cleanup_ingestion_checkpoints,
     reconcile_ingestion_jobs,
     retire_index_generations,
 )
@@ -66,6 +67,7 @@ def _run_with_lock() -> list[str]:
 def _run_maintenance() -> list[str]:
     recovered = reconcile_ingestion_jobs()
     retire_index_generations()
+    cleanup_ingestion_checkpoints()
     return recovered
 
 

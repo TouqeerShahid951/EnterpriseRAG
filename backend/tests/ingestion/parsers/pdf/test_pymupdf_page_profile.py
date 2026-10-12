@@ -107,3 +107,12 @@ def test_table_like_page_keeps_existing_table_layout_path(monkeypatch):
     pymupdf_parser._page_entries(page, 1)
 
     assert calls == {"tables": 1, "layout": 1}
+
+
+def test_small_vector_only_mark_is_treated_as_confirmed_blank():
+    page = FakePage([])
+    page.get_drawings = lambda: [{"rect": SimpleNamespace(x0=480, y0=700, x1=560, y1=750)}]
+
+    flags = pymupdf_parser._quality_flags_from_blocks([], [], 0, page)
+
+    assert "confirmed_blank_page" in flags

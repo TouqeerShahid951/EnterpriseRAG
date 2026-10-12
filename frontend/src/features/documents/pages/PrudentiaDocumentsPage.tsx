@@ -1,3 +1,4 @@
+import { DocumentRecoveryActivity } from "@/features/documents/components/DocumentRecoveryActivity";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -17,6 +18,7 @@ import { InlineMessage } from "@/components/layout/Common";
 import { PrudentiaWorkspace } from "@/components/layout/PrudentiaWorkspace";
 import { Modal } from "@/components/layout/Modal";
 import { DocumentInspector } from "@/features/documents/components/library/DocumentInspector";
+import { PermanentDeleteDocumentsDialog } from "@/features/documents/components/library/PermanentDeleteDocumentsDialog";
 import { ActiveDocumentsTab, FolderTab, TrashTab } from "@/features/documents/components/library/DocumentTabs";
 import { KnowledgeSpacesOverview } from "@/features/documents/components/library/KnowledgeSpacesOverview";
 import { SpacePanel, type SpacePanelState } from "@/features/documents/components/library/SpacePanel";
@@ -39,7 +41,7 @@ import {
   type ExplorerTab,
   type SpaceDraft,
 } from "@/features/documents/utils/documentPageUtils";
-import type { RouteId } from "@/routes/routes";
+import { canAccessRoute, type RouteId } from "@/routes/routes";
 import type { User as AuthUser } from "@/types/api";
 import { errorMessage } from "@/lib/utils/format";
 import {
@@ -70,6 +72,9 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, user, view = "spa
     enrichGraph,
     enrichingDocumentId,
     pendingIds,
+    permanentDeleteDocuments,
+    cancelPermanentDelete,
+    confirmPermanentDelete,
     performBulkAction,
     performDocumentAction,
     transferDocumentOwner,
@@ -82,7 +87,7 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, user, view = "spa
     onSelectionCleared: () => setSelectedIds(new Set()),
   });
 
-  const activeDocsQuery = useQuery({ queryKey: ["documents", "list", "active"], queryFn: () => documentsApi.list({ state: "active" }), enabled: view !== "trash", staleTime: 5000, retry: false });
+  const activeDocsQuery = useQuery({ queryKey: ["documents", "list", "active"], queryFn: () => documentsApi.list({ state: "active" }), enabled: view !== "trash", refetchInterval: 5000, staleTime: 5000, retry: false });
   const deletedDocsQuery = useQuery({ queryKey: ["documents", "list", "deleted"], queryFn: () => documentsApi.list({ state: "deleted" }), enabled: view === "trash", staleTime: 15000, retry: false });
   const overviewQuery = useQuery({
     queryKey: ["documents", "overview"],
@@ -285,6 +290,8 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, user, view = "spa
             </div>
           </header>
 
+          {canAccessRoute(user, "ingestion-jobs") ? <DocumentRecoveryActivity onNavigate={onNavigate} /> : null}
+
           {groupsQuery.isError && canLoadSpaceDirectory ? <InlineMessage tone="error">{errorMessage(groupsQuery.error, "Unable to load Knowledge Spaces.")}</InlineMessage> : null}
           {overviewQuery.isError && view === "spaces" ? <InlineMessage tone="error">{errorMessage(overviewQuery.error, "Unable to load the document overview.")}</InlineMessage> : null}
           {activeDocsQuery.isError && view !== "trash" ? <InlineMessage tone="error">{errorMessage(activeDocsQuery.error, "Unable to load documents.")}</InlineMessage> : null}
@@ -467,6 +474,12 @@ export function PrudentiaDocumentsPage({ onLogout, onNavigate, user, view = "spa
             />
           ) : null}
         </Modal> : null}
+        <PermanentDeleteDocumentsDialog
+          documents={permanentDeleteDocuments}
+          isPending={permanentDeleteDocuments.some((document) => pendingIds.has(document.id))}
+          onClose={cancelPermanentDelete}
+          onConfirm={confirmPermanentDelete}
+        />
       </main>
     </PrudentiaWorkspace>
   );

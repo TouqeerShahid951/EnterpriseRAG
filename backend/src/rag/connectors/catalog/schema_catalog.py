@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from copy import deepcopy
 from typing import Any
 
 from rag.shared.contracts.group_paths import normalize_group_path
 
 _TERM_RE = re.compile(r"[A-Za-z0-9_]{3,}")
+_ROUTING_LIST_FIELDS = (
+    "domains",
+    "entities",
+    "metrics",
+    "synonyms",
+    "example_questions",
+    "exclusions",
+)
+_NUMERIC_TYPE_PARTS = ("decimal", "double", "float", "int", "money", "numeric", "real")
+_TEMPORAL_TYPE_PARTS = ("date", "time")
 
 
 def build_default_schema_catalog(schema_json: dict[str, Any]) -> dict[str, Any]:
@@ -72,13 +83,217 @@ def build_default_schema_catalog(schema_json: dict[str, Any]) -> dict[str, Any]:
                 }
             )
     return {
-        "version": 1,
+        "version": 2,
         "source": "connector_introspection",
         "sample_values_included": False,
+        "name": "",
+        "description": "",
+        "routing_profile": {field: [] for field in _ROUTING_LIST_FIELDS},
+        "verified_queries": [],
         "tables": tables,
         "relationships": relationships,
         "business_rules": [],
     }
+
+
+def schema_catalog_routing_card(catalog_json: dict[str, Any]) -> dict[str, object]:
+    """Return compact, non-sensitive catalog metadata suitable for source routing."""
+
+    profile = catalog_json.get("routing_profile")
+    profile = profile if isinstance(profile, dict) else {}
+    card: dict[str, object] = {
+        "name": _compact_routing_text(catalog_json.get("name"), max_chars=120),
+        "description": _compact_routing_text(
+            catalog_json.get("description"), max_chars=500
+        ),
+    }
+    for field in _ROUTING_LIST_FIELDS:
+        card[field] = _routing_values(profile.get(field), limit=20)
+    card["capabilities"] = _routing_values(
+        profile.get("capabilities", catalog_json.get("capabilities")), limit=20
+    )
+    for field in ("freshness", "data_origin", "provenance"):
+        card[field] = _compact_routing_text(
+            profile.get(field, catalog_json.get(field)), max_chars=240
+        )
+    card["schema_terms"] = _schema_routing_terms(catalog_json, limit=60)
+    return card
+
+
+def schema_catalog_routing_text(catalog_json: dict[str, Any]) -> str:
+    """Render the routing card as searchable text without exposing physical schema."""
+
+    card = schema_catalog_routing_card(catalog_json)
+    values = [str(card["name"]), str(card["description"])]
+    for field in _ROUTING_LIST_FIELDS:
+        values.extend(str(item) for item in card[field])  # type: ignore[union-attr]
+    values.extend(str(item) for item in card["capabilities"])  # type: ignore[union-attr]
+    values.extend(str(item) for item in card["schema_terms"])  # type: ignore[union-attr]
+    values.extend(
+        str(card[field]) for field in ("freshness", "data_origin", "provenance")
+    )
+    return " ".join(value for value in values if value).strip()
+
+
+def populate_schema_catalog_routing_profile(
+    catalog_json: dict[str, Any],
+    *,
+    profile_name: str,
+) -> dict[str, Any]:
+    """Fill missing routing metadata from approved schema facts without replacing admin edits."""
+
+    result = deepcopy(catalog_json)
+    tables = [
+        table
+        for table in result.get("tables") or []
+        if isinstance(table, dict) and table_allowed(table)
+    ]
+    entities = _unique_routing_values(
+        _humanize_identifier(table.get("name") or table.get("key"))
+        for table in tables
+    )[:20]
+    synonyms = _unique_routing_values(
+        str(item)
+        for table in tables
+        for value in (table.get("synonyms"),)
+        for item in (value if isinstance(value, list) else [])
+    )
+    metrics: list[str] = []
+    has_temporal_column = False
+    for table in tables:
+        primary_keys = {
+            str(item).strip().lower()
+            for item in table.get("primary_keys") or []
+            if isinstance(item, str)
+        }
+        for column in table.get("columns") or []:
+            if not isinstance(column, dict) or not column_allowed(column):
+                continue
+            column_name = str(column.get("name") or "").strip()
+            data_type = str(column.get("data_type") or column.get("type") or "").lower()
+            has_temporal_column = has_temporal_column or any(
+                part in data_type for part in _TEMPORAL_TYPE_PARTS
+            )
+            column_synonyms = column.get("synonyms")
+            if isinstance(column_synonyms, list):
+                synonyms.extend(str(item) for item in column_synonyms)
+            if (
+                column_name
+                and column_name.lower() not in primary_keys
+                and not column_name.lower().endswith("_id")
+                and any(part in data_type for part in _NUMERIC_TYPE_PARTS)
+            ):
+                metrics.append(_humanize_identifier(column_name))
+    metrics = _unique_routing_values(metrics)[:20]
+    synonyms = _unique_routing_values(synonyms)[:20]
+    verified_questions = _unique_routing_values(
+        str(item.get("question") or "")
+        for item in result.get("verified_queries") or []
+        if isinstance(item, dict)
+    )
+    example_questions = verified_questions[:20] or [
+        f"Show records for {entity}." for entity in entities[:3]
+    ]
+    capabilities = ["exact_lookup", "filtering"]
+    if metrics:
+        capabilities.append("aggregation")
+    if has_temporal_column:
+        capabilities.append("temporal_filtering")
+    if any(
+        isinstance(item, dict) and item.get("allowed") is not False
+        for item in result.get("relationships") or []
+    ):
+        capabilities.append("joins")
+
+    existing = result.get("routing_profile")
+    profile = dict(existing) if isinstance(existing, dict) else {}
+    generated_lists = {
+        "domains": [profile_name] if profile_name.strip() else [],
+        "entities": entities,
+        "metrics": metrics,
+        "synonyms": synonyms,
+        "example_questions": example_questions,
+        "exclusions": [],
+        "capabilities": capabilities,
+    }
+    for field, generated in generated_lists.items():
+        if not _routing_values(profile.get(field), limit=20):
+            profile[field] = generated
+    for field, value in {
+        "freshness": "unspecified",
+        "data_origin": "unspecified",
+        "provenance": "connector_introspection",
+    }.items():
+        if not _compact_routing_text(profile.get(field), max_chars=240):
+            profile[field] = value
+    result["routing_profile"] = profile
+
+    if not _compact_routing_text(result.get("name"), max_chars=120):
+        result["name"] = (
+            f"{profile_name.strip()} structured data"
+            if profile_name.strip()
+            else "Approved structured data"
+        )
+    if not _compact_routing_text(result.get("description"), max_chars=500):
+        entity_summary = ", ".join(entities[:4]) or "approved schema records"
+        result["description"] = f"Approved structured access to {entity_summary}."
+    return result
+
+
+def _routing_values(value: object, *, limit: int) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    values: list[str] = []
+    for item in value:
+        cleaned = _compact_routing_text(item, max_chars=240)
+        if cleaned and cleaned.lower() not in {existing.lower() for existing in values}:
+            values.append(cleaned)
+        if len(values) >= limit:
+            break
+    return values
+
+
+def _schema_routing_terms(catalog_json: dict[str, Any], *, limit: int) -> list[str]:
+    values: list[str] = []
+    for table in catalog_json.get("tables") or []:
+        if not isinstance(table, dict) or not table_allowed(table):
+            continue
+        values.extend(
+            str(table.get(field) or "")
+            for field in ("name", "description")
+        )
+        values.extend(str(item) for item in table.get("synonyms") or [])
+        for column in table.get("columns") or []:
+            if not isinstance(column, dict) or not column_allowed(column):
+                continue
+            values.extend(
+                str(column.get(field) or "")
+                for field in ("name", "description")
+            )
+            values.extend(str(item) for item in column.get("synonyms") or [])
+    return _unique_routing_values(values)[:limit]
+
+
+def _unique_routing_values(values: Iterable[object]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = _compact_routing_text(value, max_chars=240)
+        key = cleaned.lower()
+        if not cleaned or key in seen:
+            continue
+        unique.append(cleaned)
+        seen.add(key)
+    return unique
+
+
+def _humanize_identifier(value: object) -> str:
+    text = str(value or "").rsplit(".", 1)[-1]
+    return " ".join(part for part in re.split(r"[_\s]+", text) if part).strip()
+
+
+def _compact_routing_text(value: object, *, max_chars: int) -> str:
+    return " ".join(str(value or "").split())[:max_chars].strip()
 
 
 def approved_schema_prompt(catalog_json: dict[str, Any], *, question: str, max_tables: int = 8) -> str:
@@ -127,6 +342,18 @@ def approved_schema_prompt(catalog_json: dict[str, Any], *, question: str, max_t
     if rules:
         lines.append("Business rules:")
         lines.extend(f"- {item}" for item in rules[:10])
+    verified_queries = [
+        item
+        for item in catalog_json.get("verified_queries") or []
+        if isinstance(item, dict)
+        and str(item.get("question") or "").strip()
+        and str(item.get("sql") or "").strip()
+    ]
+    if verified_queries:
+        lines.append("Admin-verified query examples:")
+        for item in verified_queries[:10]:
+            lines.append(f"- Question: {str(item['question']).strip()[:500]}")
+            lines.append(f"  SQL: {str(item['sql']).strip()[:2000]}")
     return "\n".join(lines)
 
 

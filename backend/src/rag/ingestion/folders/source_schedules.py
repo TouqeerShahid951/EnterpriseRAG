@@ -33,6 +33,7 @@ def create_minio_prefix_schedule(
     timezone_name: str,
     scheduled_at: datetime | None,
     recurrence: dict[str, object],
+    analyze_slide_visuals: bool = True,
     user: UserRecord,
     identity_repo: IdentityRepository,
     document_repo: DocumentRepository,
@@ -77,7 +78,11 @@ def create_minio_prefix_schedule(
         timezone=normalized_timezone,
         scheduled_at=next_run_at if schedule_type == "one_time" else None,
         recurrence=recurrence,
-        source_config={"bucket": bucket.strip(), "prefix": normalized_prefix},
+        source_config={
+            "bucket": bucket.strip(),
+            "prefix": normalized_prefix,
+            **({} if analyze_slide_visuals else {"analyze_slide_visuals": False}),
+        },
         created_by=user.id,
         next_run_at=next_run_at,
     )
@@ -111,6 +116,7 @@ def create_local_folder_schedule(
     timezone_name: str,
     scheduled_at: datetime | None,
     recurrence: dict[str, object],
+    analyze_slide_visuals: bool = True,
     user: UserRecord,
     identity_repo: IdentityRepository,
     document_repo: DocumentRepository,
@@ -157,7 +163,10 @@ def create_local_folder_schedule(
         timezone=normalized_timezone,
         scheduled_at=next_run_at if schedule_type == "one_time" else None,
         recurrence=recurrence,
-        source_config={"path": normalized_path},
+        source_config={
+            "path": normalized_path,
+            **({} if analyze_slide_visuals else {"analyze_slide_visuals": False}),
+        },
         created_by=user.id,
         next_run_at=next_run_at,
     )

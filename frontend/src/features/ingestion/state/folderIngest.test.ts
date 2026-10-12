@@ -18,14 +18,17 @@ describe("folder ingestion scheduling", () => {
     const jpg = withRelativePath(new File(["jpeg"], "diagram.jpg", { type: "image/jpeg" }), "Finance/Images/diagram.jpg");
     const png = withRelativePath(new File(["png"], "chart.png", { type: "image/png" }), "Finance/Images/chart.png");
     const json = withRelativePath(new File(['{"case_id":"FIR-001"}'], "records.json", { type: "application/json" }), "Finance/Data/records.json");
+    const csv = withRelativePath(new File(["id,name\n1,Ada"], "people.csv", { type: "text/csv" }), "Finance/Data/people.csv");
+    const xlsx = withRelativePath(new File(["xlsx"], "people.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "Finance/Data/people.xlsx");
     const text = withRelativePath(new File(["notes"], "notes.txt", { type: "text/plain" }), "Finance/notes.txt");
+    const mislabeledPdf = withRelativePath(new File(["pdf"], "legacy.txt", { type: "application/pdf" }), "Finance/legacy.txt");
 
-    const summary = summarizeFolderFiles([pdf, jpg, png, json, text]);
+    const summary = summarizeFolderFiles([pdf, jpg, png, json, csv, xlsx, text, mislabeledPdf]);
 
     expect(relativePathForFile(pdf)).toBe("Finance/Policies/policy.pdf");
-    expect(summary.entries.map((entry) => entry.relativePath)).toEqual(["Finance/Policies/policy.pdf", "Finance/Images/diagram.jpg", "Finance/Images/chart.png", "Finance/Data/records.json", "Finance/notes.txt"]);
-    expect(summary.supportedEntries).toHaveLength(4);
-    expect(summary.unsupportedEntries).toHaveLength(1);
+    expect(summary.entries.map((entry) => entry.relativePath)).toEqual(["Finance/Policies/policy.pdf", "Finance/Images/diagram.jpg", "Finance/Images/chart.png", "Finance/Data/records.json", "Finance/Data/people.csv", "Finance/Data/people.xlsx", "Finance/notes.txt", "Finance/legacy.txt"]);
+    expect(summary.supportedEntries).toHaveLength(6);
+    expect(summary.unsupportedEntries.map((entry) => entry.relativePath)).toEqual(["Finance/notes.txt", "Finance/legacy.txt"]);
     expect(summary.validationMessages).toEqual([]);
   });
 
@@ -43,7 +46,7 @@ describe("folder ingestion scheduling", () => {
     const text = withRelativePath(new File(["notes"], "notes.txt", { type: "text/plain" }), "Finance/notes.txt");
     const summary = summarizeFolderFiles([text]);
 
-    expect(summary.validationMessages).toEqual(["The selected folder does not contain any PDF, DOCX, JPG, PNG, or JSON files."]);
+    expect(summary.validationMessages).toEqual(["The selected folder does not contain any PDF, DOCX, PPTX, CSV, XLSX, JPG, JPEG, PNG, and JSON files."]);
 
     const draft = {
       ...defaultFolderScheduleDraft("2026-06-09"),
@@ -60,6 +63,7 @@ describe("folder ingestion scheduling", () => {
     expect(request.schedule_type).toBe("one_time");
     expect(request.scheduled_at).toBe("2026-06-09T22:00");
     expect(request.description).toBe("Folder metadata");
+    expect(request.analyze_slide_visuals).toBe(true);
   });
 
   it("builds recurrence and local folder schedule payloads", () => {

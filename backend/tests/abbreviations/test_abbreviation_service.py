@@ -68,7 +68,7 @@ def test_only_global_admins_can_view(
         assert exc_info.value.code == "abbreviation_glossary_forbidden"
 
 
-def test_duplicate_and_stale_updates_return_conflicts() -> None:
+def test_same_abbreviation_with_distinct_definitions_and_stale_updates() -> None:
     repository = InMemoryAbbreviationRepository()
     service = AbbreviationGlossaryService(repository)
     actor = _user("platform_admin", ())
@@ -76,11 +76,10 @@ def test_duplicate_and_stale_updates_return_conflicts() -> None:
         abbreviation="AD", expansion="Assistant Director", actor=actor
     )
 
-    with pytest.raises(AbbreviationGlossaryRejected) as duplicate:
-        service.create_entry(
-            abbreviation="ad", expansion="Another Definition", actor=actor
-        )
-    assert duplicate.value.code == "abbreviation_already_exists"
+    duplicate = service.create_entry(
+        abbreviation="ad", expansion="Another Definition", actor=actor
+    )
+    assert duplicate.abbreviation == "AD"
 
     service.update_entry(
         first.id,
@@ -100,23 +99,20 @@ def test_duplicate_and_stale_updates_return_conflicts() -> None:
     assert stale.value.code == "abbreviation_revision_conflict"
 
 
-def test_import_rejects_conflicting_definitions_before_replacement() -> None:
+def test_import_accepts_multiple_definitions_for_one_abbreviation() -> None:
     repository = InMemoryAbbreviationRepository()
     service = AbbreviationGlossaryService(repository)
 
-    with pytest.raises(AbbreviationGlossaryRejected) as exc_info:
-        service.import_document_entries(
-            document_id=str(uuid4()),
-            entries=[
-                ("AD", "Assistant Director", 1),
-                ("AD", "Active Directory", 2),
-            ],
-        )
-
-    assert exc_info.value.code == "abbreviation_glossary_conflict"
+    assert service.import_document_entries(
+        document_id=str(uuid4()),
+        entries=[
+            ("AD", "Assistant Director", 1),
+            ("AD", "Active Directory", 2),
+        ],
+    ) == 2
 
 
-def test_pdf_sources_merge_identical_terms_and_remove_independently() -> None:
+def test_pdf_sources_allow_distinct_definitions_and_remove_independently() -> None:
     repository = InMemoryAbbreviationRepository()
     service = AbbreviationGlossaryService(repository)
     actor = _user("system_admin", ())
@@ -134,17 +130,15 @@ def test_pdf_sources_merge_identical_terms_and_remove_independently() -> None:
     assert {source.document_id for source in sources} == {"source-one", "source-two"}
     assert next(entry for entry in entries if entry.abbreviation == "AD").source_count == 2
 
-    with pytest.raises(AbbreviationGlossaryRejected) as conflict:
-        service.import_document_entries(
-            document_id="source-three",
-            entries=[("AD", "Active Directory", 1)],
-        )
-    assert conflict.value.code == "abbreviation_glossary_conflict"
+    service.import_document_entries(
+        document_id="source-three",
+        entries=[("AD", "Active Directory", 1)],
+    )
 
     service.remove_source("source-one", actor=actor)
 
     _glossary, sources, entries = service.view(actor=actor)
-    assert [source.document_id for source in sources] == ["source-two"]
+    assert {source.document_id for source in sources} == {"source-two", "source-three"}
     assert {entry.abbreviation for entry in entries} == {"AD", "FIA"}
 
 

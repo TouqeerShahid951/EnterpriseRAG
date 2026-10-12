@@ -81,6 +81,7 @@ class ChatHistoryRepositoryTests(unittest.TestCase):
             {
                 "query": "Question 1",
                 "answer": "Answer 1",
+                "answer_status": None,
                 "intent": "factual_simple",
                 "sources": [],
                 "source_mode": None,
@@ -88,6 +89,7 @@ class ChatHistoryRepositoryTests(unittest.TestCase):
                 "group_path": None,
                 "document_ids": [],
                 "query_source_id": None,
+                "query_source_ids": [],
                 "faithfulness_score": None,
                 "faithfulness_status": None,
                 "degraded": None,
@@ -95,6 +97,7 @@ class ChatHistoryRepositoryTests(unittest.TestCase):
             {
                 "query": "Question 2",
                 "answer": "Answer 2",
+                "answer_status": None,
                 "intent": "factual_simple",
                 "sources": [],
                 "source_mode": None,
@@ -102,6 +105,7 @@ class ChatHistoryRepositoryTests(unittest.TestCase):
                 "group_path": None,
                 "document_ids": [],
                 "query_source_id": None,
+                "query_source_ids": [],
                 "faithfulness_score": None,
                 "faithfulness_status": None,
                 "degraded": None,
@@ -160,6 +164,43 @@ class ChatHistoryRepositoryTests(unittest.TestCase):
                 client_request_id="request-1",
                 request_fingerprint="fingerprint-2",
             )
+
+    def test_source_selection_replaces_clarification_without_new_user_turn(self) -> None:
+        repo = InMemoryChatHistoryRepository()
+        common = {
+            "user_id": "user-1",
+            "permission_version": 1,
+            "session_id": "session-1",
+            "title": "Cases",
+            "client_request_id": "request-1",
+        }
+        repo.append_completed_turn(
+            **common,
+            user_turn={"role": "user", "content": "How many cases are there?"},
+            assistant_turn={
+                "role": "assistant",
+                "response": {
+                    "answer": "Choose a database.",
+                    "source_clarification": {"question": "Which database?", "options": []},
+                },
+            },
+            request_fingerprint="fingerprint-1",
+        )
+
+        session = repo.append_completed_turn(
+            **common,
+            user_turn={"role": "user", "content": "unused"},
+            assistant_turn={
+                "role": "assistant",
+                "response": {"answer": "There are three cases."},
+            },
+            request_fingerprint="fingerprint-2",
+            continue_source_clarification=True,
+        )
+
+        self.assertEqual(len(session.turns), 2)
+        self.assertEqual(session.turns[0]["content"], "How many cases are there?")
+        self.assertEqual(session.turns[1]["response"]["answer"], "There are three cases.")
 
 
 if __name__ == "__main__":

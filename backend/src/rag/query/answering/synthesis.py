@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Generator
 from dataclasses import dataclass
 from time import perf_counter
 
 from rag.shared.contracts.evidence import ConflictPair, SourceAnchor
 from rag.query.cancellation import QueryCancellationToken, call_with_optional_cancellation
+from rag.query.http import ServiceRequestError
 from rag.query.inference import InferenceClient
 from rag.query.ollama import (
     SYNTHESIS_PROMPT_HEADROOM_TOKENS,
@@ -17,9 +19,21 @@ from rag.query.ollama import (
 from rag.query.schemas import AnswerStatus, QueryCoverage, RAGResponse
 from rag.query.state import QueryContext
 from rag.query.routing.routing_models import RoutePlan
+from rag.query.reranking.coverage import coverage_obligations
 from rag.query.sources import citation_label, source_citation, sources_from_hits
 
 _CITATION_RE = re.compile(r"\[[^\[\]\n]{1,200}:[^\[\]\n]{1,200}\]")
+ANSWER_CONTEXT_LIMIT_REASON = "answer_context_limit_reached"
+ANSWER_CONTEXT_LIMIT_NOTICE = "Answer generation stopped at the model's token limit."
+_CONTEXT_LIMIT_MARKERS = (
+    "output token limit",
+    "maximum context length",
+    "context length",
+    "context window",
+    "maximum model length",
+    "input prompt is too long",
+    "input length exceeds",
+)
 _CLAIM_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?!\[)|(?<=\])\s+|\n+")
 _MARKDOWN_TABLE_SEPARATOR_RE = re.compile(
     r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$"
@@ -99,6 +113,7 @@ _PROFILE_INSTRUCTIONS = {
     ),
     "summarization": (
         "Summarize only the retrieved section or document evidence.",
+        "For an ordinary summary, use 6–8 concise factual bullets unless the user requests more detail, one independently verifiable point per line, each followed by its own exact supporting citation labels. Keep conditions and exceptions with the point they qualify.",
         "Do not add conclusions or background that the indexed evidence does not support.",
     ),
     "comparison": (
@@ -144,6 +159,7 @@ class PreparedSynthesis:
     contexts: list[str]
     profile: str
     sources: list[SourceAnchor]
+    context_complete: bool = True
 
 
 def synthesize_response(
@@ -152,6 +168,18 @@ def synthesize_response(
     *,
     cancellation_token: QueryCancellationToken | None = None,
 ) -> QueryContext:
+    for _chunk in synthesis_steps(ctx, ollama, cancellation_token=cancellation_token):
+        pass
+    return ctx
+
+
+def synthesis_steps(
+    ctx: QueryContext,
+    ollama: InferenceClient,
+    *,
+    stream: bool = False,
+    cancellation_token: QueryCancellationToken | None = None,
+) -> Generator[str, None, QueryContext]:
     if cancellation_token is not None:
         cancellation_token.raise_if_cancelled()
     evidence_sources = sources_from_hits(
@@ -160,6 +188,10 @@ def synthesize_response(
     plan = ctx.get("route_plan")
     prepared = prepare_synthesis_input(ctx, evidence_sources)
     ctx["synthesis_profile"] = prepared.profile
+    ctx["synthesis_source_keys"] = [
+        _source_lineage_key(ctx, source) for source in prepared.sources
+    ]
+    ctx["synthesis_context_complete"] = prepared.context_complete
     if plan is not None and not plan.needs_retrieval:
         available_sources = []
         answer = "I can only answer questions grounded in the indexed documents."
@@ -171,16 +203,29 @@ def synthesize_response(
             evidence_sources, conflict_sources(ctx["conflict_pairs"])
         )
         answer = build_conflict_answer(ctx["conflict_pairs"])
-    elif evidence_sources:
+    elif prepared.contexts and prepared.sources:
         available_sources = prepared.sources
-        answer = call_with_optional_cancellation(
-            ollama.answer,
-            cancellation_token,
-            question=prepared.question,
-            contexts=prepared.contexts,
-            profile=prepared.profile,
-        )
-        answer = validate_synthesized_answer(ctx, answer, available_sources)
+        try:
+            answer = yield from answer_steps(
+                ollama,
+                stream=stream,
+                cancellation_token=cancellation_token,
+                question=prepared.question,
+                contexts=prepared.contexts,
+                profile=prepared.profile,
+            )
+        except ServiceRequestError as exc:
+            if not is_answer_context_limit_error(exc):
+                raise
+            mark_answer_context_limit(ctx)
+            answer = ctx.get("streamed_answer", "") if stream else ""
+        else:
+            answer = validate_synthesized_answer(ctx, answer, available_sources)
+    elif ctx.get("summary_contexts") == []:
+        available_sources = []
+        answer = "I could not produce a supported summary from the authorized document content."
+        ctx["degraded"] = True
+        ctx["degraded_reason"] = ctx["degraded_reason"] or "summary_generation_failed"
     elif _scope_requires_clarification(ctx):
         available_sources = []
         answer = (
@@ -189,6 +234,10 @@ def synthesize_response(
         )
         ctx["degraded"] = True
         ctx["degraded_reason"] = ctx["degraded_reason"] or "exhaustive_scope_unresolved"
+    elif operational_message := _operational_failure_message(ctx):
+        available_sources = []
+        answer = operational_message
+        ctx["degraded"] = True
     elif ctx.get("source_expansion"):
         available_sources = []
         answer = "I could not answer from the selected source. You can search all sources too."
@@ -199,15 +248,72 @@ def synthesize_response(
         answer = "No accessible current sources were found for this query."
         ctx["degraded"] = True
         ctx["degraded_reason"] = ctx["degraded_reason"] or "no_indexed_sources"
-    if available_sources and _has_incomplete_exhaustive_scope(ctx):
-        answer = _enforce_partial_answer(answer)
     answer = ensure_answer_has_citation(answer, available_sources)
+    if available_sources and _has_incomplete_exhaustive_scope(ctx):
+        ctx["degraded"] = True
+        ctx["degraded_reason"] = ctx["degraded_reason"] or (
+            "exhaustive_coverage_unavailable"
+            if ctx.get("exhaustive_coverage") is None
+            else "exhaustive_final_evidence_coverage_partial"
+        )
+        answer = _enforce_partial_answer(answer)
+    ctx["citation_evidence"] = available_sources
+    ctx["citation_source_keys"] = [
+        _source_lineage_key(ctx, source)
+        for source in cited_sources(answer, available_sources)
+    ]
+    if ctx["degraded_reason"] == ANSWER_CONTEXT_LIMIT_REASON:
+        answer = append_context_limit_notice(answer)
     ctx["response"] = build_rag_response(
         ctx,
         answer=answer,
         sources=response_sources(answer, available_sources),
     )
     return ctx
+
+
+def answer_steps(
+    ollama: InferenceClient,
+    *,
+    question: str,
+    contexts: list[str],
+    profile: str,
+    stream: bool = False,
+    cancellation_token: QueryCancellationToken | None = None,
+) -> Generator[str, None, str]:
+    if not stream:
+        return call_with_optional_cancellation(
+            ollama.answer, cancellation_token,
+            question=question, contexts=contexts, profile=profile,
+        )
+    chunks = []
+    for chunk in call_with_optional_cancellation(
+        ollama.stream_answer, cancellation_token,
+        question=question, contexts=contexts, profile=profile,
+    ):
+        if cancellation_token is not None:
+            cancellation_token.raise_if_cancelled()
+        if chunk:
+            chunks.append(chunk)
+            yield chunk
+    return "".join(chunks)
+
+
+def is_answer_context_limit_error(exc: ServiceRequestError) -> bool:
+    return exc.service in {"ollama", "vllm"} and any(
+        marker in exc.message.lower() for marker in _CONTEXT_LIMIT_MARKERS
+    )
+
+
+def mark_answer_context_limit(ctx: QueryContext) -> None:
+    ctx["degraded"] = True
+    ctx["degraded_reason"] = ANSWER_CONTEXT_LIMIT_REASON
+
+
+def append_context_limit_notice(answer: str) -> str:
+    if answer.strip():
+        return f"{answer.rstrip()}\n\n> {ANSWER_CONTEXT_LIMIT_NOTICE}"
+    return f"{ANSWER_CONTEXT_LIMIT_NOTICE} Try a narrower question."
 
 
 def prepare_synthesis_input(
@@ -226,17 +332,51 @@ def prepare_synthesis_input(
         exhaustive_document_scope_complete=exhaustive_scope_complete,
         scoped_document_titles=_scoped_document_titles(ctx) if exhaustive_scope else (),
     )
-    contexts = route_source_contexts(
-        sources, profile=profile, include_location=exhaustive_scope
-    )
-    contexts, sources = _fit_prompt_budget(
-        question=question,
-        contexts=contexts,
-        sources=sources,
-        profile=profile,
-        token_budget=ctx.get("synthesis_token_limit", ctx["token_budget"]),
-    )
+    summary_contexts = ctx.get("summary_contexts")
+    if summary_contexts is not None:
+        contexts, retained_units, context_complete = fit_context_prompt_budget(
+            question=question,
+            contexts=summary_contexts,
+            context_units=ctx.get("summary_context_units", [[] for _ in summary_contexts]),
+            profile=profile,
+            token_budget=ctx["token_budget"],
+        )
+        _reconcile_summary_prompt_coverage(
+            ctx,
+            retained_units=retained_units,
+            context_complete=context_complete,
+        )
+        labels = {label for context in contexts for label in _CITATION_RE.findall(context)}
+        sources = [source for source in sources if source_citation(source) in labels]
+    else:
+        contexts = route_source_contexts(
+            sources, profile=profile, include_location=exhaustive_scope
+        )
+        original_sources = list(sources)
+        contexts, sources, context_complete = _fit_prompt_budget(
+            question=question,
+            contexts=contexts,
+            sources=sources,
+            profile=profile,
+            token_budget=ctx["token_budget"],
+        )
+        _reconcile_prompt_coverage(
+            ctx,
+            original_sources=original_sources,
+            retained_sources=sources,
+            context_complete=context_complete,
+        )
+    if exhaustive_scope_complete != (not _has_incomplete_exhaustive_scope(ctx)):
+        question = _profiled_question(
+            base_question,
+            plan=plan,
+            profile=profile,
+            exhaustive_document_scope=exhaustive_scope,
+            exhaustive_document_scope_complete=False,
+            scoped_document_titles=_scoped_document_titles(ctx) if exhaustive_scope else (),
+        )
     ctx["synthesis_context_count"] = len(contexts)
+    ctx["synthesis_context_complete"] = context_complete
     ctx["synthesis_estimated_prompt_tokens"] = estimate_answer_prompt_tokens(
         question=question,
         contexts=contexts,
@@ -247,6 +387,7 @@ def prepare_synthesis_input(
         contexts=contexts,
         profile=profile,
         sources=sources,
+        context_complete=context_complete,
     )
 
 
@@ -311,12 +452,16 @@ def _fit_prompt_budget(
     sources: list[SourceAnchor],
     profile: str,
     token_budget: int,
-) -> tuple[list[str], list[SourceAnchor]]:
+    output_tokens: int | None = None,
+    context_tokens: int | None = None,
+) -> tuple[list[str], list[SourceAnchor], bool]:
     prompt_budget = synthesis_prompt_token_budget(
-        token_budget=token_budget, profile=profile
+        token_budget=token_budget, profile=profile,
+        output_tokens=output_tokens, context_tokens=context_tokens,
     )
     trimmed_contexts = list(contexts)
     trimmed_sources = list(sources)
+    context_complete = True
     while (
         len(trimmed_contexts) > 1
         and estimate_answer_prompt_tokens(
@@ -326,6 +471,7 @@ def _fit_prompt_budget(
     ):
         trimmed_contexts.pop()
         trimmed_sources.pop()
+        context_complete = False
     estimated_tokens = estimate_answer_prompt_tokens(
         question=question, contexts=trimmed_contexts, profile=profile
     )
@@ -337,16 +483,118 @@ def _fit_prompt_budget(
             - ((estimated_tokens - prompt_budget + 1) * 4),
         )
         trimmed_contexts[-1] = trimmed_contexts[-1][:keep_chars].rstrip()
-    return trimmed_contexts, trimmed_sources
+        context_complete = False
+    return trimmed_contexts, trimmed_sources, context_complete
 
 
-def synthesis_prompt_token_budget(*, token_budget: int, profile: str | None) -> int:
-    return max(
-        1,
-        token_budget
-        - answer_num_predict_for_profile(profile)
-        - SYNTHESIS_PROMPT_HEADROOM_TOKENS,
+def _reconcile_prompt_coverage(
+    ctx: QueryContext,
+    *,
+    original_sources: list[SourceAnchor],
+    retained_sources: list[SourceAnchor],
+    context_complete: bool,
+) -> None:
+    coverage = ctx.get("exhaustive_coverage")
+    if coverage is None:
+        return
+    retained = {(source.doc_id, source.chunk_id) for source in retained_sources}
+    original = {(source.doc_id, source.chunk_id) for source in original_sources}
+    if context_complete and retained == original:
+        return
+    retained_hits = [
+        hit
+        for hit in ctx["retrieved_hits"]
+        if (
+            str(hit.payload.get("doc_id") or hit.point_id),
+            str(hit.payload.get("chunk_id") or hit.point_id),
+        )
+        in retained
+    ]
+    covered = coverage_obligations(retained_hits)
+    required = set(coverage["required_obligations"])
+    coverage["covered_obligations"] = sorted(
+        set(coverage["covered_obligations"]) & covered
     )
+    if not context_complete or not required <= covered:
+        coverage["evidence_status"] = "partial"
+        if "synthesis_prompt_budget_incomplete" not in coverage["reasons"]:
+            coverage["reasons"].append("synthesis_prompt_budget_incomplete")
+        ctx["degraded"] = True
+        ctx["degraded_reason"] = (
+            ctx["degraded_reason"] or "exhaustive_final_evidence_coverage_partial"
+        )
+
+
+def fit_context_prompt_budget(
+    *,
+    question: str,
+    contexts: list[str],
+    context_units: list[list[str]],
+    profile: str,
+    token_budget: int,
+    output_tokens: int | None = None,
+    context_tokens: int | None = None,
+) -> tuple[list[str], list[list[str]], bool]:
+    prompt_budget = synthesis_prompt_token_budget(
+        token_budget=token_budget, profile=profile,
+        output_tokens=output_tokens, context_tokens=context_tokens,
+    )
+    retained_contexts = list(contexts)
+    retained_units = [list(units) for units in context_units]
+    complete = True
+    while (
+        len(retained_contexts) > 1
+        and estimate_answer_prompt_tokens(
+            question=question, contexts=retained_contexts, profile=profile
+        )
+        > prompt_budget
+    ):
+        retained_contexts.pop()
+        retained_units.pop()
+        complete = False
+    estimated = estimate_answer_prompt_tokens(
+        question=question, contexts=retained_contexts, profile=profile
+    )
+    if retained_contexts and estimated > prompt_budget:
+        keep_chars = max(
+            1,
+            len(retained_contexts[-1]) - ((estimated - prompt_budget + 1) * 4),
+        )
+        retained_contexts[-1] = retained_contexts[-1][:keep_chars].rstrip()
+        retained_units[-1] = []
+        complete = False
+    return retained_contexts, retained_units, complete
+
+
+def _reconcile_summary_prompt_coverage(
+    ctx: QueryContext,
+    *,
+    retained_units: list[list[str]],
+    context_complete: bool,
+) -> None:
+    coverage = ctx.get("exhaustive_coverage")
+    if coverage is None:
+        return
+    represented = {unit for units in retained_units for unit in units}
+    covered = set(coverage["covered_obligations"]) & represented
+    coverage["covered_obligations"] = sorted(covered)
+    required = set(coverage["required_obligations"])
+    if context_complete and required <= covered:
+        return
+    coverage["evidence_status"] = "partial"
+    if "synthesis_prompt_budget_incomplete" not in coverage["reasons"]:
+        coverage["reasons"].append("synthesis_prompt_budget_incomplete")
+    ctx["degraded"] = True
+    ctx["degraded_reason"] = ctx["degraded_reason"] or "summary_coverage_partial"
+
+
+def synthesis_prompt_token_budget(
+    *, token_budget: int, profile: str | None,
+    output_tokens: int | None = None, context_tokens: int | None = None,
+) -> int:
+    output = output_tokens if output_tokens is not None else answer_num_predict_for_profile(profile)
+    window = context_tokens if context_tokens is not None else token_budget
+    return max(1, min(token_budget, window - output - SYNTHESIS_PROMPT_HEADROOM_TOKENS))
 
 
 def ensure_answer_has_citation(answer: str, sources: list[SourceAnchor]) -> str:
@@ -397,7 +645,7 @@ def ensure_answer_has_citation(answer: str, sources: list[SourceAnchor]) -> str:
 def validate_synthesized_answer(
     ctx: QueryContext, answer: str, sources: list[SourceAnchor]
 ) -> str:
-    answer = ensure_answer_has_citation(answer, sources)
+    # Missing and unknown labels remain visible to the mandatory citation repair.
     if not sources or (
         _has_substantive_answer(answer) and not is_global_abstention(answer)
     ):
@@ -414,7 +662,7 @@ def validate_synthesized_answer(
 
 
 def _has_substantive_answer(answer: str) -> bool:
-    return bool(re.search(r"[A-Za-z0-9]", _CITATION_RE.sub("", answer)))
+    return any(character.isalnum() for character in _CITATION_RE.sub("", answer))
 
 
 def _append_citation(statement: str, label: str) -> str:
@@ -531,6 +779,8 @@ def _route_source_context(
 
 
 def _synthesis_excerpt(source: SourceAnchor) -> str:
+    if source.prompt_context and source.prompt_context != source.excerpt:
+        return f"Original citable text:\n{source.excerpt}\nSurrounding context (not citable under this source label):\n{source.prompt_context}"
     table_row_context = _table_row_column_context(source.excerpt)
     if not table_row_context:
         return source.excerpt
@@ -619,20 +869,27 @@ def _format_filters(filters: dict[str, object]) -> str:
 
 
 def _has_exhaustive_document_scope(ctx: QueryContext) -> bool:
-    return "exhaustive_coverage" in ctx or any(
+    plan = ctx.get("route_plan")
+    return bool(plan is not None and plan.coverage == "exhaustive") or any(
         str(hit.payload.get("exhaustive_scope_origin", "")) == "document_class_scope"
         for hit in ctx["retrieved_hits"]
     )
 
 
 def _has_incomplete_exhaustive_scope(ctx: QueryContext) -> bool:
+    plan = ctx.get("route_plan")
+    if plan is not None and plan.coverage != "exhaustive":
+        return False
     coverage = ctx.get("exhaustive_coverage")
     if coverage is not None:
         return (
             coverage["candidate_status"] != "complete"
             or coverage["evidence_status"] != "complete"
         )
-    return str(ctx.get("degraded_reason") or "").startswith("exhaustive_")
+    return bool(
+        (plan is not None and plan.coverage == "exhaustive")
+        or str(ctx.get("degraded_reason") or "").startswith("exhaustive_")
+    )
 
 
 def _scope_requires_clarification(ctx: QueryContext) -> bool:
@@ -696,6 +953,28 @@ def cited_sources(answer: str, sources: list[SourceAnchor]) -> list[SourceAnchor
     return [source for source in sources if source_citation(source) in labels]
 
 
+def _source_lineage_key(ctx: QueryContext, source: SourceAnchor) -> dict[str, object]:
+    generations = sorted(
+        {
+            str(hit.payload["index_generation_id"])
+            for hit in ctx["retrieved_hits"]
+            if str(hit.payload.get("doc_id") or hit.point_id) == source.doc_id
+            and str(hit.payload.get("chunk_id") or hit.point_id) == source.chunk_id
+            and hit.payload.get("index_generation_id")
+        }
+    )
+    key: dict[str, object] = {
+        "doc_id": source.doc_id,
+        "chunk_id": source.chunk_id,
+        "citation": source_citation(source),
+    }
+    if len(generations) == 1:
+        key["index_generation_id"] = generations[0]
+    elif generations:
+        key["index_generation_ids"] = generations
+    return key
+
+
 def response_sources(answer: str, sources: list[SourceAnchor]) -> list[SourceAnchor]:
     if is_global_abstention(answer):
         return []
@@ -748,7 +1027,7 @@ def cited_insufficient_evidence_answer(
     source = _best_source(_support_terms(question), sources)
     return (
         "The indexed evidence does not contain enough information to answer this question. "
-        f"Closest relevant evidence reviewed: {source_citation(source)}."
+        f"The nearest source was reviewed but does not establish the requested fact {source_citation(source)}."
     )
 
 
@@ -756,9 +1035,7 @@ def is_global_abstention(answer: str) -> bool:
     if _CITATION_RE.search(answer):
         return False
     normalized = " ".join(answer.lower().split())
-    return any(
-        phrase in normalized
-        for phrase in (
+    phrases = (
             "indexed sources do not contain enough information",
             "sources do not contain enough information",
             "sources do not contain the answer",
@@ -768,8 +1045,9 @@ def is_global_abstention(answer: str) -> bool:
             "documents do not contain information about",
             "not enough information in the indexed sources",
             "no accessible current sources were found",
-        )
     )
+    sentences = [part for part in re.split(r"(?<=[.!?])\s+", normalized) if part]
+    return bool(sentences) and all(any(phrase in sentence for phrase in phrases) for sentence in sentences)
 
 
 def conflict_sources(conflicts: list[ConflictPair]) -> list[SourceAnchor]:
@@ -936,6 +1214,9 @@ def build_rag_response(
 ) -> RAGResponse:
     source_decision = ctx.get("source_decision")
     coverage = _response_coverage(ctx)
+    ctx["response_source_keys"] = [
+        _source_lineage_key(ctx, source) for source in sources
+    ]
     return RAGResponse(
         trace_id=ctx["trace_id"],
         answer=answer,
@@ -953,14 +1234,29 @@ def build_rag_response(
         degraded=ctx["degraded"],
         degraded_reason=ctx["degraded_reason"],
         source_mode=str(getattr(source_decision, "resolved_mode", "")) or None,
+        query_source_id=str(getattr(source_decision, "query_source_id", "")) or None,
         source_decision_reason=str(getattr(source_decision, "reason", "")) or None,
         source_expansion=ctx.get("source_expansion"),  # type: ignore[arg-type]
+        operational_failures=ctx.get("operational_failures", []),  # type: ignore[arg-type]
     )
+
+
+def _operational_failure_message(ctx: QueryContext) -> str | None:
+    failures = ctx.get("operational_failures", [])
+    if not failures:
+        return None
+    return str(failures[0].get("message") or "Database retrieval is unavailable.")
 
 
 def _response_coverage(ctx: QueryContext) -> QueryCoverage:
     state = ctx.get("exhaustive_coverage")
     if state is None:
+        plan = ctx.get("route_plan")
+        if plan is not None and plan.coverage == "exhaustive":
+            return QueryCoverage(
+                completeness="unknown",
+                warnings=["exhaustive_coverage_unavailable"],
+            )
         return QueryCoverage()
     statuses = {state["candidate_status"], state["evidence_status"]}
     if "unknown" in statuses:

@@ -40,11 +40,24 @@ export function resolveAnalyticsChartTooltipIndex(hoveredIndex: number | null, f
   return focusedIndex ?? hoveredIndex;
 }
 
+function analyticsBucketIndexAtPointer(svg: SVGSVGElement | null, clientX: number, x: (index: number) => number, bucketCount: number): number | null {
+  if (!svg || !bucketCount) return null;
+  const bounds = svg.getBoundingClientRect();
+  const viewBoxX = bounds.width ? (clientX - bounds.left) / bounds.width * width : 0;
+  return Array.from({ length: bucketCount }, (_, index) => index).reduce((closest, index) => Math.abs(x(index) - viewBoxX) < Math.abs(x(closest) - viewBoxX) ? index : closest, 0);
+}
+
 function formatAnalyticsBucketLabel(startedAt: string, hourly: boolean): string {
   const date = new Date(startedAt);
   const day = date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
   const time = hourly ? ` ${date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}` : "";
   return `${day}${time} UTC`;
+}
+
+function analyticsTooltipPosition(index: number, bucketCount: number, x: (index: number) => number): { left?: string; right?: string; transform: string } {
+  if (index === 0) return { left: "0%", transform: "none" };
+  if (index === bucketCount - 1) return { right: "0", transform: "none" };
+  return { left: `${x(index) / width * 100}%`, transform: "translateX(-50%)" };
 }
 
 function ChartAxes({ buckets, max, x, label, tooltip, tooltipId, children }: { buckets: AnalyticsSeriesBucket[]; max: number; x: (index: number) => number; label: string; tooltip: ChartTooltip | null; tooltipId: string; children: ReactNode }) {
@@ -56,7 +69,7 @@ function ChartAxes({ buckets, max, x, label, tooltip, tooltipId, children }: { b
       <div className="analytics-y-ticks">{[0, 0.5, 1].map((fraction) => <span key={fraction} style={{ top: `${yPosition(max * fraction, max) / height * 100}%` }}>{(max * fraction).toLocaleString("en-US", { maximumFractionDigits: 1 })}</span>)}</div>
       <div className="analytics-chart-data">
         {children}
-        {tooltip ? <div className="analytics-chart-tooltip" id={tooltipId} role="tooltip" style={{ left: `${Math.min(90, Math.max(10, x(tooltip.index) / width * 100))}%`, pointerEvents: "none" }}>
+        {tooltip ? <div className="analytics-chart-tooltip" id={tooltipId} role="tooltip" style={{ ...analyticsTooltipPosition(tooltip.index, buckets.length, x), pointerEvents: "none" }}>
           <strong>{tooltip.title}</strong>
           {tooltip.items.map((item) => <div key={item.label}><span>{item.label}</span> <span>{item.value}</span></div>)}
         </div> : null}
@@ -91,11 +104,11 @@ export function AnalyticsLineChart({ buckets, metrics, onBucketSelect }: { bucke
     <ChartAxes buckets={buckets} max={max} x={x} label={label} tooltip={tooltip} tooltipId={tooltipId}>
     <svg preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`} role="group" aria-label="Filter executions by UTC bucket">
       {[0, 0.5, 1].map((fraction) => <line key={fraction} className="analytics-grid-line" x1={plot.left} x2={width - plot.right} y1={y(max * fraction)} y2={y(max * fraction)} />)}
-      {metrics.map((metric) => <polyline key={metric.key} className={`analytics-chart-line analytics-chart-line-${metric.tone}`} points={buckets.flatMap((bucket, index) => { const value = valueFor(bucket, metric.key); return value === null ? [] : [`${x(index)},${y(value)}`]; }).join(" ")} />)}
+      {metrics.map((metric) => <polyline key={metric.key} className={`analytics-chart-line analytics-chart-line-${metric.tone}`} pointerEvents="stroke" points={buckets.flatMap((bucket, index) => { const value = valueFor(bucket, metric.key); return value === null ? [] : [`${x(index)},${y(value)}`]; }).join(" ")} onPointerEnter={(event) => setHoveredIndex(analyticsBucketIndexAtPointer(event.currentTarget.ownerSVGElement, event.clientX, x, buckets.length))} onPointerMove={(event) => setHoveredIndex(analyticsBucketIndexAtPointer(event.currentTarget.ownerSVGElement, event.clientX, x, buckets.length))} onPointerLeave={() => setHoveredIndex(null)} onClick={onBucketSelect ? (event) => { const index = analyticsBucketIndexAtPointer(event.currentTarget.ownerSVGElement, event.clientX, x, buckets.length); if (index !== null) onBucketSelect(buckets[index]); } : undefined} />)}
       {buckets.map((bucket, index) => {
         const items = metrics.map((metric) => ({ label: metric.label, value: formatAnalyticsChartValue(valueFor(bucket, metric.key), metric.unit) }));
         const bucketLabel = `${formatAnalyticsBucketLabel(bucket.started_at, hourly)}. ${items.map((item) => `${item.label} ${item.value}`).join(". ")}${onBucketSelect ? `. Filter executions to ${bucket.started_at} UTC bucket` : ""}`;
-        return <rect key={bucket.started_at} className="analytics-chart-hitarea" x={x(index) - 12} y={plot.top} width={24} height={height - plot.top - plot.bottom} role={onBucketSelect ? "button" : "img"} tabIndex={0} aria-label={bucketLabel} aria-describedby={activeIndex === index ? tooltipId : undefined} onPointerEnter={() => setHoveredIndex(index)} onPointerLeave={() => setHoveredIndex(null)} onFocus={() => setFocusedIndex(index)} onBlur={() => setFocusedIndex(null)} onClick={onBucketSelect ? () => onBucketSelect(bucket) : undefined} onKeyDown={onBucketSelect ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onBucketSelect(bucket); } } : undefined} />;
+        return <rect key={bucket.started_at} className="analytics-chart-hitarea" x={x(index) - 12} y={plot.top} width={24} height={height - plot.top - plot.bottom} role={onBucketSelect ? "button" : "img"} tabIndex={0} aria-label={bucketLabel} aria-describedby={activeIndex === index ? tooltipId : undefined} style={{ pointerEvents: "none" }} onFocus={() => setFocusedIndex(index)} onBlur={() => setFocusedIndex(null)} onClick={onBucketSelect ? () => onBucketSelect(bucket) : undefined} onKeyDown={onBucketSelect ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onBucketSelect(bucket); } } : undefined} />;
       })}
     </svg>
     </ChartAxes>
@@ -138,12 +151,13 @@ export function AnalyticsOutcomeChart({ buckets, onBucketSelect }: { buckets: An
         });
       })}
       {buckets.map((bucket, index) => {
+        const barHeight = outcomeTotal(bucket) / max * plotHeight;
         const items = [
           { label: "Total", value: formatAnalyticsChartValue(outcomeTotal(bucket), "count") },
           ...outcomeMetrics.map(([key, label]) => ({ label, value: formatAnalyticsChartValue(bucket[key], "count") })),
         ];
         const bucketLabel = `${formatAnalyticsBucketLabel(bucket.started_at, hourly)}. ${items.map((item) => `${item.label} ${item.value}`).join(". ")}${onBucketSelect ? `. Filter executions to ${bucket.started_at} UTC bucket` : ""}`;
-        return <rect key={`hit-${bucket.started_at}`} className="analytics-chart-hitarea" x={plot.left + (index / Math.max(1, buckets.length)) * (width - plot.left - plot.right)} y={plot.top} width={barWidth} height={height - plot.top - plot.bottom} role={onBucketSelect ? "button" : "img"} tabIndex={0} aria-label={bucketLabel} aria-describedby={activeIndex === index ? tooltipId : undefined} onPointerEnter={() => setHoveredIndex(index)} onPointerLeave={() => setHoveredIndex(null)} onFocus={() => setFocusedIndex(index)} onBlur={() => setFocusedIndex(null)} onClick={onBucketSelect ? () => onBucketSelect(bucket) : undefined} onKeyDown={onBucketSelect ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onBucketSelect(bucket); } } : undefined} />;
+        return <rect key={`hit-${bucket.started_at}`} className="analytics-chart-hitarea" x={plot.left + (index / Math.max(1, buckets.length)) * (width - plot.left - plot.right)} y={height - plot.bottom - barHeight} width={barWidth} height={barHeight} role={onBucketSelect ? "button" : "img"} tabIndex={0} aria-label={bucketLabel} aria-describedby={activeIndex === index ? tooltipId : undefined} onPointerEnter={() => setHoveredIndex(index)} onPointerLeave={() => setHoveredIndex(null)} onFocus={() => setFocusedIndex(index)} onBlur={() => setFocusedIndex(null)} onClick={onBucketSelect ? () => onBucketSelect(bucket) : undefined} onKeyDown={onBucketSelect ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onBucketSelect(bucket); } } : undefined} />;
       })}
     </svg>
     </ChartAxes>

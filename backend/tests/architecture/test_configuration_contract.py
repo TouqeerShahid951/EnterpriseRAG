@@ -13,6 +13,7 @@ from rag.ingestion.configuration.schemas import (
     IngestRuntimeConfigResponse,
 )
 from rag.shared.contracts.rag_defaults import (
+    DEFAULT_CONTEXT_RESOLVER_ENABLED,
     DEFAULT_EVIDENCE_GATE_POLICY,
     DEFAULT_EMBEDDING_MODEL_ID,
     DEFAULT_FAITHFULNESS_POLICY,
@@ -91,6 +92,7 @@ def test_python_defaults_preserve_the_supported_docker_profile() -> None:
     )
     assert config.rag_evidence_gate_policy == DEFAULT_EVIDENCE_GATE_POLICY == "adaptive"
     assert config.rag_faithfulness_policy == DEFAULT_FAITHFULNESS_POLICY == "adaptive"
+    assert config.rag_context_resolver_enabled is DEFAULT_CONTEXT_RESOLVER_ENABLED is True
     assert config.rag_reranker_device == DEFAULT_RERANKER_DEVICE == "auto"
     assert config.graphrag_enabled is True
     assert config.embedding_model_id == DEFAULT_EMBEDDING_MODEL_ID == "nomic-ai/nomic-embed-text-v1.5"

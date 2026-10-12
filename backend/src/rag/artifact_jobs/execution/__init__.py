@@ -2,12 +2,14 @@
 
 from .errors import (
     ArtifactEvidenceUnavailable,
+    ArtifactCitationVerificationFailed,
     ArtifactJobCancelled,
     ArtifactJobLeaseLost,
     ArtifactPermissionChanged,
 )
 __all__ = [
     "ArtifactEvidenceUnavailable",
+    "ArtifactCitationVerificationFailed",
     "ArtifactJobCancelled",
     "ArtifactJobExecutor",
     "ArtifactJobLeaseLost",

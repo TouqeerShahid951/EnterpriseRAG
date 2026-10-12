@@ -40,10 +40,14 @@ def test_resolved_mixed_provider_snapshot_round_trips_runtime_fields() -> None:
         restored.faithfulness_timeout_seconds
         == original.faithfulness_timeout_seconds
     )
+    assert restored.answer_output_tokens == original.answer_output_tokens
+    assert restored.answer_context_tokens == original.answer_context_tokens
     assert restored.retrieval_token_budget == original.retrieval_token_budget
+    assert restored.context_resolver_enabled is original.context_resolver_enabled
     assert restored.query_planner_enabled is original.query_planner_enabled
     assert restored.evidence_gate_policy == original.evidence_gate_policy
     assert restored.faithfulness_policy == original.faithfulness_policy
+    assert snapshot["effective_faithfulness_policy"] == original.faithfulness_policy
     assert restored.embedding_port == 0
 
 
@@ -66,6 +70,11 @@ def test_resolved_mixed_provider_snapshot_round_trips_runtime_fields() -> None:
         (("faithfulness_timeout_seconds",), 301),
         (("json_num_predict",), 128),
         (("retrieval_token_budget",), 999),
+        (("answer_output_tokens",), 255),
+        (("answer_output_tokens",), 32769),
+        (("answer_context_tokens",), 2047),
+        (("answer_context_tokens",), 262145),
+        (("answer_context_tokens",), 8704),
         (("evidence_gate_policy",), "sometimes"),
         (("faithfulness_policy",), "sometimes"),
     ],
@@ -81,6 +90,14 @@ def test_invalid_snapshot_values_fail_closed(
 
     with pytest.raises(ValueError):
         rag_config_from_snapshot(snapshot)
+
+
+def test_legacy_snapshot_gets_answer_budget_defaults() -> None:
+    snapshot = _snapshot()
+    snapshot.pop("answer_output_tokens")
+    snapshot.pop("answer_context_tokens")
+    restored = rag_config_from_snapshot(snapshot)
+    assert (restored.answer_output_tokens, restored.answer_context_tokens) == (4096, 16384)
 
 
 def test_empty_missing_and_extra_snapshot_fields_fail_closed() -> None:
@@ -125,9 +142,12 @@ def test_explicit_runtime_config_bypasses_live_repository_resolution(
     assert service.nodes.routing_model == record.routing_model
     assert service.nodes.faithfulness_model == record.faithfulness_model
     assert service.nodes.reranker_model == record.reranker_model
+    assert service.nodes.context_resolver_enabled is record.context_resolver_enabled
     assert service.nodes.query_planner_enabled is record.query_planner_enabled
     assert service.nodes.evidence_gate_policy == record.evidence_gate_policy
     assert service.nodes.faithfulness_policy == record.faithfulness_policy
+    assert service.nodes.faithfulness_timeout_seconds == record.faithfulness_timeout_seconds
+    assert service.nodes.citation_output_tokens == record.json_num_predict
 
 
 def _snapshot() -> dict[str, object]:
@@ -162,6 +182,9 @@ def _record() -> RagConfigRecord:
         thinking_enabled=True,
         json_num_predict=8192,
         retrieval_token_budget=24000,
+        answer_output_tokens=8192,
+        answer_context_tokens=32768,
+        context_resolver_enabled=False,
         query_planner_enabled=False,
         evidence_gate_policy="never",
         faithfulness_policy="never",

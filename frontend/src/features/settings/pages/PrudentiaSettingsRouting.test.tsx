@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { RuntimeAdvancedSettings } from "../components/RuntimeSettingsFields";
 
 import {
   DEFAULT_RAG_FORM,
@@ -14,12 +17,26 @@ import { ollamaForm } from "./settingsTestFixtures";
 describe("inference settings helpers", () => {
   it("defaults semantic judges to adaptive execution", () => {
     expect(requestFromForm(DEFAULT_RAG_FORM)).toMatchObject({
+      context_resolver_enabled: true,
       evidence_gate_policy: "adaptive",
       faithfulness_policy: "adaptive",
       routing_timeout_seconds: 5,
       reasoning_timeout_seconds: 30,
       faithfulness_timeout_seconds: 30,
     });
+  });
+
+  it("shows the original faithfulness policies without citation-specific answer controls", () => {
+    const html = renderToStaticMarkup(createElement(RuntimeAdvancedSettings, {
+      form: ollamaForm,
+      onChange: () => {},
+    }));
+    expect(html).toContain('value="adaptive"');
+    expect(html).toContain(">Adaptive</option>");
+    expect(html).toContain(">Always</option>");
+    expect(html).toContain(">Never</option>");
+    expect(html).not.toContain("Answer output budget");
+    expect(html).not.toContain("Answer context window");
   });
 
   it("normalizes the RAG configuration source for the runtime UI", () => {
@@ -102,7 +119,7 @@ describe("inference settings helpers", () => {
     });
   });
 
-  it("maps output and evidence budgets into the saved config request", () => {
+  it("maps artifact output and evidence budgets into the saved config request", () => {
     const request = requestFromForm({
       ...ollamaForm,
       json_num_predict: "8192",
@@ -135,6 +152,15 @@ describe("inference settings helpers", () => {
     });
 
     expect(request.query_planner_enabled).toBe(false);
+  });
+
+  it("maps the context resolver switch into the saved config request", () => {
+    const request = requestFromForm({
+      ...ollamaForm,
+      context_resolver_enabled: false,
+    });
+
+    expect(request.context_resolver_enabled).toBe(false);
   });
 
   it("maps an explicit SQL generation model into the saved config request", () => {

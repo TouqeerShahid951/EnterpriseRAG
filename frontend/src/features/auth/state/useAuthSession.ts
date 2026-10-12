@@ -40,7 +40,6 @@ export function useAuthSession() {
   const markSessionTouched = useCallback((touchedAt = Date.now(), broadcast = true) => {
     setLastTouchedAt((current) => Math.max(current, touchedAt));
     setIdleWarningRemainingSeconds(null);
-    setSessionExpired(false);
     if (broadcast) {
       writeSharedLastTouchedAt(touchedAt);
       broadcastAuthSessionMessage({ type: "touched", touchedAt, createdAt: Date.now() });
@@ -78,6 +77,7 @@ export function useAuthSession() {
     mutationFn: authApi.refresh,
     onSuccess: (response) => {
       queryClient.setQueryData(["auth", "me"], response.user);
+      setSessionExpired(false);
       markSessionTouched(Date.now(), true);
     },
   });

@@ -1,6 +1,6 @@
 """Composition providers for deployment-control application services."""
 
-from fastapi import Depends
+from fastapi import Depends, Request
 
 from ..core.config import settings
 from .vllm_config_models import VllmDeploymentConfigRepository
@@ -12,6 +12,7 @@ from .application import (
     VllmDeploymentApplyService,
 )
 from .controller_client import HttpDeploymentControllerClient
+from .resource_metrics import ResourceReader
 
 
 def get_deployment_controller() -> DeploymentController:
@@ -32,3 +33,7 @@ def get_vllm_deployment_apply_service(
         repository=repository,
         controller=controller,
     )
+
+
+async def get_resource_reader(request: Request) -> ResourceReader:
+    return request.app.state.resource_sampler

@@ -272,6 +272,8 @@ def test_citations_resolve_exactly_to_returned_sources_per_occurrence() -> None:
 
     assert scored["passed"] is True
     assert scored["checks"]["citation"] == {
+        "protocol_version": None, "verification_status": "legacy", "answer_revision_valid": None,
+        "quote_validity": None, "claim_support": None, "all_claim_coverage": None, "revision_traceability": None,
         "passed": True,
         "required": True,
         "citations": ["[live:row-alpha]", "[live:row-alpha]"],
@@ -293,6 +295,8 @@ def test_one_unresolved_citation_fails_the_whole_citation_check() -> None:
     assert scored["passed"] is False
     assert scored["primary_failure_stage"] == "citation"
     assert scored["checks"]["citation"] == {
+        "protocol_version": None, "verification_status": "legacy", "answer_revision_valid": None,
+        "quote_validity": None, "claim_support": None, "all_claim_coverage": None, "revision_traceability": None,
         "passed": False,
         "required": True,
         "citations": ["[live:row-alpha]", "[fake:123]"],
@@ -310,6 +314,8 @@ def test_required_citation_fails_when_answer_has_no_citation_token() -> None:
 
     assert scored["passed"] is False
     assert scored["checks"]["citation"] == {
+        "protocol_version": None, "verification_status": "legacy", "answer_revision_valid": None,
+        "quote_validity": None, "claim_support": None, "all_claim_coverage": None, "revision_traceability": None,
         "passed": False,
         "required": True,
         "citations": [],
@@ -340,6 +346,8 @@ def test_optional_answer_without_citations_keeps_citation_check_passed() -> None
 
     assert scored["passed"] is True
     assert scored["checks"]["citation"] == {
+        "protocol_version": None, "verification_status": "legacy", "answer_revision_valid": None,
+        "quote_validity": None, "claim_support": None, "all_claim_coverage": None, "revision_traceability": None,
         "passed": True,
         "required": False,
         "citations": [],
@@ -497,3 +505,28 @@ def _source() -> SourceAnchor:
         excerpt="Supported.",
         group_path="/quality",
     )
+
+
+def test_new_citation_metrics_detect_missing_claims_and_wrong_quotes():
+    from rag.evaluations.scoring import _citation_check
+    from rag.query.evidence_validation import answer_claims, text_hash
+    from rag.shared.contracts.evidence import CitationVerification, EvidenceQuote
+    from types import SimpleNamespace
+    from rag.query.schemas import RAGResponse, SourceAnchor
+    answer = "Retention is 30 days. [doc:1]"
+    source = SourceAnchor(doc_id="doc", doc_title="Policy", chunk_id="doc:1", group_path="/local",
+        excerpt="Retention is 30 days.", evidence_hash=text_hash("Retention is 30 days."),
+        index_generation_id="generation", content_hash="a"*64, provenance_kind="native")
+    claim = answer_claims(answer)[0].model_copy(update={"verdict": "supported", "quotes": [EvidenceQuote(
+        source_label="[doc:1]", text="Retention is 30 days.", source_start=0, source_end=21)]})
+    response = RAGResponse(trace_id="trace", session_id="session", answer=answer, intent="factual_simple",
+        latency_ms=0, degraded=False, conflict_flag=False, faithfulness_score=1, sources=[source],
+        citation_verification=CitationVerification(answer_sha256=text_hash(answer), status="verified", claims=[claim]))
+    checked = _citation_check(SimpleNamespace(must_cite_source=True), response)
+    assert checked["passed"] and checked["revision_traceability"]
+    response.answer += "\nAnother uncited fact."
+    response.citation_verification.answer_sha256 = text_hash(response.answer)
+    checked = _citation_check(SimpleNamespace(must_cite_source=True), response)
+    assert not checked["passed"] and not checked["all_claim_coverage"]
+    response.citation_verification.claims[0].quotes[0].text = "Retention is 90 days."
+    assert _citation_check(SimpleNamespace(must_cite_source=True), response)["quote_validity"] is False

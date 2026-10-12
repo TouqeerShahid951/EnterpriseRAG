@@ -8,7 +8,7 @@ import logging
 from billiard.exceptions import SoftTimeLimitExceeded
 
 from rag.core.config import Settings
-from rag.artifact_jobs.contracts import ArtifactContentBundle, EvidenceManifest
+from rag.artifact_jobs.contracts import ArtifactContentBundle, EvidenceManifest, DocumentPlan
 from rag.artifact_jobs.execution.errors import (
     ArtifactJobCancelled,
     ArtifactJobLeaseLost,
@@ -36,6 +36,11 @@ class ArtifactFormatExecution:
         evidence: EvidenceManifest,
         bundle: ArtifactContentBundle,
     ) -> list[str]:
+        bundle = self._verify_citation_support(job, bundle, evidence, DocumentPlan.model_validate(job.plan_json))
+        self._update(job.id, {"content_spec_json": bundle.model_dump(mode="json")})
+        if not bundle.citation_verification or bundle.citation_verification.get("status") != "verified":
+            raise RuntimeError("artifact_citation_verification_required")
+        self._citation_evidence = evidence
         source_doc_ids = list(
             dict.fromkeys(record.doc_id for record in evidence.records)
         )

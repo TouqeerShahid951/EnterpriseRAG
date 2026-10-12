@@ -3,13 +3,11 @@ from __future__ import annotations
 import pytest
 
 from rag.query import ollama as ollama_module
-from rag.query.http import ServiceRequestError
 from rag.query.inference import RoleRoutedInferenceClient
 from rag.query.ollama import OllamaClient
 
 
 JSON_METHODS = (
-    "judge_faithfulness",
     "verify_route",
     "plan_query",
     "rewrite_query",
@@ -17,6 +15,32 @@ JSON_METHODS = (
     "generate_json",
     "generate_routing_json",
 )
+
+
+def test_cloud_faithfulness_uses_generic_json_format(monkeypatch) -> None:
+    payload = _capture_json_payload(
+        monkeypatch,
+        method_name="judge_faithfulness",
+        chat_model="nemotron-3-super:cloud",
+    )
+
+    assert payload["format"] == "json"
+
+
+@pytest.mark.parametrize("model", ["qwen3:8b", "nemotron-3-super:cloud"])
+def test_faithfulness_schema_is_enforced_locally_and_in_cloud_prompt(monkeypatch, model):
+    from rag.query.evidence_validation import VERDICT_SCHEMA
+    import json
+
+    payload = _capture_json_payload(
+        monkeypatch, method_name="judge_faithfulness", chat_model=model,
+        json_schema=VERDICT_SCHEMA,
+    )
+    if model.endswith(":cloud"):
+        assert payload["format"] == "json"
+        assert json.dumps(VERDICT_SCHEMA) in payload["messages"][-1]["content"]
+    else:
+        assert payload["format"] is VERDICT_SCHEMA
 
 
 @pytest.mark.parametrize("method_name", JSON_METHODS)
@@ -83,38 +107,21 @@ def test_local_generate_json_uses_exact_schema_on_first_request(monkeypatch) -> 
     assert payload["format"] is schema
 
 
-def test_cloud_generate_json_rejects_unenforceable_schema(monkeypatch) -> None:
-    called = False
-
-    def fake_request_json(*_args, **_kwargs):
-        nonlocal called
-        called = True
-        return {"message": {"content": "{}"}}
-
-    monkeypatch.setattr(ollama_module, "request_json", fake_request_json)
-    client = OllamaClient(
-        base_url="http://ollama.local",
+def test_cloud_generate_json_uses_prompt_only_json_when_schema_is_unavailable(
+    monkeypatch,
+) -> None:
+    payload = _capture_json_payload(
+        monkeypatch,
+        method_name="generate_json",
         chat_model="nemotron-3-super:cloud",
-        embed_model="embed-model",
-        timeout_seconds=45,
+        json_schema={
+            "type": "object",
+            "properties": {"status": {"type": "string"}},
+            "required": ["status"],
+        },
     )
 
-    with pytest.raises(
-        ServiceRequestError,
-        match="does not support schema-constrained output",
-    ):
-        client.generate_json(
-            prompt="Return status.",
-            model=None,
-            system="Return valid JSON.",
-            json_schema={
-                "type": "object",
-                "properties": {"status": {"type": "string"}},
-                "required": ["status"],
-            },
-        )
-
-    assert called is False
+    assert "format" not in payload
 
 
 def test_role_router_preserves_schema_for_first_request() -> None:

@@ -228,7 +228,14 @@ def _should_expand_document_scope(query: str, plan: RoutePlan | None) -> bool:
         plan is not None
         and plan.coverage == "exhaustive"
         and plan.scope in {"document", "corpus"}
-        and "document_search" in plan.capabilities
+        and (
+            "document_search" in plan.capabilities
+            or any(
+                assignment.required and assignment.capability == "indexed_search"
+                for need in (plan.evidence_plan.needs if plan.evidence_plan else ())
+                for assignment in need.assignments
+            )
+        )
     )
 
 
@@ -297,7 +304,7 @@ def _target_document_ids_for_scope(query: str, hits: list[SearchHit]) -> set[str
     else:
         preferred_groups = groups
     if not preferred_groups:
-        return set()
+        return {_hit_doc_id(hits[0])} if _is_summary_query(query) and hits else set()
     max_specificity = max(
         _scope_group_specificity(tokens) for tokens in preferred_groups
     )
@@ -317,6 +324,16 @@ def _target_document_ids_for_scope(query: str, hits: list[SearchHit]) -> set[str
             )
         )
     return matched_doc_ids
+
+
+def _is_summary_query(query: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:summari[sz]e|summar(?:y|ies)|overview)\b",
+            query,
+            re.IGNORECASE,
+        )
+    )
 
 
 def _scope_group_specificity(tokens: set[str]) -> int:

@@ -8,6 +8,10 @@ from typing import Protocol
 from urllib.parse import urlsplit
 
 from rag.shared.contracts.rag_defaults import (
+    SYNTHESIS_PROMPT_HEADROOM_TOKENS,
+    DEFAULT_ANSWER_OUTPUT_TOKENS,
+    DEFAULT_ANSWER_CONTEXT_TOKENS,
+    DEFAULT_CONTEXT_RESOLVER_ENABLED,
     DEFAULT_EVIDENCE_GATE_POLICY,
     DEFAULT_FAITHFULNESS_POLICY,
     DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS,
@@ -61,6 +65,9 @@ class RagConfigRecord:
     vision_model: str | None = None
     json_num_predict: int = DEFAULT_JSON_NUM_PREDICT
     retrieval_token_budget: int = DEFAULT_RETRIEVAL_TOKEN_BUDGET
+    answer_output_tokens: int = DEFAULT_ANSWER_OUTPUT_TOKENS
+    answer_context_tokens: int = DEFAULT_ANSWER_CONTEXT_TOKENS
+    context_resolver_enabled: bool = DEFAULT_CONTEXT_RESOLVER_ENABLED
     query_planner_enabled: bool = DEFAULT_QUERY_PLANNER_ENABLED
     evidence_gate_policy: EvidenceGatePolicy = DEFAULT_EVIDENCE_GATE_POLICY
     faithfulness_policy: FaithfulnessPolicy = DEFAULT_FAITHFULNESS_POLICY
@@ -77,6 +84,12 @@ class RagConfigRecord:
     provider: str = "ollama"
 
     def __post_init__(self) -> None:
+        if not 256 <= self.answer_output_tokens <= 32768:
+            raise ValueError("Answer output budget must be between 256 and 32768 tokens.")
+        if not 2048 <= self.answer_context_tokens <= 262144:
+            raise ValueError("Answer context window must be between 2048 and 262144 tokens.")
+        if self.answer_output_tokens + SYNTHESIS_PROMPT_HEADROOM_TOKENS >= self.answer_context_tokens:
+            raise ValueError("Answer output budget must leave space for input and 512 tokens of headroom.")
         if not self.embedding_base_url:
             object.__setattr__(self, "embedding_base_url", self.base_url)
         if not self.embedding_provider:

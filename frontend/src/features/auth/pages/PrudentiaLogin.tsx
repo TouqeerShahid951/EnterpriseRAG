@@ -4,11 +4,13 @@ import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 
 import { authApi } from "@/lib/api/contracts";
 import { PrudentiaWordmark } from "@/components/brand/PrudentiaBrand";
+import { useBranding } from "@/components/brand/BrandContext";
 import { InlineMessage } from "@/components/layout/Common";
 import type { User as AuthUser } from "@/types/api";
 import { errorMessage } from "@/lib/utils/format";
 
 export function PrudentiaLogin({ onAuthChanged, sessionExpired = false }: Props) {
+  const branding = useBranding();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -29,8 +31,8 @@ export function PrudentiaLogin({ onAuthChanged, sessionExpired = false }: Props)
           <div className="mb-8">
             <PrudentiaWordmark className="Prudentia-login-wordmark" />
             <p className="sv-eyebrow">Secure enterprise workspace</p>
-            <h1 className="mt-2 text-headline-md text-on-surface">Sign in to Prudentia</h1>
-            <p className="mt-2 text-body-md text-on-surface-variant">Use your organization credentials to continue.</p>
+            <h1 className="mt-2 text-headline-md text-on-surface">Sign in to {branding.app_name}</h1>
+            <p className="mt-2 text-body-md text-on-surface-variant">{branding.login_message}</p>
           </div>
           {sessionExpired ? (
             <div className="mb-4">
@@ -74,6 +76,7 @@ export function PrudentiaLogin({ onAuthChanged, sessionExpired = false }: Props)
             <ShieldCheck size={16} aria-hidden="true" />
             <p>Access follows your assigned role and Knowledge Spaces.</p>
           </div>
+          {branding.support_url ? <a className="mt-3 inline-block text-label-md text-primary underline" href={branding.support_url}>Get support</a> : null}
         </section>
       </main>
     </div>

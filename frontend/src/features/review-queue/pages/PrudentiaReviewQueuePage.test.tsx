@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ReviewItem } from "@/types/api";
 import { ReviewQueueClearState } from "../components/ReviewQueuePrimitives";
-import { confidencePercent, groupReviewItemsByDocument, reviewDocumentCount, reviewRegionFromItem } from "../utils/reviewQueueUtils";
+import { bulkReviewTargets, confidencePercent, groupReviewItemsByDocument, proportionalScrollTop, reviewApprovalText, reviewDocumentCount, reviewRegionFromItem } from "../utils/reviewQueueUtils";
 
 const baseItem: ReviewItem = {
   id: "review-1",
@@ -35,6 +35,11 @@ it("keeps clear-state copy specific to each review queue", () => {
 });
 
 describe("review queue helpers", () => {
+  it("keeps original and corrected text at the same relative scroll position", () => {
+    expect(proportionalScrollTop(400, 1000, 200, 1800, 200)).toBe(800);
+    expect(proportionalScrollTop(0, 200, 200, 1800, 200)).toBe(0);
+  });
+
   it("converts a review item into a document highlight region", () => {
     expect(reviewRegionFromItem(baseItem)).toEqual({
       bbox: [10, 20, 110, 60],
@@ -61,6 +66,19 @@ describe("review queue helpers", () => {
     expect(groups[0].docTitle).toBe("Scanned policy.pdf");
     expect(groups[0].items.map((item) => item.id)).toEqual(["review-1", "review-2"]);
     expect(groups[1].docTitle).toBe("Scanned manual.pdf");
+  });
+
+  it("targets selected blocks and rejects each batch only once", () => {
+    const items = [
+      baseItem,
+      { ...baseItem, id: "review-2" },
+      { ...baseItem, id: "review-3", batch_id: "batch-2", corrected_text: "Corrected text." },
+    ];
+
+    expect(bulkReviewTargets(items, [], "approve")).toEqual(items);
+    expect(bulkReviewTargets(items, ["review-2", "review-3"], "approve").map((item) => item.id)).toEqual(["review-2", "review-3"]);
+    expect(bulkReviewTargets(items, [], "reject").map((item) => item.id)).toEqual(["review-1", "review-3"]);
+    expect(reviewApprovalText(items[2])).toBe("Corrected text.");
   });
 
   it("counts a document once across OCR and image review", () => {

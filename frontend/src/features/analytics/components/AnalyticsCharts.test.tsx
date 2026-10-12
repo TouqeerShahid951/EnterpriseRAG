@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 
@@ -55,6 +57,24 @@ it("exposes total and category values on each stacked-bar bucket", () => {
   expect(markup).toContain("Complete 3 count");
   expect(markup).toContain("Partial 2 count");
   expect(markup).toContain("Clarification 0 count");
+});
+
+it("limits pointer hit testing to the painted chart geometry", () => {
+  const lineMarkup = renderToStaticMarkup(<AnalyticsLineChart buckets={[tooltipBucket]} metrics={[{ key: "total_executions", label: "Executions", tone: "accent", unit: "count" }]} onBucketSelect={() => undefined} />);
+  const barMarkup = renderToStaticMarkup(<AnalyticsOutcomeChart buckets={[tooltipBucket]} onBucketSelect={() => undefined} />);
+
+  expect(lineMarkup).toContain('class="analytics-chart-line analytics-chart-line-accent" pointer-events="stroke"');
+  expect(lineMarkup).toContain('class="analytics-chart-hitarea"');
+  expect(lineMarkup).toContain('pointer-events:none');
+  expect(barMarkup).toContain('class="analytics-chart-hitarea" x="12" y="38" width="574" height="130"');
+});
+
+it("keeps tooltip content wide enough at chart edges", () => {
+  const styles = readFileSync(new URL("../../../styles/analytics-dashboard.css", import.meta.url), "utf8");
+  const tooltipRule = styles.match(/\.analytics-chart-tooltip \{[^}]+\}/)?.[0] ?? "";
+
+  expect(tooltipRule).toContain("width: max-content;");
+  expect(tooltipRule).toContain("max-width: calc(100% - 1rem);");
 });
 
 it("keeps the focused bucket active over the hovered bucket", () => {

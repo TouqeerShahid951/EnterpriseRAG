@@ -528,3 +528,19 @@ def _job(
         conversation_context=[],
         retention_days=1,
     )
+
+
+def test_exhausted_citation_repair_is_terminal_and_redelivery_cannot_retry(monkeypatch):
+    from rag.artifact_jobs.execution.errors import ArtifactCitationVerificationFailed
+    repo = InMemoryArtifactJobRepository()
+    job = _job(repo)
+    monkeypatch.setattr(task_execution, "_heartbeat", lambda *_args: nullcontext())
+    validator = _FailingContextValidator(ArtifactCitationVerificationFailed("failed"))
+    result = run_artifact_job(job.id, repository=repo, executor_factory=_UnexpectedExecutor, context_validator=validator)
+    assert result["status"] == "failed"
+    assert repo.get_job(job.id).error_code == "artifact_citation_verification_failed"
+    assert repo.get_job(job.id).completed_at is not None
+    attempts = repo.get_job(job.id).attempt_count
+    repeated = run_artifact_job(job.id, repository=repo, executor_factory=_UnexpectedExecutor, context_validator=validator)
+    assert repeated["status"] == "failed"
+    assert repo.get_job(job.id).attempt_count == attempts

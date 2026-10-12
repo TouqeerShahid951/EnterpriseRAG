@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import type { RouteId } from "@/routes/routes";
+import type { NavigateOptions, RouteId } from "@/routes/routes";
 import type { Document, QuerySourceMode, SourceAnchor, User as AuthUser } from "@/types/api";
 import type { ChatTurn, SavedChatSessionSummary } from "@/types/chat";
 
@@ -24,16 +24,20 @@ export type Props = {
   onActiveSpaceChange: (groupPath: string | null) => void;
   onCancelArtifactJob: (jobId: string) => Promise<void>;
   onClarifyArtifactJob: (jobId: string, answers: Record<string, string>) => Promise<void>;
+  onChooseQuerySource: (assistantTurnId: string, sourceId: string) => void;
   onExpandSourceSearch: (assistantTurnId: string) => void;
-  onNavigate: (route: RouteId) => void;
+  onNavigate: (route: RouteId, options?: NavigateOptions) => void;
   onQuestionChange: (value: string) => void;
   onQuestionSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onCancelReply: () => void;
+  onReplyToTurn: (turnId: string) => void;
   onReset: () => void;
   onRetryArtifactJob: (jobId: string) => Promise<void>;
   onSelectedQuerySourceChange: (sourceId: string) => void;
-  onSelectSource: (source: SourceAnchor | null) => void;
+  onSelectSource: (source: SourceAnchor | null, turnId?: string) => void;
   onSourceModeChange: (mode: QuerySourceMode) => void;
   question: string;
+  replyTarget: ChatTurn | null;
   removeScopedDocument: (documentId: string) => void;
   savedSessions: SavedChatSessionSummary[];
   savedSessionsError: string | null;
@@ -45,6 +49,7 @@ export type Props = {
   scopedDocumentIds: string[];
   selectedQuerySourceId: string;
   selectedSource: SourceAnchor | null;
+  selectedSourceTurnId: string | null;
   sourceMode: QuerySourceMode;
   user: AuthUser;
 };

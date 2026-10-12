@@ -1,5 +1,6 @@
 import {
   Activity,
+  ChartColumnIncreasing,
   ChevronDown,
   ChevronRight,
   Database,
@@ -18,6 +19,7 @@ import { routePaths, type NavigationBadge, type NavigationIcon, type RouteId, ty
 import type { SidebarBadgeValue } from "./useSidebarBadges";
 
 const iconByKey: Record<NavigationIcon, LucideIcon> = {
+  analytics: ChartColumnIncreasing,
   audit: FolderKanban,
   documents: FileSearch,
   evaluations: Activity,

@@ -4,17 +4,22 @@ import type { SourceAnchor } from "@/types/api";
 import {
   clampSourcePage,
   citedSourcePage,
+  documentViewerHref,
   fitContentScale,
   fitContentWidthScale,
   fitPdfPageScale,
   fitPdfWidthScale,
+  highlightPdfTextLayer,
   jsonDocumentText,
-  jsonHighlightRange,
+  jsonPointerRange,
   sourcePageFromInput,
   sourceDocumentKind,
+  sourceTextMatchPages,
+  sourceTextMatchRanges,
   sourceTextCandidates,
   sourceViewerHref,
   sourceViewerParams,
+  sourceViewerReturnHref,
   sourceZoomLabel,
   stepSourceZoom,
 } from "./sourceViewer";
@@ -31,31 +36,72 @@ const source: SourceAnchor = {
   page: 4,
   page_end: 5,
   page_start: 4,
-  source_regions: [
+  citation_targets: [
     {
       bbox: [10, 20, 200, 60],
       confidence: 0.98,
+      exact_text: "Records must be retained for seven years.",
+      extraction_method: null,
+      image_asset_id: null,
+      image_source_kind: null,
+      kind: "page",
       page: 4,
       region_type: "text",
-      text: "Records must be retained for seven years.",
     },
   ],
 };
 
 describe("source viewer utilities", () => {
-  it("builds and parses an encoded viewer link", () => {
-    const href = sourceViewerHref(source);
+  it("builds a return link to the originating chat turn", () => {
+    const href = sourceViewerHref(source, { sessionId: "session-1", turnId: "turn-1" });
 
-    expect(href).toBe("/source-viewer?docId=doc-1&chunkId=doc-1%3A7");
+    expect(href).toBe("/source-viewer?docId=doc-1&chunkId=doc-1%3A7&returnSessionId=session-1&returnTurnId=turn-1");
     expect(sourceViewerParams(href.slice(href.indexOf("?")))).toEqual({
+      revision: { index_generation_id: null, content_hash: null, evidence_hash: null },
       documentId: "doc-1",
       chunkId: "doc-1:7",
+      citationChunkIds: [],
+      returnSessionId: "session-1",
+      returnTurnId: "turn-1",
     });
+    expect(sourceViewerReturnHref(sourceViewerParams(href.slice(href.indexOf("?"))))).toBe("/chat?sessionId=session-1&turnId=turn-1");
+    expect(sourceViewerReturnHref(sourceViewerParams("?docId=doc-1&chunkId=doc-1%3A7"))).toBe("/chat");
   });
 
-  it("detects PDF, DOCX, JSON, JPEG, and PNG content from media type or filename", () => {
+  it("builds and parses a document-library preview link without a citation", () => {
+    const href = documentViewerHref("doc/1");
+
+    expect(href).toBe("/source-viewer?docId=doc%2F1");
+    expect(sourceViewerParams(href.slice(href.indexOf("?")))).toEqual({
+      revision: { index_generation_id: null, content_hash: null, evidence_hash: null },
+      documentId: "doc/1",
+      chunkId: null,
+      citationChunkIds: [],
+      returnSessionId: null,
+      returnTurnId: null,
+    });
+    expect(sourceViewerReturnHref(sourceViewerParams(href.slice(href.indexOf("?"))))).toBe("/documents");
+  });
+
+  it("round-trips same-document citation ids for preview navigation", () => {
+    const href = sourceViewerHref(source, {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      citationChunkIds: [source.chunk_id, "doc-1:12", source.chunk_id],
+    });
+
+    expect(href).toBe("/source-viewer?docId=doc-1&chunkId=doc-1%3A7&citationChunkId=doc-1%3A7&citationChunkId=doc-1%3A12&returnSessionId=session-1&returnTurnId=turn-1");
+    expect(sourceViewerParams(href.slice(href.indexOf("?")))?.citationChunkIds).toEqual(["doc-1:7", "doc-1:12"]);
+  });
+
+  it("detects every supported document type from media type or filename", () => {
     expect(sourceDocumentKind("application/pdf", "document")).toBe("pdf");
     expect(sourceDocumentKind("", "policy.DOCX")).toBe("docx");
+    expect(sourceDocumentKind("", "briefing.PPTX")).toBe("pptx");
+    expect(sourceDocumentKind("text/csv", "records")).toBe("spreadsheet");
+    expect(sourceDocumentKind("", "records.CSV")).toBe("spreadsheet");
+    expect(sourceDocumentKind("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "records")).toBe("spreadsheet");
+    expect(sourceDocumentKind("", "records.XLSX")).toBe("spreadsheet");
     expect(sourceDocumentKind("application/json", "records")).toBe("json");
     expect(sourceDocumentKind("", "records.JSON")).toBe("json");
     expect(sourceDocumentKind("image/jpeg", "scan")).toBe("image");
@@ -70,30 +116,28 @@ describe("source viewer utilities", () => {
     expect(sourceTextCandidates(source)).toEqual(["Records must be retained for seven years."]);
   });
 
-  it("pretty-prints JSON and highlights cited values from JSON evidence excerpts", () => {
-    const encoded = new TextEncoder().encode('{"case_id":"FIR-001","accused":"Sajjad Hussain"}');
+  it("pretty-prints JSON and resolves an exact JSON pointer even when values repeat", () => {
+    const encoded = new TextEncoder().encode('{"first":"open","second":"open"}');
     const { prettyText } = jsonDocumentText(encoded.buffer as ArrayBuffer);
-    const range = jsonHighlightRange(prettyText, [
-      "JSON path: cases[0]\naccused: Sajjad Hussain\nJSON path for accused: cases[0].accused",
-    ]);
+    const range = jsonPointerRange(prettyText, "/second");
 
-    expect(prettyText).toContain('"case_id": "FIR-001"');
+    expect(prettyText).toContain('"first": "open"');
     expect(range).not.toBeNull();
-    expect(prettyText.slice(range?.start, range?.end)).toBe("Sajjad Hussain");
+    expect(prettyText.slice(range?.start, range?.end)).toBe('"open"');
+    expect(range?.start).toBeGreaterThan(prettyText.indexOf('"open"'));
   });
 
-  it("falls back to page one and excerpt text for old source anchors", () => {
-    const oldSource: SourceAnchor = {
+  it("falls back to page one without citation targets", () => {
+    const sourceWithoutTargets: SourceAnchor = {
       ...source,
-      excerpt: "Legacy excerpt",
       page: null,
       page_end: null,
       page_start: null,
-      source_regions: undefined,
+      citation_targets: [],
     };
 
-    expect(citedSourcePage(oldSource)).toBe(1);
-    expect(sourceTextCandidates(oldSource)).toEqual(["Legacy excerpt"]);
+    expect(citedSourcePage(sourceWithoutTargets)).toBe(1);
+    expect(sourceTextCandidates(sourceWithoutTargets)).toEqual([]);
   });
 
   it("fits PDF pages within both the available width and height", () => {
@@ -156,4 +200,46 @@ describe("source viewer utilities", () => {
     expect(stepSourceZoom(0.1, "out")).toBe(0.25);
     expect(sourceZoomLabel(1.254)).toBe("125%");
   });
+
+  it("matches text across case and whitespace differences", () => {
+    expect(sourceTextMatchRanges("Space\nResources are useful", "space resources")).toEqual([{ start: 0, end: 15 }]);
+    expect(sourceTextMatchPages(["first page", "SPACE   RESOURCES", "last page"], "space resources")).toEqual([2]);
+    expect(sourceTextMatchPages(["page one"], "")).toEqual([]);
+  });
+
+  it("highlights matching PDF text-layer spans and marks the active result", () => {
+    const makeTextLayerSpan = (text: string) => {
+      const classes = new Set<string>();
+      return {
+        textContent: text,
+        classList: {
+          add: (...names: string[]) => names.forEach((name) => classes.add(name)),
+          contains: (name: string) => classes.has(name),
+          remove: (...names: string[]) => names.forEach((name) => classes.delete(name)),
+        },
+      } as unknown as HTMLElement;
+    };
+    const first = makeTextLayerSpan("Space");
+    const second = makeTextLayerSpan("Resources");
+    const third = makeTextLayerSpan("Other text");
+
+    expect(highlightPdfTextLayer([first, second, third], "space resources", true)).toBe(1);
+    expect(first.classList.contains("source-viewer-pdf-search-highlight")).toBe(true);
+    expect(first.classList.contains("is-active")).toBe(true);
+    expect(second.classList.contains("source-viewer-pdf-search-highlight")).toBe(true);
+    expect(third.classList.contains("source-viewer-pdf-search-highlight")).toBe(false);
+
+    expect(highlightPdfTextLayer([first, second, third], "missing", true)).toBe(0);
+    expect(first.classList.contains("source-viewer-pdf-search-highlight")).toBe(false);
+    expect(first.classList.contains("is-active")).toBe(false);
+    expect(second.classList.contains("source-viewer-pdf-search-highlight")).toBe(false);
+  });
+});
+
+it("round-trips revision constraints and encoded identifiers", () => {
+  const revision = { index_generation_id: "generation/2", content_hash: "a".repeat(64), evidence_hash: "b".repeat(64) };
+  const href = sourceViewerHref({ ...source, doc_id: "doc/1", ...revision });
+  const parsed = sourceViewerParams(href.slice(href.indexOf("?")));
+  expect(parsed?.documentId).toBe("doc/1");
+  expect(parsed?.revision).toEqual(revision);
 });

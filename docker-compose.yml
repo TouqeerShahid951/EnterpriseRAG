@@ -19,10 +19,6 @@ x-backend-env: &backend-env
   CONNECTOR_LIVE_SQL_ENABLED: ${CONNECTOR_LIVE_SQL_ENABLED:-true}
   CONNECTOR_LIVE_SQL_MAX_ROWS: ${CONNECTOR_LIVE_SQL_MAX_ROWS:-100}
   CONNECTOR_LIVE_SQL_TIMEOUT_SECONDS: ${CONNECTOR_LIVE_SQL_TIMEOUT_SECONDS:-15}
-  CONNECTOR_LIVE_SQL_MAX_SCOPES: ${CONNECTOR_LIVE_SQL_MAX_SCOPES:-5}
-  CONNECTOR_LIVE_SQL_MAX_REPAIR_ATTEMPTS: ${CONNECTOR_LIVE_SQL_MAX_REPAIR_ATTEMPTS:-2}
-  CONNECTOR_LIVE_SQL_RESULT_VERIFIER_ENABLED: ${CONNECTOR_LIVE_SQL_RESULT_VERIFIER_ENABLED:-true}
-  CONNECTOR_LIVE_SQL_VERIFIER_SAMPLE_ROWS: ${CONNECTOR_LIVE_SQL_VERIFIER_SAMPLE_ROWS:-5}
   EVALUATION_ANSWER_LLM_VERIFIER_ENABLED: ${EVALUATION_ANSWER_LLM_VERIFIER_ENABLED:-true}
   EVALUATION_ANSWER_LLM_VERIFIER_MODEL: ${EVALUATION_ANSWER_LLM_VERIFIER_MODEL:-}
   APPLICATION_IMAGE_DIGEST:
@@ -32,6 +28,13 @@ x-backend-env: &backend-env
   DEPLOYMENT_CONTROLLER_TOKEN: ${DEPLOYMENT_CONTROLLER_TOKEN:-replace-with-local-deployment-controller-token}
   DEPLOYMENT_CONTROLLER_URL: ${DEPLOYMENT_CONTROLLER_URL:-http://deployment-controller:8080}
   DOCUMENT_REPOSITORY: ${DOCUMENT_REPOSITORY:-postgres}
+  QUERY_ANALYTICS_RETENTION_DAYS:
+  QUERY_ANALYTICS_LINEAGE_RETENTION_DAYS:
+  QUERY_ANALYTICS_MAINTENANCE_BATCH_SIZE:
+  QUERY_ANALYTICS_RECONCILIATION_GRACE_SECONDS:
+  QUERY_ANALYTICS_MAINTENANCE_INTERVAL_SECONDS:
+  QUERY_ANALYTICS_RETRIEVAL_LINEAGE_MAX_CANDIDATES:
+  QUERY_ANALYTICS_RETRIEVAL_LINEAGE_MAX_BYTES:
   DO_NOT_TRACK: ${DO_NOT_TRACK:-1}
   EMBEDDING_MODEL_ID:
   EMBEDDINGS_BASE_URL: ${EMBEDDINGS_BASE_URL:-http://vllm-embeddings:8000/v1}
@@ -50,6 +53,8 @@ x-backend-env: &backend-env
   GRAPHRAG_QUEUE_NAME:
   GRAPHRAG_SUMMARIZE_AFTER_DOCUMENT:
   GRAPHRAG_SUMMARY_CONCURRENCY:
+  GLOSSARY_IMPORT_QUEUE_NAME: ${GLOSSARY_IMPORT_QUEUE_NAME:-glossary:imports}
+  GLOSSARY_IMPORT_TASK_NAME: ${GLOSSARY_IMPORT_TASK_NAME:-rag.abbreviations.tasks.import_source}
   HF_DATASETS_OFFLINE: ${HF_DATASETS_OFFLINE:-1}
   HF_HOME: ${HF_HOME:-/models/huggingface}
   HF_HUB_DISABLE_TELEMETRY: ${HF_HUB_DISABLE_TELEMETRY:-1}
@@ -94,6 +99,7 @@ x-backend-env: &backend-env
   RAG_INGESTION_BASE_URL:
   RAG_JSON_NUM_PREDICT:
   RAG_MODEL_PROVIDER:
+  RAG_CONTEXT_RESOLVER_ENABLED:
   RAG_QUERY_PLANNER_ENABLED:
   RAG_QUERY_REWRITE_LLM_ENABLED:
   RAG_OLLAMA_CHAT_TIMEOUT_SECONDS:
@@ -103,6 +109,8 @@ x-backend-env: &backend-env
   RAG_REASONING_PROVIDER:
   RAG_REASONING_BASE_URL:
   RAG_RETRIEVAL_MAX_RETRIES:
+  RAG_ANSWER_OUTPUT_TOKENS:
+  RAG_ANSWER_CONTEXT_TOKENS:
   RAG_RETRIEVAL_TOKEN_BUDGET:
   RAG_ROUTING_MODEL:
   RAG_ROUTING_PROVIDER:
@@ -628,10 +636,28 @@ services:
       minio:
         condition: service_healthy
 
+  query-analytics-maintenance:
+    image: agenticrag-api
+    restart: unless-stopped
+    command: ["python", "-m", "apps.background.query_analytics_cleanup"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "apps.background.query_analytics_cleanup", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    environment:
+      <<: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
   ingestion-worker:
     image: agenticrag-ingestion-worker
     restart: unless-stopped
-    command: ["celery", "-A", "apps.workers.document_pipeline.celery_app", "worker", "--loglevel=info", "--hostname=ingestion-worker@%h", "--queues=${INGEST_QUEUE_NAME:-ingest:jobs}"]
+    command: ["celery", "-A", "apps.workers.document_pipeline.celery_app", "worker", "--loglevel=info", "--hostname=ingestion-worker@%h", "--queues=${INGEST_QUEUE_NAME:-ingest:jobs},${GLOSSARY_IMPORT_QUEUE_NAME:-glossary:imports}"]
     build:
       context: ./backend
       dockerfile: apps/workers/document_pipeline/Dockerfile

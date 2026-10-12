@@ -14,6 +14,7 @@ from rag.shared.contracts.structured_payloads import (
 
 from ..parsers.context import is_table_title
 from ..parsers.models import ParsedPdfItem
+from .citation_targets import citation_targets
 from .text import CHARS_PER_TOKEN_GUARD, _token_count, _too_large, split_text
 
 
@@ -39,7 +40,7 @@ class TableRow:
     structured_field_names: list[str] = field(default_factory=list)
     structured_field_values: list[str] = field(default_factory=list)
     structured_search_text: str = ""
-    source_regions: list[dict[str, object]] = field(default_factory=list)
+    citation_targets: list[dict[str, object]] = field(default_factory=list)
 
 
 def table_chunks(
@@ -224,7 +225,6 @@ def _header_mapped_fields(headers: list[str], row: list[str]) -> list[dict[str, 
             continue
         fields.append({"label": label, "value": normalized_value})
     return fields
-
 
 def _alternating_row_fields(row: list[str]) -> list[dict[str, str]]:
     cells = [_clean_cell(cell) for cell in row if _clean_cell(cell)]
@@ -420,7 +420,7 @@ def _row(
         structured_field_names=normalized_field_names(normalized_structured_fields),
         structured_field_values=normalized_field_values(normalized_structured_fields),
         structured_search_text=canonical_structured_search_text(normalized_structured_fields),
-        source_regions=_source_regions(item, text=text, chunk_type=chunk_type),
+        citation_targets=citation_targets([item], table_row_index=table_row_index),
     )
 
 
@@ -515,7 +515,7 @@ def _record_row(
         structured_field_names=normalized_field_names(normalized_fields),
         structured_field_values=normalized_field_values(normalized_fields),
         structured_search_text=canonical_structured_search_text(normalized_fields),
-        source_regions=_source_regions_for_items(items, chunk_type="kv_record"),
+        citation_targets=citation_targets(items),
     )
 
 
@@ -566,34 +566,3 @@ def _colon_delimited_fields(text: str) -> list[dict[str, str]]:
         if label and value:
             fields.append({"label": label, "value": value})
     return fields
-
-
-def _source_regions_for_items(items: list[ParsedPdfItem], *, chunk_type: str) -> list[dict[str, object]]:
-    regions: list[dict[str, object]] = []
-    for item in items:
-        if item.bbox is None or item.page_start is None:
-            continue
-        regions.append(
-            {
-                "page": item.page_start,
-                "bbox": [float(value) for value in item.bbox],
-                "text": item.text,
-                "region_type": chunk_type,
-                "confidence": item.confidence,
-            }
-        )
-    return regions
-
-
-def _source_regions(item: ParsedPdfItem, *, text: str, chunk_type: str) -> list[dict[str, object]]:
-    if item.bbox is None or item.page_start is None:
-        return []
-    return [
-        {
-            "page": item.page_start,
-            "bbox": [float(value) for value in item.bbox],
-            "text": text,
-            "region_type": chunk_type,
-            "confidence": item.confidence,
-        }
-    ]

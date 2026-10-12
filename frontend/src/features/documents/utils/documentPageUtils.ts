@@ -14,7 +14,7 @@ export type ExplorerTab = { kind: "overview" } | { kind: "space"; path: string }
 export type DocumentAction = "reingest" | "trash" | "restore" | "permanent";
 export type DocumentMode = "active" | "trash" | "readonly";
 export type DocumentStateFilter = "all" | "current" | "superseded";
-export type DocumentIngestFilter = "all" | "indexed" | "active" | "processing" | "human_review" | "cancelled" | "failed" | "unknown";
+export type DocumentIngestFilter = "all" | "indexed" | "attention" | "active" | "processing" | "human_review" | "cancelled" | "failed" | "unknown";
 export type SpaceDraft = { name: string; path: string; pathTouched: boolean };
 
 export type ExplorerUrlState = {
@@ -171,12 +171,11 @@ export function confirmDocumentAction(action: DocumentAction, documents: Documen
   if (action === "trash") {
     return window.confirm(`Move ${documents.length} document${documents.length === 1 ? "" : "s"} to Trash? Indexed vectors will be removed immediately.`);
   }
-  if (action === "permanent") {
-    const expected = documents.length === 1 ? "DELETE" : `DELETE ${documents.length}`;
-    const entered = window.prompt(`Permanent deletion removes database records and source files. Type ${expected} to continue.`);
-    return entered === expected;
-  }
   return true;
+}
+
+export function permanentDeleteConfirmation(documentCount: number) {
+  return documentCount === 1 ? "DELETE" : `DELETE ${documentCount}`;
 }
 
 export async function runBounded<T>(
@@ -305,6 +304,7 @@ function matchesStatus(doc: Document, status: DocumentStateFilter) {
 function matchesIngestStatus(status: DocumentIngestStatus, filter: DocumentIngestFilter) {
   if (filter === "all") return true;
   if (filter === "indexed") return status === "complete";
+  if (filter === "attention") return status === "failed" || status === "human_review" || status === "unknown";
   if (filter === "active") return status !== "complete";
   if (filter === "processing") return isProcessingIngestStatus(status);
   return status === filter;
@@ -331,5 +331,5 @@ function isDocumentStateFilter(value: string): value is DocumentStateFilter {
 }
 
 function isDocumentIngestFilter(value: string): value is DocumentIngestFilter {
-  return value === "all" || value === "indexed" || value === "active" || value === "processing" || value === "human_review" || value === "cancelled" || value === "failed" || value === "unknown";
+  return value === "all" || value === "attention" || value === "indexed" || value === "active" || value === "processing" || value === "human_review" || value === "cancelled" || value === "failed" || value === "unknown";
 }

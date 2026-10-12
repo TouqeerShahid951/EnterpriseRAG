@@ -62,6 +62,7 @@ import { IngestionControlsPanel } from "@/features/settings/components/Ingestion
 import { RagConfigResetDialog } from "@/features/settings/components/RagConfigResetDialog";
 import { ModelsAndRolesPanel } from "@/features/settings/components/ModelsAndRolesPanel";
 import { InferenceServicesPanel } from "@/features/settings/components/VllmDeploymentPanels";
+import { BrandingPanel } from "@/features/settings/components/BrandingPanel";
 
 export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Props) {
   const queryClient = useQueryClient();
@@ -75,6 +76,7 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
   const [vllmRestartConfirmed, setVllmRestartConfirmed] = useState<VllmRestartConfirmations>(DEFAULT_VLLM_RESTART_CONFIRMATIONS);
   const [activeVllmApplyService, setActiveVllmApplyService] = useState<VllmDeploymentService | null>(null);
   const [workerConcurrency, setWorkerConcurrency] = useState(1);
+  const [folderSnapshotMaxFiles, setFolderSnapshotMaxFiles] = useState(100);
   const [ocrReviewThresholdPercent, setOcrReviewThresholdPercent] = useState(90);
   const [pdfImageReviewThreshold, setPdfImageReviewThreshold] = useState(64);
   const [visionLayoutRepairEnabled, setVisionLayoutRepairEnabled] = useState(false);
@@ -185,6 +187,7 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
     mutationFn: adminApi.updateIngestConfig,
     onSuccess: (config) => {
       setWorkerConcurrency(safeWorkerConcurrency(config.worker_concurrency));
+      setFolderSnapshotMaxFiles(config.folder_snapshot_max_files);
       setOcrReviewThresholdPercent(thresholdPercentFromConfig(config.ocr_review_confidence_threshold));
       setPdfImageReviewThreshold(safePdfImageReviewThreshold(config.pdf_image_review_threshold));
       setVisionLayoutRepairEnabled(config.vision_layout_repair_enabled);
@@ -253,6 +256,7 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
   useEffect(() => {
     if (ingestConfigQuery.data) {
       setWorkerConcurrency(safeWorkerConcurrency(ingestConfigQuery.data.worker_concurrency));
+      setFolderSnapshotMaxFiles(ingestConfigQuery.data.folder_snapshot_max_files);
       setOcrReviewThresholdPercent(thresholdPercentFromConfig(ingestConfigQuery.data.ocr_review_confidence_threshold));
       setPdfImageReviewThreshold(safePdfImageReviewThreshold(ingestConfigQuery.data.pdf_image_review_threshold));
       setVisionLayoutRepairEnabled(ingestConfigQuery.data.vision_layout_repair_enabled);
@@ -315,7 +319,7 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
   const activeVllmRequest = vllmDeploymentQuery.data ? requestFromVllmForm(vllmFormFromConfig(vllmDeploymentQuery.data)) : null;
   const vllmDraftIsDirty = activeVllmRequest !== null && JSON.stringify(activeVllmRequest) !== JSON.stringify(vllmRequest);
   const vllmFormIsValid = canSubmitVllmDeploymentConfig(vllmDraft);
-  const ingestConfigIsValid = isValidWorkerConcurrency(workerConcurrency) && isValidThresholdPercent(ocrReviewThresholdPercent) && isValidPdfImageReviewThreshold(pdfImageReviewThreshold);
+  const ingestConfigIsValid = isValidWorkerConcurrency(workerConcurrency) && Number.isInteger(folderSnapshotMaxFiles) && folderSnapshotMaxFiles >= 1 && folderSnapshotMaxFiles <= 10000 && isValidThresholdPercent(ocrReviewThresholdPercent) && isValidPdfImageReviewThreshold(pdfImageReviewThreshold);
   const discoveryState = discoveryHealthLabel(
     ragDiscoveryResult,
     ragModelsAreLoading,
@@ -404,11 +408,13 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
             onSave={() => saveVllmDeploymentMutation.mutate(vllmRequest)}
           />
         ) : null}
+        {isAdmin && activeConfigPanel === "branding" ? <BrandingPanel notify={notify} /> : null}
         {isAdmin && activeConfigPanel === "workers" ? (
           <IngestionControlsPanel
             config={ingestConfigQuery.data}
             configError={ingestConfigQuery.error}
             configFailed={ingestConfigQuery.isError}
+            folderSnapshotMaxFiles={folderSnapshotMaxFiles}
             graphEnrichmentEnabled={graphEnrichmentEnabled}
             highConcurrencyConfirmed={highConcurrencyConfirmed}
             isValid={ingestConfigIsValid}
@@ -418,11 +424,13 @@ export function PrudentiaSettingsPage({ currentUser, onLogout, onNavigate }: Pro
             visionLayoutRepairEnabled={visionLayoutRepairEnabled}
             workerConcurrency={workerConcurrency}
             onGraphEnrichmentChange={setGraphEnrichmentEnabled}
+            onFolderSnapshotMaxFilesChange={setFolderSnapshotMaxFiles}
             onHighConcurrencyConfirmedChange={setHighConcurrencyConfirmed}
             onOcrReviewThresholdChange={setOcrReviewThresholdPercent}
             onPdfImageReviewThresholdChange={setPdfImageReviewThreshold}
             onSave={() => saveIngestConfigMutation.mutate({
               worker_concurrency: workerConcurrency,
+              folder_snapshot_max_files: folderSnapshotMaxFiles,
               ocr_review_confidence_threshold: thresholdFromPercent(ocrReviewThresholdPercent),
               pdf_image_review_threshold: pdfImageReviewThreshold,
               vision_layout_repair_enabled: visionLayoutRepairEnabled,

@@ -5,6 +5,7 @@ import { CitedAnswer } from "./CitedAnswer";
 import type { Props } from "@/features/chat/types/assistantTurnTypes";
 import { formatLatencyMs } from "@/features/chat/utils/assistantTiming";
 import { SourceChip } from "@/features/chat/components/AssistantSourceChip";
+import { groupSourcesByDocument } from "@/features/chat/utils/sourceGroups";
 import {
   ArtifactDownloads,
   ArtifactJobElapsed,
@@ -12,6 +13,7 @@ import {
   artifactJobBadgeFor,
 } from "@/features/chat/components/AssistantArtifactJob";
 import { PendingAssistant, StoppedAssistant } from "@/features/chat/components/AssistantProgress";
+import { useBranding } from "@/components/brand/BrandContext";
 import {
   ErrorAssistant,
   ResponseNotices,
@@ -19,7 +21,8 @@ import {
 } from "@/features/chat/components/AssistantResponseNotices";
 
 
-export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArtifactJob, onExpandSourceSearch, onRetryArtifactJob, onSelectSource, selectedSource, turn }: Props) {
+export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArtifactJob, onChooseQuerySource, onExpandSourceSearch, onRetryArtifactJob, onSelectSource, selectedSource, turn }: Props) {
+  const branding = useBranding();
   if (turn.status === "pending") return <PendingAssistant documents={documents} onSelectSource={onSelectSource} selectedSource={selectedSource} turn={turn} />;
   if (turn.status === "cancelled") return <StoppedAssistant documents={documents} onSelectSource={onSelectSource} turn={turn} />;
   if (turn.status === "error" || !turn.response) return <ErrorAssistant message={turn.errorMessage} />;
@@ -28,12 +31,13 @@ export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArti
   const artifactJob = response.artifact_job ?? null;
   const headerBadge = artifactJob ? artifactJobBadgeFor(artifactJob) : faithfulnessBadgeFor(response.faithfulness_status, response.faithfulness_score);
   const artifacts = artifactJob?.artifacts.length ? artifactJob.artifacts : response.artifacts ?? [];
+  const sourceGroups = groupSourcesByDocument(response.sources);
   return (
     <div className="rag-assistant-turn">
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex items-center gap-1 text-label-md text-on-surface">
           <Bot size={18} className="text-primary" />
-          Prudentia AI
+          {branding.app_name}
         </span>
         <span className={`sv-pill ${headerBadge.className}`}>
           {headerBadge.icon}
@@ -53,6 +57,12 @@ export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArti
         faithfulnessStatus={response.faithfulness_status}
         unfoundedClaims={response.unfounded_claims}
       />
+      {response.sources.length > 0 && response.operational_failures?.length ? (
+        <div className="rag-source-expansion" role="status">
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span>{response.operational_failures[0].message}</span>
+        </div>
+      ) : null}
       {response.source_expansion?.available ? (
         <div className="rag-source-expansion">
           <AlertTriangle size={16} />
@@ -63,9 +73,31 @@ export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArti
           </button>
         </div>
       ) : null}
-      <div className="rag-assistant-prose space-y-3 text-body-md text-on-surface">
-        <CitedAnswer answer={response.answer} documents={documents} onSelectSource={onSelectSource} sources={response.sources} />
-      </div>
+      {response.source_clarification ? (
+        <section className="grid gap-3 rounded border border-surface-border bg-surface-container-low p-3" aria-labelledby={`source-question-${turn.id}`}>
+          <p id={`source-question-${turn.id}`} className="font-bold text-on-surface">
+            {response.source_clarification.question}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {response.source_clarification.options.map((option) => (
+              <button
+                key={option.source_id}
+                type="button"
+                className="sv-action-secondary"
+                onClick={() => onChooseQuerySource?.(turn.id, option.source_id)}
+                title={option.description ?? undefined}
+              >
+                {option.name}
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {!response.source_clarification ? (
+        <div className="rag-assistant-prose space-y-3 text-body-md text-on-surface">
+          <CitedAnswer answer={response.answer} documents={documents} onSelectSource={onSelectSource} sources={response.sources} />
+        </div>
+      ) : null}
       {artifactJob ? (
         <ArtifactJobPanel
           job={artifactJob}
@@ -83,14 +115,13 @@ export function AssistantZipTurn({ documents, onCancelArtifactJob, onClarifyArti
         {response.conflict_flag ? <span className="text-error-red">Conflict detected</span> : null}
       </div>
       <div className="flex flex-wrap gap-2">
-        {response.sources.map((source, index) => (
+        {sourceGroups.map((group) => (
           <SourceChip
-            key={`${source.doc_id}-${source.chunk_id}-${index}`}
+            key={group.docId}
             documents={documents}
+            group={group}
             onSelectSource={onSelectSource}
-            selected={selectedSource?.doc_id === source.doc_id && selectedSource?.chunk_id === source.chunk_id}
-            source={source}
-            sourceNumber={index + 1}
+            selected={selectedSource?.doc_id === group.docId}
           />
         ))}
       </div>

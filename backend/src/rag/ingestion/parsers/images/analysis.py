@@ -78,6 +78,7 @@ def image_sources_to_items(
     analyzer: ImageAnalyzer,
     start_index: int = 0,
     progress_callback: ImageProgressCallback | None = None,
+    analyze: bool = True,
 ) -> tuple[list[ParsedPdfItem], list[ParsedImageAsset]]:
     items: list[ParsedPdfItem] = []
     assets: list[ParsedImageAsset] = []
@@ -100,13 +101,13 @@ def image_sources_to_items(
         )
         width, height = image_dimensions(source.content)
         effective_bbox = source.bbox or _standalone_image_bbox(source, width, height)
-        analysis = analyze_image_source(source, analyzer)
+        analysis = analyze_image_source(source, analyzer) if analyze else ImageAnalysisResult()
         extracted_text = clean_text(analysis.extracted_text)
         caption = clean_text(analysis.caption)
         flags = sorted(
             {
                 *source.quality_flags,
-                "source:vision",
+                *(["source:vision"] if analyze else []),
                 *(analysis.quality_flags or []),
                 *(["source:ocr"] if extracted_text else []),
             }
@@ -128,7 +129,7 @@ def image_sources_to_items(
                 quality_flags=flags,
             )
         )
-        text = image_item_text(extracted_text, caption)
+        text = image_item_text(extracted_text, caption) if analyze else ""
         if not text:
             _emit_image_progress(
                 progress_callback,
@@ -153,6 +154,7 @@ def image_sources_to_items(
                 image_source_kind=source.source_kind,
                 image_content_type=source.content_type,
                 extraction_method="vision_ocr_description",
+                quote_texts=[extracted_text] if extracted_text else [],
             )
         )
         _emit_image_progress(
@@ -345,6 +347,20 @@ def image_item_text(extracted_text: str, caption: str) -> str:
     if caption:
         parts.append(f"Image description:\n{caption}")
     return "\n\n".join(parts).strip()
+
+
+def image_item_description(item: ParsedPdfItem) -> str | None:
+    """Read the generated description without treating visible text as a delimiter."""
+    if item.extraction_method != "vision_ocr_description" or not item.quote_texts or len(item.quote_texts) != 1:
+        return None
+    prefix = f"Visible image text:\n{item.quote_texts[0]}"
+    if not item.text.startswith(prefix):
+        return None
+    remainder = item.text[len(prefix):]
+    if not remainder:
+        return ""
+    marker = "\n\nImage description:\n"
+    return remainder[len(marker):] if remainder.startswith(marker) else None
 
 
 def _standalone_image_placeholder_item(

@@ -36,6 +36,7 @@ from .content import (
     get_document_content,
     get_document_image_asset_content,
     get_document_qdrant_client,
+    get_document_slide_content,
     get_document_source,
 )
 from .presenters import document_shares_to_schema, document_to_schema, version_node
@@ -56,6 +57,7 @@ __all__ = [
     "get_document_content",
     "get_document_image_asset_content",
     "get_document_qdrant_client",
+    "get_document_slide_content",
     "get_document_shares",
     "get_document_source",
     "get_document_versions",

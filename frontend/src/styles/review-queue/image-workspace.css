@@ -11,6 +11,37 @@
   grid-template-columns: minmax(15rem, 18rem) minmax(28rem, 1fr) minmax(16rem, 19rem);
 }
 
+.review-image-workspace {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.review-image-top-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.review-image-top-actions > div:first-child {
+  min-width: 10rem;
+}
+
+.review-image-top-actions-summary {
+  margin-top: 0.2rem;
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.review-image-top-actions .review-actions {
+  margin: 0;
+}
+
 .review-queue-panel,
 .review-preview-panel,
 .review-correction-panel {

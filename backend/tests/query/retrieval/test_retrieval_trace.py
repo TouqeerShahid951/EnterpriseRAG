@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -128,6 +129,55 @@ def test_query_nodes_capture_candidate_fate_across_retrieval_waves() -> None:
     assert "text" not in latest["retrieved"].candidates[0].to_row()
 
 
+def test_exhaustive_route_cannot_skip_coverage_reranking() -> None:
+    nodes = object.__new__(QueryNodes)
+    nodes.config = SimpleNamespace(
+        rag_top_k=4,
+        rag_reranker_max_candidates=4,
+        rag_reranker_cache_dir=None,
+    )
+    nodes.reranker_model = "test-reranker"
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="How many repair tools are listed?"),
+        user=UserContext(
+            user_id="user", email="user@example.com", group_paths=("/space",)
+        ),
+        started=0.0,
+    )
+    ctx["route_plan"] = RoutePlan(
+        original_query=ctx["request"].query,
+        resolved_query=ctx["request"].query,
+        intent="aggregation",
+        coverage="exhaustive",
+        public_intent="aggregation",
+        use_reranker=False,
+        top_k=4,
+    )
+    ctx["retrieved_hits"] = [
+        hit(
+            "tools",
+            1.0,
+            "Tools for Disassembly and Assembly",
+            section_title="Tools for Disassembly and Assembly",
+            parent_section_id="tools",
+            parent_chunk_id="tools-parent",
+            parent_text="Tools for Disassembly and Assembly",
+            authorized_scan_complete=True,
+            exhaustive_scope_origin="document_class_scope",
+        )
+    ]
+
+    with patch(
+        "rag.query.reranker._load_cross_encoder", return_value=FakeCrossEncoder()
+    ):
+        nodes.reranker(ctx)
+
+    assert ctx["exhaustive_coverage"]["candidate_status"] == "complete"
+    assert ctx["execution_modes"]["reranker"] != "skipped"
+
+
 def test_trace_keeps_candidate_text_only_until_text_free_serialization() -> None:
     secret = "authorized evidence sentinel"
 
@@ -142,6 +192,31 @@ def test_trace_keeps_candidate_text_only_until_text_free_serialization() -> None
     assert secret not in repr(candidate)
     assert secret not in str(candidate.to_row())
     assert {"evidence_text", "text", "parent_text"}.isdisjoint(candidate.to_row())
+
+
+def test_trace_preserves_text_free_provenance_identity() -> None:
+    source = "native citation passage"
+    candidate = retrieval_trace_stage(
+        "retrieved",
+        [
+            hit(
+                "evidence",
+                0.9,
+                "display text",
+                citation_original_text=source,
+                content_hash="content-hash",
+                index_generation_id="generation",
+                provenance_kind="native",
+            )
+        ],
+        attempt=0,
+    ).candidates[0]
+
+    assert candidate.to_row()["content_hash"] == "content-hash"
+    assert candidate.to_row()["evidence_hash"] == sha256(source.encode()).hexdigest()
+    assert candidate.to_row()["index_generation_id"] == "generation"
+    assert candidate.to_row()["provenance_kind"] == "native"
+    assert source not in str(candidate.to_row())
 
 
 def test_samsung_style_exhaustive_hits_reach_final_evidence() -> None:
@@ -262,19 +337,19 @@ def test_samsung_style_exhaustive_hits_reach_final_evidence() -> None:
     ]
     assert {item.page for item in target_input} == {51, 52, 53}
     assert any(
-        item.page_start == 51
-        and item.page_end == 53
+        item.page_start == item.page
+        and item.page_end == item.page
         and all(anchor in item.evidence_text for anchor in anchors)
         for item in target_input
     )
     assert any(
-        item.page_start == 51
-        and item.page_end == 53
+        item.page_start == item.page
+        and item.page_end == item.page
         and all(anchor in item.evidence_text for anchor in anchors)
         for item in reranked.candidates
     )
     assert any(
-        item.page_start == 51 and item.page_end == 53
+        item.page_start == item.page_end and item.page in {51, 52, 53}
         for item in final_evidence.candidates
     )
     final_text = "\n".join(

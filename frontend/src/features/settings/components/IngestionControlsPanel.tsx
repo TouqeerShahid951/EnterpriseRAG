@@ -13,6 +13,7 @@ type Props = {
   config?: IngestConfig;
   configError: Error | null;
   configFailed: boolean;
+  folderSnapshotMaxFiles: number;
   graphEnrichmentEnabled: boolean;
   highConcurrencyConfirmed: boolean;
   isValid: boolean;
@@ -22,6 +23,7 @@ type Props = {
   visionLayoutRepairEnabled: boolean;
   workerConcurrency: number;
   onGraphEnrichmentChange: (value: boolean) => void;
+  onFolderSnapshotMaxFilesChange: (value: number) => void;
   onHighConcurrencyConfirmedChange: (value: boolean) => void;
   onOcrReviewThresholdChange: (value: number) => void;
   onPdfImageReviewThresholdChange: (value: number) => void;
@@ -34,6 +36,7 @@ export function IngestionControlsPanel({
   config,
   configError,
   configFailed,
+  folderSnapshotMaxFiles,
   graphEnrichmentEnabled,
   highConcurrencyConfirmed,
   isValid,
@@ -43,6 +46,7 @@ export function IngestionControlsPanel({
   visionLayoutRepairEnabled,
   workerConcurrency,
   onGraphEnrichmentChange,
+  onFolderSnapshotMaxFilesChange,
   onHighConcurrencyConfirmedChange,
   onOcrReviewThresholdChange,
   onPdfImageReviewThresholdChange,
@@ -71,6 +75,18 @@ export function IngestionControlsPanel({
             className="sv-input"
           />
           <span className="text-body-md text-secondary">Allowed range: 1-10. Recommended: 1.</span>
+        </label>
+        <label className="sv-field">
+          <span className="sv-label">Folder snapshot file limit</span>
+          <input
+            type="number"
+            min={1}
+            max={10000}
+            value={folderSnapshotMaxFiles}
+            onChange={(event) => onFolderSnapshotMaxFilesChange(Number(event.target.value))}
+            className="sv-input"
+          />
+          <span className="text-body-md text-secondary">Supported files per browser folder snapshot. The 5 GB total limit remains.</span>
         </label>
         <label className="sv-field">
           <span className="sv-label">OCR review threshold</span>
@@ -118,7 +134,7 @@ export function IngestionControlsPanel({
       </div>
       {!isValid ? (
         <InlineMessage tone="error">
-          Worker concurrency must be 1-10, OCR review threshold must be 0-100%, and PDF image review threshold must be 0-10000.
+          Worker concurrency must be 1-10, folder snapshots must be 1-10000 files, OCR review threshold must be 0-100%, and PDF image review threshold must be 0-10000.
         </InlineMessage>
       ) : null}
       {workerConcurrency > 2 ? (

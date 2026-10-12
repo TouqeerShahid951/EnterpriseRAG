@@ -9,8 +9,13 @@ from rag.core.config import Settings
 from rag.query.state import QueryContext
 from rag.query.retrieval.query_retrieval import retrieve_candidates
 from rag.query.cancellation import QueryCancelled
-from rag.query.sources.live_sql import retrieve_live_sql_hits
+from rag.query.sources.live_sql import LiveSqlFailure, retrieve_live_sql_hits
 from rag.query.sources import dedupe_hits
+from rag.query.routing.evidence_planning import (
+    evidence_queries,
+    required_evidence_assignments,
+)
+from rag.query.routing.routing_models import EvidenceCapability
 
 
 class RetrievalService:
@@ -53,9 +58,16 @@ class RetrievalService:
             if not live_hits and bool(getattr(decision, "explicit", False)):
                 ctx["degraded"] = True
                 ctx["degraded_reason"] = ctx["degraded_reason"] or "explicit_source_no_answer"
+                failures = ctx.get("operational_failures", [])
                 ctx["source_expansion"] = {
                     "available": True,
-                    "reason": ctx["execution_details"].get("live_sql_retriever", "selected_source_no_answer"),
+                    "reason": (
+                        failures[0]["message"]
+                        if failures
+                        else ctx["execution_details"].get(
+                            "live_sql_retriever", "selected_source_no_answer"
+                        )
+                    ),
                     "suggested_source_mode": "hybrid",
                 }
             return live_hits
@@ -97,11 +109,23 @@ class RetrievalService:
             )
             ctx["execution_modes"]["live_sql_retriever"] = live_sql.mode
             ctx["execution_details"]["live_sql_retriever"] = live_sql.detail
+            _record_live_sql_failures(ctx, live_sql.failures)
         except QueryCancelled:
             raise
-        except Exception as exc:
+        except Exception:
+            source_id = str(
+                getattr(ctx.get("source_decision"), "query_source_id", "") or ""
+            )
+            failure = LiveSqlFailure(
+                stage="selection",
+                code="live_sql_discovery_failed",
+                retryable=True,
+                source_id=source_id or None,
+                message="Database retrieval is temporarily unavailable.",
+            )
             ctx["execution_modes"]["live_sql_retriever"] = "fallback"
-            ctx["execution_details"]["live_sql_retriever"] = f"discovery_failed:{type(exc).__name__}"
+            ctx["execution_details"]["live_sql_retriever"] = failure.code
+            _record_live_sql_failures(ctx, (failure,))
             return []
         return live_sql.hits
 
@@ -114,8 +138,8 @@ class RetrievalService:
         )
 
     def _retrieve_hybrid(self, ctx: QueryContext, *, preferred: str) -> list[Any]:
-        live_ctx = _hybrid_branch_context(ctx)
-        vector_ctx = _hybrid_branch_context(ctx)
+        live_ctx = _hybrid_branch_context(ctx, capability="connector_query")
+        vector_ctx = _hybrid_branch_context(ctx, capability="indexed_search")
         # ponytail: request-local workers avoid lifecycle plumbing; use a shared pool only if thread pressure is measured.
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="rag-hybrid") as executor:
             live_future = executor.submit(self._retrieve_live_sql, live_ctx)
@@ -131,11 +155,20 @@ class RetrievalService:
         return dedupe_hits([*live_hits, *vector_hits])
 
 
-def _hybrid_branch_context(ctx: QueryContext) -> QueryContext:
+def _hybrid_branch_context(
+    ctx: QueryContext, *, capability: EvidenceCapability
+) -> QueryContext:
     branch = ctx.copy()
     branch["execution_modes"] = dict(ctx["execution_modes"])
     branch["execution_details"] = dict(ctx["execution_details"])
     branch["retrieval_phase_timings_ms"] = {}
+    plan = ctx.get("route_plan")
+    queries = evidence_queries(
+        plan.evidence_plan if plan is not None else None,
+        capability,
+    )
+    if queries:
+        branch["sub_queries"] = list(queries)
     return branch
 
 
@@ -163,3 +196,55 @@ def _merge_hybrid_branch_state(
         ctx["exhaustive_deadline"] = vector_ctx["exhaustive_deadline"]
     if "exhaustive_coverage" in vector_ctx:
         ctx["exhaustive_coverage"] = vector_ctx["exhaustive_coverage"]
+    failures = [
+        *vector_ctx.get("operational_failures", []),
+        *live_ctx.get("operational_failures", []),
+    ]
+    if failures:
+        ctx["operational_failures"] = list(
+            {
+                (
+                    failure["stage"],
+                    failure["code"],
+                    failure["source_id"],
+                ): failure
+                for failure in failures
+            }.values()
+        )
+
+
+def _record_live_sql_failures(
+    ctx: QueryContext, failures: tuple[LiveSqlFailure, ...]
+) -> None:
+    if not failures:
+        return
+    ctx["operational_failures"] = [
+        {
+            "stage": failure.stage,
+            "code": failure.code,
+            "retryable": failure.retryable,
+            "source_id": failure.source_id,
+            "message": failure.message,
+        }
+        for failure in failures
+    ]
+    decision = ctx.get("source_decision")
+    mode = str(getattr(decision, "resolved_mode", "") or "")
+    plan = ctx.get("route_plan")
+    required_source_ids = {
+        source_id
+        for _need_id, source_id, capability in required_evidence_assignments(
+            plan.evidence_plan if plan is not None else None
+        )
+        if capability == "connector_query"
+    }
+    required_failures = [
+        failure
+        for failure in failures
+        if bool(getattr(decision, "explicit", False))
+        or failure.source_id in required_source_ids
+        or (mode in {"db_only", "db_first"} and not required_source_ids)
+    ]
+    if required_failures:
+        ctx["degraded"] = True
+        ctx["degraded_reason"] = ctx["degraded_reason"] or required_failures[0].code

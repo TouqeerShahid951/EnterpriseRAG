@@ -68,6 +68,8 @@ class IngestJobFilters:
     created_from: datetime | None = None
     created_to: datetime | None = None
     uploaded_by_user_id: str | None = None
+    include_abbreviation_glossary: bool = False
+    abbreviation_glossary_only: bool = False
 
 
 @dataclass(frozen=True)

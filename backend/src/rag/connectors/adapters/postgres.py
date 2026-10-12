@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from ..models import ConnectorQueryResult, ConnectorTestResult
@@ -68,6 +69,7 @@ class PostgresConnector:
         config: dict[str, Any],
         secrets: dict[str, Any],
         query: str,
+        parameters: dict[str, Any] | None = None,
         row_limit: int,
         timeout_seconds: int,
     ) -> ConnectorQueryResult:
@@ -77,7 +79,10 @@ class PostgresConnector:
                 conn, {**config, "timeout_seconds": timeout_seconds}
             )
             with conn.cursor() as cursor:
-                cursor.execute(query)
+                if parameters:
+                    cursor.execute(_postgres_parameter_query(query), parameters)
+                else:
+                    cursor.execute(query)
                 rows = cursor.fetchmany(max(1, row_limit))
                 result = ConnectorQueryResult(
                     query=query,
@@ -98,6 +103,14 @@ class PostgresConnector:
         return psycopg.connect(
             **postgres_connection_kwargs(config, secrets), row_factory=dict_row
         )
+
+
+def _postgres_parameter_query(query: str) -> str:
+    return re.sub(
+        r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)",
+        lambda match: f"%({match.group(1)})s",
+        query,
+    )
 
 
 def postgres_connection_kwargs(

@@ -3,6 +3,7 @@
 DEFAULT_ARTIFACT_TASK_NAME = "rag.artifact_jobs.tasks.generate_artifact_job"
 DEFAULT_EVALUATION_TASK_NAME = "rag.evaluations.tasks.run_evaluation"
 DEFAULT_INGEST_TASK_NAME = "apps.ingestion.tasks.ingest_document"
+DEFAULT_GLOSSARY_IMPORT_TASK_NAME = "rag.abbreviations.tasks.import_source"
 DEFAULT_GRAPHRAG_INDEX_TASK_NAME = "apps.ingestion.tasks.index_document_graphrag"
 DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME = (
     "apps.ingestion.tasks.rebuild_graphrag_partition"
@@ -30,6 +31,7 @@ def normalize_task_name(setting_name: str, value: str) -> str:
 def validate_document_pipeline_task_names(
     *,
     ingest: str,
+    glossary_import: str,
     graphrag_index: str,
     graphrag_partition_rebuild: str,
 ) -> None:
@@ -37,6 +39,7 @@ def validate_document_pipeline_task_names(
 
     names_by_owner = {
         "ingest": {DEFAULT_INGEST_TASK_NAME, ingest},
+        "glossary_import": {DEFAULT_GLOSSARY_IMPORT_TASK_NAME, glossary_import},
         "graphrag_index": {
             DEFAULT_GRAPHRAG_INDEX_TASK_NAME,
             graphrag_index,

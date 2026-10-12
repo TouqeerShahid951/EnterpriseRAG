@@ -154,6 +154,25 @@ def test_folder_application_code_is_transport_and_settings_independent() -> None
     assert_no_violations(violations)
 
 
+def test_ocr_reconciliation_and_correction_are_transport_independent() -> None:
+    assert_no_violations(find_violations(
+        [
+            RAG_ROOT / "ingestion" / "parsers" / "pdf" / "ocr_reconciliation.py",
+            RAG_ROOT / "ingestion" / "review" / "corrections.py",
+        ],
+        lambda target: target.startswith(("fastapi", "celery", "apps", "rag.core.config")) or is_concrete_adapter_module(target),
+        resolve_relative_imports=True,
+    ))
+
+
 def test_deployment_controller_uses_backend_composition_root() -> None:
     assert (BACKEND_ROOT / "apps" / "deployment_controller" / "main.py").is_file()
     assert not (REPOSITORY_ROOT / "deployment-controller").exists()
+
+
+def test_resource_sampling_is_transport_and_adapter_independent() -> None:
+    assert_no_violations(find_violations(
+        [RAG_ROOT / "deployment" / "resource_sampling.py"],
+        lambda target: target.startswith(("fastapi", "celery", "apps", "rag.core.config")) or is_concrete_adapter_module(target),
+        resolve_relative_imports=True,
+    ))

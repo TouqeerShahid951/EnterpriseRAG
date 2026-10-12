@@ -13,6 +13,7 @@ from ...auth.permissions import can_read_document_metadata, is_global_admin
 from ...shared.contracts.clearance import clearance_levels_at_or_below
 from rag.shared.contracts.http import ErrorResponse
 from rag.documents.metadata.schemas import VersionChainResponse
+from rag.shared.contracts.abbreviations import ABBREVIATION_GLOSSARY_DOC_TYPE
 from rag.documents.schemas import (
     Document,
     DocumentCatalogSummary,
@@ -22,6 +23,9 @@ from rag.documents.schemas import (
 )
 from ..claim_dependencies import get_claim_repository
 from ..claim_models import ClaimRepository
+from rag.ingestion.job_dependencies import get_ingest_job_repository
+from rag.ingestion.job_models import IngestJobRepository
+
 from ..overview import build_document_overview
 from ..repository import DocumentRepository, get_document_repository
 from .authorization import require_visible_document
@@ -43,6 +47,8 @@ async def list_documents(
     documents = [
         document_to_schema(document)
         for document in records
+        if state_value == "deleted"
+        or document.doc_type != ABBREVIATION_GLOSSARY_DOC_TYPE
         if can_read_document(user, document)
         and _matches_group_filter(document.access_group_paths, normalized_group)
     ]
@@ -69,6 +75,7 @@ async def summarize_documents(
         repo.count_documents_by_owner_group,
         clearance_levels=clearance_levels_at_or_below(user.clearance_level),
         group_paths=group_paths,
+        exclude_abbreviation_glossary=True,
     )
     groups = [
         DocumentGroupCount(group_path=group_path, count=count)
@@ -88,11 +95,13 @@ async def summarize_documents(
 async def summarize_document_overview(
     user: UserRecord = Depends(require_current_user),
     repo: DocumentRepository = Depends(get_document_repository),
+    job_repo: IngestJobRepository = Depends(get_ingest_job_repository),
 ) -> DocumentOverviewResponse:
     overview = await run_in_threadpool(
         build_document_overview,
         user=user,
         repository=repo,
+        job_repository=job_repo,
     )
     return document_overview_to_schema(overview)
 

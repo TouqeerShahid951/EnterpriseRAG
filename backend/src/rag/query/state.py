@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from time import perf_counter
-from typing import NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from ..auth.context import UserContext
-from ..shared.contracts.evidence import ConflictPair
+from ..shared.contracts.evidence import ConflictPair, SourceAnchor
 from .cancellation import QueryCancellationToken
 from rag.query.answering.evidence_sufficiency import EvidenceSufficiencyResult
 from rag.query.answering.evidence_quality import EvidenceQuality
@@ -27,6 +27,14 @@ class ExhaustiveCoverageState(TypedDict):
     covered_obligations: list[str]
 
 
+class OperationalFailureState(TypedDict):
+    stage: Literal["selection", "generation", "validation", "execution"]
+    code: str
+    retryable: bool
+    source_id: str | None
+    message: str
+
+
 class QueryContext(TypedDict):
     trace_id: str
     session_id: str
@@ -40,6 +48,7 @@ class QueryContext(TypedDict):
     initial_route_intent: NotRequired[str]
     route_signals: NotRequired[QuerySignals]
     source_decision: NotRequired[object]
+    source_candidates: NotRequired[dict[str, object]]
     source_expansion: NotRequired[dict[str, object]]
     source_expansion_from: NotRequired[str]
     source_primary_hits: NotRequired[list[SearchHit]]
@@ -54,6 +63,7 @@ class QueryContext(TypedDict):
     exhaustive_deadline: NotRequired[float]
     force_faithfulness_check: bool
     session_turns: list[dict[str, object]]
+    reply_context_turn_id: NotRequired[str]
     conversation_resolution: NotRequired[ConversationResolution]
     node_trace: list[dict[str, str | None]]
     node_timings: list[dict[str, object]]
@@ -66,12 +76,22 @@ class QueryContext(TypedDict):
     reranker_stop_reason: NotRequired[str | None]
     synthesis_source_limit: NotRequired[int]
     synthesis_token_limit: NotRequired[int]
+    answer_output_tokens: NotRequired[int]
+    answer_context_tokens: NotRequired[int]
     synthesis_context_count: NotRequired[int]
     synthesis_estimated_prompt_tokens: NotRequired[int]
+    synthesis_context_complete: NotRequired[bool]
+    synthesis_source_keys: NotRequired[list[dict[str, object]]]
+    response_source_keys: NotRequired[list[dict[str, object]]]
+    citation_source_keys: NotRequired[list[dict[str, object]]]
+    summary_contexts: NotRequired[list[str]]
+    summary_context_units: NotRequired[list[list[str]]]
+    summary_manifest: NotRequired[dict[str, object]]
     required_query_slot_count: NotRequired[int]
     covered_query_slot_count: NotRequired[int]
     execution_modes: dict[str, str]
     execution_details: dict[str, str]
+    operational_failures: NotRequired[list[OperationalFailureState]]
     graphrag_communities: NotRequired[list[object]]
     retry_count: int
     token_budget: int
@@ -80,7 +100,12 @@ class QueryContext(TypedDict):
     evidence_quality: NotRequired[EvidenceQuality]
     evidence_sufficiency: NotRequired[EvidenceSufficiencyResult]
     conflict_checker_used: bool
+    citation_evidence: NotRequired[list[SourceAnchor]]
+    citation_diagnostics: NotRequired[dict[str, object]]
+    generated_citation_quotes: NotRequired[list[dict[str, str]]]
     synthesis_profile: NotRequired[str]
+    answer_streamed: NotRequired[bool]
+    streamed_answer: NotRequired[str]
     conflict_flag: bool
     conflict_pairs: list[ConflictPair]
     faithfulness_score: float
@@ -99,6 +124,8 @@ def initial_state(
     user: UserContext,
     started: float,
     token_budget: int = 12000,
+    answer_output_tokens: int | None = None,
+    answer_context_tokens: int | None = None,
     cancellation_token: QueryCancellationToken | None = None,
     capture_retrieval_trace: bool = False,
     force_faithfulness_check: bool = False,
@@ -136,6 +163,10 @@ def initial_state(
     }
     if cancellation_token is not None:
         ctx["cancellation_token"] = cancellation_token
+    if answer_output_tokens is not None:
+        ctx["answer_output_tokens"] = answer_output_tokens
+    if answer_context_tokens is not None:
+        ctx["answer_context_tokens"] = answer_context_tokens
     if capture_retrieval_trace:
         ctx["retrieval_trace"] = []
     return ctx

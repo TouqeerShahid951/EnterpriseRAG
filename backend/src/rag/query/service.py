@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
@@ -26,6 +28,8 @@ from ..documents.adapters.memory import InMemoryDocumentRepository
 from ..documents.models import DocumentRepository
 from ..documents.adapters.postgres import PostgresDocumentRepository
 from ..ingestion.publication.dependencies import active_generation_resolver_for
+from ..ingestion.configuration import IngestConfigRepository
+from ..ingestion.configuration.dependencies import effective_ingest_config
 from .schemas import QueryRequest, QueryStreamEvent, RAGResponse
 from .artifact_intent import (
     ArtifactRequest,
@@ -34,22 +38,34 @@ from .artifact_intent import (
     requires_conversation_context,
     requires_document_scope,
 )
-from .cancellation import QueryCancellationToken
+from .cancellation import QueryCancellationToken, QueryCancelled
 from rag.query.answering.conflicts import ConflictChecker
 from .inference import InferenceClient, build_inference_client
+from rag.auth.identity_models import IdentityRepository
+from rag.auth.identity_repository import get_identity_repository
 from .qdrant import QdrantClient
 from .configuration.models import RagConfigRecord, RagConfigRepository
 from .configuration.repository import effective_rag_config, env_rag_config
 from .state import initial_state
 from .graph import QueryGraphRunner
-from .chat_history_models import ChatHistoryRepository
+from .chat_history_models import (
+    ChatHistoryRepository,
+    ChatHistoryRequestConflict,
+    context_turn_for_message_id,
+)
 from .chat_history_repository import default_chat_history_repository
 from .nodes import QueryNodes
+from .history_access import context_is_available
 from .query_stream import stream_graph
 from rag.query.retrieval.retrieval_trace import RetrievalTrace
 from rag.query.routing.routing_logs import log_query_complete, log_query_error, log_query_start
 from rag.query.routing.conversation_resolution import resolve_conversation
 from rag.shared.contracts.evidence import SourceAnchor
+from .analytics.models import AnalyticsOrigin
+from .analytics.repository import analytics_repository_from_config
+from .analytics.service import AnalyticsRecorder
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,15 +87,30 @@ class LocalRagService:
         rag_config: RagConfigRecord | None = None,
         artifact_job_service: ArtifactJobService | None = None,
         document_repo: DocumentRepository | None = None,
+        identity_repo: IdentityRepository | None = None,
         abbreviation_repo: AbbreviationRepository | None = None,
+        ingest_config_repo: IngestConfigRepository | None = None,
+        analytics_recorder: AnalyticsRecorder | None = None,
     ) -> None:
         self.config = config
+        self.analytics_recorder = analytics_recorder
+        if self.analytics_recorder is None:
+            try:
+                self.analytics_recorder = AnalyticsRecorder(
+                    analytics_repository_from_config(config),
+                    reconciliation_grace_seconds=config.query_analytics_reconciliation_grace_seconds,
+                    retrieval_lineage_max_candidates=config.query_analytics_retrieval_lineage_max_candidates,
+                    retrieval_lineage_max_bytes=config.query_analytics_retrieval_lineage_max_bytes,
+                )
+            except Exception:  # noqa: BLE001 - an analytics outage must not stop the query
+                logger.warning("query analytics initialization failed; capture unavailable")
         resolved_document_repo = document_repo or _document_repository_from_config(config)
         self.rag_config = rag_config or (
             effective_rag_config(config=config, repo=rag_config_repo)
             if ollama is None
             else env_rag_config(config)
         )
+        self.analytics_cohort = _analytics_cohort(config, self.rag_config)
         self.ollama = ollama or build_inference_client(self.rag_config, settings=config)
         self.qdrant = qdrant or QdrantClient(
             base_url=config.qdrant_url,
@@ -108,8 +139,19 @@ class LocalRagService:
             evidence_gate_policy=self.rag_config.evidence_gate_policy,
             faithfulness_policy=self.rag_config.faithfulness_policy,
             reranker_model=self.rag_config.reranker_model,
+            context_resolver_enabled=self.rag_config.context_resolver_enabled,
             query_planner_enabled=self.rag_config.query_planner_enabled,
+            graph_enabled=(
+                config.graphrag_enabled
+                and effective_ingest_config(
+                    config=config,
+                    repo=ingest_config_repo,
+                ).graph_enrichment_enabled
+            ),
             document_repo=resolved_document_repo,
+            identity_repo=identity_repo or get_identity_repository(),
+            faithfulness_timeout_seconds=self.rag_config.faithfulness_timeout_seconds,
+            citation_output_tokens=self.rag_config.json_num_predict,
             abbreviation_service=AbbreviationGlossaryService(
                 abbreviation_repo or abbreviation_repository_from_settings()
             ),
@@ -141,11 +183,13 @@ class LocalRagService:
         cancellation_token: QueryCancellationToken | None = None,
         capture_retrieval_trace: bool = False,
         force_faithfulness_check: bool = False,
+        analytics_origin: AnalyticsOrigin = "chat",
     ) -> QueryExecutionResult:
         started = perf_counter()
         trace_id = str(uuid4())
         session_id = request.session_id or str(uuid4())
         async_request = self._async_artifact_request(request)
+        analytics = getattr(self, "analytics_recorder", None)
         ctx = initial_state(
             trace_id=trace_id,
             session_id=session_id,
@@ -154,34 +198,60 @@ class LocalRagService:
             started=started,
             token_budget=self.rag_config.retrieval_token_budget,
             cancellation_token=cancellation_token,
-            capture_retrieval_trace=capture_retrieval_trace,
+            capture_retrieval_trace=capture_retrieval_trace or analytics is not None,
             force_faithfulness_check=force_faithfulness_check,
         )
-        log_query_start(ctx, stream=False)
-        try:
-            if async_request is not None:
-                response = self._handle_artifact_request(
-                    request=request,
-                    artifact_request=async_request,
-                    user=user,
-                    trace_id=trace_id,
-                    session_id=session_id,
-                    started=started,
-                    cancellation_token=cancellation_token,
+        if analytics is not None:
+            analytics.start(
+                execution_id=trace_id,
+                trace_id=trace_id,
+                session_id=session_id,
+                user=user,
+                request=request,
+                started_at=datetime.now(UTC),
+                origin=analytics_origin,
+                work_kind="artifact_submission" if async_request is not None else "answer",
+                cohort=self.analytics_cohort,
+            )
+        with analytics.heartbeat(trace_id) if analytics is not None else nullcontext():
+            log_query_start(ctx, stream=False)
+            try:
+                if async_request is not None:
+                    response = self._handle_artifact_request(
+                        request=request,
+                        artifact_request=async_request,
+                        user=user,
+                        trace_id=trace_id,
+                        session_id=session_id,
+                        started=started,
+                        cancellation_token=cancellation_token,
+                    )
+                    ctx["response"] = response
+                else:
+                    result = self.graph.invoke(ctx)
+                    response = result["response"]
+                    ctx = result
+            except QueryCancelled as exc:
+                if analytics is not None:
+                    analytics.fail(execution_id=trace_id, outcome="cancelled", ctx=ctx)
+                log_query_error(ctx, stream=False, exc=exc)
+                raise
+            except Exception as exc:
+                if analytics is not None:
+                    analytics.fail(execution_id=trace_id, ctx=ctx)
+                log_query_error(ctx, stream=False, exc=exc)
+                raise
+            log_query_complete(ctx, stream=False)
+            if analytics is not None:
+                analytics.finish_response(
+                    execution_id=trace_id,
+                    response=response,
+                    ctx=ctx,
                 )
-                ctx["response"] = response
-            else:
-                result = self.graph.invoke(ctx)
-                response = result["response"]
-                ctx = result
-        except Exception as exc:
-            log_query_error(ctx, stream=False, exc=exc)
-            raise
-        log_query_complete(ctx, stream=False)
-        return QueryExecutionResult(
-            response=response,
-            retrieval_trace=RetrievalTrace(tuple(ctx.get("retrieval_trace", ()))),
-        )
+            return QueryExecutionResult(
+                response=response,
+                retrieval_trace=RetrievalTrace(tuple(ctx.get("retrieval_trace", ()))),
+            )
 
     def stream_query(
         self,
@@ -189,11 +259,14 @@ class LocalRagService:
         user: UserContext,
         *,
         cancellation_token: QueryCancellationToken | None = None,
+        capture_retrieval_trace: bool = False,
+        analytics_origin: AnalyticsOrigin = "chat",
     ):
         started = perf_counter()
         trace_id = str(uuid4())
         session_id = request.session_id or str(uuid4())
         async_request = self._async_artifact_request(request)
+        analytics = getattr(self, "analytics_recorder", None)
         ctx = initial_state(
             trace_id=trace_id,
             session_id=session_id,
@@ -202,63 +275,109 @@ class LocalRagService:
             started=started,
             token_budget=self.rag_config.retrieval_token_budget,
             cancellation_token=cancellation_token,
+            capture_retrieval_trace=capture_retrieval_trace or analytics is not None,
         )
-        log_query_start(ctx, stream=True)
-        if async_request is not None:
-            try:
-                response = self._handle_artifact_request(
-                    request=request,
-                    artifact_request=async_request,
-                    user=user,
-                    trace_id=trace_id,
-                    session_id=session_id,
-                    started=started,
-                    cancellation_token=cancellation_token,
-                )
-                ctx["response"] = response
-                self._record_completed_query(
-                    request=request,
-                    user=user,
-                    response=response,
-                )
-                yield QueryStreamEvent(
-                    event="trace", data={"trace_id": trace_id, "session_id": session_id}
-                )
-                if response.artifact_job is not None:
-                    yield QueryStreamEvent(
-                        event="artifact_job",
-                        data=response.artifact_job.model_dump(),
+        if analytics is not None:
+            analytics.start(
+                execution_id=trace_id,
+                trace_id=trace_id,
+                session_id=session_id,
+                user=user,
+                request=request,
+                started_at=datetime.now(UTC),
+                origin=analytics_origin,
+                work_kind="artifact_submission" if async_request is not None else "answer",
+                cohort=self.analytics_cohort,
+            )
+        with analytics.heartbeat(trace_id) if analytics is not None else nullcontext():
+            log_query_start(ctx, stream=True)
+            if async_request is not None:
+                try:
+                    response = self._handle_artifact_request(
+                        request=request,
+                        artifact_request=async_request,
+                        user=user,
+                        trace_id=trace_id,
+                        session_id=session_id,
+                        started=started,
+                        cancellation_token=cancellation_token,
                     )
-                yield QueryStreamEvent(event="token", data={"text": response.answer})
-                yield QueryStreamEvent(event="done", data=response.model_dump())
-            except Exception as exc:
-                log_query_error(ctx, stream=True, exc=exc)
-                raise
-            log_query_complete(ctx, stream=True)
-            return
-        try:
-            for event in stream_graph(ctx, self.nodes):
-                if event.event == "done":
-                    response = RAGResponse.model_validate(event.data)
+                    ctx["response"] = response
+                    if analytics is not None:
+                        analytics.finish_response(
+                            execution_id=trace_id,
+                            response=response,
+                            ctx=ctx,
+                        )
                     self._record_completed_query(
                         request=request,
                         user=user,
                         response=response,
                     )
-                elif event.event == "verified":
-                    response = RAGResponse.model_validate(event.data)
-                    self.chat_history_repo.update_assistant_response(
-                        user_id=user.user_id,
-                        permission_version=user.permission_version,
-                        session_id=response.session_id,
-                        trace_id=response.trace_id,
-                        response=response.model_dump(mode="json"),
+                    yield QueryStreamEvent(
+                        event="trace", data={"trace_id": trace_id, "session_id": session_id}
                     )
-                yield event
-        except Exception as exc:
-            log_query_error(ctx, stream=True, exc=exc)
-            raise
-        log_query_complete(ctx, stream=True)
+                    if response.artifact_job is not None:
+                        yield QueryStreamEvent(
+                            event="artifact_job",
+                            data=response.artifact_job.model_dump(),
+                        )
+                    yield QueryStreamEvent(event="token", data={"text": response.answer})
+                    yield QueryStreamEvent(event="done", data=response.model_dump())
+                except QueryCancelled:
+                    if analytics is not None:
+                        analytics.fail(execution_id=trace_id, outcome="cancelled", ctx=ctx)
+                    raise
+                except GeneratorExit:
+                    if analytics is not None:
+                        analytics.fail(execution_id=trace_id, outcome="interrupted", ctx=ctx)
+                    raise
+                except Exception as exc:
+                    if analytics is not None:
+                        analytics.fail(execution_id=trace_id, ctx=ctx)
+                    log_query_error(ctx, stream=True, exc=exc)
+                    raise
+                log_query_complete(ctx, stream=True)
+                return
+            try:
+                for event in stream_graph(ctx, self.nodes):
+                    if event.event == "done":
+                        response = RAGResponse.model_validate(event.data)
+                        if analytics is not None:
+                            analytics.finish_response(
+                                execution_id=trace_id,
+                                response=response,
+                                ctx=ctx,
+                            )
+                        self._record_completed_query(
+                            request=request,
+                            user=user,
+                            response=response,
+                        )
+                    elif event.event == "verified":
+                        response = RAGResponse.model_validate(event.data)
+                        self.chat_history_repo.update_assistant_response(
+                            user_id=user.user_id,
+                            permission_version=user.permission_version,
+                            session_id=response.session_id,
+                            trace_id=response.trace_id,
+                            response=response.model_dump(mode="json"),
+                        )
+                    yield event
+            except QueryCancelled:
+                if analytics is not None:
+                    analytics.fail(execution_id=trace_id, outcome="cancelled", ctx=ctx)
+                raise
+            except GeneratorExit:
+                if analytics is not None:
+                    analytics.fail(execution_id=trace_id, outcome="interrupted", ctx=ctx)
+                raise
+            except Exception as exc:
+                if analytics is not None:
+                    analytics.fail(execution_id=trace_id, ctx=ctx)
+                log_query_error(ctx, stream=True, exc=exc)
+                raise
+            log_query_complete(ctx, stream=True)
 
     def _async_artifact_request(self, request: QueryRequest):
         return parse_artifact_request(request.query)
@@ -279,26 +398,31 @@ class LocalRagService:
             session_id=response.session_id,
             title=_compact_session_title(question),
             user_turn={
-                "id": f"user-{uuid4()}",
+                "id": f"user-{client_request_id}",
                 "role": "user",
                 "content": question,
                 "createdAt": created_at,
+                "replyToTurnId": request.reply_to_turn_id,
             },
             assistant_turn={
-                "id": f"assistant-{uuid4()}",
+                "id": client_request_id,
                 "role": "assistant",
                 "status": "complete",
                 "question": question,
                 "createdAt": created_at,
+                "clientRequestId": client_request_id,
+                "replyToTurnId": request.reply_to_turn_id,
                 "groupPath": request.group_path,
                 "documentIds": request.document_ids,
                 "sourceMode": request.source_mode,
                 "querySourceId": request.query_source_id,
+                "querySourceIds": list(request.effective_query_source_ids),
                 "progress": [],
                 "response": response.model_dump(mode="json"),
             },
             client_request_id=client_request_id,
             request_fingerprint=_request_fingerprint(request),
+            continue_source_clarification=request.continue_source_clarification,
         )
 
 
@@ -313,7 +437,7 @@ class LocalRagService:
         started: float,
         cancellation_token: QueryCancellationToken | None,
     ) -> RAGResponse:
-        if request.query_source_id or request.source_mode in {"db_only", "hybrid"}:
+        if request.effective_query_source_ids or request.source_mode in {"db_only", "hybrid"}:
             return self._artifact_clarification(
                 trace_id=trace_id,
                 session_id=session_id,
@@ -333,12 +457,47 @@ class LocalRagService:
             if requires_document_scope(content_query) and document_ids:
                 pass
             elif requires_conversation_context(content_query):
-                turns = self.chat_history_repo.load_recent_context_turns(
-                    user_id=user.user_id,
-                    permission_version=user.permission_version,
-                    session_id=session_id,
-                    limit=8,
-                )
+                reply_context_turn_id: str | None = None
+                if request.reply_to_turn_id:
+                    session = self.chat_history_repo.get_session(
+                        user_id=user.user_id,
+                        permission_version=user.permission_version,
+                        session_id=session_id,
+                    )
+                    reply_turn = (
+                        context_turn_for_message_id(
+                            session.turns,
+                            request.reply_to_turn_id,
+                        )
+                        if session is not None
+                        else None
+                    )
+                    if reply_turn is None:
+                        raise ChatHistoryRequestConflict(
+                            "reply target was not found in this chat"
+                        )
+                    reply_context_turn_id = str(reply_turn.get("turn_id") or "")
+                    if not reply_context_turn_id:
+                        raise ChatHistoryRequestConflict(
+                            "reply target does not identify a complete exchange"
+                        )
+                    turns = [reply_turn]
+                elif self.rag_config.context_resolver_enabled:
+                    turns = self.chat_history_repo.load_recent_context_turns(
+                        user_id=user.user_id,
+                        permission_version=user.permission_version,
+                        session_id=session_id,
+                        limit=8,
+                    )
+                else:
+                    return self._artifact_clarification(
+                        trace_id=trace_id,
+                        session_id=session_id,
+                        started=started,
+                        message="Use Reply on an earlier response to choose what this file should cover.",
+                    )
+                turns = [turn for turn in turns if context_is_available(
+                    turn, user=user, documents=self.nodes.document_repo)]
                 if not turns:
                     return self._artifact_clarification(
                         trace_id=trace_id,
@@ -379,7 +538,11 @@ class LocalRagService:
                         turns,
                         client=self.ollama,
                         model=self.nodes.routing_model,
-                        has_explicit_scope=bool(document_ids or request.query_source_id),
+                        enabled=self.rag_config.context_resolver_enabled,
+                        reply_to_turn_id=reply_context_turn_id,
+                        has_explicit_scope=bool(
+                            document_ids or request.effective_query_source_ids
+                        ),
                         cancellation_token=cancellation_token,
                     )
                     if resolution.relation != "follow_up":
@@ -574,11 +737,62 @@ def _request_fingerprint(request: QueryRequest) -> str:
         "group_path": request.group_path,
         "document_ids": sorted(request.document_ids),
         "source_mode": request.source_mode,
-        "query_source_id": request.query_source_id,
+        "query_source_ids": sorted(request.effective_query_source_ids),
         "allow_source_expansion": request.allow_source_expansion,
+        "reply_to_turn_id": request.reply_to_turn_id,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _analytics_cohort(config: Settings, rag_config: RagConfigRecord) -> dict[str, object]:
+    models = {
+        "chat": rag_config.chat_model,
+        "reasoning": rag_config.effective_reasoning_model or rag_config.chat_model,
+        "sql_generation": rag_config.effective_sql_generation_model or rag_config.chat_model,
+        "routing": rag_config.routing_model or rag_config.chat_model,
+        "faithfulness": rag_config.faithfulness_model or rag_config.chat_model,
+        "embedding": rag_config.embed_model,
+        "reranker": rag_config.reranker_model,
+    }
+    providers = {
+        "reasoning": rag_config.effective_reasoning_provider,
+        "routing": rag_config.effective_routing_provider,
+        "faithfulness": rag_config.effective_faithfulness_provider,
+        "embedding": rag_config.embedding_provider,
+    }
+    snapshot = {
+        "schema_version": 1,
+        "models": models,
+        "providers": providers,
+        "policies": {
+            "evidence_gate": rag_config.evidence_gate_policy,
+            "faithfulness": rag_config.faithfulness_policy,
+        },
+        "flags": {
+            "thinking_enabled": rag_config.thinking_enabled,
+            "context_resolver_enabled": rag_config.context_resolver_enabled,
+            "query_planner_enabled": rag_config.query_planner_enabled,
+        },
+        "limits": {
+            "json_num_predict": rag_config.json_num_predict,
+            "retrieval_token_budget": rag_config.retrieval_token_budget,
+            "answer_output_tokens": rag_config.answer_output_tokens,
+            "answer_context_tokens": rag_config.answer_context_tokens,
+        },
+        "retrieval": {
+            "top_k": config.rag_top_k,
+            "reranker_max_candidates": config.rag_reranker_max_candidates,
+        },
+    }
+    encoded = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+    model_encoded = json.dumps({"models": models, "providers": providers}, sort_keys=True, separators=(",", ":"))
+    return {
+        "model_cohort": f"models-{hashlib.sha256(model_encoded.encode('utf-8')).hexdigest()[:16]}",
+        "configuration_digest": f"config-{hashlib.sha256(encoded.encode('utf-8')).hexdigest()[:16]}",
+        "application_image_digest": config.application_image_digest,
+        "snapshot": snapshot,
+    }
 
 
 def _compact_session_title(value: str) -> str:

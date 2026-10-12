@@ -178,11 +178,18 @@ def update_user(
     payload: UserUpdateRequest,
     user: UserRecord = Depends(require_user_manager),
     repo: IdentityRepository = Depends(get_identity_repository),
+    sessions: RefreshSessionStore = Depends(get_refresh_session_store),
+    audit_repo: DocumentRepository = Depends(get_document_repository),
 ) -> UserAdmin:
     current = repo.get_user_by_id(user_id)
     if current is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "user_not_found", "message": "User was not found."})
     require_can_manage_target_user(user, current)
+    if payload.email is not None:
+        if user.id == current.id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "cannot_change_current_user_email", "message": "Use Account Management to change the email for your current session."})
+        if user.account_type != "platform_admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": "platform_admin_required", "message": "Platform admin account type required to change another user's email."})
     next_group_paths = current.group_paths if payload.group_paths is None else tuple(payload.group_paths)
     next_account_type = current.account_type if payload.account_type is None else payload.account_type
     next_clearance = current.clearance_level if payload.clearance_level is None else normalize_clearance_level(payload.clearance_level)
@@ -190,6 +197,7 @@ def update_user(
     try:
         updated = repo.update_user(
             user_id,
+            email=payload.email,
             name=payload.name,
             group_paths=payload.group_paths,
             is_active=payload.is_active,
@@ -200,6 +208,15 @@ def update_user(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "invalid_user", "message": str(exc)}) from exc
     if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "user_not_found", "message": "User was not found."})
+    if updated.email != current.email:
+        sessions.revoke_user(updated.id)
+        audit_repo.append_audit_event(
+            event_type="admin.user.email_changed",
+            actor_id=user.id,
+            target_type="user",
+            target_id=updated.id,
+            payload={"previous_email": current.email, "email": updated.email},
+        )
     return user_to_admin(updated)
 
 

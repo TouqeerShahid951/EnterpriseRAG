@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Protocol
+from typing import Iterator, Protocol
 
 from ..auth.context import UserContext
 
@@ -36,6 +36,13 @@ class RetrievedChunk:
     retrieval_score: float
     rerank_score: float | None
     identity_keys: frozenset[str]
+    section_path: tuple[str, ...] = ()
+    parent_section_id: str | None = None
+    ordinal: int | None = None
+    index_generation_id: str | None = None
+    content_hash: str | None = None
+    provenance_kind: str = "unknown"
+    quote_texts: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -43,12 +50,29 @@ class RetrievedChunk:
             "structured_fields",
             tuple(tuple(field) for field in self.structured_fields),
         )
+        object.__setattr__(self, "section_path", tuple(self.section_path))
         identity_keys = set(self.identity_keys)
         identity_keys.add(f"chunk:{self.chunk_id}")
         normalized_text = " ".join(self.text.strip().lower().split())
         if normalized_text:
             identity_keys.add(f"text:{sha256(normalized_text.encode()).hexdigest()}")
         object.__setattr__(self, "identity_keys", frozenset(identity_keys))
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorizedDocumentScan:
+    chunks: tuple[RetrievedChunk, ...]
+    complete: bool | None
+    stop_reason: str | None = None
+
+    def __iter__(self) -> Iterator[RetrievedChunk]:
+        return iter(self.chunks)
+
+    def __len__(self) -> int:
+        return len(self.chunks)
+
+    def __getitem__(self, index: int) -> RetrievedChunk:
+        return self.chunks[index]
 
 
 class AuthorizedCorpusRetriever(Protocol):
@@ -64,4 +88,4 @@ class AuthorizedCorpusRetriever(Protocol):
         *,
         structured_only: bool,
         limit: int,
-    ) -> tuple[RetrievedChunk, ...]: ...
+    ) -> AuthorizedDocumentScan: ...

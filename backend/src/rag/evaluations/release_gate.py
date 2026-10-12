@@ -96,6 +96,7 @@ def _evaluate_run(
 
     correctness_required = correctness_passed = judge_checked = 0
     citation_required = citation_passed = citation_checked = 0
+    citation_protocol_checked = citation_protocol_passed = 0
     faithfulness_required = faithfulness_passed = faithfulness_checked = 0
     ordinary_latencies: list[int] = []
     special_latencies: list[int] = []
@@ -133,6 +134,17 @@ def _evaluate_run(
         if case.get("must_cite_source"):
             citation_required += 1
             citation = _dict(checks.get("citation"))
+            if citation.get("protocol_version") == 1:
+                citation_protocol_checked += 1
+                protocol_passed = citation.get("verification_status") == "verified" and all(
+                    citation.get(check) is True for check in ("answer_revision_valid", "quote_validity",
+                        "claim_support", "all_claim_coverage", "revision_traceability")
+                )
+                citation_protocol_passed += protocol_passed
+                if not protocol_passed:
+                    failures.add(f"{case_prefix}:citation_verification_failed")
+            else:
+                failures.add(f"{case_prefix}:metric_unavailable:citation_protocol")
             unresolved = citation.get("unresolved_citations")
             if isinstance(unresolved, list) and "passed" in citation:
                 citation_checked += 1
@@ -294,6 +306,8 @@ def _evaluate_run(
         else None,
         "semantic_judge_coverage": _rate(judge_checked, correctness_required),
         "answer_correctness": _rate(correctness_passed, correctness_required),
+        "citation_protocol_coverage": _rate(citation_protocol_checked, citation_required),
+        "verified_citation_pass_rate": _rate(citation_protocol_passed, citation_required),
         "citation_resolution": _rate(citation_passed, citation_required),
         "citation_coverage": _rate(citation_checked, citation_required),
         "faithfulness_coverage": _rate(
@@ -362,6 +376,8 @@ def _apply_thresholds(
         "special_route_pre_rerank_location_recall": 1.0,
         "semantic_judge_coverage": 1.0,
         "answer_correctness": 0.95,
+        "citation_protocol_coverage": 1.0,
+        "verified_citation_pass_rate": 1.0,
         "citation_resolution": 1.0,
         "citation_coverage": 1.0,
         "faithfulness_coverage": 1.0,

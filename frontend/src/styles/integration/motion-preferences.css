@@ -1,4 +1,25 @@
 
+/* Keep SVG rotation centered on Windows Chromium; show an unambiguous static
+   activity marker when the operating system requests reduced motion. */
+.ingestion-active-icon {
+  display: inline-grid;
+  place-items: center;
+}
+
+.ingestion-active-icon > * {
+  grid-area: 1 / 1;
+}
+
+.ingestion-active-icon-spinner {
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.ingestion-active-icon-static {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -14,5 +35,13 @@
   .knowledge-skeleton-row,
   #root::after {
     animation: none;
+  }
+
+  .ingestion-active-icon-spinner {
+    display: none;
+  }
+
+  .ingestion-active-icon-static {
+    display: block;
   }
 }

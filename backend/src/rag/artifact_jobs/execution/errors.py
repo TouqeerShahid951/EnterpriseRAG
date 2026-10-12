@@ -16,6 +16,16 @@ class ArtifactJobLeaseLost(RuntimeError):
 class ArtifactEvidenceUnavailable(RuntimeError):
     """The authorized corpus did not yield evidence for the requested artifact."""
 
+    code = "artifact_no_evidence"
+    stage = "retrieving"
     safe_message = (
         "No authorized evidence was found for this document generation request."
     )
+
+
+class ArtifactCitationVerificationFailed(ArtifactEvidenceUnavailable):
+    """The single citation repair was exhausted; another delivery must not retry it."""
+
+    code = "artifact_citation_verification_failed"
+    stage = "validating"
+    safe_message = "Supporting citations could not be verified."

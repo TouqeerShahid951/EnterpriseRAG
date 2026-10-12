@@ -49,4 +49,12 @@
   .rag-answer-skeleton span {
     animation: none;
   }
+
+  .rag-progress-icon-spinner {
+    display: none;
+  }
+
+  .rag-progress-icon-static {
+    display: block;
+  }
 }

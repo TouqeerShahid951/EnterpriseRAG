@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { canShareUploadAcrossSpaces, uploadShareTargetPaths } from "./PrudentiaUploadPage";
+import { canShareUploadAcrossSpaces, GlossarySourceFiles, uploadShareTargetPaths } from "./PrudentiaUploadPage";
 import type { User } from "@/types/api";
 
 describe("upload shared Knowledge Space helpers", () => {
@@ -21,6 +23,32 @@ describe("upload shared Knowledge Space helpers", () => {
 
     expect(canShareUploadAcrossSpaces(user, "/legal")).toBe(false);
     expect(uploadShareTargetPaths(user, "/legal", _spaces())).toEqual([]);
+  });
+});
+
+describe("persistent glossary source management", () => {
+  it("keeps source documents visible with explicit Trash actions", () => {
+    const markup = renderToStaticMarkup(createElement(
+      GlossarySourceFiles,
+      {
+        error: null,
+        loading: false,
+        movingDocumentId: null,
+        onMoveToTrash: () => undefined,
+        onViewTrash: () => undefined,
+        sources: [{
+          activated_at: "2026-08-28T10:00:00Z",
+          document_id: "document-1",
+          document_title: "directorate-glossary.pdf",
+          entry_count: 12,
+        }],
+      },
+    ));
+
+    expect(markup).toContain("Persistent documents");
+    expect(markup).toContain("directorate-glossary.pdf");
+    expect(markup).toContain("Move to Trash");
+    expect(markup).toContain("View Trash");
   });
 });
 

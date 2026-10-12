@@ -81,7 +81,9 @@ def document_shares_to_schema(document: DocumentRecord) -> DocumentSharesRespons
 def document_overview_to_schema(
     overview: DocumentOverviewSnapshot,
 ) -> DocumentOverviewResponse:
+    jobs = {job.doc_id: job for job in overview.attention_jobs}
     return DocumentOverviewResponse(
+        cancelled_current=overview.cancelled_current,
         library_documents=overview.library_documents,
         current_versions=overview.current_versions,
         indexed_current=overview.indexed_current,
@@ -99,6 +101,11 @@ def document_overview_to_schema(
                 title=document.title or document.source_id,
                 group_path=document.group_path,
                 ingest_status=document.ingest_status,
+                latest_job_id=jobs[document.id].id if document.id in jobs else None,
+                latest_job_status=jobs[document.id].status if document.id in jobs else None,
+                error_code=jobs[document.id].error_code if document.id in jobs else None,
+                error_message=jobs[document.id].error_message_safe if document.id in jobs else None,
+                updated_at=jobs[document.id].updated_at if document.id in jobs else document.updated_at,
             )
             for document in overview.attention_documents
         ],

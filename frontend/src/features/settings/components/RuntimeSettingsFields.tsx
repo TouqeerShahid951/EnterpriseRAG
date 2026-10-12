@@ -197,8 +197,27 @@ export function RuntimeAdvancedSettings({ form, onChange }: { form: RagConfigFor
             </span>
           </label>
         ) : null}
-        <label className="flex items-start justify-between gap-3 rounded border border-surface-border bg-surface-container-low p-3">
-          <span>
+        <label className="flex min-w-0 flex-col gap-3 rounded border border-surface-border bg-surface-container-low p-3">
+          <span className="min-w-0">
+            <span className="block text-body-md font-bold text-on-surface">Context resolver</span>
+            <span className="mt-1 block text-body-md text-secondary">
+              Uses recent chat history to resolve implicit follow-ups. Explicit Reply targets always remain available and use the selected response.
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-3">
+            <span className="text-label-md text-secondary">{form.context_resolver_enabled ? "Enabled" : "Disabled"}</span>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="Enable automatic context resolver for conversational follow-ups"
+              checked={form.context_resolver_enabled}
+              onChange={(event) => onChange({ ...form, context_resolver_enabled: event.target.checked })}
+              className="h-5 w-5 accent-primary"
+            />
+          </span>
+        </label>
+        <label className="flex min-w-0 flex-col gap-3 rounded border border-surface-border bg-surface-container-low p-3">
+          <span className="min-w-0">
             <span className="block text-body-md font-bold text-on-surface">Query planner</span>
             <span className="mt-1 block text-body-md text-secondary">
               Route complex retrieval questions through focused sub-query planning before evidence search.
@@ -230,15 +249,15 @@ export function RuntimeAdvancedSettings({ form, onChange }: { form: RagConfigFor
               ...form,
               evidence_gate_policy: event.target.value as RagConfigFormState["evidence_gate_policy"],
             })}
-            className="sv-select w-28 shrink-0"
+            className="sv-select w-full"
           >
             <option value="adaptive">Adaptive</option>
             <option value="always">Always</option>
             <option value="never">Never</option>
           </select>
         </label>
-        <label className="flex items-start justify-between gap-3 rounded border border-surface-border bg-surface-container-low p-3">
-          <span>
+        <label className="flex min-w-0 flex-col gap-3 rounded border border-surface-border bg-surface-container-low p-3">
+          <span className="min-w-0">
             <span className="block text-body-md font-bold text-on-surface">Faithfulness checker</span>
             <span className="mt-1 block text-body-md text-secondary">
               Adaptive verifies clear, directly cited answers with the local reranker and sends uncertain or higher-risk answers to the AI judge. Never disables the AI judge.
@@ -251,7 +270,7 @@ export function RuntimeAdvancedSettings({ form, onChange }: { form: RagConfigFor
               ...form,
               faithfulness_policy: event.target.value as RagConfigFormState["faithfulness_policy"],
             })}
-            className="sv-select w-28 shrink-0"
+            className="sv-select w-full"
           >
             <option value="adaptive">Adaptive</option>
             <option value="always">Always</option>

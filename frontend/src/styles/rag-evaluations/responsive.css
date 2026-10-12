@@ -81,31 +81,13 @@
     gap: 0.85rem;
   }
 
-  .rag-eval-tracker-console,
-  .rag-eval-tracker-timeline-panel,
-  .rag-eval-tracker-answer-panel,
-  .rag-eval-tracker-sources-panel,
-  .rag-eval-tracker-timings-panel {
-    padding: 1rem;
-  }
-
   .rag-eval-tracker-controls {
-    grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.7fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0.8rem;
   }
 
   .rag-eval-tracker-status {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .rag-eval-tracker-grid {
-    grid-template-columns: minmax(24rem, 0.36fr) minmax(0, 1fr);
-    gap: 1rem;
-  }
-
-  .rag-eval-tracker-detail-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(24rem, 0.36fr);
-    gap: 1rem;
   }
 
   .rag-eval-tracker-timeline {
@@ -151,16 +133,8 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .rag-eval-tracker-controls {
-    grid-template-columns: minmax(0, 1fr) minmax(22rem, 0.55fr) minmax(18rem, 0.45fr);
-  }
-
-  .rag-eval-tracker-grid {
-    grid-template-columns: minmax(28rem, 0.32fr) minmax(0, 1fr);
-  }
-
-  .rag-eval-tracker-detail-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(30rem, 0.32fr);
+  .rag-eval-tracker-workbench {
+    grid-template-columns: minmax(18rem, 0.6fr) minmax(34rem, 1.7fr) minmax(22rem, 0.75fr);
   }
 }
 
@@ -177,12 +151,8 @@
     grid-template-columns: minmax(30rem, 42rem) minmax(0, 1fr);
   }
 
-  .rag-eval-tracker-grid {
-    grid-template-columns: minmax(34rem, 0.28fr) minmax(0, 1fr);
-  }
-
-  .rag-eval-tracker-detail-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(38rem, 0.28fr);
+  .rag-eval-tracker-workbench {
+    grid-template-columns: minmax(22rem, 0.52fr) minmax(42rem, 1.8fr) minmax(28rem, 0.7fr);
   }
 }
 
@@ -192,9 +162,22 @@
 .rag-eval-new-run-grid,
 .rag-eval-main-grid,
 .rag-eval-detail-grid,
-.rag-eval-tracker-grid,
-.rag-eval-tracker-detail-grid {
+.rag-eval-tracker-workbench {
     grid-template-columns: 1fr;
+  }
+
+  .rag-eval-tracker-trace-pane,
+  .rag-eval-tracker-evidence-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-surface-border);
+  }
+
+  .rag-eval-pipeline-track {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .rag-eval-pipeline-step::after {
+    display: none;
   }
 
   .rag-eval-case-table {
@@ -208,8 +191,28 @@
   .rag-eval-metrics,
   .rag-eval-form-grid,
   .rag-eval-facts,
-  .rag-eval-tracker-controls,
-  .rag-eval-tracker-status {
+  .rag-eval-tracker-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .rag-eval-tracker-query-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rag-eval-tracker-actions {
+    justify-content: stretch;
+  }
+
+  .rag-eval-tracker-actions > button {
+    flex: 1;
+  }
+
+  .rag-eval-tracker-status,
+  .rag-eval-run-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rag-eval-pipeline-track {
     grid-template-columns: 1fr;
   }
 
@@ -230,11 +233,46 @@
   }
 
   .rag-eval-tracker-fact {
-    border-right: 0;
     border-bottom: 1px solid var(--color-surface-border);
   }
 
-  .rag-eval-tracker-fact:last-child {
+  .rag-eval-tracker-fact:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .rag-eval-tracker-fact:nth-last-child(-n + 2) {
     border-bottom: 0;
+  }
+
+  .rag-eval-run-facts > div:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .rag-eval-run-facts > div:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .rag-eval-timing-header {
+    display: none;
+  }
+
+  .rag-eval-timing-row {
+    grid-template-columns: 4rem minmax(0, 1fr);
+    gap: 0.2rem 0.65rem;
+  }
+
+  .rag-eval-timing-mode,
+  .rag-eval-timing-detail {
+    grid-column: 2;
+  }
+
+  .rag-eval-stage-candidates article {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .rag-eval-candidate-scores {
+    grid-column: 2;
+    text-align: left;
+    white-space: normal;
   }
 }

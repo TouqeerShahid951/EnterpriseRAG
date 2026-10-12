@@ -67,6 +67,7 @@ def test_executor_wiring_reuses_one_query_client_for_generation_and_retrieval(
     config = Settings(document_repository="memory")
     rag_config = SimpleNamespace(
         effective_reasoning_model="reasoning-model",
+        faithfulness_model="citation-model", faithfulness_timeout_seconds=37, json_num_predict=2048,
         chat_model="chat-model",
     )
     query_client = _QueryClient(response="{}")

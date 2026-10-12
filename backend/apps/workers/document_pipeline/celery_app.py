@@ -8,6 +8,7 @@ from celery import Celery
 
 from rag.ingestion.config import WorkerConfig
 from rag.shared.contracts.task_names import (
+    DEFAULT_GLOSSARY_IMPORT_TASK_NAME,
     DEFAULT_GRAPHRAG_INDEX_TASK_NAME,
     DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME,
 )
@@ -26,11 +27,12 @@ graphrag_task_names = {
     config.graphrag_index_task_name,
     config.graphrag_partition_rebuild_task_name,
 }
+glossary_task_names = {DEFAULT_GLOSSARY_IMPORT_TASK_NAME, config.glossary_import_task_name}
 celery_app.conf.update(
     task_default_queue=config.ingest_queue_name,
     task_routes={
-        name: {"queue": config.graphrag_queue_name}
-        for name in graphrag_task_names
+        **{name: {"queue": config.graphrag_queue_name} for name in graphrag_task_names},
+        **{name: {"queue": config.glossary_import_queue_name} for name in glossary_task_names},
     },
     task_serializer="json",
     accept_content=["json"],

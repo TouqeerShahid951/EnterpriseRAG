@@ -12,7 +12,13 @@ from rag.connectors.registry import default_connector_registry
 from rag.query.sources.live_sql import retrieve_live_sql_hits
 from rag.query.cancellation import QueryCancelled
 from rag.query.qdrant import SearchHit
-from rag.query.routing.routing_models import RoutePlan
+from rag.query.routing.routing_models import (
+    EvidenceNeed,
+    EvidencePlan,
+    RoutePlan,
+    SourceAssignment,
+)
+from rag.query.sources.source_catalog import query_source_id_for_catalog
 from rag.query.sources.source_resolution import SourceDecision
 from rag.query.sources import sources_from_hits
 from rag.query.state import initial_state
@@ -27,10 +33,6 @@ class FakeConfig:
     connector_live_sql_enabled: bool = True
     connector_live_sql_max_rows: int = 2
     connector_live_sql_timeout_seconds: int = 15
-    connector_live_sql_max_scopes: int = 5
-    connector_live_sql_max_repair_attempts: int = 2
-    connector_live_sql_result_verifier_enabled: bool = False
-    connector_live_sql_verifier_sample_rows: int = 5
     connector_secrets_key: str = "replace-with-local-connector-secrets-key"
     connector_secrets_key_ring: str = ""
     connector_include_stale_in_retrieval: bool = False
@@ -71,6 +73,19 @@ class SequenceLlm(FakeLlm):
         return response
 
 
+class UnavailableLlm(FakeLlm):
+    def generate_json(
+        self,
+        *,
+        prompt: str,
+        model: str | None,
+        system: str,
+        cancellation_token=None,
+    ) -> str:
+        _ = prompt, model, system, cancellation_token
+        raise RuntimeError("cloud model request failed with subscription details")
+
+
 class FakeQdrant:
     def prepare_for_query(self, _vector_size: int) -> bool:
         return True
@@ -105,6 +120,23 @@ class FailingConnector:
 class FailingRegistry:
     def get(self, _connector_type: str):
         return FailingConnector()
+
+
+class SelectiveFailConnector:
+    connector_type = "fake"
+
+    def execute_query(self, *, config, query, row_limit, **kwargs):
+        _ = kwargs
+        if config.get("fail_query"):
+            raise RuntimeError("database unavailable; password=secret")
+        rows = config.get("live_query_rows", [])[: max(1, row_limit)]
+        columns = list(rows[0]) if rows else []
+        return ConnectorQueryResult(query=query, columns=columns, rows=rows)
+
+
+class SelectiveFailRegistry:
+    def get(self, _connector_type: str):
+        return SelectiveFailConnector()
 
 
 class FlakyConnector:
@@ -160,6 +192,32 @@ class QueryAwareRegistry:
         return self.connector
 
 
+class ParameterConnector:
+    connector_type = "fake"
+
+    def __init__(self) -> None:
+        self.parameters: dict[str, object] | None = None
+
+    def execute_query(
+        self, *, config, secrets, query, parameters, row_limit, timeout_seconds
+    ):
+        _ = config, secrets, row_limit, timeout_seconds
+        self.parameters = parameters
+        return ConnectorQueryResult(
+            query=query,
+            columns=["status"],
+            rows=[{"status": parameters["status"]}],
+        )
+
+
+class ParameterRegistry:
+    def __init__(self) -> None:
+        self.connector = ParameterConnector()
+
+    def get(self, _connector_type: str):
+        return self.connector
+
+
 def test_live_sql_retrieval_returns_fresh_connector_evidence() -> None:
     profile_repo = _repo_with_approved_catalog(
         live_rows=[
@@ -188,7 +246,7 @@ def test_live_sql_retrieval_returns_fresh_connector_evidence() -> None:
     assert set(ctx["retrieval_phase_timings_ms"]) == {
         "sql_generation",
         "sql_execution",
-        "sql_verification",
+        "sql_validation",
     }
 
     sources = sources_from_hits(result.hits, query=ctx["request"].query)
@@ -214,6 +272,58 @@ def test_live_sql_generation_uses_its_configured_model() -> None:
 
     assert result.mode == "ai_assisted"
     assert llm.generated_models == ["sql-specialist"]
+
+
+def test_live_sql_binds_generated_filter_parameters() -> None:
+    registry = ParameterRegistry()
+
+    result = retrieve_live_sql_hits(
+        _ctx("List open cases"),
+        config=FakeConfig(),
+        llm=FakeLlm(
+            '{"sql":"SELECT status FROM fake.records WHERE status = :status",'
+            '"parameters":{"status":"open"}}'
+        ),
+        connector_profile_repo=_repo_with_approved_catalog(),
+        connector_registry=registry,
+    )
+
+    assert result.mode == "ai_assisted"
+    assert registry.connector.parameters == {"status": "open"}
+    assert result.hits[0].payload["structured_fields"][0]["value"] == "open"
+
+
+def test_exact_verified_query_bypasses_sql_generation() -> None:
+    profile_repo = _repo_with_approved_catalog(live_rows=[{"status": "open"}])
+    catalog = profile_repo.list_schema_catalogs()[0]
+    profile_repo.update_schema_catalog(
+        catalog.id,
+        catalog_json={
+            **catalog.catalog_json,
+            "verified_queries": [
+                {
+                    "name": "Open cases",
+                    "question": "List open cases",
+                    "sql": "SELECT status FROM fake.records WHERE status = :status",
+                    "parameters": {"status": "open"},
+                }
+            ],
+        },
+    )
+    registry = ParameterRegistry()
+    llm = FakeLlm()
+
+    result = retrieve_live_sql_hits(
+        _ctx("List open cases"),
+        config=FakeConfig(),
+        llm=llm,
+        connector_profile_repo=profile_repo,
+        connector_registry=registry,
+    )
+
+    assert result.mode == "ai_assisted"
+    assert llm.generated_prompts == []
+    assert registry.connector.parameters == {"status": "open"}
 
 
 def test_live_sql_retrieval_respects_catalog_visibility_and_ignores_legacy_schedules() -> None:
@@ -272,6 +382,10 @@ def test_live_sql_generation_and_execution_fail_closed_to_fallback() -> None:
     )
     assert bad_json.mode == "fallback"
     assert bad_json.hits == []
+    assert bad_json.failures[0].stage == "generation"
+    assert bad_json.failures[0].code == "sql_generation_unavailable"
+    assert bad_json.failures[0].retryable is True
+    assert bad_json.failures[0].source_id.startswith("connector_catalog:")
 
     unsafe_sql = retrieve_live_sql_hits(
         _ctx("List all live case statuses"),
@@ -283,6 +397,9 @@ def test_live_sql_generation_and_execution_fail_closed_to_fallback() -> None:
     )
     assert unsafe_sql.mode == "fallback"
     assert unsafe_sql.hits == []
+    assert unsafe_sql.failures[0].stage == "validation"
+    assert unsafe_sql.failures[0].code == "sql_validation_failed"
+    assert unsafe_sql.failures[0].retryable is False
 
     connector_failure = retrieve_live_sql_hits(
         _ctx("List all live case statuses"),
@@ -294,6 +411,56 @@ def test_live_sql_generation_and_execution_fail_closed_to_fallback() -> None:
     )
     assert connector_failure.mode == "fallback"
     assert connector_failure.hits == []
+    assert connector_failure.failures[0].stage == "execution"
+    assert connector_failure.failures[0].code == "sql_execution_failed"
+    assert connector_failure.failures[0].retryable is True
+    assert connector_failure.failures[0].message == (
+        "Database query execution is unavailable for Fake cases approved database scope."
+    )
+
+    unavailable_model = retrieve_live_sql_hits(
+        _ctx("List all live case statuses"),
+        config=FakeConfig(),
+        llm=UnavailableLlm(),
+        connector_profile_repo=profile_repo,
+        connector_registry=default_connector_registry(),
+    )
+    assert unavailable_model.failures[0].code == "sql_generation_unavailable"
+    assert unavailable_model.failures[0].message == (
+        "SQL generation is unavailable for Fake cases approved database scope."
+    )
+    assert "subscription" not in unavailable_model.failures[0].message
+
+
+def test_retrieval_service_propagates_required_database_failure() -> None:
+    service = RetrievalService(
+        config=FakeConfig(),
+        embedder=FakeLlm("{}"),
+        vector_store=FakeQdrant(),
+        connector_profile_repo=_repo_with_approved_catalog(),
+        connector_registry=default_connector_registry(),
+    )
+    ctx = _ctx("Count current cases")
+    ctx["source_decision"] = SourceDecision(
+        requested_mode="db_only",
+        resolved_mode="db_only",
+        semantic_query=ctx["request"].query,
+        explicit=True,
+        reason="composer_selected_database",
+    )
+
+    hits = service.retrieve(ctx)
+
+    assert hits == []
+    assert ctx["degraded"] is True
+    assert ctx["degraded_reason"] == "sql_generation_unavailable"
+    assert ctx["operational_failures"][0]["stage"] == "generation"
+    assert ctx["operational_failures"][0]["source_id"].startswith(
+        "connector_catalog:"
+    )
+    assert ctx["source_expansion"]["reason"] == (
+        "SQL generation is unavailable for Fake cases approved database scope."
+    )
 
 
 def test_corpus_only_blocks_planned_live_sql() -> None:
@@ -680,7 +847,137 @@ def test_live_sql_retrieval_uses_approved_database_scope_without_schedule() -> N
     assert "open" in result.hits[0].payload["text"]
 
 
-def test_live_sql_repairs_after_catalog_validation_error() -> None:
+@pytest.mark.parametrize(
+    ("fail_second", "second_required", "expected_degraded"),
+    [
+        (False, True, False),
+        (True, False, False),
+        (True, True, True),
+    ],
+)
+def test_live_sql_fanout_preserves_successes_and_required_failure_state(
+    fail_second: bool,
+    second_required: bool,
+    expected_degraded: bool,
+) -> None:
+    profile_repo = InMemoryConnectorProfileRepository()
+    catalog_ids: list[str] = []
+    for index in (1, 2):
+        profile = profile_repo.create_profile(
+            name=f"Source {index}",
+            connector_type="fake",
+            public_config={
+                "live_query_rows": [{"id": str(index), "status": "open"}],
+                "fail_query": fail_second and index == 2,
+            },
+            encrypted_secrets=encrypt_secret(
+                {}, keyring_from_settings(FakeConfig.connector_secrets_key)
+            ),
+            created_by="user",
+        )
+        catalog = profile_repo.save_schema_catalog(
+            profile_id=profile.id,
+            connector_type="fake",
+            status="approved",
+            group_path="/ops",
+            clearance_level="NATO_RESTRICTED",
+            created_by="user",
+            approved_by="user",
+            catalog_json={
+                "name": f"Source {index}",
+                "tables": [
+                    {
+                        "key": "fake.records",
+                        "schema": "fake",
+                        "name": "records",
+                        "allowed": True,
+                        "columns": [
+                            {"name": "id", "data_type": "text", "allowed": True},
+                            {
+                                "name": "status",
+                                "data_type": "text",
+                                "allowed": True,
+                            },
+                        ],
+                    }
+                ],
+                "relationships": [],
+            },
+        )
+        catalog_ids.append(catalog.id)
+    source_ids = tuple(query_source_id_for_catalog(item) for item in catalog_ids)
+    evidence_plan = EvidencePlan(
+        needs=tuple(
+            EvidenceNeed(
+                id=f"need_{index}",
+                query=f"status from source {index}",
+                assignments=(
+                    SourceAssignment(
+                        source_id=source_id,
+                        capability="connector_query",
+                        required=index == 1 or second_required,
+                    ),
+                ),
+            )
+            for index, source_id in enumerate(source_ids, start=1)
+        )
+    )
+    ctx = _ctx("Compare source statuses")
+    ctx["route_plan"] = replace(ctx["route_plan"], evidence_plan=evidence_plan)
+    ctx["source_decision"] = SourceDecision(
+        requested_mode="auto",
+        resolved_mode="db_only",
+        semantic_query="Compare source statuses",
+        explicit=False,
+        reason="evidence_plan_selected_sources",
+        query_source_id=source_ids[0],
+        query_source_ids=source_ids,
+        query_source_kind="catalog",
+        query_source_record_id=catalog_ids[0],
+        query_source_record_ids=tuple(catalog_ids),
+    )
+    llm = FakeLlm('{"sql":"SELECT id, status FROM fake.records"}')
+
+    service = RetrievalService(
+        config=FakeConfig(),
+        embedder=llm,
+        vector_store=FakeQdrant(),
+        connector_profile_repo=profile_repo,
+        connector_registry=SelectiveFailRegistry(),
+    )
+    hits = service.retrieve(ctx)
+
+    expected_catalog_ids = set(catalog_ids[:1] if fail_second else catalog_ids)
+    assert ctx["execution_modes"]["live_sql_retriever"] == "ai_assisted"
+    assert {hit.payload["connector_schema_catalog_id"] for hit in hits} == (
+        expected_catalog_ids
+    )
+    assert {
+        tuple(item)
+        for hit in hits
+        for item in hit.payload["_required_evidence_assignments"]
+    } == (
+        {("need_1", source_ids[0], "connector_query")}
+        | (
+            {("need_2", source_ids[1], "connector_query")}
+            if not fail_second and second_required
+            else set()
+        )
+    )
+    assert len(llm.generated_prompts) == 2
+    assert ctx["degraded"] is expected_degraded
+    assert ctx["degraded_reason"] == (
+        "sql_execution_failed" if expected_degraded else None
+    )
+    if fail_second:
+        assert ctx["operational_failures"][0]["source_id"] == source_ids[1]
+        assert ctx["operational_failures"][0]["code"] == "sql_execution_failed"
+        assert "password" not in ctx["operational_failures"][0]["message"]
+    else:
+        assert "operational_failures" not in ctx
+
+
+def test_live_sql_does_not_retry_after_catalog_validation_error() -> None:
     profile_repo = _repo_with_approved_catalog(live_rows=[{"status": "open"}])
     llm = SequenceLlm(
         [
@@ -698,16 +995,36 @@ def test_live_sql_repairs_after_catalog_validation_error() -> None:
         connector_registry=default_connector_registry(),
     )
 
+    assert result.mode == "fallback"
+    assert result.hits == []
+    assert len(llm.generated_prompts) == 1
+
+
+def test_live_sql_repairs_fast_model_validation_failure_with_reasoning_model() -> None:
+    profile_repo = _repo_with_approved_catalog(live_rows=[{"status": "open"}])
+    llm = SequenceLlm(
+        [
+            '{"sql":"SELECT * FROM fake.records"}',
+            '{"sql":"SELECT status FROM fake.records"}',
+        ]
+    )
+
+    result = retrieve_live_sql_hits(
+        _ctx("List case statuses"),
+        config=FakeConfig(),
+        llm=llm,
+        reasoning_model="strong-reasoning",
+        sql_generation_model="fast-sql",
+        connector_profile_repo=profile_repo,
+        connector_registry=default_connector_registry(),
+    )
+
     assert result.mode == "ai_assisted"
-    assert "repairs=1" in result.detail
-    assert len(llm.generated_prompts) == 2
-    assert "Previous failure stage: validation" in llm.generated_prompts[1]
-    assert "SELECT * FROM fake.records" in llm.generated_prompts[1]
-    assert result.hits[0].payload["live_sql_scope"] == "database_scope"
-    assert "SELECT status FROM fake.records" in result.hits[0].payload["live_sql"]
+    assert len(result.hits) == 1
+    assert llm.generated_models == ["fast-sql", "strong-reasoning"]
 
 
-def test_live_sql_repairs_after_connector_execution_error() -> None:
+def test_live_sql_does_not_retry_after_connector_execution_error() -> None:
     profile_repo = _repo_with_approved_catalog(live_rows=[{"status": "open"}])
     llm = SequenceLlm(
         [
@@ -721,21 +1038,22 @@ def test_live_sql_repairs_after_connector_execution_error() -> None:
         _ctx("List case statuses"),
         config=FakeConfig(),
         llm=llm,
+        reasoning_model="strong-reasoning",
+        sql_generation_model="fast-sql",
         schedule_repo=InMemoryFolderScheduleRepository(),
         connector_profile_repo=profile_repo,
         connector_registry=registry,
     )
 
-    assert result.mode == "ai_assisted"
-    assert "repairs=1" in result.detail
-    assert registry.connector.calls == 2
-    assert len(llm.generated_prompts) == 2
-    assert "Previous failure stage: execution" in llm.generated_prompts[1]
-    assert "secret" not in llm.generated_prompts[1].lower()
-    assert result.hits[0].payload["structured_fields"][0]["value"] == "open"
+    assert result.mode == "fallback"
+    assert result.hits == []
+    assert registry.connector.calls == 1
+    assert len(llm.generated_prompts) == 1
+    assert result.failures[0].code == "sql_execution_failed"
+    assert "password" not in result.failures[0].message
 
 
-def test_live_sql_repairs_after_result_verifier_rejects_shape() -> None:
+def test_live_sql_does_not_call_result_verifier() -> None:
     profile_repo = _repo_with_approved_catalog()
     llm = SequenceLlm(
         [
@@ -749,7 +1067,7 @@ def test_live_sql_repairs_after_result_verifier_rejects_shape() -> None:
 
     result = retrieve_live_sql_hits(
         _ctx("Count cases by status"),
-        config=FakeConfig(connector_live_sql_result_verifier_enabled=True),
+        config=FakeConfig(),
         llm=llm,
         schedule_repo=InMemoryFolderScheduleRepository(),
         connector_profile_repo=profile_repo,
@@ -757,17 +1075,12 @@ def test_live_sql_repairs_after_result_verifier_rejects_shape() -> None:
     )
 
     assert result.mode == "ai_assisted"
-    assert "repairs=1" in result.detail
-    assert registry.connector.calls == 2
-    assert len(llm.generated_prompts) == 4
-    assert "Verify whether this already-safe live SQL result shape" in llm.generated_prompts[1]
-    assert "Previous failure stage: verification" in llm.generated_prompts[2]
-    assert "SELECT status FROM fake.records" in llm.generated_prompts[2]
-    assert result.hits[0].payload["structured_field_names"] == ["status", "total"]
-    assert result.hits[0].payload["structured_fields"][1]["value"] == "2"
+    assert registry.connector.calls == 1
+    assert len(llm.generated_prompts) == 1
+    assert result.hits[0].payload["structured_field_names"] == ["status"]
 
 
-def test_live_sql_result_verifier_bad_json_accepts_existing_result() -> None:
+def test_live_sql_uses_one_generation_and_one_execution() -> None:
     profile_repo = _repo_with_approved_catalog()
     llm = SequenceLlm(
         [
@@ -779,7 +1092,7 @@ def test_live_sql_result_verifier_bad_json_accepts_existing_result() -> None:
 
     result = retrieve_live_sql_hits(
         _ctx("Count cases by status"),
-        config=FakeConfig(connector_live_sql_result_verifier_enabled=True),
+        config=FakeConfig(),
         llm=llm,
         schedule_repo=InMemoryFolderScheduleRepository(),
         connector_profile_repo=profile_repo,
@@ -787,9 +1100,8 @@ def test_live_sql_result_verifier_bad_json_accepts_existing_result() -> None:
     )
 
     assert result.mode == "ai_assisted"
-    assert "repairs=0" in result.detail
     assert registry.connector.calls == 1
-    assert len(llm.generated_prompts) == 2
+    assert len(llm.generated_prompts) == 1
     assert result.hits[0].payload["structured_field_names"] == ["status", "total"]
 
 

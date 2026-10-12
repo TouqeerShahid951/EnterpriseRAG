@@ -63,14 +63,138 @@
   }
 }
 
-@media (max-width: 1280px) {
+@media (min-width: 900px) and (max-width: 1679px) {
+  .review-workspace .review-page-header {
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.65rem;
+    padding-bottom: 0.55rem;
+  }
+
+  .review-workspace .review-header-tools {
+    display: flex;
+    min-width: 0;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .review-workspace .review-summary {
+    display: flex;
+    width: auto;
+    gap: 0.25rem;
+  }
+
+  .review-workspace .review-summary-metric {
+    display: flex;
+    min-height: 2.3rem;
+    align-items: center;
+    gap: 0.35rem;
+    border: 0;
+    background: transparent;
+    padding: 0.35rem 0.45rem;
+  }
+
+  .review-workspace .review-summary-metric strong {
+    margin: 0;
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .review-workspace .review-layout {
+    position: relative;
+    height: auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(28rem, auto) minmax(24rem, auto);
+    gap: 0.7rem;
+  }
+
+  .review-layout .review-preview-panel {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .review-layout .review-correction-panel {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .review-layout .review-queue-panel {
+    position: absolute;
+    z-index: 4;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(22rem, calc(100% - 2rem));
+    box-shadow: 0.75rem 0 2rem rgb(0 0 0 / 30%);
+  }
+
+  .review-queue-backdrop {
+    position: absolute;
+    z-index: 3;
+    inset: 0;
+    border: 0;
+    border-radius: 0.5rem;
+    background: rgb(4 4 8 / 54%);
+  }
+
+  .review-queue-close {
+    display: inline-flex;
+  }
+}
+
+@media (min-width: 1680px) {
+  .review-ocr-workbench {
+    padding-bottom: 0.75rem;
+  }
+
+  .review-ocr-workbench .review-layout {
+    height: auto;
+  }
+
+  .review-queue-toggle {
+    display: none;
+  }
+
+}
+
+@media (max-width: 899px) {
   .review-workspace {
     overflow-y: auto;
   }
 
-  .review-layout {
+  .review-workspace .review-layout {
+    position: relative;
     height: auto;
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+  }
+
+  .review-layout .review-preview-panel,
+  .review-layout .review-correction-panel {
+    grid-column: 1;
+  }
+
+  .review-layout .review-queue-panel {
+    position: absolute;
+    z-index: 4;
+    top: 0;
+    left: 0;
+    width: min(22rem, calc(100% - 1rem));
+    max-height: min(42rem, calc(100dvh - 8rem));
+    box-shadow: 0.75rem 0 2rem rgb(0 0 0 / 30%);
+  }
+
+  .review-queue-backdrop {
+    position: absolute;
+    z-index: 3;
+    inset: 0;
+    border: 0;
+    background: rgb(4 4 8 / 54%);
+  }
+
+  .review-queue-close {
+    display: inline-flex;
   }
 
   .review-clear-state {
@@ -92,34 +216,32 @@
     overflow-y: visible;
   }
 
+  .review-image-top-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .review-image-top-actions .review-actions {
+    width: 100%;
+  }
+
+  .review-image-top-actions .review-actions button {
+    flex: 1 1 12rem;
+  }
+
   .review-preview-body {
     height: 36rem;
   }
 }
 
-@media (min-width: 900px) and (max-width: 1280px) {
-  .review-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(20rem, 24rem);
+@media (max-width: 1180px) {
+  .review-workbench-toolbar {
+    flex-wrap: wrap;
   }
 
-  .review-queue-panel {
-    grid-column: 1 / -1;
-  }
-
-  .review-preview-body {
-    height: 34rem;
-  }
-
-  .review-correction-panel {
-    align-self: stretch;
-  }
-
-  .review-image-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(20rem, 24rem);
-  }
-
-  .review-image-batch-panel {
-    grid-column: 1 / -1;
+  .review-selection-context {
+    order: 4;
+    flex-basis: 100%;
   }
 }
 
@@ -133,6 +255,33 @@
   .review-summary {
     min-width: 0;
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .review-workbench-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .review-bulk-actions {
+    width: 100%;
+  }
+
+  .review-bulk-actions .sv-action-primary,
+  .review-bulk-actions .sv-action-danger {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .review-bulk-confirmation {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .review-bulk-confirmation-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  .review-selection-context {
+    flex-basis: 100%;
   }
 
   .review-header-tools {
@@ -152,6 +301,16 @@
 
   .review-facts {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .review-correction-body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: visible;
+  }
+
+  .review-original-text pre,
+  .review-correction-field .sv-textarea {
+    min-height: 16rem;
   }
 
   .review-preview-body {

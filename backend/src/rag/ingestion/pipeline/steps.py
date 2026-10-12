@@ -8,8 +8,14 @@ import threading
 import time
 
 from ..errors import HumanReviewRequired, IngestJobCancelled
-from ..metadata import build_metadata_bundle, generate_metadata_v2
+from ..metadata import (
+    build_metadata_bundle,
+    enrich_spreadsheet_schema_items,
+    generate_metadata_v2,
+    spreadsheet_review_from_items,
+)
 from ..parsers import PdfImageReviewRequired, parse_document, resume_pdf_image_review
+from ..parsers.images.analysis import image_item_description
 from ..parsers.models import (
     ParsedPdfItem,
     parsed_image_asset_to_dict,
@@ -22,6 +28,7 @@ from .image_review import (
     image_review_resume_inputs as _image_review_resume_inputs,
 )
 from .indexing_stages import (
+    _configuration_digest,
     activate_generation as activate_generation,
     chunk_text as chunk_text,
     download_file as download_file,
@@ -48,6 +55,7 @@ from .progress import (
     vision_layout_progress_reporter as _vision_layout_progress_reporter,
 )
 from .state import IngestDependencies, IngestState
+from .resume import save_metadata_checkpoint, save_parsed_checkpoint
 
 METADATA_PROGRESS_INTERVAL_SECONDS = 15.0
 
@@ -139,6 +147,8 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
                 doc_id=payload.doc_id,
                 image_asset_store=deps.image_asset_writer,
                 image_analyzer=deps.vision,
+                analyze_slide_visuals=payload.analyze_slide_visuals,
+                spreadsheet_review=payload.spreadsheet_review,
             )
         except PdfImageReviewRequired as exc:
             provenance = _image_review_required_provenance(exc)
@@ -195,6 +205,9 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
                 ],
             )
         parsed_items = parsed_items.items
+        state["parsed_items"] = parsed_items
+    if not payload.review_batch_id:
+        parsed_items = state["parsed_items"]
         review_items = _low_confidence_ocr_items(
             parsed_items, deps.ocr_review_confidence_threshold
         )
@@ -218,7 +231,6 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
                 ),
             )
             raise HumanReviewRequired(review_batch_id=review_batch_id)
-        state["parsed_items"] = parsed_items
     page_count = _page_count(state["parsed_items"])
     deps.backend.update_job(
         job_id=state["payload"].job_id,
@@ -230,6 +242,7 @@ def extract_text(state: IngestState, deps: IngestDependencies) -> IngestState:
             else None
         ),
     )
+    save_parsed_checkpoint(state, deps, _checkpoint_digest(deps, "parsed"))
     return state
 
 
@@ -244,12 +257,18 @@ def generate_metadata(state: IngestState, deps: IngestDependencies) -> IngestSta
             "metadata", 0, 1, f"Requesting metadata from {model_label}"
         ),
     )
-    text = "\n\n".join(item.text for item in state["parsed_items"])
     with _metadata_progress_reporter(deps, job_id=job_id, model_label=model_label):
+        state["parsed_items"], spreadsheet_warnings = enrich_spreadsheet_schema_items(
+            state["parsed_items"], getattr(deps.ollama, "generate_json", None)
+        )
         llm_metadata = generate_metadata_v2(
             state["parsed_items"], deps.ollama.generate_metadata
         )
-    warnings = [str(item) for item in llm_metadata.pop("_warnings", [])]
+    text = "\n\n".join(item.text for item in state["parsed_items"])
+    warnings = [
+        *spreadsheet_warnings,
+        *(str(item) for item in llm_metadata.pop("_warnings", [])),
+    ]
     metadata_errors = _metadata_errors(llm_metadata.pop("_metadata_errors", []))
     state["warnings"] = list(dict.fromkeys([*state.get("warnings", []), *warnings]))
     if warnings:
@@ -269,6 +288,11 @@ def generate_metadata(state: IngestState, deps: IngestDependencies) -> IngestSta
         topic_taxonomy=deps.topic_taxonomy,
         use_gliner=deps.metadata_use_gliner,
     ).as_worker_metadata()
+    spreadsheet_review = spreadsheet_review_from_items(
+        state["parsed_items"], state["payload"].spreadsheet_review
+    )
+    if spreadsheet_review:
+        state["metadata"].setdefault("metadata_flags", {})["spreadsheet_review"] = spreadsheet_review
     if warnings:
         metadata_flags = state["metadata"].setdefault("metadata_flags", {})
         metadata_flags["metadata_generation_degraded"] = True
@@ -295,7 +319,12 @@ def generate_metadata(state: IngestState, deps: IngestDependencies) -> IngestSta
         progress_pct=50,
         warnings=state.get("warnings", []),
     )
+    save_metadata_checkpoint(state, deps, _checkpoint_digest(deps, "metadata"))
     return state
+
+
+def _checkpoint_digest(deps: IngestDependencies, stage: str) -> str:
+    return _configuration_digest(deps, stage) if getattr(deps, "checkpoint", None) is not None else ""
 
 
 @contextmanager
@@ -387,7 +416,9 @@ def _low_confidence_ocr_items(
                 "page_end": item.page_end,
                 "bbox": list(item.bbox) if item.bbox is not None else None,
                 "quality_flags": list(item.quality_flags),
-                "partial_text": item.text,
+                "partial_text": item.quote_texts[0]
+                if "ocr_image_consolidated" in item.quality_flags and image_item_description(item) is not None
+                else item.text,
                 "confidence": item.confidence,
             }
         )

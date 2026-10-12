@@ -8,7 +8,7 @@ import pytest
 
 from rag.auth.context import UserContext
 from rag.core.config import Settings
-from rag.query.qdrant import SearchHit
+from rag.query.qdrant import QdrantScanResult, SearchHit
 from rag.query.configuration.models import RagConfigRecord
 from rag.retrieval.adapters import query_runtime
 from rag.retrieval.adapters.query_runtime import (
@@ -260,6 +260,42 @@ def test_document_scan_uses_current_scope_when_query_has_no_date() -> None:
     qdrant_filter = qdrant.calls[0]["qdrant_filter"]
     assert isinstance(qdrant_filter, dict)
     assert {"key": "is_current", "match": {"value": True}} in qdrant_filter["must"]
+
+
+def test_document_scan_preserves_explicit_status_and_structure() -> None:
+    hit = SearchHit(
+        point_id="point-1",
+        score=0.5,
+        payload={
+            "doc_id": "doc-1",
+            "doc_title": "Policy.pdf",
+            "chunk_id": "doc-1:12",
+            "text": "Policy text",
+            "section_path": ["Controls", "Authentication"],
+            "parent_section_id": "section-auth",
+            "index_generation_id": "generation-2",
+            "content_hash": "content-hash",
+        },
+    )
+
+    class ScanningQdrant(_CapturingQdrant):
+        def scan_document_chunks(self, **kwargs):
+            self.calls.append(kwargs)
+            return QdrantScanResult(
+                (hit,), complete=False, stop_reason="limit_reached"
+            )
+
+    result = _retriever(qdrant=ScanningQdrant()).scan_documents(
+        _request(), structured_only=False, limit=10
+    )
+
+    assert result.complete is False
+    assert result.stop_reason == "limit_reached"
+    assert result[0].section_path == ("Controls", "Authentication")
+    assert result[0].parent_section_id == "section-auth"
+    assert result[0].ordinal == 12
+    assert result[0].index_generation_id == "generation-2"
+    assert result[0].content_hash == "content-hash"
 
 
 def test_document_scan_rejects_group_scope_outside_user_authorization() -> None:

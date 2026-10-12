@@ -97,7 +97,7 @@ export function FolderScheduleWorkspace({
               multiple
               {...folderInputAttributes}
               onChange={(event) => onFileSelection(event.currentTarget.files)}
-              className="sv-input file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-label-md file:font-bold file:text-on-primary"
+              className="sv-input file:mr-3 file:rounded-md file:border-0 file:bg-primary-action file:px-3 file:py-1.5 file:text-label-md file:font-bold file:text-on-primary"
             />
             <small className="text-secondary">Choose a local folder to upload a point-in-time copy. Future edits require a new snapshot.</small>
           </label>
@@ -142,6 +142,10 @@ export function FolderScheduleWorkspace({
           <span className="sv-label">Description</span>
           <textarea value={draft.description} onChange={(event) => onDraftChange({ description: event.target.value })} placeholder="Optional shared context for staged folder files" className="sv-input min-h-20" />
           <small className="text-secondary">Shared context attached to every staged folder file.</small>
+        </label>
+        <label className="flex min-h-11 items-start gap-3 rounded-md border border-surface-border bg-surface-container-low px-3 py-2">
+          <input type="checkbox" checked={draft.analyzeSlideVisuals} onChange={(event) => onDraftChange({ analyzeSlideVisuals: event.target.checked })} className="mt-1" />
+          <span><strong className="block text-body-md text-on-surface">Analyze slide visuals</strong><small className="text-secondary">Interpret diagrams, charts, images, and spatial relationships in PPTX files.</small></span>
         </label>
 
         {formError ? <InlineMessage tone="warning">{formError}</InlineMessage> : null}

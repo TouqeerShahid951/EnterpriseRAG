@@ -170,10 +170,16 @@ def _parent_covers_unit(
     ):
         return False
     normalized_parent = normalized_text(parent_text)
-    if any(
-        (child_text := normalized_text(searchable_text(child)))
-        and not contains_normalized_phrase(normalized_parent, child_text)
+    source_children = tuple(
+        child
         for child in children
+        if str(child.payload.get("chunk_type") or "").lower()
+        not in {"cell", "table_row"}
+    ) or children
+    if any(
+        (child_text := normalized_text(child.payload.get("text")))
+        and not contains_normalized_phrase(normalized_parent, child_text)
+        for child in source_children
     ):
         return False
     pages = {page for child in children if (page := hit_page(child)) is not None}

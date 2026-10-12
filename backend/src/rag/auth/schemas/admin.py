@@ -58,6 +58,7 @@ class UserCreateRequest(ContractModel):
 
 
 class UserUpdateRequest(ContractModel):
+    email: str | None = Field(default=None, min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     name: str | None = None
     account_type: AccountType | None = None
     group_paths: list[str] | None = None

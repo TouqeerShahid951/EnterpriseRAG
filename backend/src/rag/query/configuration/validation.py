@@ -8,6 +8,9 @@ from urllib.parse import urlsplit, urlunsplit
 
 from rag.core.config import Settings, settings
 from rag.shared.contracts.rag_defaults import (
+    DEFAULT_ANSWER_OUTPUT_TOKENS,
+    DEFAULT_ANSWER_CONTEXT_TOKENS,
+    DEFAULT_CONTEXT_RESOLVER_ENABLED,
     DEFAULT_EVIDENCE_GATE_POLICY,
     DEFAULT_FAITHFULNESS_POLICY,
     DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS,
@@ -144,6 +147,9 @@ def env_rag_config(config: Settings = settings) -> RagConfigRecord:
         vision_model=vision_model or None,
         json_num_predict=config.rag_json_num_predict,
         retrieval_token_budget=config.rag_retrieval_token_budget,
+        answer_output_tokens=config.rag_answer_output_tokens,
+        answer_context_tokens=config.rag_answer_context_tokens,
+        context_resolver_enabled=config.rag_context_resolver_enabled,
         query_planner_enabled=config.rag_query_planner_enabled,
         evidence_gate_policy=config.rag_evidence_gate_policy,
         faithfulness_policy=config.rag_faithfulness_policy,
@@ -198,6 +204,13 @@ def record_from_row(row: dict[str, object]) -> RagConfigRecord:
         vision_model=str(row["vision_model"]).strip() if row.get("vision_model") else None,
         json_num_predict=int(row.get("json_num_predict") or 4096),
         retrieval_token_budget=int(row.get("retrieval_token_budget") or 12000),
+        answer_output_tokens=int(row.get("answer_output_tokens", DEFAULT_ANSWER_OUTPUT_TOKENS)),
+        answer_context_tokens=int(row.get("answer_context_tokens", DEFAULT_ANSWER_CONTEXT_TOKENS)),
+        context_resolver_enabled=bool(
+            row["context_resolver_enabled"]
+            if row.get("context_resolver_enabled") is not None
+            else DEFAULT_CONTEXT_RESOLVER_ENABLED
+        ),
         query_planner_enabled=bool(
             row["query_planner_enabled"] if row.get("query_planner_enabled") is not None else True
         ),
@@ -251,6 +264,9 @@ def with_updated_at(config: RagConfigRecord) -> RagConfigRecord:
         vision_model=config.vision_model,
         json_num_predict=config.json_num_predict,
         retrieval_token_budget=config.retrieval_token_budget,
+        answer_output_tokens=config.answer_output_tokens,
+        answer_context_tokens=config.answer_context_tokens,
+        context_resolver_enabled=config.context_resolver_enabled,
         query_planner_enabled=config.query_planner_enabled,
         evidence_gate_policy=config.evidence_gate_policy,
         faithfulness_policy=config.faithfulness_policy,

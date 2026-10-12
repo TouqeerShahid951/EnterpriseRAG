@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Info, XCircle, type LucideIcon } from "lucide-react";
 
 import { PrudentiaWordmark } from "@/components/brand/PrudentiaBrand";
+import { useBranding } from "@/components/brand/BrandContext";
 
 export function Fact({ label, value }: { label: string; value: string }) {
   return (
@@ -43,13 +44,14 @@ export function Skeleton({ className = "" }: { className?: string }) {
 }
 
 export function SessionLoading() {
+  const branding = useBranding();
   return (
     <main className="flex min-h-screen items-center justify-center bg-background text-on-background">
       <section className="Prudentia-session-card sv-card w-[min(32rem,calc(100vw-2rem))] p-8" role="status">
         <PrudentiaWordmark className="Prudentia-session-wordmark" />
         <p className="sv-eyebrow">Secure Workspace</p>
         <h1 className="text-headline-md">Checking secure session</h1>
-        <p className="sr-only">Preparing your authenticated Prudentia AI workspace.</p>
+        <p className="sr-only">Preparing your authenticated {branding.app_name} workspace.</p>
         <div className="mt-5 grid gap-3" aria-hidden="true">
           <Skeleton className="h-4 w-4/5" />
           <Skeleton className="h-4 w-3/5" />

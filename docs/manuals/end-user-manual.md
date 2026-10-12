@@ -187,7 +187,8 @@ The sidebar is organized into four areas:
 | Govern | System Audit, User Management, Runtime Settings | Administrative and governance pages. |
 
 Use the account button in the sidebar footer to open **Account Management**,
-change your password, switch theme, or sign out.
+change your email or password, switch theme, or sign out. Changing your email
+requires your current password and ends other signed-in sessions.
 
 ## 6. Knowledge Spaces
 
@@ -222,9 +223,14 @@ filtered by Knowledge Space and clearance level.
    evidence, and drafts the answer.
 7. Inspect the citations before relying on the answer.
 
+For Live DB and Hybrid questions, Prudentia selects one authorized database. If
+two databases remain plausible, choose the correct source from the buttons in
+the answer. Follow-up questions reuse that choice while it remains authorized.
+
 The composer starts in **Auto** whenever you start or load a conversation. A
 manual source choice applies to the active conversation; it is not reused as a
-global preference in another conversation.
+global preference in another conversation. Database routing uses the model
+assigned to the Routing role by the administrator.
 
 Good questions name the policy, date, person, contract, report, section, or
 comparison you need. Within one conversation, you may ask follow-ups such as
@@ -242,6 +248,9 @@ short form or full definition. For example, `AD` and `Assistant Director` are
 matched in both directions without changing the question shown in your chat.
 When the definition came from an imported PDF, its citation identifies the
 source PDF and page; the glossary PDF itself is not searched as corpus content.
+Glossary PDFs are managed only through **Abbreviation Glossary**, not Document
+Library or normal Activity; their processing status returns when you revisit
+the glossary page or sign in again.
 
 ## 8. Scope a Question To Specific Documents
 
@@ -251,6 +260,20 @@ files.
 
 Document tags apply to **Auto**, **Documents**, and **Hybrid** questions. They
 do not apply to **Live DB** only questions.
+
+### Summarize Documents
+
+Tag a document before asking for a whole-document or chapter summary. Prudentia
+reads authorized indexed content in document order, uses section structure when
+available, and keeps citations linked to the original pages or chunks. Large
+documents are processed in bounded section and document stages before the final
+answer.
+
+Topic summaries search a larger, diverse set of relevant sections. Requests for
+everything about a topic require broader coverage. If a scan or summary stage
+cannot process the complete authorized scope, the answer reports partial or
+unknown coverage rather than claiming completeness. The cited statements remain
+grounded, but uncited parts of the requested scope may be missing.
 
 ## 9. Verify Answers With Evidence
 
@@ -263,9 +286,33 @@ Every important answer should be checked against its evidence.
 4. Treat warnings as review signals. Warnings can mean low faithfulness,
    degraded retrieval, conflicting sources, or missing highlights.
 
-Evidence can include PDF page highlights, DOCX text excerpts, image evidence,
+Evidence can include PDF page highlights, DOCX text excerpts, rendered PPTX slides, image evidence,
 or live database rows. If highlighting is unavailable, open the original source
 file and compare manually.
+
+Text-bearing PDF, DOCX, JSON, CSV, and XLSX previews include a **Search document**
+control. Enter a phrase and press Enter or select Search to move through matching
+pages, with matching PDF text highlighted, document text, or workbook cells. Rendered PPTX slides, standalone images,
+and extracted image evidence are bitmap previews and do not support text search;
+use the original file or OCR workflow when you need to search those sources.
+
+Answer text streams as it is generated. Bracketed citations identify the source
+passages used for the answer. Copy and reply are available after completion.
+Source-access or revision changes can still make an answer unavailable. OCR
+matches are against extracted OCR text, so compare them with the scanned page
+when accuracy matters. Database and glossary citations identify returned record
+snapshots. Older responses and semantic candidate
+passages remain visibly unverified.
+
+Citation links carry the source revision. If a document has been replaced,
+deleted or restricted, the viewer reports that the cited revision is unavailable
+instead of opening replacement content as the old evidence. Saved answers also
+withhold evidence that is no longer accessible. Page or paragraph targets show
+that location's granularity; they do not imply a precise rectangle for every word.
+
+Generated PDF, Word and PowerPoint files are checked after formatting. Their
+references contain supporting excerpts and revision identifiers. Unsupported
+content prevents publication of the final files.
 
 ## 10. Chat History And Generated Files
 
@@ -292,11 +339,23 @@ Supported files:
 
 - PDF
 - DOCX
+- PPTX
+- CSV
+- XLSX
 - JPG or JPEG
 - PNG
 - JSON
 
 Each file must be non-empty and no larger than 50 MB.
+
+CSV files are treated as one table. Each visible, non-empty XLSX worksheet is
+treated as one table. Column names, types, and representative values are indexed;
+when metadata inference is available, generated descriptions help match queries
+to abbreviated column names. Formula expressions are indexed but never executed.
+After ingestion, open the document inspector's **Tables** tab to include or
+exclude sheets, correct one- or multi-row headers, rename tables and columns, and
+edit generated descriptions or aliases. Saving queues reindexing and never
+changes the uploaded workbook.
 
 Upload steps:
 
@@ -304,12 +363,15 @@ Upload steps:
 2. Select one or more supported files.
 3. Choose the writable Knowledge Space.
 4. Choose the clearance level. You cannot upload above your own clearance.
-5. Enable **GraphRAG** only when the document should participate in
+5. For PPTX files, leave **Analyze slide visuals** enabled to interpret diagrams,
+   charts, images, and spatial relationships. Disable it only for text-only intake.
+6. Enable **GraphRAG** only when the document should participate in
    relationship, theme, risk, trend, or corpus-level analysis.
-6. Optionally add effective date, expiry date, description, and supersedes IDs.
+7. Optionally add effective date, expiry date, description, and supersedes IDs.
    Supersedes IDs are for single-file replacements.
-7. Select **Upload documents**.
-8. Watch **Recent upload jobs** for progress and warnings.
+8. Select **Upload documents**.
+9. Watch **Recent upload jobs** for progress and warnings. PPTX jobs report
+   slide-by-slide visual-analysis progress.
 
 If an upload is rejected, check the file type, size, Knowledge Space, clearance,
 and whether virus scanning is healthy.
@@ -342,7 +404,7 @@ The Document Library may include:
 - **Overview**: summary metrics, attention items, and recent activity.
 - **Knowledge Spaces**: folder tree and direct documents in selected spaces.
 - **Documents**: searchable table of visible documents.
-- **Trash**: soft-deleted documents that authorized users can restore or delete.
+- **Trash**: soft-deleted documents and glossary sources that authorized users can restore or delete.
 
 Overview and Knowledge Spaces share one access-filtered document snapshot.
 Library documents includes visible, non-deleted current and superseded records.
@@ -431,6 +493,7 @@ Audit is for review and escalation. It is not an editing surface.
 | Document says Needs review | OCR, extraction, or PDF image triage paused ingestion | A Document Contributor, Space Admin, System Admin, or Platform Admin must resolve the pending Review Queue item. |
 | Answer has warnings | Low grounding, conflict, degraded retrieval | Inspect citations manually before using the answer. |
 | Source highlight is missing | No page coordinates or exact text match | Open the original source and compare manually. |
+| Preview search is unavailable | The preview is a rendered slide or image | Use the original file or an OCR workflow to search its text. |
 | Graph enrichment is absent | GraphRAG was not selected, disabled, or worker unavailable | Standard retrieval still works; ask an admin if graph analysis is required. |
 
 ## 18. Glossary

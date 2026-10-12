@@ -37,9 +37,24 @@ VISION_USER_PROMPT = (
     "angle when visible. If an exact model or identity is uncertain, write what it appears to be and name "
     "the visible cues; do not present guesses as facts. For charts or tables, describe apparent trends, "
     "categories, and notable values. For document scans, describe the form type, fields, stamps, "
-    "signatures, and image quality. Do not invent identities, locations, values, or events that are not "
+    "signatures, and image quality. For maps, be especially specific: identify the map type and covered "
+    "region, visible place names and labels, borders and boundaries, roads and routes, waterways, landmarks, "
+    "grid or coordinates, compass orientation, scale, legend symbols, colors, annotations, and spatial "
+    "relationships. For weapons, be especially specific: identify the visible weapon type and configuration, "
+    "make, model, variant, caliber or chambering when visible, markings, serial numbers, accessories, "
+    "attachments, magazine or ammunition details, condition, damage, and distinctive features. Do not infer "
+    "operational status or capabilities that are not visible. Do not invent identities, locations, values, or events that are not "
     "visible; say when a detail is unclear.\n"
     "confidence: number from 0 to 1 for the combined OCR and visual description accuracy."
+)
+SLIDE_VISION_USER_PROMPT = (
+    "Interpret this complete presentation slide for enterprise RAG retrieval. "
+    "Return only valid JSON with keys extracted_text, caption, and confidence. "
+    "Use extracted_text only for readable content not already likely available through native PowerPoint extraction. "
+    "In caption, explain the slide's visual meaning: relationships, arrows and flow direction, hierarchy, grouping, "
+    "spatial organization, chart trends, diagram semantics, annotations, callouts, and the conclusion conveyed by the layout. "
+    "Preserve concrete labels, categories, values, and qualifiers needed to support the interpretation. "
+    "Do not merely transcribe the slide and do not infer facts that are not visible."
 )
 VISION_LAYOUT_SYSTEM_PROMPT = (
     "You repair complex document page layout for enterprise RAG ingestion. "
@@ -132,8 +147,15 @@ class VisionClient:
         if not self.base_url:
             return ImageAnalysis(quality_flags=["vision_unconfigured"])
         if self.provider == OLLAMA_PROVIDER:
-            return self._analyze_ollama(content=content, content_type=content_type)
-        return self._analyze_openai_compatible(content=content, content_type=content_type)
+            return self._analyze_ollama(content=content, content_type=content_type, prompt=VISION_USER_PROMPT)
+        return self._analyze_openai_compatible(content=content, content_type=content_type, prompt=VISION_USER_PROMPT)
+
+    def analyze_slide(self, *, content: bytes, content_type: str) -> ImageAnalysis:
+        if not self.base_url:
+            return ImageAnalysis(quality_flags=["vision_unconfigured"])
+        if self.provider == OLLAMA_PROVIDER:
+            return self._analyze_ollama(content=content, content_type=content_type, prompt=SLIDE_VISION_USER_PROMPT)
+        return self._analyze_openai_compatible(content=content, content_type=content_type, prompt=SLIDE_VISION_USER_PROMPT)
 
     def analyze_layout(self, *, content: bytes, content_type: str) -> VisionLayoutAnalysis:
         if not self.base_url:
@@ -142,7 +164,7 @@ class VisionClient:
             return self._analyze_layout_ollama(content=content, content_type=content_type)
         return self._analyze_layout_openai_compatible(content=content, content_type=content_type)
 
-    def _analyze_openai_compatible(self, *, content: bytes, content_type: str) -> ImageAnalysis:
+    def _analyze_openai_compatible(self, *, content: bytes, content_type: str, prompt: str) -> ImageAnalysis:
         payload = {
             "model": self.model,
             **no_thinking_payload_fields(),
@@ -156,7 +178,7 @@ class VisionClient:
                     "content": [
                         {
                             "type": "text",
-                            "text": VISION_USER_PROMPT,
+                            "text": prompt,
                         },
                         {
                             "type": "image_url",
@@ -228,7 +250,7 @@ class VisionClient:
             return VisionLayoutAnalysis(quality_flags=["vision_layout_empty_response"])
         return _layout_analysis_from_text(content_text)
 
-    def _analyze_ollama(self, *, content: bytes, content_type: str) -> ImageAnalysis:
+    def _analyze_ollama(self, *, content: bytes, content_type: str, prompt: str) -> ImageAnalysis:
         payload = {
             "model": self.model,
             "stream": False,
@@ -242,7 +264,7 @@ class VisionClient:
                 },
                 {
                     "role": "user",
-                    "content": VISION_USER_PROMPT,
+                    "content": prompt,
                     "images": [base64.b64encode(content).decode("ascii")],
                 },
             ],

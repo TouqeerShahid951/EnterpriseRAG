@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ...core.config import Settings
+from rag.auth.identity_models import IdentityRepository
 from rag.shared.contracts.rag_defaults import EvidenceGatePolicy, FaithfulnessPolicy
 from rag.abbreviations.service import AbbreviationGlossaryService
 from ...retrieval.service import RetrievalService
@@ -31,11 +32,16 @@ class QueryNodes(RoutingNodes, RetrievalNodes, ResponseNodes):
         evidence_gate_policy: EvidenceGatePolicy | None = None,
         faithfulness_policy: FaithfulnessPolicy | None = None,
         reranker_model: str | None = None,
+        context_resolver_enabled: bool | None = None,
         query_planner_enabled: bool | None = None,
+        graph_enabled: bool | None = None,
         schedule_repo: object | None = None,
         connector_profile_repo: object | None = None,
         connector_registry: object | None = None,
         document_repo: object | None = None,
+        identity_repo: IdentityRepository | None = None,
+        faithfulness_timeout_seconds: float | None = None,
+        citation_output_tokens: int | None = None,
         abbreviation_service: AbbreviationGlossaryService | None = None,
     ) -> None:
         self.config = config
@@ -55,10 +61,19 @@ class QueryNodes(RoutingNodes, RetrievalNodes, ResponseNodes):
         self.evidence_gate_policy = evidence_gate_policy or config.rag_evidence_gate_policy
         self.faithfulness_policy = faithfulness_policy or config.rag_faithfulness_policy
         self.reranker_model = reranker_model or config.rag_reranker_model
+        self.context_resolver_enabled = (
+            config.rag_context_resolver_enabled
+            if context_resolver_enabled is None
+            else context_resolver_enabled
+        )
         self.query_planner_enabled = config.rag_query_planner_enabled if query_planner_enabled is None else query_planner_enabled
+        self.graph_enabled = config.graphrag_enabled if graph_enabled is None else graph_enabled
         self.schedule_repo = schedule_repo
         self.connector_profile_repo = connector_profile_repo
         self.document_repo = document_repo
+        self.identity_repo = identity_repo
+        self.faithfulness_timeout_seconds = faithfulness_timeout_seconds or config.rag_faithfulness_timeout_seconds
+        self.citation_output_tokens = citation_output_tokens or config.rag_json_num_predict
         self.abbreviation_service = abbreviation_service
         self.retrieval_service = RetrievalService(
             config=config,

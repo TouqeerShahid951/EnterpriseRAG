@@ -75,8 +75,10 @@ def test_api_warms_query_runtime_before_readiness(
 
     with TestClient(app) as client:  # type: ignore[arg-type]
         assert events == ["schema", "admin", "config", "warmup"]
+        assert app.state.resource_sampler._thread.is_alive()
         assert client.get("/health/ready").status_code == 200
 
+    assert not app.state.resource_sampler._thread.is_alive()
     assert events == ["schema", "admin", "config", "warmup", "close"]
 
 
@@ -92,3 +94,4 @@ def test_api_startup_fails_before_readiness_when_warmup_fails(
             pytest.fail("application must not become ready")
 
     assert events == ["schema", "admin", "config", "warmup", "close"]
+    assert not app.state.resource_sampler._thread.is_alive()

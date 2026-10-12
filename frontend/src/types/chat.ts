@@ -9,6 +9,7 @@ export interface PdfUploadDraft {
   expiryDate: string;
   description: string;
   supersedesText: string;
+  analyzeSlideVisuals: boolean;
 }
 
 export interface UploadJobView {
@@ -52,10 +53,13 @@ interface UserTurn {
   role: "user";
   content: string;
   createdAt: string;
+  replyToTurnId?: string | null;
 }
 
 export interface AssistantTurn {
   id: string;
+  clientRequestId?: string;
+  replyToTurnId?: string | null;
   role: "assistant";
   status: "pending" | "complete" | "error" | "cancelled";
   question: string;

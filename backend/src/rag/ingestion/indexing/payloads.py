@@ -103,7 +103,17 @@ def build_qdrant_points(
                     "structured_field_names": chunk.structured_field_names,
                     "structured_field_values": chunk.structured_field_values,
                     "structured_search_text": chunk.structured_search_text,
-                    "source_regions": chunk.source_regions,
+                    "citation_targets": chunk.citation_targets,
+                    "quote_texts": [target["exact_text"] for target in chunk.citation_targets
+                                    if target.get("provenance_kind") in {"native", "ocr", "structured"}
+                                    and target.get("exact_text")],
+                    "provenance_kind": (
+                        "ocr" if any(target.get("provenance_kind") == "ocr" for target in chunk.citation_targets)
+                        else "native" if any(target.get("provenance_kind") == "native" for target in chunk.citation_targets)
+                        else "structured" if any(target.get("provenance_kind") == "structured" for target in chunk.citation_targets)
+                        else "generated" if any(target.get("provenance_kind") == "generated" for target in chunk.citation_targets)
+                        else "unknown"
+                    ),
                     "group_path": group_path,
                     "acl_group_paths": acl_group_paths,
                     "clearance_level": clearance_level,

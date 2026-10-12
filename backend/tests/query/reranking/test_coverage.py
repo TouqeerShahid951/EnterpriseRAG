@@ -23,6 +23,7 @@ class RerankHitsTests(unittest.TestCase):
             "Summarize the document",
             "Summarize all repair equipment in the document",
             "Provide a summary of every repair tool in the document",
+            "Summarize the selected record",
         )
 
         for query in queries:
@@ -307,6 +308,93 @@ class RerankHitsTests(unittest.TestCase):
         self.assertIn(
             "tools-last",
             {item.point_id for item in result.ranked_hits},
+        )
+    def test_exact_multiword_heading_resolves_exhaustive_section_scope(self) -> None:
+        tools_parent = (
+            "Tools for Disassembly and Assembly\n"
+            "Safety Goggles — eye protection\n"
+            "Heating Bag — removes the back cover"
+        )
+        hits = [
+            hit(
+                "tools-1",
+                0.9,
+                "Safety Goggles — eye protection",
+                page=51,
+                parent_section_id="tools",
+                parent_chunk_id="tools-parent",
+                parent_text=tools_parent,
+                parent_page_start=51,
+                parent_page_end=52,
+                chunk_type="table",
+                section_title="Tools for Disassembly and Assembly",
+                exhaustive_scope_origin="document_class_scope",
+                authorized_scan_complete=True,
+            ),
+            hit(
+                "tools-2",
+                0.8,
+                "[Table: Tools for Disassembly and Assembly]\n"
+                "Row: Heating Bag\nValue: removes the back cover",
+                page=52,
+                parent_section_id="tools",
+                parent_chunk_id="tools-parent",
+                parent_text=tools_parent,
+                parent_page_start=51,
+                parent_page_end=52,
+                chunk_type="table_row",
+                section_title="Tools for Disassembly and Assembly",
+                exhaustive_scope_origin="document_class_scope",
+                authorized_scan_complete=True,
+            ),
+            hit(
+                "display-1",
+                0.7,
+                "Display calibration procedure",
+                page=60,
+                parent_section_id="display",
+                parent_chunk_id="display-parent",
+                parent_text="Display Calibration\nDisplay calibration procedure",
+                parent_page_start=60,
+                section_title="Display Calibration",
+                exhaustive_scope_origin="document_class_scope",
+                authorized_scan_complete=True,
+            ),
+            hit(
+                "assembly-1",
+                0.6,
+                "General assembly guidance",
+                page=50,
+                parent_section_id="assembly",
+                parent_chunk_id="assembly-parent",
+                parent_text="Disassembly and Assembly\nGeneral assembly guidance",
+                parent_page_start=50,
+                section_title="Disassembly and Assembly",
+                exhaustive_scope_origin="document_class_scope",
+                authorized_scan_complete=True,
+            ),
+        ]
+
+        with patch(
+            "rag.query.reranker._load_cross_encoder",
+            return_value=RecordingCrossEncoder(),
+        ):
+            result = rerank_hits_with_result(
+                "How many disassembly and assembly tools are listed, and what is each tool used for?",
+                hits,
+                top_k=4,
+                max_candidates=4,
+                exhaustive=True,
+            )
+
+        self.assertEqual(result.candidate_coverage_status, "complete")
+        self.assertEqual(result.evidence_coverage_status, "complete")
+        self.assertEqual(
+            {
+                item.payload.get("exhaustive_coverage_unit_id")
+                for item in result.ranked_hits
+            },
+            {"doc|section:tools|parent:tools-parent"},
         )
     def test_full_section_query_reserves_every_section_in_one_document(self) -> None:
         hits = [

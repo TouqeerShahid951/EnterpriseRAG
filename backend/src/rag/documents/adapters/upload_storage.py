@@ -168,6 +168,12 @@ def _content_type_for(filename: str) -> str:
         return "application/pdf"
     if lowered.endswith(".docx"):
         return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if lowered.endswith(".pptx"):
+        return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    if lowered.endswith(".csv"):
+        return "text/csv"
+    if lowered.endswith(".xlsx"):
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     if lowered.endswith(".jpg") or lowered.endswith(".jpeg"):
         return "image/jpeg"
     if lowered.endswith(".png"):

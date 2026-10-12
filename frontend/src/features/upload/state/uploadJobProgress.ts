@@ -11,7 +11,7 @@ export const uploadFallbackSteps: UploadJobStep[] = [
   { id: "parsing_document", label: "Parse document", detail: "Extracting text, layout, tables, and hierarchy.", state: "pending" },
   { id: "docling_repair", label: "Docling repair", detail: "Repairing selected pages with Docling OCR and layout analysis.", state: "pending" },
   { id: "vision_layout_repair", label: "Vision repair", detail: "Using the vision model to re-read complex PDF layout.", state: "pending" },
-  { id: "image_analysis", label: "Image analysis", detail: "Running OCR and descriptions for extracted document images.", state: "pending" },
+  { id: "image_analysis", label: "Visual analysis", detail: "Interpreting document images and rendered presentation slides.", state: "pending" },
   { id: "metadata_enrichment", label: "Metadata enrichment", detail: "Creating document metadata for retrieval filters.", state: "pending" },
   { id: "chunking_document", label: "Build chunks", detail: "Creating retrieval chunks and extracted claims.", state: "pending" },
   { id: "saving_claims", label: "Save claims", detail: "Persisting extracted claims and conflict pairs.", state: "pending" },

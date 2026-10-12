@@ -143,6 +143,9 @@ def get_artifact_job_executor(config: Settings | None = None) -> ArtifactJobExec
             inference=inference,
         ),
         model_name=rag_config.effective_reasoning_model or rag_config.chat_model,
+        citation_model_name=rag_config.faithfulness_model or rag_config.chat_model,
+        citation_timeout_seconds=rag_config.faithfulness_timeout_seconds,
+        citation_output_tokens=rag_config.json_num_predict,
     )
 
 

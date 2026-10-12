@@ -45,10 +45,12 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeGeneration, setActiveGenerationState] = useState<ActiveGeneration | null>(null);
   const [question, setQuestion] = useState("");
+  const [replyToTurnId, setReplyToTurnId] = useState<string | null>(null);
   const [sessionTurnsById, setSessionTurnsById] = useState<ChatSessionTurnCache>({});
   const [localSessionSummaries, setLocalSessionSummaries] = useState<SavedChatSessionSummary[]>([]);
   const [scopedDocumentIds, setScopedDocumentIds] = useState<string[]>([]);
   const [selectedSource, setSelectedSource] = useState<SourceAnchor | null>(null);
+  const [selectedSourceTurnId, setSelectedSourceTurnId] = useState<string | null>(null);
   const [sourceMode, setSourceModeState] = useState<QuerySourceMode>("auto");
   const [selectedQuerySourceId, setSelectedQuerySourceIdState] = useState("");
   const [activeSpacePath, setActiveSpacePath] = useState<string | null>(() => defaultSpacePath(currentUser));
@@ -126,6 +128,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
       setSourceModeState("auto");
       setSelectedQuerySourceIdState("");
       setQuestion("");
+      setReplyToTurnId(null);
     },
   });
 
@@ -147,6 +150,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
   });
 
   const chatTurns = activeSessionId ? sessionTurnsById[activeSessionId] ?? [] : [];
+  const replyTarget = chatTurns.find((turn) => turn.id === replyToTurnId) ?? null;
   const latestResponse = useMemo(() => latestCompleteResponse(chatTurns), [chatTurns]);
   const activeSessionHasPendingTurn = chatTurns.some((turn) => turn.role === "assistant" && turn.status === "pending");
   const hasPendingGeneration = Boolean(activeGeneration);
@@ -164,12 +168,17 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
     setSourceModeState("auto");
     setSelectedQuerySourceIdState("");
     setQuestion("");
+    setReplyToTurnId(null);
     setActiveSpacePath(defaultActiveSpacePath);
   }, [defaultActiveSpacePath, chatHistoryQueryKey]);
 
   useEffect(() => {
     return () => abortActiveQuery();
   }, []);
+
+  useEffect(() => {
+    if (!selectedSource) setSelectedSourceTurnId(null);
+  }, [selectedSource]);
 
   useEffect(() => {
     const jobIds = activeArtifactJobKey ? activeArtifactJobKey.split("|") : [];
@@ -208,6 +217,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
     setSourceModeState("auto");
     setSelectedQuerySourceIdState("");
     setQuestion("");
+    setReplyToTurnId(null);
   }
 
   function handleQuestionSubmit(event: FormEvent<HTMLFormElement>) {
@@ -222,12 +232,27 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
     }
     const effectiveSourceMode = override.sourceMode ?? sourceMode;
     const effectiveQuerySourceId = override.querySourceId ?? selectedQuerySourceId;
+    const effectiveReplyToTurnId = override.replyToTurnId === undefined
+      ? replyToTurnId
+      : override.replyToTurnId;
     const queryDocumentIds = override.documentIds ?? (effectiveSourceMode === "db_only" ? [] : scopedDocumentIds);
     const sessionId = activeSessionId ?? createId("session");
     setActiveSessionId(sessionId);
-    const assistantTurn = createAssistantTurn(nextQuestion, queryDocumentIds, activeSpacePath, effectiveSourceMode, effectiveQuerySourceId || null);
+    const assistantTurn = createAssistantTurn(
+      nextQuestion,
+      queryDocumentIds,
+      activeSpacePath,
+      effectiveSourceMode,
+      effectiveQuerySourceId || null,
+      effectiveReplyToTurnId,
+    );
     const createdAt = new Date().toISOString();
-    const userTurn = createUserTurn(nextQuestion, createdAt);
+    const userTurn = createUserTurn(
+      nextQuestion,
+      createdAt,
+      `user-${assistantTurn.id}`,
+      effectiveReplyToTurnId,
+    );
     const existingSummary = savedSessions.find((session) => session.id === sessionId)
       ?? localSessionSummaries.find((session) => session.id === sessionId);
     const nextQuestionCount = questionCountForTurns([...(sessionTurnsById[sessionId] ?? []), userTurn]);
@@ -245,6 +270,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
     );
     setSelectedSource(null);
     setQuestion("");
+    setReplyToTurnId(null);
     setScopedDocumentIds([]);
     startStreamingQuery({
       assistantTurnId: assistantTurn.id,
@@ -252,6 +278,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
         query: nextQuestion,
         session_id: sessionId,
         client_request_id: assistantTurn.id,
+        reply_to_turn_id: effectiveReplyToTurnId || undefined,
         group_path: activeSpacePath,
         document_ids: queryDocumentIds.length ? queryDocumentIds : undefined,
         source_mode: effectiveSourceMode,
@@ -312,9 +339,15 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
       setSourceModeState("auto");
       setSelectedQuerySourceIdState("");
       setQuestion("");
+      setReplyToTurnId(null);
       return;
     }
     loadSessionMutation.mutate(sessionId);
+  }
+
+  function selectSource(source: SourceAnchor | null, turnId?: string) {
+    setSelectedSource(source);
+    setSelectedSourceTurnId(source ? turnId ?? null : null);
   }
 
   function deleteChatSession(sessionId: string) {
@@ -353,6 +386,7 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
         query: turn.question,
         session_id: activeSessionId,
         client_request_id: assistantTurnId,
+        reply_to_turn_id: turn.replyToTurnId || undefined,
         group_path: retrySpacePath,
         document_ids: turn.documentIds?.length ? turn.documentIds : undefined,
         source_mode: turn.sourceMode ?? "auto",
@@ -370,6 +404,58 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
       querySourceId: null,
       allowSourceExpansion: true,
       documentIds: turn.documentIds ?? [],
+      replyToTurnId: turn.replyToTurnId ?? null,
+    });
+  }
+
+  function chooseQuerySource(assistantTurnId: string, sourceId: string) {
+    const turn = chatTurns.find((candidate) => candidate.id === assistantTurnId);
+    if (!turn || turn.role !== "assistant" || !turn.response?.source_clarification || !activeSessionId || activeGenerationRef.current) return;
+    const selected = turn.response.source_clarification.options.some((option) => option.source_id === sourceId);
+    if (!selected) return;
+    const nextMode = turn.response.source_mode === "hybrid" ? "hybrid" : "db_only";
+    const documentIds = nextMode === "hybrid" ? turn.documentIds ?? [] : [];
+    const clientRequestId = turn.clientRequestId ?? turn.id;
+    setSessionTurnsById((cache) =>
+      updateChatSessionTurns(cache, activeSessionId, (turns) =>
+        turns.map((candidate) =>
+          candidate.id === assistantTurnId && candidate.role === "assistant"
+            ? {
+                ...candidate,
+                status: "pending",
+                sourceMode: nextMode,
+                querySourceId: sourceId,
+                documentIds,
+                progress: initialProgressForQuestion(
+                  turn.question,
+                  "Continuing with selected database",
+                  documentIds,
+                  turn.groupPath ?? activeSpacePath,
+                  nextMode,
+                ),
+                response: undefined,
+                streamText: undefined,
+                errorMessage: undefined,
+              }
+            : candidate,
+        ),
+      ),
+    );
+    setSelectedSource(null);
+    startStreamingQuery({
+      assistantTurnId,
+      request: {
+        query: turn.question,
+        session_id: activeSessionId,
+        client_request_id: clientRequestId,
+        reply_to_turn_id: turn.replyToTurnId || undefined,
+        group_path: turn.groupPath ?? activeSpacePath,
+        document_ids: documentIds.length ? documentIds : undefined,
+        source_mode: nextMode,
+        query_source_id: sourceId,
+        continue_source_clarification: true,
+      },
+      sessionId: activeSessionId,
     });
   }
 
@@ -385,6 +471,12 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
 
   function changeSelectedQuerySourceId(nextSourceId: string) {
     setSelectedQuerySourceIdState(nextSourceId);
+  }
+
+  function replyToTurn(turnId: string) {
+    const target = chatTurns.find((turn) => turn.id === turnId);
+    if (!target || (target.role === "assistant" && target.status !== "complete")) return;
+    setReplyToTurnId(turnId);
   }
 
   async function clarifyArtifactJob(jobId: string, answers: Record<string, string>) {
@@ -438,9 +530,11 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
     chatTurns,
     cancelPendingTurn,
     cancelArtifactJob,
+    cancelReply: () => setReplyToTurnId(null),
     handleQuestionSubmit,
     handleRetry,
     expandSourceSearch,
+    chooseQuerySource,
     clarifyArtifactJob,
     activeSessionHasPendingTurn,
     generatingSessionId: activeGeneration?.sessionId ?? null,
@@ -449,6 +543,8 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
     latestResponse,
     loadChatSession,
     question,
+    replyTarget,
+    replyToTurn,
     resetChat,
     addScopedDocument,
     removeScopedDocument,
@@ -470,10 +566,11 @@ export function useChatSession(currentUser: User | null, historyEnabled = true) 
     },
     loadingSessionId: loadSessionMutation.isPending ? loadSessionMutation.variables ?? null : null,
     selectedSource,
+    selectedSourceTurnId,
     setSourceMode: changeSourceMode,
     setSelectedQuerySourceId: changeSelectedQuerySourceId,
     setQuestion,
-    setSelectedSource,
+    setSelectedSource: selectSource,
   };
 }
 

@@ -52,10 +52,11 @@ class FakeConnector:
         config: dict[str, Any],
         secrets: dict[str, Any],
         query: str,
+        parameters: dict[str, Any] | None = None,
         row_limit: int,
         timeout_seconds: int,
     ) -> ConnectorQueryResult:
-        _ = secrets, timeout_seconds
+        _ = secrets, parameters, timeout_seconds
         rows = [
             item
             for item in config.get("live_query_rows", config.get("records", []))

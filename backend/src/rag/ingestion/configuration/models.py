@@ -9,6 +9,7 @@ from typing import Protocol
 @dataclass(frozen=True)
 class IngestConfigRecord:
     worker_concurrency: int = 1
+    folder_snapshot_max_files: int = 100
     ocr_review_confidence_threshold: float = 0.9
     pdf_image_review_threshold: int = 64
     vision_layout_repair_enabled: bool = False

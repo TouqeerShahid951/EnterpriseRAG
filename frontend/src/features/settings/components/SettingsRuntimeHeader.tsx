@@ -1,8 +1,8 @@
-import { Boxes, Cpu, ServerCog } from "lucide-react";
+import { Boxes, Cpu, Palette, ServerCog } from "lucide-react";
 
 import { Fact } from "@/components/layout/Common";
 
-export type ConfigPanel = "models" | "services" | "workers";
+export type ConfigPanel = "models" | "services" | "workers" | "branding";
 
 export function ConfigPanelTabs({ onChange, value }: { value: ConfigPanel; onChange: (value: ConfigPanel) => void }) {
   const items: Array<{
@@ -29,10 +29,16 @@ export function ConfigPanelTabs({ onChange, value }: { value: ConfigPanel; onCha
       description: "Tune ingestion capacity, OCR review gates, and enrichment behavior.",
       icon: <Cpu size={18} />,
     },
+    {
+      id: "branding",
+      label: "Branding",
+      description: "Set the application name, logo, and primary color.",
+      icon: <Palette size={18} />,
+    },
   ];
 
   return (
-    <nav aria-label="Runtime Settings sections" className="grid gap-2 lg:grid-cols-3">
+    <nav aria-label="Runtime Settings sections" className="grid gap-2 lg:grid-cols-4">
       {items.map((item) => {
         const active = value === item.id;
         return (

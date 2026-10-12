@@ -80,7 +80,14 @@ class PostgresChatHistoryRepository(PostgresConnectionMixin):
         row = self._execute_optional(
             """
             SELECT s.*, COALESCE(
-                jsonb_agg(t.payload ORDER BY t.turn_index) FILTER (WHERE t.turn_index IS NOT NULL),
+                jsonb_agg(
+                    CASE
+                        WHEN t.role = 'assistant' AND t.client_request_id IS NOT NULL
+                        THEN t.payload || jsonb_build_object('clientRequestId', t.client_request_id)
+                        ELSE t.payload
+                    END
+                    ORDER BY t.turn_index
+                ) FILTER (WHERE t.turn_index IS NOT NULL),
                 '[]'::jsonb
             ) AS turns
             FROM chat_sessions s
@@ -136,6 +143,7 @@ class PostgresChatHistoryRepository(PostgresConnectionMixin):
         assistant_turn: dict[str, Any],
         client_request_id: str | None = None,
         request_fingerprint: str | None = None,
+        continue_source_clarification: bool = False,
     ) -> ChatSessionRecord:
         with self._connect() as conn:
             with conn.transaction():
@@ -162,7 +170,7 @@ class PostgresChatHistoryRepository(PostgresConnectionMixin):
                 if client_request_id is not None:
                     existing_rows = conn.execute(
                         """
-                        SELECT role, request_fingerprint
+                        SELECT role, request_fingerprint, payload
                         FROM chat_session_turns
                         WHERE session_id = %s
                           AND user_id = %s
@@ -178,34 +186,68 @@ class PostgresChatHistoryRepository(PostgresConnectionMixin):
                         ),
                     ).fetchall()
                 if existing_rows:
-                    if any(
+                    if continue_source_clarification and not any(
+                        row["role"] == "assistant"
+                        and _has_source_clarification(row["payload"])
+                        for row in existing_rows
+                    ):
+                        raise ChatHistoryRequestConflict(
+                            "client request does not reference a source clarification"
+                        )
+                    if not continue_source_clarification and any(
                         row["request_fingerprint"] != request_fingerprint
                         for row in existing_rows
                     ):
                         raise ChatHistoryRequestConflict(
                             "client_request_id was already used for a different query request"
                         )
-                    result = conn.execute(
-                        """
-                        UPDATE chat_session_turns
-                        SET payload = %s::jsonb
-                        WHERE session_id = %s
-                          AND user_id = %s
-                          AND permission_version = %s
-                          AND client_request_id = %s
-                          AND role = 'assistant'
-                        """,
-                        (
-                            json.dumps(assistant_turn),
-                            session_id,
-                            user_id,
-                            permission_version,
-                            client_request_id,
-                        ),
-                    )
-                    if result.rowcount != 1:
+                    if continue_source_clarification:
+                        result = conn.execute(
+                            """
+                            UPDATE chat_session_turns
+                            SET payload = CASE WHEN role = 'assistant' THEN %s::jsonb ELSE payload END,
+                                request_fingerprint = %s
+                            WHERE session_id = %s
+                              AND user_id = %s
+                              AND permission_version = %s
+                              AND client_request_id = %s
+                            """,
+                            (
+                                json.dumps(assistant_turn),
+                                request_fingerprint,
+                                session_id,
+                                user_id,
+                                permission_version,
+                                client_request_id,
+                            ),
+                        )
+                    else:
+                        result = conn.execute(
+                            """
+                            UPDATE chat_session_turns
+                            SET payload = %s::jsonb
+                            WHERE session_id = %s
+                              AND user_id = %s
+                              AND permission_version = %s
+                              AND client_request_id = %s
+                              AND role = 'assistant'
+                            """,
+                            (
+                                json.dumps(assistant_turn),
+                                session_id,
+                                user_id,
+                                permission_version,
+                                client_request_id,
+                            ),
+                        )
+                    expected_rows = 2 if continue_source_clarification else 1
+                    if result.rowcount != expected_rows:
                         raise RuntimeError("saved chat request had no assistant turn")
                 else:
+                    if continue_source_clarification:
+                        raise ChatHistoryRequestConflict(
+                            "source clarification request was not found"
+                        )
                     row = conn.execute(
                         """
                         SELECT COALESCE(MAX(turn_index), -1) AS last_index
@@ -302,6 +344,15 @@ class PostgresChatHistoryRepository(PostgresConnectionMixin):
     def _ensure_tables(self) -> None:
         with self._connect() as conn:
             conn.execute(CHAT_HISTORY_SCHEMA_SQL)
+
+
+def _has_source_clarification(turn: object) -> bool:
+    if not isinstance(turn, dict):
+        return False
+    response = turn.get("response")
+    return isinstance(response, dict) and isinstance(
+        response.get("source_clarification"), dict
+    )
 
 
 def session_from_row(row: dict[str, Any]) -> ChatSessionRecord:

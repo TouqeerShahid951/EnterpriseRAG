@@ -15,6 +15,13 @@ class UnsupportedPdfError(WorkerStepError):
         super().__init__("unsupported_pdf_type", "PDF does not contain enough native text for this milestone.")
 
 
+class IncompletePdfError(WorkerStepError):
+    def __init__(self, provenance: dict[str, object]) -> None:
+        self.provenance = provenance
+        failed = [entry["page"] for entry in provenance.get("page_statuses", []) if entry["status"] == "failed"]
+        super().__init__("pdf_incomplete", f"PDF extraction failed for pages {failed}. Reprocess these pages before indexing.")
+
+
 class UnsupportedDocumentError(WorkerStepError):
     def __init__(self) -> None:
         super().__init__("unsupported_document_type", "Document format is not supported for ingestion.")

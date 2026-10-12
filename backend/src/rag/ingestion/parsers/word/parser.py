@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
 from rag.ingestion.errors import UnsupportedDocumentError, WorkerStepError
 from rag.ingestion.parsers.docling.adapter import parse_docling_docx
@@ -78,4 +79,11 @@ def validated_docx_items(file_bytes: bytes) -> list[ParsedPdfItem]:
         ) from exc
     if not items or not "".join(item.text for item in items).strip():
         raise UnsupportedDocumentError()
+    items = [
+        replace(
+            item,
+            quality_flags=sorted({*item.quality_flags, "source:docx_structured"}),
+        )
+        for item in items
+    ]
     return apply_hierarchy(renumber_items(items))

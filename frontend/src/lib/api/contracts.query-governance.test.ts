@@ -41,6 +41,7 @@ describe("queryApi", () => {
       session_id: "session-1",
       source_mode: "db_only",
       query_source_id: "connector_catalog:catalog-1",
+      query_source_ids: ["connector_catalog:catalog-1", "connector_catalog:catalog-2"],
       allow_source_expansion: true,
     });
 
@@ -53,6 +54,7 @@ describe("queryApi", () => {
       session_id: "session-1",
       source_mode: "db_only",
       query_source_id: "connector_catalog:catalog-1",
+      query_source_ids: ["connector_catalog:catalog-1", "connector_catalog:catalog-2"],
       allow_source_expansion: true,
     }));
   });

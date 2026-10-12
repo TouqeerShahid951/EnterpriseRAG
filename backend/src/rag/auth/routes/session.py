@@ -10,6 +10,7 @@ from rag.auth.identity_models import IdentityRepository, UserRecord
 from rag.auth.identity_repository import get_identity_repository
 from rag.auth.schemas.session import (
     AuthUser,
+    ChangeEmailRequest,
     ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
@@ -137,6 +138,49 @@ def change_password(
         )
     updated = repo.set_user_password(user.id, hash_password(payload.new_password))
     return to_auth_user(updated or user)
+
+
+@router.post(
+    "/change-email",
+    response_model=AuthUser,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {"model": ErrorResponse},
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+        status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
+    },
+    summary="Change email for the current account",
+)
+def change_email(
+    payload: ChangeEmailRequest,
+    request: Request,
+    response: Response,
+    user: UserRecord = Depends(require_current_user),
+    repo: IdentityRepository = Depends(get_identity_repository),
+    sessions: RefreshSessionStore = Depends(get_refresh_session_store),
+    audit_repo: DocumentRepository = Depends(get_document_repository),
+) -> AuthUser:
+    require_csrf(request)
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "invalid_current_password", "message": "Current password is incorrect."},
+        )
+    try:
+        updated = repo.set_user_email(user.id, payload.new_email)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"code": "invalid_email", "message": str(exc)}) from exc
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={"code": "inactive_user", "message": "User is inactive or does not exist."})
+    sessions.revoke_user(user.id)
+    issue_login(response, updated, sessions)
+    audit_repo.append_audit_event(
+        event_type="auth.email_changed",
+        actor_id=user.id,
+        target_type="user",
+        target_id=user.id,
+        payload={"previous_email": user.email, "email": updated.email},
+    )
+    return to_auth_user(updated)
 
 
 def issue_login(response: Response, user: UserRecord, sessions: RefreshSessionStore) -> str:

@@ -45,7 +45,8 @@ export function DocumentFilters({ ingestFilter, onClear, resultCount, search, se
         <select value={ingestFilter} onChange={(event) => setIngestFilter(event.target.value as DocumentIngestFilter)} className="sv-select sv-filter-select" aria-label="Ingestion filter">
           <option value="all">All Ingestion</option>
           <option value="indexed">Indexed</option>
-          <option value="active">Active Processing</option>
+          <option value="attention">Needs attention</option>
+          <option value="active">Not indexed</option>
           <option value="processing">Processing</option>
           <option value="human_review">Needs Review</option>
           <option value="cancelled">Cancelled</option>

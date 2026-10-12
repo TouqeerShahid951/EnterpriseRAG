@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from rag.shared.contracts.rag_defaults import (
+    DEFAULT_ANSWER_OUTPUT_TOKENS, DEFAULT_ANSWER_CONTEXT_TOKENS, SYNTHESIS_PROMPT_HEADROOM_TOKENS,
+)
+
 from ...shared.persistence import PostgresConnectionMixin
 from ..configuration.models import ACTIVE_CONFIG_KEY, RagConfigRecord
 from ..configuration.validation import record_from_row, with_updated_at
@@ -27,13 +31,14 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                 faithfulness_base_url, ingestion_base_url, vision_base_url, chat_model, embed_model, reasoning_model,
                 sql_generation_model, routing_model,
                 faithfulness_model, ingestion_model, vision_model, thinking_enabled, json_num_predict, retrieval_token_budget,
-                query_planner_enabled, evidence_gate_policy, faithfulness_policy, reranker_model,
+                answer_output_tokens, answer_context_tokens,
+                context_resolver_enabled, query_planner_enabled, evidence_gate_policy, faithfulness_policy, reranker_model,
                 chat_timeout_seconds, routing_timeout_seconds, reasoning_timeout_seconds,
                 faithfulness_timeout_seconds, embed_timeout_seconds, health_status,
                 health_message, embedding_dimension, chat_latency_ms, embed_latency_ms,
                 last_checked_at, updated_by, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::uuid, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::uuid, %s)
             ON CONFLICT (config_key) DO UPDATE SET
                 provider = EXCLUDED.provider,
                 embedding_provider = EXCLUDED.embedding_provider,
@@ -60,6 +65,9 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                 thinking_enabled = EXCLUDED.thinking_enabled,
                 json_num_predict = EXCLUDED.json_num_predict,
                 retrieval_token_budget = EXCLUDED.retrieval_token_budget,
+                answer_output_tokens = EXCLUDED.answer_output_tokens,
+                answer_context_tokens = EXCLUDED.answer_context_tokens,
+                context_resolver_enabled = EXCLUDED.context_resolver_enabled,
                 query_planner_enabled = EXCLUDED.query_planner_enabled,
                 evidence_gate_policy = EXCLUDED.evidence_gate_policy,
                 faithfulness_policy = EXCLUDED.faithfulness_policy,
@@ -106,6 +114,9 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                 saved.thinking_enabled,
                 saved.json_num_predict,
                 saved.retrieval_token_budget,
+                saved.answer_output_tokens,
+                saved.answer_context_tokens,
+                saved.context_resolver_enabled,
                 saved.query_planner_enabled,
                 saved.evidence_gate_policy,
                 saved.faithfulness_policy,
@@ -165,6 +176,7 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
                     thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                     json_num_predict INTEGER NOT NULL DEFAULT 4096,
                     retrieval_token_budget INTEGER NOT NULL DEFAULT 12000,
+                    context_resolver_enabled BOOLEAN NOT NULL DEFAULT TRUE,
                     query_planner_enabled BOOLEAN NOT NULL DEFAULT TRUE,
                     evidence_gate_policy TEXT NOT NULL DEFAULT 'adaptive',
                     faithfulness_policy TEXT NOT NULL DEFAULT 'adaptive',
@@ -273,6 +285,9 @@ class PostgresRagConfigRepository(PostgresConnectionMixin):
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS json_num_predict INTEGER NOT NULL DEFAULT 4096")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS retrieval_token_budget INTEGER NOT NULL DEFAULT 12000")
+            conn.execute(f"ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS answer_output_tokens INTEGER NOT NULL DEFAULT {DEFAULT_ANSWER_OUTPUT_TOKENS} CHECK (answer_output_tokens BETWEEN 256 AND 32768)")
+            conn.execute(f"ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS answer_context_tokens INTEGER NOT NULL DEFAULT {DEFAULT_ANSWER_CONTEXT_TOKENS} CHECK (answer_context_tokens BETWEEN 2048 AND 262144 AND answer_output_tokens + {SYNTHESIS_PROMPT_HEADROOM_TOKENS} < answer_context_tokens)")
+            conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS context_resolver_enabled BOOLEAN NOT NULL DEFAULT TRUE")
             conn.execute("ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS query_planner_enabled BOOLEAN NOT NULL DEFAULT TRUE")
             conn.execute(
                 "ALTER TABLE workspace_rag_config ADD COLUMN IF NOT EXISTS "

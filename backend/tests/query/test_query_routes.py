@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from dataclasses import dataclass
+from time import sleep
 from typing import Any
 
 import pytest
@@ -31,6 +32,16 @@ from rag.query.service import get_local_rag_service
 
 
 CSRF_TOKEN = "query-route-csrf"
+
+
+@pytest.fixture(autouse=True)
+def analytics_repository(monkeypatch):
+    from rag.query import route_access
+    from rag.query.analytics.adapters.memory import InMemoryAnalyticsRepository
+
+    repository = InMemoryAnalyticsRepository()
+    monkeypatch.setattr(route_access, "get_analytics_repository", lambda: repository)
+    return repository
 
 
 def _user(
@@ -173,6 +184,7 @@ def test_run_query_preserves_role_and_group_rejections(
     payload: dict[str, object],
     expected_status: int,
     expected_code: str,
+    analytics_repository,
 ) -> None:
     service = RecordingRagService()
     client = _execution_client(service=service, user=user)
@@ -182,6 +194,14 @@ def test_run_query_preserves_role_and_group_rejections(
     assert response.status_code == expected_status
     assert response.json()["detail"]["code"] == expected_code
     assert service.answer_calls == []
+    records = list(analytics_repository._records.values())
+    if expected_status == 403:
+        assert len(records) == 1
+        assert records[0].outcome == "access_denied"
+        assert records[0].actor_id == user.id
+        assert records[0].reason_code == expected_code
+    else:
+        assert records == []
 
 
 @pytest.mark.parametrize(
@@ -205,6 +225,47 @@ def test_run_query_maps_source_access_errors(
 
     assert response.status_code == expected_status
     assert response.json()["detail"]["code"] == expected_code
+    assert service.answer_calls == []
+
+
+def test_run_query_rejects_an_inaccessible_source_in_multi_database_scope() -> None:
+    service = RecordingRagService()
+    profile_repo = InMemoryConnectorProfileRepository()
+    profile = profile_repo.create_profile(
+        profile_id="profile-1",
+        name="Cases",
+        connector_type="fake",
+        public_config={},
+        encrypted_secrets="encrypted",
+        created_by="admin",
+    )
+    catalog = profile_repo.save_schema_catalog(
+        profile_id=profile.id,
+        connector_type="fake",
+        catalog_json={"name": "Cases", "tables": [], "relationships": []},
+        status="approved",
+        group_path="/ops",
+        clearance_level="NATO_RESTRICTED",
+        created_by="admin",
+        approved_by="admin",
+    )
+    client = _execution_client(service=service, profile_repo=profile_repo)
+
+    response = client.post(
+        "/query",
+        json={
+            "query": "Compare cases",
+            "source_mode": "db_only",
+            "query_source_ids": [
+                f"connector_catalog:{catalog.id}",
+                "connector_catalog:missing",
+            ],
+        },
+        **_csrf_request(),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "query_source_forbidden"
     assert service.answer_calls == []
 
 
@@ -315,6 +376,44 @@ def test_stream_maps_service_failure_to_an_sse_error() -> None:
     assert '"message": "qdrant unavailable: timed out"' in response.text
 
 
+def test_stream_keeps_connection_alive_during_blocking_work(monkeypatch) -> None:
+    from threading import Event
+
+    released = Event()
+
+    class SlowService:
+        def stream_query(self, *args, **kwargs):
+            assert released.wait(timeout=2)
+            yield QueryStreamEvent(event="done", data={"answer": "Checked"})
+
+    class ConnectedRequest(DisconnectingRequest):
+        async def is_disconnected(self) -> bool:
+            return False
+
+    monkeypatch.setattr(execution_routes, "_STREAM_KEEPALIVE_SECONDS", 0.01)
+
+    async def exercise():
+        response = await execution_routes.stream_query(
+            QueryRequest(query="Summarize the contract"),
+            ConnectedRequest(),
+            user=_user(),
+            identity_repo=StubIdentityRepository(),
+            schedule_repo=InMemoryFolderScheduleRepository(),
+            connector_profile_repo=InMemoryConnectorProfileRepository(),
+            rag_service=SlowService(),
+        )
+        try:
+            first = await anext(response.body_iterator)
+            assert first == ": keepalive\n\n"
+        finally:
+            released.set()
+        remaining = [chunk async for chunk in response.body_iterator]
+        assert any("event: done" in chunk for chunk in remaining)
+        assert response.headers["X-Accel-Buffering"] == "no"
+
+    asyncio.run(exercise())
+
+
 def test_stream_disconnect_cancels_and_closes_the_query_iterator() -> None:
     iterator = ClosableQueryIterator()
     service = DisconnectAwareRagService(iterator)
@@ -334,6 +433,31 @@ def test_stream_disconnect_cancels_and_closes_the_query_iterator() -> None:
         return [chunk async for chunk in response.body_iterator]
 
     assert asyncio.run(exercise()) == []
+    assert service.cancellation_token is not None
+    assert service.cancellation_token.is_cancelled
+    assert iterator.closed
+
+
+def test_stream_disconnect_is_detected_while_query_work_is_running() -> None:
+    iterator = CancellationAwareQueryIterator()
+    service = DisconnectAwareRagService(iterator)
+    request = DisconnectingDuringWorkRequest()
+    user = _user()
+
+    async def exercise() -> list[str | bytes]:
+        response = await execution_routes.stream_query(
+            QueryRequest(query="What is the policy?"),
+            request,  # type: ignore[arg-type]
+            user=user,
+            identity_repo=StubIdentityRepository(),  # type: ignore[arg-type]
+            schedule_repo=InMemoryFolderScheduleRepository(),
+            connector_profile_repo=InMemoryConnectorProfileRepository(),
+            rag_service=service,  # type: ignore[arg-type]
+        )
+        return [chunk async for chunk in response.body_iterator]
+
+    assert asyncio.run(exercise()) == []
+    assert request.checks >= 2
     assert service.cancellation_token is not None
     assert service.cancellation_token.is_cancelled
     assert iterator.closed
@@ -367,6 +491,7 @@ class DisconnectAwareRagService:
     ) -> ClosableQueryIterator:
         _ = request, user
         self.cancellation_token = cancellation_token
+        setattr(self.iterator, "cancellation_token", cancellation_token)
         return self.iterator
 
 
@@ -379,11 +504,30 @@ class DisconnectingRequest:
         return True
 
 
+class DisconnectingDuringWorkRequest(DisconnectingRequest):
+    def __init__(self) -> None:
+        self.checks = 0
+
+    async def is_disconnected(self) -> bool:
+        self.checks += 1
+        return self.checks > 1
+
+
+class CancellationAwareQueryIterator(ClosableQueryIterator):
+    cancellation_token: Any | None = None
+
+    def __next__(self) -> QueryStreamEvent:
+        while self.cancellation_token is None or not self.cancellation_token.is_cancelled:
+            sleep(0.01)
+        raise StopIteration
+
+
 def _execution_client(
     *,
     service: object,
     user: UserRecord | None = None,
     history_repo: object | None = None,
+    profile_repo: object | None = None,
 ) -> TestClient:
     app = FastAPI()
     app.include_router(query_routes.router)
@@ -396,7 +540,7 @@ def _execution_client(
         InMemoryFolderScheduleRepository()
     )
     app.dependency_overrides[get_connector_profile_repository] = lambda: (
-        InMemoryConnectorProfileRepository()
+        profile_repo or InMemoryConnectorProfileRepository()
     )
     app.dependency_overrides[get_local_rag_service] = lambda: service
     client = TestClient(app)

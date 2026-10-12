@@ -108,6 +108,76 @@ model-output failures; worker lifecycle interruptions continue to the task
 boundary. Job cancellation is checked between generation calls, so an in-flight
 provider request remains bounded by its configured HTTP timeout.
 
+## Query citations and faithfulness
+
+Query answers stream directly from one generation pass and use the existing
+bracketed source labels. Adaptive faithfulness uses the local reranker for clear,
+directly cited answers and sends uncertain or higher-risk answers to the AI judge.
+Always sends every eligible answer to the judge; Never skips answer judging.
+
+Source access and revision checks still run before response delivery. Evidence is
+fit automatically within the route's evidence budget and the deployed model's
+configured context window.
+
+## Operational query analytics
+
+The query owner stores historical execution metadata and bounded evidence lineage
+under `rag.query.analytics`. Platform Admin APIs live at
+`/api/v1/admin/query-analytics`; the browser page is `/operational-analytics`.
+Default aggregates include production chat answers only (`origin=chat`,
+`work_kind=answer`). Select another population explicitly, or use `all` for either
+filter. P50/P95 stage timings sum retries within each execution first.
+
+Analytics access does not grant conversation or document-content access. Candidate
+capture and historical responses omit titles, evidence text and freeform errors;
+the inspector displays identifiers, scores and timing metadata. Collection errors
+emit safe warnings and queries continue, so stored rows cannot prove complete
+capture during outages. Repository construction performs no DDL: API bootstrap
+owns the idempotent analytics schema.
+
+Compose configures `query-analytics-maintenance` using the API image. It runs every
+`QUERY_ANALYTICS_MAINTENANCE_INTERVAL_SECONDS` (default 300 seconds), bounded by
+`QUERY_ANALYTICS_MAINTENANCE_BATCH_SIZE` (default 500 per cleanup category; summary
+deletion shares its budget with reconciliation when that is explicitly invoked).
+`QUERY_ANALYTICS_LINEAGE_RETENTION_DAYS` defaults to seven days after completion;
+expiry removes evidence/quality detail and preserves pipeline timings.
+`QUERY_ANALYTICS_RETENTION_DAYS` defaults to 30 days from request start for terminal
+summaries and 30 days from occurrence for boundary events. Active executions are
+not deleted.
+
+New executions heartbeat during blocking work and streaming, including tracker,
+evaluation and artifact-submission paths. The interval is the smaller of 30
+seconds or one third of `QUERY_ANALYTICS_RECONCILIATION_GRACE_SECONDS`; its default
+3600 seconds is the maximum heartbeat silence, not a query-duration limit.
+Maintenance considers only rows with a recorded heartbeat and an expired renewed
+deadline. It records `interrupted` with `reason_code=analytics_heartbeat_expired`;
+the UI calls this **Heartbeat overdue** and explains that interruption is inferred.
+With the default five-minute cleanup interval, detection normally occurs within
+60–65 minutes of the last successful heartbeat, plus any cleanup backlog.
+
+Heartbeat storage failures log a safe warning and do not cancel queries. A returning
+heartbeat restores an inferred interruption to in-flight; an actual final result
+can replace the inference. Genuine terminal outcomes remain immutable. Inferred
+interruptions retain their summary for 30 days after reconciliation, allowing
+late recovery even for a request that started outside the retention window.
+Older rows without heartbeat tracking are never reconciled from age alone and
+appear as **Status unknown**. No liveness data is fabricated for historical rows.
+
+After rebuilding the normal images and starting the service, inspect its health
+and successful-cycle logs. The heartbeat is updated only after success. For a
+manual bounded cycle through the existing CLI:
+
+```bash
+docker compose run --rm --no-deps query-analytics-maintenance python -m rag.ops.query_analytics_maintenance --once
+docker compose exec query-analytics-maintenance python -m apps.background.query_analytics_cleanup --healthcheck
+docker compose logs --tail=20 query-analytics-maintenance
+```
+
+The CLI exits nonzero on failure; the scheduled process retries and becomes
+unhealthy when its last success is stale. No backfill is performed. The deployment
+status and validation record are in
+[`docs/implementation-plans/operational-analytics/README.md`](../docs/implementation-plans/operational-analytics/README.md).
+
 ## Runtime processes
 
 The deployment has four kinds of long-running process:
@@ -117,18 +187,19 @@ The deployment has four kinds of long-running process:
   and `evaluation-worker` consume Celery queues. Ingestion and GraphRAG are
   separate services with different queues, but intentionally share the heavy
   document-pipeline Celery app, image, and worker configuration.
-- **Background services:** `artifact-maintenance`, `folder-scheduler`, and
-  `ingest-maintenance` are separate containers and operating-system processes,
-  not Celery workers. They periodically clean expired artifacts, enqueue due
-  folder ingestions, and recover or fail stale ingestion jobs, respectively.
+- **Background services:** `artifact-maintenance`, `folder-scheduler`,
+  `ingest-maintenance`, and `query-analytics-maintenance` are separate containers
+  and operating-system processes, not Celery workers. They clean expired
+  artifacts, enqueue due folder ingestions, recover or fail stale ingestion jobs,
+  and expire query analytics, respectively.
 - **Deployment control:** `deployment-controller` is an internal, request-driven
   control-plane service. It serializes authenticated vLLM apply requests and
   recreates only allowlisted Compose services through the Docker socket. It is
   packaged separately from the API and does not process user requests directly.
 
 Workers react to individual queued messages. Background services wake on a
-schedule, inspect system state, perform one maintenance cycle under a PostgreSQL
-advisory lock, and sleep. Process startup and loop wiring belong in `apps`; the
+schedule, inspect system state, perform one maintenance cycle and sleep. They use
+owner-specific advisory or row locks for concurrent work. Process startup and loop wiring belong in `apps`; the
 cleanup, scheduling, and recovery behavior belongs to its owning feature under
 `src/rag`.
 
@@ -194,3 +265,20 @@ From the repository root, validate deployment wiring with:
 docker compose config --quiet
 docker compose build ingestion-worker
 ```
+
+### Document attention and recovery
+
+The Document Overview counts current, non-deleted, authorized documents.
+Attention is exactly `failed`, `human_review`, or `unknown`; cancelled documents
+are counted separately, alongside indexed and processing states. Attention
+entries include the latest job's safe error and timestamp for that visible
+document. A mismatched latest job state is shown explicitly, not interpreted as
+resolution. These are persisted ingestion states, not a live vector-index audit.
+
+The browser's `lifecycle=current&ingest=attention` filter matches this definition.
+Reingestion acceptance is reported as queued, not successful indexing. Recent
+recovery attempts remain available on document pages after a document leaves a
+failed filter; the five latest attempts link to the full ingestion history.
+Job status changes refresh document snapshots. Overview scope is all documents
+visible to the account, explicitly labeled; document-list space filters remain
+available for narrower inspection.

@@ -189,6 +189,10 @@ def _visible_job_where(
 ) -> tuple[str, tuple[Any, ...]]:
     clauses = ["document.clearance_level = ANY(%s::text[])"]
     params: list[Any] = [list(access.clearance_levels)]
+    if filters.abbreviation_glossary_only:
+        clauses.append("document.doc_type = 'abbreviation_glossary'")
+    elif not filters.include_abbreviation_glossary:
+        clauses.append("COALESCE(document.doc_type, '') <> 'abbreviation_glossary'")
     if access.group_paths is not None:
         visible_groups = list(access.group_paths)
         clauses.append(

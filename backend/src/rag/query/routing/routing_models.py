@@ -36,6 +36,7 @@ RetrievalCapability = Literal[
     "document_navigation",
     "decomposed_search",
 ]
+EvidenceCapability = Literal["indexed_search", "connector_query", "graph_query"]
 ResponseMode = Literal[
     "lookup",
     "explanation",
@@ -46,6 +47,7 @@ ResponseMode = Literal[
 ]
 QueryScope = Literal["local", "document", "corpus"]
 CoverageMode = Literal["focused", "exhaustive"]
+SummaryMode = Literal["document", "section", "topic", "multi_document"]
 TemporalScope = Literal["current", "historical", "as_of", "all"]
 RouteMethod = Literal["rules", "llm_verifier", "llm_planner", "fallback"]
 SearchMode = Literal["hybrid", "multi_query_hybrid", "metadata", "structured_first"]
@@ -86,6 +88,25 @@ class QuerySignals:
 
 
 @dataclass(frozen=True)
+class SourceAssignment:
+    source_id: str
+    capability: EvidenceCapability
+    required: bool = True
+
+
+@dataclass(frozen=True)
+class EvidenceNeed:
+    id: str
+    query: str
+    assignments: tuple[SourceAssignment, ...]
+
+
+@dataclass(frozen=True)
+class EvidencePlan:
+    needs: tuple[EvidenceNeed, ...]
+
+
+@dataclass(frozen=True)
 class RuleRouteResult:
     intent: RouteIntent
     secondary_intents: tuple[RouteIntent, ...]
@@ -106,8 +127,10 @@ class RoutePlan:
     response_mode: ResponseMode = "lookup"
     scope: QueryScope = "local"
     coverage: CoverageMode = "focused"
+    summary_mode: SummaryMode | None = None
     temporal_scope: TemporalScope = "current"
     sub_queries: tuple[str, ...] = ()
+    evidence_plan: EvidencePlan | None = None
     planner_reason: str = ""
     secondary_intents: tuple[RouteIntent, ...] = ()
     confidence: float = 0.0

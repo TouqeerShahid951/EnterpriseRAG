@@ -40,6 +40,8 @@ import type { ClearanceLevel, Document, User as AuthUser, VersionChainResponse }
 import { errorMessage, formatDate, formatDateTime } from "@/lib/utils/format";
 import type { GroupOption } from "@/lib/utils/groups";
 import { OwnerTransferControl, ShareControl, TopicEditor } from "@/features/documents/components/library/DocumentGovernanceControls";
+import { SpreadsheetReviewPanel } from "@/features/documents/components/library/SpreadsheetReviewPanel";
+import { documentViewerHref } from "@/features/source-viewer/utils/sourceViewer";
 
 
 const INSPECTOR_TABS: Array<{ id: InspectorTab; label: string }> = [
@@ -49,7 +51,7 @@ const INSPECTOR_TABS: Array<{ id: InspectorTab; label: string }> = [
   { id: "versions", label: "Versions" },
 ];
 
-type InspectorTab = "overview" | "governance" | "extracted" | "versions";
+type InspectorTab = "overview" | "governance" | "extracted" | "tables" | "versions";
 
 type DocumentInspectorProps = {
   document: Document | null;
@@ -154,7 +156,11 @@ export function DocumentInspector({ document, onClearanceChange, onClose, onDocu
   const topicsChanged = topicDraftKey !== selectedTopicKey;
   const canEditShares = isGlobalAdmin(user) && !isDeleted;
   const sharesChanged = shareDraftKey !== selectedShareKey;
-  const flagEntries = Object.entries(selected.metadata_flags ?? {}).filter(([, value]) => Boolean(value));
+  const flagEntries = Object.entries(selected.metadata_flags ?? {}).filter(([key, value]) => key !== "spreadsheet_review" && Boolean(value));
+  const isSpreadsheet = /\.(csv|xlsx)$/i.test(selected.title ?? "");
+  const inspectorTabs = isSpreadsheet
+    ? [...INSPECTOR_TABS.slice(0, 3), { id: "tables" as const, label: "Tables" }, INSPECTOR_TABS[3]]
+    : INSPECTOR_TABS;
 
   function addTopic(value: string) {
     const topic = value.trim();
@@ -219,7 +225,7 @@ export function DocumentInspector({ document, onClearanceChange, onClose, onDocu
       <div className="knowledge-inspector-actions">
         {!isDeleted ? (
           <>
-            <a href={documentsApi.contentUrl(selected.id)} target="_blank" rel="noreferrer" className="sv-action-secondary">
+            <a href={documentViewerHref(selected.id)} target="_blank" rel="noreferrer" className="sv-action-secondary">
               <Eye size={15} /> View
             </a>
             <a href={documentsApi.contentUrl(selected.id)} download className="sv-action-secondary">
@@ -257,7 +263,7 @@ export function DocumentInspector({ document, onClearanceChange, onClose, onDocu
         <span className="sv-pill">{clearanceLevelLabel(selected.clearance_level)}</span>
       </div>
       <div className="knowledge-inspector-tabs" role="tablist" aria-label="Document inspector sections">
-        {INSPECTOR_TABS.map((tab) => (
+        {inspectorTabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -433,6 +439,11 @@ export function DocumentInspector({ document, onClearanceChange, onClose, onDocu
               <p className="text-secondary">No version history recorded.</p>
             ) : null}
           </InspectorSection>
+        </div>
+      ) : null}
+      {inspectorTab === "tables" && isSpreadsheet ? (
+        <div className="knowledge-inspector-panel" role="tabpanel">
+          <SpreadsheetReviewPanel canEdit={writable && !isDeleted} documentId={selected.id} pending={pending} />
         </div>
       ) : null}
       </aside>

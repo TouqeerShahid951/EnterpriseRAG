@@ -341,6 +341,11 @@ class InMemoryIngestJobRepositoryMixin:
             document = self._documents.get(job.doc_id)
             if document is None or document.clearance_level not in access.clearance_levels:
                 continue
+            is_glossary = document.doc_type == "abbreviation_glossary"
+            if filters.abbreviation_glossary_only and not is_glossary:
+                continue
+            if not filters.include_abbreviation_glossary and is_glossary:
+                continue
             document = self._with_shares(document)
             if access.group_paths is not None and not visible_groups.intersection(document.access_group_paths):
                 continue

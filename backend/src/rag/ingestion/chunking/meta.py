@@ -44,28 +44,6 @@ def table_json(items: list[ParsedPdfItem]) -> dict[str, object] | None:
     return next((item.table_json for item in items if item.table_json), None)
 
 
-def source_regions(items: list[ParsedPdfItem]) -> list[dict[str, object]]:
-    regions: list[dict[str, object]] = []
-    for item in items:
-        if item.bbox is None and not item.image_asset_id:
-            continue
-        region: dict[str, object] = {
-            "page": item.page_start,
-            "bbox": [float(value) for value in item.bbox] if item.bbox is not None else None,
-            "text": item.text,
-            "region_type": item.item_type,
-            "confidence": item.confidence,
-        }
-        if item.image_asset_id:
-            region["image_asset_id"] = item.image_asset_id
-        if item.image_source_kind:
-            region["image_source_kind"] = item.image_source_kind
-        if item.extraction_method:
-            region["extraction_method"] = item.extraction_method
-        regions.append(region)
-    return regions
-
-
 def merge_item(items: list[ParsedPdfItem]) -> ParsedPdfItem:
     return ParsedPdfItem(
         index=items[0].index,

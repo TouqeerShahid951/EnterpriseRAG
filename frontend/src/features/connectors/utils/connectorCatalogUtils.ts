@@ -10,10 +10,32 @@ export type AiDraftProgress = {
 
 export type SchemaCatalogJson = Record<string, unknown> & {
   name?: string;
+  description?: string;
   tables?: SchemaCatalogTable[];
   relationships?: SchemaCatalogRelationship[];
   business_rules?: string[];
+  routing_profile?: SchemaCatalogRoutingProfile;
+  verified_queries?: SchemaCatalogVerifiedQuery[];
   ai_enrichment?: unknown;
+};
+
+export type SchemaCatalogVerifiedQuery = Record<string, unknown> & {
+  name: string;
+  question: string;
+  sql: string;
+};
+
+export type SchemaCatalogRoutingProfile = Record<string, unknown> & {
+  capabilities: string[];
+  data_origin: string;
+  domains: string[];
+  entities: string[];
+  freshness: string;
+  metrics: string[];
+  provenance: string;
+  synonyms: string[];
+  example_questions: string[];
+  exclusions: string[];
 };
 
 export type SchemaCatalogTable = Record<string, unknown> & {
@@ -79,14 +101,43 @@ export function normalizeCatalogJson(value: Record<string, unknown>): SchemaCata
     right_columns: Array.isArray(relationship.right_columns) ? relationship.right_columns.filter(isString) : [],
   })) : [];
   const businessRules = Array.isArray(value.business_rules) ? value.business_rules.filter(isString) : [];
+  const rawRoutingProfile = isRecord(value.routing_profile) ? value.routing_profile : {};
+  const routingProfile: SchemaCatalogRoutingProfile = {
+    ...rawRoutingProfile,
+    capabilities: stringList(rawRoutingProfile.capabilities),
+    data_origin: stringValue(rawRoutingProfile.data_origin),
+    domains: stringList(rawRoutingProfile.domains),
+    entities: stringList(rawRoutingProfile.entities),
+    freshness: stringValue(rawRoutingProfile.freshness),
+    metrics: stringList(rawRoutingProfile.metrics),
+    provenance: stringValue(rawRoutingProfile.provenance),
+    synonyms: stringList(rawRoutingProfile.synonyms),
+    example_questions: stringList(rawRoutingProfile.example_questions),
+    exclusions: stringList(rawRoutingProfile.exclusions),
+  };
+  const verifiedQueries = Array.isArray(value.verified_queries)
+    ? value.verified_queries.filter(isRecord).map((item) => ({
+        ...item,
+        name: stringValue(item.name),
+        question: stringValue(item.question),
+        sql: stringValue(item.sql),
+      })).filter((item) => item.question || item.sql)
+    : [];
   return {
     ...value,
     name: typeof value.name === "string" ? value.name : "",
+    description: typeof value.description === "string" ? value.description : "",
     tables,
     relationships,
     business_rules: businessRules,
+    routing_profile: routingProfile,
+    verified_queries: verifiedQueries,
     ai_enrichment: value.ai_enrichment,
   };
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter(isString) : [];
 }
 
 export function schemaCatalogAiEnrichmentStatus(value: Record<string, unknown>): string {

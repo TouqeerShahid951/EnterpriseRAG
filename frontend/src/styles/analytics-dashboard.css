@@ -71,7 +71,7 @@
 .analytics-chart-filters .analytics-caption { margin-top: .5rem; }
 .analytics-chart-plot { display: grid; grid-template-columns: 4rem minmax(0, 1fr); }
 .analytics-chart-data { position: relative; }
-.analytics-chart-tooltip { position: absolute; top: .75rem; z-index: 1; max-width: calc(100% - 1rem); padding: .5rem .75rem; border: 1px solid var(--color-surface-border); border-radius: .375rem; background: var(--color-surface-card); color: var(--color-on-surface); box-shadow: var(--shadow-raised); font-size: .75rem; line-height: 1.4; transform: translateX(-50%); pointer-events: none; }
+.analytics-chart-tooltip { position: absolute; top: .75rem; z-index: 1; width: max-content; max-width: calc(100% - 1rem); padding: .5rem .75rem; border: 1px solid var(--color-surface-border); border-radius: .375rem; background: var(--color-surface-card); color: var(--color-on-surface); box-shadow: var(--shadow-raised); font-size: .75rem; line-height: 1.4; transform: translateX(-50%); pointer-events: none; }
 .analytics-chart-tooltip strong { display: block; margin-bottom: .25rem; font-weight: 650; overflow-wrap: anywhere; }
 .analytics-chart-tooltip > div { display: flex; justify-content: space-between; gap: .75rem; overflow-wrap: anywhere; }
 .analytics-chart-tooltip > div span:last-child { font-weight: 600; text-align: right; }

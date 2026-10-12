@@ -16,19 +16,41 @@ const source: SourceAnchor = {
   page: 4,
   page_end: 4,
   page_start: 4,
-  source_regions: [],
+  citation_targets: [],
 };
 
 describe("EvidenceInspector", () => {
-  it("links the selected citation to the original source viewer in a new tab", () => {
+  it("links the selected citation to its originating chat turn in a new tab", () => {
     const markup = renderToStaticMarkup(
-      <EvidenceInspector onClose={vi.fn()} source={source} sourceCount={1} sourceNumber={1} />,
+      <EvidenceInspector onClose={vi.fn()} returnSessionId="session-1" returnTurnId="turn-1" source={source} sources={[source]} />,
     );
 
-    expect(markup).toContain("Open original source");
-    expect(markup).toContain("1 source");
-    expect(markup).toContain('href="/source-viewer?docId=doc-1&amp;chunkId=doc-1%3A7"');
+    expect(markup).toContain("Open Citation 1 in document preview");
+    expect(markup).toContain("1 citation");
+    expect(markup).toContain('href="/source-viewer?docId=doc-1&amp;chunkId=doc-1%3A7&amp;returnSessionId=session-1&amp;returnTurnId=turn-1"');
     expect(markup).toContain('target="_blank"');
+  });
+
+  it("groups a document's citations and opens on the selected citation", () => {
+    const secondSource: SourceAnchor = {
+      ...source,
+      chunk_id: "doc-1:12",
+      excerpt: "A second cited passage.",
+      page: 7,
+      page_end: 8,
+      page_start: 7,
+    };
+    const markup = renderToStaticMarkup(
+      <EvidenceInspector onClose={vi.fn()} source={secondSource} sources={[source, secondSource]} />,
+    );
+
+    expect(markup).toContain("2 citations");
+    expect(markup).toContain("Pages 4, 7-8");
+    expect(markup).toContain("Citation 1");
+    expect(markup).toContain("Citation 2");
+    expect(markup).toContain("Open Citation 2 in document preview");
+    expect(markup).toContain("citationChunkId=doc-1%3A7&amp;citationChunkId=doc-1%3A12");
+    expect(markup).toContain("A second cited passage.");
   });
 
   it("renders exact claim attribution as verified evidence", () => {
@@ -37,6 +59,8 @@ describe("EvidenceInspector", () => {
         onClose={vi.fn()}
         source={{
           ...source,
+          citation_protocol_version: 1,
+          provenance_kind: "native",
           attribution_status: "complete",
           evidence_windows: [
             {
@@ -58,14 +82,15 @@ describe("EvidenceInspector", () => {
             },
           ],
         }}
-        sourceCount={1}
-        sourceNumber={1}
+        sources={[source]}
       />,
     );
 
     expect(markup).toContain("Verified supporting passage");
+    expect(markup).toContain("Supports claim");
+    expect(markup).toContain('class="rag-evidence-highlight"');
     expect(markup).toContain(">Records must be retained for seven years.</mark>");
-    expect(markup).toContain("Show surrounding context");
+    expect(markup).toContain("Show full retrieved chunk");
   });
 
   it("labels semantic fallback and does not highlight it", () => {
@@ -74,6 +99,8 @@ describe("EvidenceInspector", () => {
         onClose={vi.fn()}
         source={{
           ...source,
+          citation_protocol_version: 1,
+          provenance_kind: "native",
           attribution_status: "complete",
           evidence_windows: [
             {
@@ -95,12 +122,13 @@ describe("EvidenceInspector", () => {
             },
           ],
         }}
-        sourceCount={1}
-        sourceNumber={1}
+        sources={[source]}
       />,
     );
 
-    expect(markup).toContain("Likely relevant passage, not verified");
+    expect(markup).toContain("Candidate passage from retrieved chunk — not verified");
+    expect(markup).toContain("Related answer claim");
+    expect(markup).toContain("Show full retrieved chunk");
     expect(markup).not.toContain("<mark");
   });
 
@@ -110,6 +138,8 @@ describe("EvidenceInspector", () => {
         onClose={vi.fn()}
         source={{
           ...source,
+          citation_protocol_version: 1,
+          provenance_kind: "native",
           attribution_status: "complete",
           evidence_windows: [
             {
@@ -134,8 +164,7 @@ describe("EvidenceInspector", () => {
             },
           ],
         }}
-        sourceCount={1}
-        sourceNumber={1}
+        sources={[source]}
       />,
     );
 
@@ -155,6 +184,8 @@ describe("EvidenceInspector", () => {
           doc_title: "Live connector query: Approved cases",
           chunk_id: "connector-live-scope:catalog-1:query:0",
           excerpt: "Connector type: postgres\nRows returned: 2\nstatus: open\nSQL: SELECT status FROM cases",
+          citation_protocol_version: 1,
+          provenance_kind: "native",
           attribution_status: "complete",
           evidence_windows: [
             {
@@ -183,8 +214,7 @@ describe("EvidenceInspector", () => {
           page_end: null,
           page_start: null,
         }}
-        sourceCount={1}
-        sourceNumber={1}
+        sources={[source]}
       />,
     );
 
@@ -215,8 +245,7 @@ describe("EvidenceInspector", () => {
           page_end: null,
           page_start: null,
         }}
-        sourceCount={1}
-        sourceNumber={1}
+        sources={[source]}
       />,
     );
 
@@ -237,8 +266,7 @@ describe("EvidenceInspector", () => {
           attribution_status: "pending",
           evidence_windows: [],
         }}
-        sourceCount={1}
-        sourceNumber={1}
+        sources={[source]}
       />,
     );
 
@@ -246,4 +274,17 @@ describe("EvidenceInspector", () => {
     expect(markup).toContain("Claim attribution is still being checked");
     expect(markup).not.toContain("<mark");
   });
+});
+
+it("does not certify historical windows without the citation protocol", () => {
+  const legacy: SourceAnchor = { ...source, attribution_status: "complete", evidence_windows: [{
+    claim_id: "old", claim: "Old claim", kind: "text", passage: "Records must be retained for seven years.",
+    source_start: 0, source_end: 40, quote_start: 0, quote_end: 40,
+    support_status: "verified", support_score: 1, truncated_start: false, truncated_end: false,
+    table_title: null, fields: [], highlight_ranges: [{ start: 0, end: 40 }],
+  }] };
+  const markup = renderToStaticMarkup(<EvidenceInspector source={legacy} sources={[legacy]} onClose={vi.fn()} />);
+  expect(markup).toContain("not verified");
+  expect(markup).not.toContain("Verified supporting passage");
+  expect(markup).not.toContain("<mark");
 });

@@ -20,9 +20,11 @@ from rag.evaluations.schemas import (
     EvaluationRunSummary,
 )
 from rag.evaluations.service import EvaluationActionError, EvaluationService, get_evaluation_service
+from rag.evaluations.query_tracker_routes import router as query_tracker_router
 
 
 router = APIRouter(prefix="/rag-evaluations", tags=["rag-evaluations"])
+router.include_router(query_tracker_router)
 
 
 @router.get("/datasets", response_model=EvaluationDatasetListResponse, summary="List RAG evaluation datasets")

@@ -18,6 +18,7 @@ from rag.ingestion.parsers.images import (
     pdf_visual_sources,
 )
 from rag.ingestion.parsers.models import DocumentParseResult, ParsedImageAsset, ParsedPdfItem
+from rag.ingestion.parsers.pdf.ocr_reconciliation import consolidate_image_ocr
 from rag.ingestion.parsers.provenance import parser_item_counts, parser_page_counts, quality_flag_counts
 
 logger = logging.getLogger(__name__)
@@ -153,7 +154,8 @@ def append_image_outputs(
     if not image_items and not image_assets and skipped_image_count <= 0:
         return parsed
     assets = [*parsed.assets, *image_assets]
-    items = renumber_items(merge_items_by_page_position(parsed.items, image_items))
+    parsed_items, image_items = consolidate_image_ocr(parsed.items, image_items)
+    items = renumber_items(merge_items_by_page_position(parsed_items, image_items))
     image_provenance = {"image_asset_count": len(assets)}
     if image_candidate_count is not None:
         image_provenance["image_analysis_candidate_count"] = image_candidate_count

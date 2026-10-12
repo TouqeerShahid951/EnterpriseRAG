@@ -112,10 +112,136 @@ describe("AssistantZipTurn pending draft", () => {
 
     const markup = renderToStaticMarkup(<AssistantZipTurn documents={[]} onSelectSource={() => undefined} selectedSource={null} turn={turn} />);
 
-    expect(markup).toContain("Drafting cited answer");
+    expect(markup).toContain("Running graph");
     expect(markup).toContain("<strong>Set the tone</strong>");
     expect(markup).toContain('class="rag-inline-citation"');
     expect(markup).not.toContain("**Set the tone**");
+  });
+});
+
+describe("AssistantZipTurn database clarification", () => {
+  it("renders the authorized database choices as buttons", () => {
+    const response = responseWithJob(baseJob);
+    response.artifact_job = null;
+    response.answer = "Which database source should I use?";
+    response.answer_status = "clarification";
+    response.source_clarification = {
+      question: "Do you mean current or archived orders?",
+      options: [
+        {
+          source_id: "connector_catalog:orders",
+          name: "Current orders",
+          description: "Active order records",
+        },
+        {
+          source_id: "connector_catalog:archive",
+          name: "Order archive",
+          description: "Historical order records",
+        },
+      ],
+    };
+    const markup = renderToStaticMarkup(
+      <AssistantZipTurn
+        documents={[]}
+        onChooseQuerySource={() => undefined}
+        onSelectSource={() => undefined}
+        selectedSource={null}
+        turn={{
+          id: "assistant-source-choice",
+          role: "assistant",
+          status: "complete",
+          question: "Show order totals",
+          createdAt: "2026-06-17T09:00:00+00:00",
+          progress: [],
+          response,
+        }}
+      />,
+    );
+
+    expect(markup).toContain("Do you mean current or archived orders?");
+    expect(markup).toContain(">Current orders</button>");
+    expect(markup).toContain(">Order archive</button>");
+    expect(markup).not.toContain("Which database source should I use?");
+  });
+});
+
+describe("AssistantZipTurn database failure", () => {
+  it("shows the safe operational message beside partial document evidence", () => {
+    const response = responseWithJob(baseJob);
+    response.artifact_job = null;
+    response.sources = [source];
+    response.degraded = true;
+    response.degraded_reason = "sql_generation_unavailable";
+    response.operational_failures = [
+      {
+        stage: "generation",
+        code: "sql_generation_unavailable",
+        retryable: true,
+        source_id: "connector_catalog:cases",
+        message: "SQL generation is unavailable for Prudentia Demo Cases.",
+      },
+    ];
+
+    const markup = renderToStaticMarkup(
+      <AssistantZipTurn
+        documents={[]}
+        onSelectSource={() => undefined}
+        selectedSource={null}
+        turn={{
+          id: "assistant-db-failure",
+          role: "assistant",
+          status: "complete",
+          question: "Compare cases with the manual",
+          createdAt: "2026-06-17T09:00:00+00:00",
+          progress: [],
+          response,
+        }}
+      />,
+    );
+
+    expect(markup).toContain(
+      "SQL generation is unavailable for Prudentia Demo Cases.",
+    );
+    expect(markup).toContain('role="status"');
+  });
+});
+
+describe("AssistantZipTurn sources", () => {
+  it("renders one document card for multiple chunk citations", () => {
+    const secondSource: SourceAnchor = {
+      ...source,
+      chunk_id: "doc-1:chunk-12",
+      excerpt: "A second passage from the same document.",
+      page: 30,
+      page_end: 31,
+      page_start: 30,
+    };
+    const response = responseWithJob(baseJob);
+    response.artifact_job = null;
+    response.answer = `First ${sourceCitationLabel(source)} and second ${sourceCitationLabel(secondSource)}`;
+    response.sources = [source, secondSource];
+
+    const markup = renderToStaticMarkup(
+      <AssistantZipTurn
+        documents={[]}
+        onSelectSource={() => undefined}
+        selectedSource={null}
+        turn={{
+          id: "assistant-sources",
+          role: "assistant",
+          status: "complete",
+          question: "Summarize the evidence",
+          createdAt: "2026-06-17T09:00:00+00:00",
+          progress: [],
+          response,
+        }}
+      />,
+    );
+
+    expect(markup.match(/aria-label="Open citations for/g)).toHaveLength(1);
+    expect(markup).toContain("2 citations");
+    expect(markup).toContain("Pages 26-27, 30-31");
+    expect(markup.match(/class="rag-inline-citation"/g)).toHaveLength(2);
   });
 });
 
@@ -128,6 +254,7 @@ const source: SourceAnchor = {
   excerpt: "Senior leadership sets the tone for risk management.",
   group_path: "/admin",
   highlight_ranges: [],
+  citation_targets: [],
   page: 26,
   page_end: 27,
   page_start: 26,

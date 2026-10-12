@@ -21,6 +21,7 @@ class InternalJobStatusResponse(ContractModel):
     job_id: str
     doc_id: str
     status: UploadJobState
+    retry_of_job_id: str | None = None
 
 
 class InternalJobAttemptRequest(ContractModel):

@@ -1,5 +1,7 @@
 from time import perf_counter
 
+import pytest
+
 from rag.auth.context import UserContext
 from rag.query.qdrant import SearchHit
 from rag.query.ollama import (
@@ -16,11 +18,14 @@ from rag.query.routing.routing_models import RoutePlan
 from rag.query.sources import sources_from_hits
 from rag.query.state import QueryContext, initial_state
 from rag.query.answering.synthesis import (
+    ANSWER_CONTEXT_LIMIT_NOTICE,
+    ANSWER_CONTEXT_LIMIT_REASON,
     ensure_answer_has_citation,
     is_global_abstention,
     prepare_synthesis_input,
     synthesize_response,
 )
+from rag.query.http import ServiceRequestError
 from rag.query.schemas import QueryRequest
 
 
@@ -45,6 +50,34 @@ class FakeLlm:
 
     def answer(self, **_: object) -> str:
         return self.answer_text
+
+
+class ContextLimitedLlm:
+    def answer(self, **_: object) -> str:
+        raise ServiceRequestError("vllm", "maximum context length exceeded", 400)
+
+
+def test_synthesis_returns_a_partial_response_when_vllm_rejects_the_context() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="What is finding A?"),
+        user=UserContext(
+            user_id="user", email="user@example.com", group_paths=("/admin",)
+        ),
+        started=perf_counter(),
+    )
+    ctx["retrieved_hits"] = [
+        hit(
+            "report-a:1", doc_id="report-a", doc_title="Report A.pdf", text="Finding A."
+        )
+    ]
+
+    synthesize_response(ctx, ContextLimitedLlm())
+
+    assert ctx["response"].answer == f"{ANSWER_CONTEXT_LIMIT_NOTICE} Try a narrower question."
+    assert ctx["response"].answer_status == "partial"
+    assert ctx["response"].degraded_reason == ANSWER_CONTEXT_LIMIT_REASON
 
 
 def _partial_exhaustive_context() -> QueryContext:
@@ -89,7 +122,7 @@ def _partial_exhaustive_context() -> QueryContext:
     return ctx
 
 
-def test_scoped_aggregation_synthesis_requires_document_coverage() -> None:
+def test_exhaustive_plan_without_coverage_state_cannot_report_complete() -> None:
     ctx = initial_state(
         trace_id="trace",
         session_id="session",
@@ -122,12 +155,21 @@ def test_scoped_aggregation_synthesis_requires_document_coverage() -> None:
         ctx, sources_from_hits(ctx["retrieved_hits"], query=ctx["request"].query)
     )
 
-    assert "Evidence scope: exhaustive document-class scan." in prepared.question
+    assert "Evidence scope: incomplete exhaustive document-class scan." in prepared.question
     assert "Report A.pdf" in prepared.question
     assert "Report B.pdf" in prepared.question
     assert (
         "Cover every scoped document represented in the evidence" in prepared.question
     )
+
+    synthesize_response(ctx, FakeLlm("This is the complete list: Finding A and Finding B."))
+
+    response = ctx["response"]
+    assert response.answer_status == "partial"
+    assert response.coverage.completeness == "unknown"
+    assert response.coverage.warnings == ["exhaustive_coverage_unavailable"]
+    assert response.degraded is True
+    assert response.degraded_reason == "exhaustive_coverage_unavailable"
     assert any(
         "Location: Document: Report A.pdf" in context for context in prepared.contexts
     )
@@ -194,6 +236,39 @@ def test_partial_answer_rewrites_universal_inventory_claim() -> None:
     assert response.coverage.completeness == "partial"
 
 
+def test_database_operational_failure_abstains_with_safe_message() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="Count current cases"),
+        user=UserContext(
+            user_id="user", email="user@example.com", group_paths=("/admin",)
+        ),
+        started=perf_counter(),
+    )
+    ctx["degraded"] = True
+    ctx["degraded_reason"] = "sql_generation_unavailable"
+    ctx["operational_failures"] = [
+        {
+            "stage": "generation",
+            "code": "sql_generation_unavailable",
+            "retryable": True,
+            "source_id": "connector_catalog:cases",
+            "message": "SQL generation is unavailable for Prudentia Demo Cases.",
+        }
+    ]
+
+    synthesize_response(ctx, FakeLlm("unused"))
+
+    response = ctx["response"]
+    assert response.answer_status == "abstained"
+    assert response.answer == (
+        "SQL generation is unavailable for Prudentia Demo Cases."
+    )
+    assert response.operational_failures[0].stage == "generation"
+    assert response.operational_failures[0].retryable is True
+
+
 def test_partial_answer_rewrites_unsupported_exclusivity_claim() -> None:
     ctx = synthesize_response(
         _partial_exhaustive_context(),
@@ -209,6 +284,30 @@ def test_partial_answer_rewrites_unsupported_exclusivity_claim() -> None:
         "Additional items may exist outside the retrieved evidence [manual:tools]."
         in answer
     )
+
+
+def test_synthesis_adds_a_source_label_when_model_omits_one() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="How long does processing take?"),
+        user=UserContext(
+            user_id="user", email="user@example.com", group_paths=("/admin",)
+        ),
+        started=perf_counter(),
+    )
+    ctx["retrieved_hits"] = [
+        hit(
+            "policy:1",
+            doc_id="policy",
+            doc_title="Policy.pdf",
+            text="Processing takes 7-14 working days.",
+        )
+    ]
+
+    synthesize_response(ctx, FakeLlm("Processing takes 7-14 working days."))
+
+    assert ctx["response"].answer.endswith("[policy:1]")
 
 
 def test_partial_answer_preserves_non_inventory_use_of_all() -> None:
@@ -421,6 +520,64 @@ def test_synthesis_contexts_fit_final_prompt_budget() -> None:
     )
 
 
+def test_prompt_trimming_marks_exhaustive_coverage_partial() -> None:
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query="Summarize this document"),
+        user=UserContext(
+            user_id="user", email="user@example.com", group_paths=("/admin",)
+        ),
+        started=perf_counter(),
+        token_budget=3200,
+    )
+    ctx["route_plan"] = RoutePlan(
+        original_query=ctx["request"].query,
+        resolved_query=ctx["request"].query,
+        intent="summarization",
+        capabilities=("general_search", "document_search"),
+        response_mode="summary",
+        scope="document",
+        coverage="exhaustive",
+        public_intent="multi_hop",
+        top_k=24,
+    )
+    obligations = [f"page:report:{index}" for index in range(1, 13)]
+    ctx["retrieved_hits"] = [
+        SearchHit(
+            point_id=f"report:{index}",
+            score=0.5,
+            payload={
+                "doc_id": "report",
+                "chunk_id": f"report:{index}",
+                "doc_title": "Report.pdf",
+                "text": f"Section {index}. " * 100,
+                "page": index,
+                "exhaustive_scope_origin": "document_class_scope",
+                "coverage_role": "exhaustive_section_representative",
+                "exhaustive_coverage_obligation_ids": [obligations[index - 1]],
+            },
+        )
+        for index in range(1, 13)
+    ]
+    ctx["exhaustive_coverage"] = {
+        "candidate_status": "complete",
+        "evidence_status": "complete",
+        "reasons": [],
+        "required_obligations": obligations,
+        "covered_obligations": obligations,
+    }
+
+    prepared = prepare_synthesis_input(
+        ctx, sources_from_hits(ctx["retrieved_hits"], query=ctx["request"].query)
+    )
+
+    assert prepared.context_complete is False
+    assert ctx["exhaustive_coverage"]["evidence_status"] == "partial"
+    assert "synthesis_prompt_budget_incomplete" in ctx["exhaustive_coverage"]["reasons"]
+    assert ctx["degraded_reason"] == "exhaustive_final_evidence_coverage_partial"
+
+
 def test_factual_answer_prompt_omits_structured_guidance() -> None:
     contexts = ["[doc:1]\nStatus: Open."]
 
@@ -446,6 +603,17 @@ def test_answer_prompt_forbids_citation_only_output() -> None:
     )
 
     assert "Never return a citation alone" in prompt
+
+
+def test_answer_prompt_writes_supported_partial_answer_without_using_tangential_evidence() -> None:
+    prompt = build_answer_prompt(
+        question="Who approved the request and when?",
+        contexts=["[policy:1]\nThe request was approved by Maya Chen."],
+        profile="factual_simple",
+    )
+
+    assert "answer that part" in prompt
+    assert "do not present tangential evidence as the answer" in prompt
 
 
 def test_answer_prompt_defaults_to_detailed_grounded_response() -> None:
@@ -644,13 +812,62 @@ def test_deterministic_factual_synthesis_uses_all_sources_that_fit_prompt_budget
     assert len(prepared.contexts) == len(sources) == 5
 
 
+@pytest.mark.parametrize("use_summary_contexts", [False, True])
+def test_evidence_budget_does_not_erase_clause_from_synthesis(
+    use_summary_contexts: bool,
+) -> None:
+    query = "What is clause 5 of contract?"
+    clause = "CLAUSE FIVE\n(WORKING TIME)\nThe employee works 8 hours a day, 40 hours a week."
+    ctx = initial_state(
+        trace_id="trace",
+        session_id="session",
+        request=QueryRequest(query=query),
+        user=UserContext(user_id="user", email="user@example.com", group_paths=("/admin",)),
+        started=perf_counter(),
+    )
+    ctx["route_plan"] = RoutePlan(
+        original_query=query,
+        resolved_query=query,
+        intent="document_navigation",
+        capabilities=("general_search", "document_navigation", "document_search"),
+        response_mode="lookup",
+        scope="document",
+        chunk_granularity="section",
+        search_mode="metadata",
+    )
+    ctx["synthesis_token_limit"] = 3000
+    sources = sources_from_hits([
+        hit("contract:5", doc_id="contract", doc_title="Employment contract.pdf", text=clause)
+    ], query=query)
+    if use_summary_contexts:
+        ctx["summary_contexts"] = [f"[contract:5]\n{clause}"]
+
+    prepared = prepare_synthesis_input(ctx, sources)
+
+    assert clause in "\n".join(prepared.contexts)
+    assert prepared.sources == sources
+    assert prepared.context_complete
+    actual_prompt_tokens = estimate_answer_prompt_tokens(
+        question=prepared.question,
+        contexts=prepared.contexts,
+        profile=prepared.profile,
+    )
+    assert ctx["synthesis_estimated_prompt_tokens"] == actual_prompt_tokens
+    assert (
+        actual_prompt_tokens
+        + answer_num_predict_for_profile(prepared.profile)
+        + SYNTHESIS_PROMPT_HEADROOM_TOKENS
+        <= ctx["token_budget"]
+    )
+
+
 def test_documents_do_not_contain_information_is_global_abstention() -> None:
     assert is_global_abstention(
         "The documents do not contain information about soldiers or their activities."
     )
 
 
-def test_mixed_abstention_with_supported_value_keeps_sources() -> None:
+def test_mixed_abstention_keeps_the_answer_and_adds_a_source_citation() -> None:
     ctx = initial_state(
         trace_id="trace",
         session_id="session",
@@ -681,6 +898,8 @@ def test_mixed_abstention_with_supported_value_keeps_sources() -> None:
     assert not response.degraded
     assert response.sources
     assert "[doc:1]" in response.answer
+    assert ctx["citation_evidence"]
+    assert "008301" in response.answer
 
 
 def test_title_abstention_uses_heading_fallback() -> None:
@@ -781,6 +1000,8 @@ def test_unanswered_evidence_present_abstention_keeps_cited_source() -> None:
     response = ctx["response"]
     assert response.degraded
     assert response.sources
+    assert "does not establish the requested fact" in response.answer
+    assert "HANDWRITING SAMPLE FORM" not in response.answer
     assert "[sd19:1]" in response.answer
 
 
@@ -818,4 +1039,7 @@ def test_cited_insufficient_fallback_prefers_named_document() -> None:
     response = ctx["response"]
     assert response.degraded
     assert response.sources[0].doc_title == "sd19.pdf"
+    assert "does not establish the requested fact" in response.answer
+    assert "HANDWRITING SAMPLE FORM" not in response.answer
+    assert "Visible image text" not in response.answer
     assert "[sd19:1]" in response.answer

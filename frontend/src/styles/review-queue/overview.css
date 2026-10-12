@@ -1,5 +1,5 @@
 .review-workspace {
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .review-workspace .review-page-inner {
@@ -92,6 +92,168 @@
   padding-inline: 0.35rem;
   color: var(--color-on-surface);
   font-size: 0.68rem;
+}
+
+.review-ocr-workbench {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.review-ocr-workbench .review-layout {
+  height: auto;
+  flex: 0 0 auto;
+  grid-template-rows: minmax(28rem, auto) minmax(24rem, auto);
+}
+
+.review-workbench-toolbar {
+  display: flex;
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.65rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.5rem;
+  background: var(--color-surface-container-low);
+  padding: 0.35rem 0.45rem;
+}
+
+.review-queue-toggle {
+  min-height: 2.25rem;
+  gap: 0.42rem;
+  padding-inline: 0.65rem;
+}
+
+.review-queue-toggle span {
+  display: inline-flex;
+  min-width: 1.35rem;
+  min-height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--color-surface-container-high);
+  padding-inline: 0.35rem;
+  font-size: 0.68rem;
+}
+
+.review-item-navigation {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.review-item-navigation button,
+.review-queue-close {
+  display: inline-flex;
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.42rem;
+  background: var(--color-surface-card);
+  color: var(--color-on-surface);
+}
+
+.review-item-navigation button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.review-item-navigation > span {
+  min-width: 4.5rem;
+  color: var(--color-on-surface-variant);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: center;
+}
+
+.review-selection-context {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--color-secondary);
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-bulk-actions,
+.review-bulk-confirmation-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.review-bulk-actions button,
+.review-bulk-confirmation-actions button {
+  min-height: 2.25rem;
+  padding-inline: 0.65rem;
+  white-space: nowrap;
+}
+
+.review-clear-selection {
+  min-height: 2.25rem;
+  padding-inline: 0.45rem;
+  color: var(--color-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.review-bulk-confirmation {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--color-warning-amber) 38%, var(--color-surface-border));
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-warning-amber) 8%, var(--color-surface-card));
+  padding: 0.7rem 0.8rem;
+  color: var(--color-warning-amber);
+}
+
+.review-bulk-confirmation > div:not(.review-bulk-confirmation-actions) {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.review-bulk-confirmation strong {
+  color: var(--color-on-surface);
+  font-size: 0.78rem;
+}
+
+.review-bulk-confirmation span {
+  color: var(--color-secondary);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.review-queue-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.review-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--color-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.review-queue-close {
+  display: none;
 }
 
 .review-clear-state {

@@ -20,6 +20,9 @@ class ReviewItem(ContractModel):
     page_start: int | None = Field(default=None, ge=1)
     page_end: int | None = Field(default=None, ge=1)
     bbox: list[float] | None = None
+    image_asset_id: str | None = None
+    image_source_kind: str | None = None
+    image_description: str | None = None
     quality_flags: list[str] = Field(default_factory=list)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     partial_text: str

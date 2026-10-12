@@ -16,16 +16,27 @@ def _promote_parent_text(hits: list[SearchHit]) -> list[SearchHit]:
         parent_page_end = (
             optional_int(hit.payload.get("parent_page_end")) or parent_page_start
         )
-        if not parent_text or parent_page_start is None:
+        if not parent_text:
+            promoted.append(hit)
+            continue
+        child_text = payload_text(hit)
+        if len(parent_text) < len(child_text):
             promoted.append(hit)
             continue
         payload = {
             **hit.payload,
-            "text": _bounded_parent_text(parent_text, payload_text(hit)),
-            "page": parent_page_start,
-            "page_start": parent_page_start,
-            "page_end": parent_page_end,
+            "citation_original_text": hit.payload.get("citation_original_text", hit.payload.get("text", child_text)),
+            "text": _bounded_parent_text(parent_text, child_text),
+            "page_start": hit.payload.get("page_start") or hit.payload.get("page"),
+            "page_end": hit.payload.get("page_end") or hit.payload.get("page_start") or hit.payload.get("page"),
         }
+        if parent_page_start is not None:
+            payload.update(
+                {
+                    "context_page_start": parent_page_start,
+                    "context_page_end": parent_page_end,
+                }
+            )
         promoted.append(
             SearchHit(point_id=hit.point_id, score=hit.score, payload=payload)
         )

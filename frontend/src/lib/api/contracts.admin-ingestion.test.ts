@@ -100,6 +100,7 @@ describe("uploadApi", () => {
       file: new File(["%PDF-1.7"], "policy.pdf", { type: "application/pdf" }),
       group_path: "/legal",
       shared_group_paths: ["/finance", "/ops"],
+      analyze_slide_visuals: false,
     });
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -110,6 +111,7 @@ describe("uploadApi", () => {
     expect(body.has("quality_preset")).toBe(false);
     expect(body.get("group_path")).toBe("/legal");
     expect(body.getAll("shared_group_paths")).toEqual(["/finance", "/ops"]);
+    expect(body.get("analyze_slide_visuals")).toBe("false");
   });
 });
 
@@ -122,13 +124,14 @@ describe("ingestJobsApi", () => {
     const fetchMock = vi.fn(async () => jsonResponse({ items: [], total: 0, limit: 20, offset: 0 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await ingestJobsApi.list({ origin: "upload", uploaded_by_me: true, limit: 20, offset: 0 });
+    await ingestJobsApi.list({ origin: "upload", uploaded_by_me: true, abbreviation_glossary_only: true, limit: 20, offset: 0 });
 
     const calls = fetchMock.mock.calls as unknown as Array<[unknown]>;
     const url = String(calls[0][0]);
     expect(url).toContain("/api/v1/ingest-jobs?");
     expect(url).toContain("origin=upload");
     expect(url).toContain("uploaded_by_me=true");
+    expect(url).toContain("abbreviation_glossary_only=true");
     expect(url).toContain("limit=20");
     expect(url).toContain("offset=0");
   });

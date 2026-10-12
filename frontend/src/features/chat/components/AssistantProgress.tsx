@@ -2,14 +2,18 @@ import { useMemo } from "react";
 import { Activity, AlertTriangle, Bot, CheckCircle2, Clock, FileText, GitBranch, Loader2 } from "lucide-react";
 import { SourceChip } from "@/features/chat/components/AssistantSourceChip";
 import { CitedAnswer } from "@/features/chat/components/CitedAnswer";
+import { useBranding } from "@/components/brand/BrandContext";
 import { formatElapsed, useElapsedSeconds } from "@/features/chat/utils/assistantTiming";
+import { groupSourcesByDocument, sourcesForTurn } from "@/features/chat/utils/sourceGroups";
 import type { Props } from "@/features/chat/types/assistantTurnTypes";
 import type { Document, SourceAnchor } from "@/types/api";
 import type { ChatTurn } from "@/types/chat";
 
 export function PendingAssistant({ documents, onSelectSource, selectedSource, turn }: Props) {
+  const branding = useBranding();
   const elapsedSeconds = useElapsedSeconds(turn.createdAt);
-  const pendingSources = useMemo(() => uniqueProgressSources(turn.progress), [turn.progress]);
+  const pendingSources = useMemo(() => sourcesForTurn(turn), [turn]);
+  const pendingSourceGroups = useMemo(() => groupSourcesByDocument(pendingSources), [pendingSources]);
   const hasSources = pendingSources.length > 0;
   const hasDraft = Boolean(turn.streamText);
   const activeProgress = turn.progress.at(-1);
@@ -19,9 +23,9 @@ export function PendingAssistant({ documents, onSelectSource, selectedSource, tu
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex items-center gap-1 text-label-md text-on-surface">
           <Bot size={18} className="text-primary" />
-          Prudentia AI
+          {branding.app_name}
         </span>
-        <span className="rag-live-badge">
+        <span className="rag-live-badge" role="status">
           <Activity size={14} />
           Running graph
         </span>
@@ -55,14 +59,13 @@ export function PendingAssistant({ documents, onSelectSource, selectedSource, tu
           <div className="rag-pending-sources">
             <p className="rag-live-section-label">Evidence coming in</p>
             <div className="flex flex-wrap gap-2">
-              {pendingSources.slice(0, 4).map((source, index) => (
+              {pendingSourceGroups.slice(0, 4).map((group) => (
                 <SourceChip
-                  key={`${source.doc_id}-${source.chunk_id}`}
+                  key={group.docId}
                   documents={documents}
+                  group={group}
                   onSelectSource={onSelectSource}
-                  selected={selectedSource?.doc_id === source.doc_id && selectedSource?.chunk_id === source.chunk_id}
-                  source={source}
-                  sourceNumber={index + 1}
+                  selected={selectedSource?.doc_id === group.docId}
                 />
               ))}
             </div>
@@ -85,14 +88,15 @@ export function PendingAssistant({ documents, onSelectSource, selectedSource, tu
 }
 
 export function StoppedAssistant({ documents, onSelectSource, turn }: StoppedAssistantProps) {
-  const partialSources = useMemo(() => uniqueProgressSources(turn.progress), [turn.progress]);
+  const branding = useBranding();
+  const partialSources = useMemo(() => sourcesForTurn(turn), [turn]);
 
   return (
     <div className="rag-assistant-turn rag-assistant-turn-stopped">
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex items-center gap-1 text-label-md text-on-surface">
           <Bot size={18} className="text-primary" />
-          Prudentia AI
+          {branding.app_name}
         </span>
         <span className="rag-stopped-badge">
           <AlertTriangle size={14} />
@@ -123,7 +127,10 @@ function ProgressIcon({ active, kind }: { active: boolean; kind?: Extract<ChatTu
   if (active) {
     return (
       <span className="rag-progress-dot is-active-dot" aria-hidden="true">
-        <Loader2 size={13} />
+        <span className="rag-progress-icon">
+          <Loader2 className="rag-progress-icon-spinner" size={13} />
+          <Activity className="rag-progress-icon-static" size={13} />
+        </span>
       </span>
     );
   }
@@ -175,19 +182,6 @@ function AnswerSkeleton() {
       <span />
     </div>
   );
-}
-
-function uniqueProgressSources(progress: Extract<ChatTurn, { role: "assistant" }>["progress"]): SourceAnchor[] {
-  const seen = new Set<string>();
-  const sources: SourceAnchor[] = [];
-  for (const item of progress) {
-    if (!item.source) continue;
-    const key = `${item.source.doc_id}-${item.source.chunk_id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    sources.push(item.source);
-  }
-  return sources;
 }
 
 export type StoppedAssistantProps = {

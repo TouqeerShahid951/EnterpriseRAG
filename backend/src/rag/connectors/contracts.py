@@ -24,6 +24,7 @@ class Connector(Protocol):
         config: dict[str, Any],
         secrets: dict[str, Any],
         query: str,
+        parameters: dict[str, Any] | None = None,
         row_limit: int,
         timeout_seconds: int,
     ) -> ConnectorQueryResult: ...

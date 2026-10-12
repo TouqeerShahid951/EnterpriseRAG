@@ -24,12 +24,8 @@ PROMPT_POLICY_VERSION = (
 _QUERY_SETTING_FIELDS = (
     "connector_include_stale_in_retrieval",
     "connector_live_sql_enabled",
-    "connector_live_sql_max_repair_attempts",
     "connector_live_sql_max_rows",
-    "connector_live_sql_max_scopes",
-    "connector_live_sql_result_verifier_enabled",
     "connector_live_sql_timeout_seconds",
-    "connector_live_sql_verifier_sample_rows",
     "evaluation_answer_llm_verifier_enabled",
     "evaluation_answer_llm_verifier_model",
     "graphrag_community_collection",

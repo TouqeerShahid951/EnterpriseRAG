@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import re
+from hashlib import sha256
+from pydantic import TypeAdapter, ValidationError
 
 from rag.shared.contracts.clearance import normalize_clearance_level
 from rag.shared.contracts.evidence import (
+    CitationTarget,
     EvidenceField,
     HighlightRange,
+    RecordCitationTarget,
     SourceAnchor,
-    SourceRegion,
 )
 from rag.query.qdrant import SearchHit
 
@@ -31,6 +34,7 @@ _STOPWORDS = {
     "who",
     "why",
 }
+_CITATION_TARGETS_ADAPTER = TypeAdapter(list[CitationTarget])
 
 
 def citation_label(doc_id: str, chunk_id: str) -> str:
@@ -51,7 +55,7 @@ def parse_citation_tokens(text: str) -> tuple[str, ...]:
 
 def source_from_hit(hit: SearchHit, *, query: str = "") -> SourceAnchor:
     payload = hit.payload
-    excerpt = payload_text(hit)
+    excerpt = str(payload.get("citation_original_text", payload.get("text", "")))
     page = optional_int(payload.get("page"))
     page_start = optional_int(payload.get("page_start")) or page
     page_end = optional_int(payload.get("page_end")) or page_start
@@ -67,11 +71,18 @@ def source_from_hit(hit: SearchHit, *, query: str = "") -> SourceAnchor:
         page_start=page_start,
         page_end=page_end,
         excerpt=excerpt,
+        canonical_excerpt=excerpt,
+        prompt_context=payload_text(hit) if "citation_original_text" in payload else None,
+        quote_texts=payload.get("quote_texts"),
+        index_generation_id=optional_str(payload.get("index_generation_id")),
+        content_hash=optional_str(payload.get("content_hash")),
+        evidence_hash=sha256(excerpt.encode("utf-8")).hexdigest(),
+        provenance_kind=("structured" if is_live_database else payload.get("provenance_kind", "unknown")),
         group_path=str(payload.get("group_path", "/local")),
         clearance_level=normalize_clearance_level(payload.get("clearance_level")),
         effective_date=optional_str(payload.get("effective_date")),
         highlight_ranges=build_highlights(query, excerpt) if query else [],
-        source_regions=source_regions_from_payload(payload),
+        citation_targets=citation_targets_from_payload(payload),
         attribution_kind="table_row"
         if structured_kind == "table_row"
         or (is_live_database and structured_kind == "kv_record")
@@ -98,45 +109,23 @@ def optional_int(value: object) -> int | None:
     return None
 
 
-def source_regions_from_payload(payload: dict[str, object]) -> list[SourceRegion]:
-    raw_regions = payload.get("source_regions")
-    if not isinstance(raw_regions, list):
-        return []
-    regions: list[SourceRegion] = []
-    for raw_region in raw_regions:
-        if not isinstance(raw_region, dict):
-            continue
-        normalized_bbox = optional_bbox(raw_region.get("bbox"))
-        page = optional_int(raw_region.get("page"))
-        text = raw_region.get("text")
-        region_type = raw_region.get("region_type")
-        confidence = raw_region.get("confidence")
-        image_asset_id = raw_region.get("image_asset_id")
-        image_source_kind = raw_region.get("image_source_kind")
-        extraction_method = raw_region.get("extraction_method")
-        regions.append(
-            SourceRegion(
-                page=page,
-                bbox=normalized_bbox,
-                text=text if isinstance(text, str) else "",
-                region_type=region_type
-                if isinstance(region_type, str) and region_type
-                else "text",
-                confidence=float(confidence)
-                if isinstance(confidence, (int, float))
-                else None,
-                image_asset_id=image_asset_id
-                if isinstance(image_asset_id, str) and image_asset_id
-                else None,
-                image_source_kind=image_source_kind
-                if isinstance(image_source_kind, str) and image_source_kind
-                else None,
-                extraction_method=extraction_method
-                if isinstance(extraction_method, str) and extraction_method
-                else None,
+def citation_targets_from_payload(payload: dict[str, object]) -> list[CitationTarget]:
+    raw_targets = payload.get("citation_targets")
+    if isinstance(raw_targets, list):
+        try:
+            return _CITATION_TARGETS_ADAPTER.validate_python(raw_targets)
+        except ValidationError as exc:
+            raise ValueError("indexed citation targets are invalid") from exc
+    if str(payload.get("source_type", "")).startswith("connector_live_sql"):
+        fields = structured_fields_from_payload(payload)
+        return [
+            RecordCitationTarget(
+                record_id=str(payload.get("chunk_id", "record")),
+                fields=[field.label for field in fields],
+                exact_text=str(payload.get("text") or "").strip(),
             )
-        )
-    return regions
+        ]
+    return []
 
 
 def structured_fields_from_payload(payload: dict[str, object]) -> list[EvidenceField]:

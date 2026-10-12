@@ -1,7 +1,10 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Clock3 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 import { isGlobalAdmin } from "@/lib/auth/authz";
+import { adminApi } from "@/lib/api/contracts";
+import { BrandProvider, defaultBranding } from "@/components/brand/BrandContext";
 import { ChatKnowledgeSpaceControl, type ChatSpaceOption } from "@/features/chat/components/ChatWorkspaceHeader";
 import { InlineMessage, SessionLoading } from "@/components/layout/Common";
 import { Modal } from "@/components/layout/Modal";
@@ -20,9 +23,16 @@ import { ABBREVIATION_GLOSSARY_DOC_TYPE } from "@/features/upload/state/pdfUploa
 import { readStoredBoolean, writeStoredBoolean } from "@/lib/utils/uiPreferences";
 import type { DocumentGroupCount, User as AuthUser } from "@/types/api";
 import { isDocumentInSpace, userSpacesFromPaths } from "@/lib/utils/groups";
+import { readableForeground, readableThemeColor } from "@/lib/utils/themeContrast";
 import "@/styles.css";
 
 const THEME_STORAGE_KEY = "Prudentia-theme-light";
+const TYPE_SIZES = {
+  h1: { compact: "1.375rem", standard: "1.5rem", large: "1.75rem" },
+  h2: { compact: "0.875rem", standard: "0.95rem", large: "1.125rem" },
+  body: { compact: "0.8125rem", standard: "0.875rem", large: "1rem" },
+} as const;
+const TYPE_WEIGHTS = { semibold: "600", bold: "700", extrabold: "800" } as const;
 const DOCUMENT_INVENTORY_ROUTES = new Set<RouteId>([
   "abbreviation-glossary",
   "chat",
@@ -44,6 +54,7 @@ const PrudentiaDocumentsPage = lazy(() => import("@/features/documents/pages/Pru
 const PrudentiaIngestionHealthPage = lazy(() => import("@/features/ingestion/pages/PrudentiaIngestionHealthPage").then((module) => ({ default: module.PrudentiaIngestionHealthPage })));
 const PrudentiaIngestionJobsPage = lazy(() => import("@/features/ingestion/pages/PrudentiaIngestionJobsPage").then((module) => ({ default: module.PrudentiaIngestionJobsPage })));
 const PrudentiaOverviewPage = lazy(() => import("@/features/overview/pages/PrudentiaPlannedPage").then((module) => ({ default: module.PrudentiaOverviewPage })));
+const PrudentiaAnalyticsPage = lazy(() => import("@/features/analytics/pages/PrudentiaAnalyticsPage").then((module) => ({ default: module.PrudentiaAnalyticsPage })));
 const PrudentiaRagEvaluationsPage = lazy(() => import("@/features/evaluations/pages/PrudentiaRagEvaluationsPage").then((module) => ({ default: module.PrudentiaRagEvaluationsPage })));
 const PrudentiaReviewQueuePage = lazy(() => import("@/features/review-queue/pages/PrudentiaReviewQueuePage").then((module) => ({ default: module.PrudentiaReviewQueuePage })));
 const PrudentiaSettingsPage = lazy(() => import("@/features/settings/pages/PrudentiaSettingsPage").then((module) => ({ default: module.PrudentiaSettingsPage })));
@@ -52,10 +63,14 @@ const PrudentiaUploadPage = lazy(() => import("@/features/upload/pages/Prudentia
 
 function App() {
   const [activeRoute, setActiveRoute] = useState<RouteId>(() => routeFromLocation() ?? "chat");
-  const [isLightMode, setIsLightMode] = useState(() => readStoredBoolean(THEME_STORAGE_KEY, false));
+  const [isLightModePreference, setIsLightMode] = useState(() => readStoredBoolean(THEME_STORAGE_KEY, false));
   const auth = useAuthSession();
+  const brandingQuery = useQuery({ queryKey: ["branding"], queryFn: adminApi.getBranding, retry: false });
+  const branding = brandingQuery.data ?? defaultBranding;
+  const isLightMode = branding.theme_mode === "light" || (branding.theme_mode === "user" && isLightModePreference);
   const resolvedRoute = auth.currentUser ? authenticatedRouteForUser(auth.currentUser, routeFromLocation()) : activeRoute;
   const chat = useChatSession(auth.currentUser, resolvedRoute === "chat");
+  const requestedChatSessionId = new URLSearchParams(location.search).get("sessionId");
   const inventory = useDocumentInventory(auth.currentUser, DOCUMENT_INVENTORY_ROUTES.has(resolvedRoute));
   const documentSummary = useDocumentCatalogSummary(auth.currentUser, resolvedRoute !== "source-viewer");
   const pdfUpload = usePdfUpload(
@@ -63,6 +78,10 @@ function App() {
     UPLOAD_JOB_ROUTES.has(resolvedRoute),
     resolvedRoute === "abbreviation-glossary" ? ABBREVIATION_GLOSSARY_DOC_TYPE : null,
   );
+
+  useEffect(() => {
+    sessionStorage.removeItem("agenticrag:stale-chunk-reload");
+  }, []);
   const sidebarSpaceOptions = useMemo(
     () => knowledgeSpaceOptions(auth.currentUser, documentSummary.groups),
     [auth.currentUser, documentSummary.groups],
@@ -78,13 +97,51 @@ function App() {
 
   useLayoutEffect(() => {
     document.documentElement.classList.toggle("light", isLightMode);
-    document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content", isLightMode ? "#f1f1f4" : "#101016");
-    writeStoredBoolean(THEME_STORAGE_KEY, isLightMode);
-  }, [isLightMode]);
+    document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content", isLightMode ? "#ECEBF0" : branding.background_color);
+    if (branding.theme_mode === "user") writeStoredBoolean(THEME_STORAGE_KEY, isLightMode);
+  }, [branding.background_color, branding.theme_mode, isLightMode]);
+
+  useLayoutEffect(() => {
+    document.documentElement.style.setProperty("--color-brand-primary", branding.primary_color);
+    document.documentElement.style.setProperty("--color-primary-action", branding.primary_color);
+    document.documentElement.style.setProperty("--color-primary", readableThemeColor(branding.primary_color, isLightMode ? "light" : "dark"));
+    document.documentElement.style.setProperty("--color-brand-accent", readableThemeColor(branding.accent_color, isLightMode ? "light" : "dark"));
+    document.documentElement.style.setProperty("--focus-ring", readableThemeColor(branding.accent_color, isLightMode ? "light" : "dark"));
+    document.documentElement.style.setProperty("--color-brand-background", branding.background_color);
+    document.documentElement.style.setProperty("--color-on-primary", readableForeground(branding.primary_color));
+    document.documentElement.style.setProperty("--font-size-ui-page-title", TYPE_SIZES.h1[branding.h1_size]);
+    document.documentElement.style.setProperty("--font-weight-ui-page-title", TYPE_WEIGHTS[branding.h1_weight]);
+    setOptionalStyle("--color-heading-h1", branding.h1_color ? readableThemeColor(branding.h1_color, isLightMode ? "light" : "dark") : null);
+    document.documentElement.style.setProperty("--font-size-ui-section", TYPE_SIZES.h2[branding.h2_size]);
+    document.documentElement.style.setProperty("--font-weight-ui-section", TYPE_WEIGHTS[branding.h2_weight]);
+    setOptionalStyle("--color-heading-h2", branding.h2_color ? readableThemeColor(branding.h2_color, isLightMode ? "light" : "dark") : null);
+    document.documentElement.style.setProperty("--font-size-ui-body", TYPE_SIZES.body[branding.body_size]);
+    return () => {
+      document.documentElement.style.removeProperty("--color-brand-primary");
+      document.documentElement.style.removeProperty("--color-primary-action");
+      document.documentElement.style.removeProperty("--color-primary");
+      document.documentElement.style.removeProperty("--color-brand-accent");
+      document.documentElement.style.removeProperty("--focus-ring");
+      document.documentElement.style.removeProperty("--color-brand-background");
+      document.documentElement.style.removeProperty("--color-on-primary");
+      document.documentElement.style.removeProperty("--font-size-ui-page-title");
+      document.documentElement.style.removeProperty("--font-weight-ui-page-title");
+      document.documentElement.style.removeProperty("--color-heading-h1");
+      document.documentElement.style.removeProperty("--font-size-ui-section");
+      document.documentElement.style.removeProperty("--font-weight-ui-section");
+      document.documentElement.style.removeProperty("--color-heading-h2");
+      document.documentElement.style.removeProperty("--font-size-ui-body");
+    };
+  }, [branding.accent_color, branding.background_color, branding.body_size, branding.h1_color, branding.h1_size, branding.h1_weight, branding.h2_color, branding.h2_size, branding.h2_weight, branding.primary_color, isLightMode]);
 
   useEffect(() => {
     const routeTitle = auth.currentUser ? routeTitles[resolvedRoute] : "Sign in";
-    document.title = `${routeTitle} | Prudentia AI`;
+    document.title = `${routeTitle} | ${branding.app_name}`;
+    document.querySelector<HTMLMetaElement>('meta[name="application-name"]')?.setAttribute("content", branding.app_name);
+    if (branding.logo_url) {
+      document.querySelector<HTMLLinkElement>('link[rel="icon"]')?.setAttribute("href", branding.logo_url);
+      document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]')?.setAttribute("href", branding.logo_url);
+    }
     if (!auth.currentUser) return;
 
     const focusMainContent = window.requestAnimationFrame(() => {
@@ -94,7 +151,7 @@ function App() {
       main.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(focusMainContent);
-  }, [auth.currentUser, resolvedRoute]);
+  }, [auth.currentUser, branding.app_name, branding.logo_url, resolvedRoute]);
 
   useEffect(() => {
     const handlePopState = () => setActiveRoute(routeFromLocation() ?? "chat");
@@ -109,6 +166,12 @@ function App() {
       navigate(resolvedRoute, { replace: true });
     }
   }, [activeRoute, auth.currentUser, auth.currentUserQuery.isLoading, resolvedRoute]);
+
+  useEffect(() => {
+    if (resolvedRoute === "chat" && requestedChatSessionId && requestedChatSessionId !== chat.activeSessionId) {
+      chat.loadChatSession(requestedChatSessionId);
+    }
+  }, [chat.activeSessionId, requestedChatSessionId, resolvedRoute]);
 
   function navigate(route: RouteId, options: NavigateOptions = {}) {
     const targetRoute = canonicalRoute(route);
@@ -139,8 +202,8 @@ function App() {
     auth.logoutMutation.mutate(undefined, { onSettled: () => navigate("login", { replace: true }) });
   }
 
-  if (auth.currentUserQuery.isLoading) return <SessionLoading />;
-  if (!auth.currentUser) return <PrudentiaLogin onAuthChanged={handleAuthChanged} sessionExpired={auth.sessionExpired} />;
+  if (auth.currentUserQuery.isLoading) return <BrandProvider value={branding}><SessionLoading /></BrandProvider>;
+  if (!auth.currentUser) return <BrandProvider value={branding}><PrudentiaLogin onAuthChanged={handleAuthChanged} sessionExpired={auth.sessionExpired} /></BrandProvider>;
 
   const user = auth.currentUser;
   const sessionTimeoutDialog = (
@@ -158,11 +221,13 @@ function App() {
   if (resolvedRoute === "source-viewer") {
     return (
       <>
-        <div className="app-route-stage">
-          <Suspense fallback={<RouteLoading label="Loading source viewer" />}>
-            <SourceViewerPage />
-          </Suspense>
-        </div>
+        <BrandProvider value={branding}>
+          <div className="app-route-stage">
+            <Suspense fallback={<RouteLoading label="Loading source viewer" />}>
+              <SourceViewerPage />
+            </Suspense>
+          </div>
+        </BrandProvider>
         {sessionTimeoutDialog}
       </>
     );
@@ -181,9 +246,10 @@ function App() {
   );
 
   return (
+    <BrandProvider value={branding}>
     <PrudentiaSidebarHeaderProvider
       isLightMode={isLightMode}
-      onToggleTheme={() => setIsLightMode((value) => !value)}
+      onToggleTheme={branding.theme_mode === "user" ? () => setIsLightMode((value) => !value) : undefined}
       value={sidebarHeaderContent}
     >
       <a className="skip-link" href="#main-content">Skip to content</a>
@@ -212,17 +278,21 @@ function App() {
             onActiveSpaceChange={chat.changeActiveSpacePath}
             onCancelArtifactJob={chat.cancelArtifactJob}
             onClarifyArtifactJob={chat.clarifyArtifactJob}
+            onChooseQuerySource={chat.chooseQuerySource}
             onExpandSourceSearch={chat.expandSourceSearch}
             onLogout={handleLogout}
             onNavigate={navigate}
             onQuestionChange={chat.setQuestion}
             onQuestionSubmit={chat.handleQuestionSubmit}
+            onCancelReply={chat.cancelReply}
+            onReplyToTurn={chat.replyToTurn}
             onReset={chat.resetChat}
             onRetryArtifactJob={chat.retryArtifactJob}
             onSelectSource={chat.setSelectedSource}
             onSelectedQuerySourceChange={chat.setSelectedQuerySourceId}
             onSourceModeChange={chat.setSourceMode}
             question={chat.question}
+            replyTarget={chat.replyTarget}
             removeScopedDocument={chat.removeScopedDocument}
             savedSessions={chat.savedSessions}
             savedSessionsError={chat.savedSessionsError}
@@ -234,6 +304,7 @@ function App() {
             scopedDocumentIds={chat.scopedDocumentIds}
             selectedQuerySourceId={chat.selectedQuerySourceId}
             selectedSource={chat.selectedSource}
+            selectedSourceTurnId={chat.selectedSourceTurnId}
             sourceMode={chat.sourceMode}
             user={user}
           />
@@ -253,6 +324,7 @@ function App() {
         {resolvedRoute === "settings" ? <PrudentiaSettingsPage currentUser={user} onLogout={handleLogout} onNavigate={navigate} /> : null}
 
         {resolvedRoute === "overview" ? <PrudentiaOverviewPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
+        {resolvedRoute === "operational-analytics" ? <PrudentiaAnalyticsPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
         {resolvedRoute === "activity-log" ? <PrudentiaAuditPage onLogout={handleLogout} onNavigate={navigate} user={user} /> : null}
         {resolvedRoute === "evaluations" ? (
           <PrudentiaRagEvaluationsPage
@@ -270,6 +342,7 @@ function App() {
       </div>
       {sessionTimeoutDialog}
     </PrudentiaSidebarHeaderProvider>
+    </BrandProvider>
   );
 }
 
@@ -312,6 +385,11 @@ function knowledgeSpaceOptions(
     name: space.name,
     path: space.path,
   }));
+}
+
+function setOptionalStyle(name: string, value: string | null) {
+  if (value) document.documentElement.style.setProperty(name, value);
+  else document.documentElement.style.removeProperty(name);
 }
 
 export default App;

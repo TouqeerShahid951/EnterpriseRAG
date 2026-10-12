@@ -136,17 +136,12 @@ class AbbreviationGlossaryService:
         document_id: str,
         entries: Sequence[tuple[str, str, int | None]],
     ) -> int:
-        normalized: dict[str, tuple[str, int | None]] = {}
+        normalized: dict[tuple[str, str], tuple[str, str, int | None]] = {}
         for abbreviation, expansion, source_page in entries:
             key, value = self._normalize(abbreviation, expansion)
-            previous = normalized.get(key)
-            if previous is not None and previous[0].casefold() != value.casefold():
-                raise AbbreviationGlossaryRejected(
-                    "invalid",
-                    "abbreviation_glossary_conflict",
-                    f"Glossary contains conflicting definitions for {key}.",
-                )
-            normalized.setdefault(key, (value, source_page))
+            normalized.setdefault(
+                (key.casefold(), value.casefold()), (key, value, source_page)
+            )
         if not normalized:
             raise AbbreviationGlossaryRejected(
                 "invalid",
@@ -156,10 +151,7 @@ class AbbreviationGlossaryService:
         try:
             return self.repository.replace_from_document(
                 document_id=document_id,
-                entries=[
-                    (abbreviation, expansion, source_page)
-                    for abbreviation, (expansion, source_page) in normalized.items()
-                ],
+                entries=list(normalized.values()),
             )
         except SourceAbbreviationConflictError as exc:
             raise AbbreviationGlossaryRejected(

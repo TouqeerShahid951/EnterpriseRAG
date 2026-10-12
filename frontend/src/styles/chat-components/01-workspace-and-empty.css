@@ -92,105 +92,302 @@
 
 .rag-empty-state {
   display: grid;
-  gap: 0.7rem;
-  border: 1px solid var(--color-surface-border);
-  border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--color-surface-card) 76%, transparent);
-  width: min(100%, 56rem);
+  width: min(100%, 60rem);
+  gap: 1rem;
   align-self: center;
-  padding: clamp(1rem, 2vw, 1.5rem);
+  padding: clamp(1rem, 2vw, 1.5rem) 0;
   color: var(--color-on-surface);
 }
 
-.rag-empty-copy {
+.rag-empty-intro {
   display: grid;
-  max-width: 52rem;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.75rem;
-  align-items: start;
-}
-
-.rag-empty-icon {
-  display: inline-flex;
-  width: 2.25rem;
-  height: 2.25rem;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-surface-border));
-  border-radius: 0.45rem;
-  background: color-mix(in srgb, var(--color-primary-container) 72%, transparent);
-  color: var(--color-primary);
+  gap: 0.35rem;
+  justify-items: center;
+  text-align: center;
 }
 
 .rag-empty-eyebrow {
   margin: 0;
   color: var(--color-primary);
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0;
+  letter-spacing: 0.08em;
   line-height: 1.15;
   text-transform: uppercase;
 }
 
-.rag-empty-copy h2 {
-  margin: 0.12rem 0 0;
+.rag-empty-intro h2 {
+  margin: 0.15rem 0 0;
   color: var(--color-on-surface);
-  font-size: 1.125rem;
+  font-size: clamp(1.6rem, 3vw, 2.35rem);
   font-weight: 700;
-  line-height: 1.2;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
 }
 
-.rag-empty-copy p:not(.rag-empty-eyebrow) {
-  margin: 0.18rem 0 0;
+.rag-empty-intro p:not(.rag-empty-eyebrow) {
+  margin: 0.15rem 0 0;
   color: var(--color-secondary);
-  max-width: 62ch;
-  font-size: 0.8125rem;
+  max-width: 58ch;
+  font-size: 0.875rem;
   line-height: 1.5;
 }
 
-.rag-empty-capabilities {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
+.rag-empty-composer {
+  width: 100%;
+  margin-top: 0.65rem;
 }
 
-.rag-empty-capability {
+.rag-empty-composer .rag-composer-shell {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.rag-empty-composer .rag-composer-inner {
+  width: 100%;
+}
+
+.rag-empty-composer .rag-composer-source-row {
+  justify-content: flex-end;
+}
+
+.rag-empty-composer .rag-composer-hint {
+  display: none;
+}
+
+.rag-empty-composer .rag-composer-box {
+  min-height: 5.5rem;
+  border-radius: 0.75rem;
+  background: var(--color-surface-container-low);
+  padding: 0 0 4rem;
+}
+
+.rag-empty-composer .rag-composer-input {
+  display: block;
+  min-height: 2rem;
+  padding: 0.25rem 1rem;
+  font-size: 0.95rem;
+}
+
+.rag-empty-composer .rag-composer-box-empty > .rag-composer-source-row-compact {
+  position: absolute;
+  right: 4rem;
+  bottom: 0.65rem;
+  z-index: 1;
+  margin: 0;
+  justify-content: flex-start;
+}
+
+.rag-empty-composer .rag-composer-box-has-upload > .rag-composer-source-row-compact {
+  right: 7rem;
+}
+
+.rag-composer-source-row-compact .rag-composer-compact-source {
+  position: relative;
   display: inline-flex;
-  min-height: 1.85rem;
-  max-width: 100%;
+  min-height: 2.5rem;
   align-items: center;
-  gap: 0.35rem;
-  border: 1px solid var(--color-surface-border);
-  border-radius: 0.45rem;
-  background: color-mix(in srgb, var(--color-surface-container-low) 72%, transparent);
-  padding: 0.3rem 0.5rem;
-  color: var(--color-secondary);
-  font-size: 0.7rem;
-  font-weight: 700;
-  line-height: 1.2;
 }
 
-.rag-empty-capability span {
+.rag-composer-compact-source > svg:first-of-type {
+  position: absolute;
+  left: 0.65rem;
+  z-index: 1;
+  pointer-events: none;
+  color: var(--color-on-surface-variant);
+}
+
+.rag-composer-compact-source > svg:last-of-type {
+  position: absolute;
+  right: 0.55rem;
+  pointer-events: none;
+  color: var(--color-on-surface-variant);
+}
+
+.rag-composer-compact-source select {
+  min-height: 2.5rem;
+  appearance: none;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 999px;
+  background: var(--color-surface-container-low);
+  padding: 0 2rem 0 2rem;
+  color: var(--color-on-surface);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.rag-composer-compact-source select:hover,
+.rag-composer-compact-source select:focus-visible {
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-surface-border));
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.rag-empty-composer .rag-composer-box-empty > .rag-composer-icon-action,
+.rag-empty-composer .rag-composer-box-empty > .rag-composer-send-action {
+  top: auto;
+  bottom: 0.65rem;
+  transform: none;
+}
+
+.rag-empty-composer .rag-composer-box-empty > .rag-composer-icon-action:disabled:hover,
+.rag-empty-composer .rag-composer-box-empty > .rag-composer-send-action:disabled:hover {
+  transform: none;
+}
+
+.rag-empty-trust {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  margin: 0;
+  color: var(--color-secondary);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.rag-empty-trust svg {
   flex: 0 0 auto;
   color: var(--color-primary);
 }
 
-@media (min-width: 2200px) {
-  .rag-empty-state {
-    grid-template-columns: minmax(0, 1.1fr) minmax(24rem, 0.9fr);
-    align-items: center;
-    gap: 1rem;
-    padding: 1rem;
-  }
+.rag-empty-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-top: 1.25rem;
+}
 
-  .rag-empty-copy {
-    max-width: none;
-  }
+.rag-empty-action {
+  display: grid;
+  min-width: 0;
+  min-height: 10.5rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto 1fr;
+  align-items: start;
+  gap: 0.85rem 0.65rem;
+  border: 1px solid var(--color-surface-border);
+  border-radius: 0.75rem;
+  background: var(--color-surface-card);
+  padding: 0.9rem;
+  color: var(--color-on-surface);
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
 
-  .rag-empty-capabilities {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
+.rag-empty-action:hover:not(:disabled),
+.rag-empty-action:focus-visible {
+  border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-surface-border));
+  background: var(--color-surface-container-high);
+  transform: translateY(-2px);
+}
+
+.rag-empty-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.rag-empty-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.rag-empty-action-icon {
+  display: inline-flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--color-primary-container) 72%, var(--color-surface-container-low));
+  color: var(--color-primary);
+}
+
+.rag-empty-action-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.35rem;
+  grid-column: 1 / -1;
+}
+
+.rag-empty-action-copy strong {
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+
+.rag-empty-action-copy small {
+  color: var(--color-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.rag-empty-action-arrow {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: center;
+  color: var(--color-secondary);
+}
+
+.rag-empty-action:hover:not(:disabled) .rag-empty-action-arrow,
+.rag-empty-action:focus-visible .rag-empty-action-arrow {
+  color: var(--color-primary);
+}
+
+.rag-empty-action-upload .rag-empty-action-icon {
+  background: color-mix(in srgb, var(--color-info-blue) 14%, var(--color-surface-container-low));
+  color: var(--color-info-blue);
+}
+
+.rag-empty-action-review .rag-empty-action-icon {
+  background: color-mix(in srgb, var(--color-warning-amber) 14%, var(--color-surface-container-low));
+  color: var(--color-warning-amber);
+}
+
+.rag-empty-action-artifact .rag-empty-action-icon {
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface-container-low));
+}
+
+@media (max-width: 900px) {
+  .rag-empty-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
+@media (max-width: 560px) {
+  .rag-empty-state {
+    gap: 0.75rem;
+  }
+
+  .rag-empty-intro h2 {
+    font-size: 1.55rem;
+  }
+
+  .rag-empty-composer .rag-composer-source-row {
+    justify-content: flex-start;
+  }
+
+  .rag-empty-composer .rag-composer-source-segments {
+    margin-right: 0;
+  }
+
+  .rag-empty-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rag-empty-action {
+    min-height: 0;
+  }
+}
+
+@media (min-width: 2200px) {
+  .rag-empty-state {
+    width: min(100%, 72rem);
+  }
+
+  .rag-empty-actions {
+    gap: 0.85rem;
+  }
+}

@@ -171,6 +171,7 @@ async def create_snapshot_folder_schedule(
     timezone: str = Form(default="Asia/Karachi"),
     scheduled_at: datetime | None = Form(default=None),
     recurrence_json: str = Form(default="{}"),
+    analyze_slide_visuals: bool = Form(default=True),
     user: UserRecord = Depends(require_current_user),
     identity_repo: IdentityRepository = Depends(get_identity_repository),
     document_repo: DocumentRepository = Depends(get_document_repository),
@@ -197,6 +198,7 @@ async def create_snapshot_folder_schedule(
             timezone_name=timezone,
             scheduled_at=scheduled_at,
             recurrence=recurrence,
+            analyze_slide_visuals=analyze_slide_visuals,
             user=user,
             identity_repo=identity_repo,
             document_repo=document_repo,
@@ -242,6 +244,7 @@ async def create_minio_folder_schedule(
             timezone_name=payload.timezone,
             scheduled_at=payload.scheduled_at,
             recurrence=payload.recurrence.model_dump() if payload.recurrence else {},
+            analyze_slide_visuals=payload.analyze_slide_visuals,
             user=user,
             identity_repo=identity_repo,
             document_repo=document_repo,
@@ -284,6 +287,7 @@ async def create_local_folder_schedule_route(
             timezone_name=payload.timezone,
             scheduled_at=payload.scheduled_at,
             recurrence=payload.recurrence.model_dump() if payload.recurrence else {},
+            analyze_slide_visuals=payload.analyze_slide_visuals,
             user=user,
             identity_repo=identity_repo,
             document_repo=document_repo,
@@ -597,11 +601,17 @@ def _public_source_config(schedule: FolderScheduleRecord) -> dict[str, object]:
     if schedule.source_type == "local_folder":
         return {
             "path": str(schedule.source_config.get("path") or ""),
+            "analyze_slide_visuals": schedule.source_config.get(
+                "analyze_slide_visuals", True
+            ),
         }
     if schedule.source_type == "minio_prefix":
         return {
             "bucket": str(schedule.source_config.get("bucket") or ""),
             "prefix": str(schedule.source_config.get("prefix") or ""),
+            "analyze_slide_visuals": schedule.source_config.get(
+                "analyze_slide_visuals", True
+            ),
         }
     if schedule.source_type == "connector":
         return {
@@ -623,7 +633,12 @@ def _public_source_config(schedule: FolderScheduleRecord) -> dict[str, object]:
             "batch_size": int(schedule.source_config.get("batch_size") or 500),
             "row_limit": int(schedule.source_config.get("row_limit") or 5000),
         }
-    return {"mode": "browser_snapshot"}
+    return {
+        "mode": "browser_snapshot",
+        "analyze_slide_visuals": schedule.source_config.get(
+            "analyze_slide_visuals", True
+        ),
+    }
 
 
 def _raise_folder_http_error(exc: FolderIngestionRejected) -> NoReturn:

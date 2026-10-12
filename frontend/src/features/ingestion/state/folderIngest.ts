@@ -1,9 +1,10 @@
 import type { CreateLocalFolderScheduleRequest, CreateSnapshotScheduleRequest } from "@/lib/api/contracts";
 import { defaultClearanceLevel } from "@/lib/auth/authz";
+import { isSupportedDocumentName } from "@/lib/utils/documentUpload";
 import type { ClearanceLevel, ConnectorDeletionPolicy, ConnectorIngestionMode, ConnectorType, FolderScheduleType, RecurrenceWindow } from "@/types/api";
 
 export const WORKSPACE_TIMEZONE = "Asia/Karachi";
-const FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES = 100;
+export const FOLDER_SUPPORTED_FORMATS = "PDF, DOCX, PPTX, CSV, XLSX, JPG, JPEG, PNG, and JSON";
 const FOLDER_SNAPSHOT_MAX_BYTES = 5 * 1024 * 1024 * 1024;
 
 type FolderSourceMode = "snapshot" | "local_folder" | "connector";
@@ -46,6 +47,7 @@ export interface FolderScheduleDraft {
   connectorDeletionPolicy: ConnectorDeletionPolicy;
   connectorBatchSize: number;
   connectorRowLimit: number;
+  analyzeSlideVisuals: boolean;
 }
 
 export function defaultFolderScheduleDraft(effectiveDate: string): FolderScheduleDraft {
@@ -72,6 +74,7 @@ export function defaultFolderScheduleDraft(effectiveDate: string): FolderSchedul
     connectorDeletionPolicy: "keep_deleted_documents",
     connectorBatchSize: 500,
     connectorRowLimit: 5000,
+    analyzeSlideVisuals: true,
   };
 }
 
@@ -94,7 +97,7 @@ export function summarizeFolderFiles(files: File[]): FolderSelectionSummary {
     return {
       file,
       relativePath,
-      supported: isSupportedFolderDocument(file, relativePath),
+      supported: isSupportedFolderDocument(relativePath),
     };
   });
   const supportedEntries = entries.filter((entry) => entry.supported);
@@ -102,10 +105,7 @@ export function summarizeFolderFiles(files: File[]): FolderSelectionSummary {
   const supportedBytes = supportedEntries.reduce((total, entry) => total + entry.file.size, 0);
   const validationMessages: string[] = [];
   if (supportedEntries.length === 0 && entries.length > 0) {
-    validationMessages.push("The selected folder does not contain any PDF, DOCX, JPG, PNG, or JSON files.");
-  }
-  if (supportedEntries.length > FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES) {
-    validationMessages.push(`Folder snapshots cannot exceed ${FOLDER_SNAPSHOT_MAX_SUPPORTED_FILES} supported files.`);
+    validationMessages.push(`The selected folder does not contain any ${FOLDER_SUPPORTED_FORMATS} files.`);
   }
   if (supportedBytes > FOLDER_SNAPSHOT_MAX_BYTES) {
     validationMessages.push("Folder snapshots cannot exceed 5 GB of supported files.");
@@ -141,6 +141,7 @@ export function buildSnapshotScheduleRequest(draft: FolderScheduleDraft, entries
     timezone: draft.timezone,
     scheduled_at: draft.scheduleType === "one_time" ? draft.scheduledAt || null : null,
     recurrence: buildRecurrence(draft),
+    analyze_slide_visuals: draft.analyzeSlideVisuals,
   };
 }
 
@@ -157,6 +158,7 @@ export function buildLocalFolderScheduleRequest(draft: FolderScheduleDraft): Cre
     timezone: draft.timezone,
     scheduled_at: draft.scheduleType === "one_time" ? draft.scheduledAt || null : null,
     recurrence: buildRecurrence(draft),
+    analyze_slide_visuals: draft.analyzeSlideVisuals,
   };
 }
 
@@ -175,21 +177,8 @@ export function folderSnapshotLabel(entries: FolderFileEntry[]): string {
   return `${roots.length} folders selected`;
 }
 
-function isSupportedFolderDocument(file: File, relativePath: string): boolean {
-  const name = (relativePath || file.name).toLowerCase();
-  return (
-    file.type === "application/pdf"
-    || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    || file.type === "image/jpeg"
-    || file.type === "image/png"
-    || file.type === "application/json"
-    || name.endsWith(".pdf")
-    || name.endsWith(".docx")
-    || name.endsWith(".jpg")
-    || name.endsWith(".jpeg")
-    || name.endsWith(".png")
-    || name.endsWith(".json")
-  );
+function isSupportedFolderDocument(relativePath: string): boolean {
+  return isSupportedDocumentName(relativePath);
 }
 
 function sanitizeRelativePath(path: string): string {

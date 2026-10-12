@@ -1,7 +1,12 @@
 from datetime import datetime
-from pydantic import Field
+from typing import Self
+from pydantic import Field, model_validator
 
 from rag.shared.contracts.rag_defaults import (
+    SYNTHESIS_PROMPT_HEADROOM_TOKENS,
+    DEFAULT_ANSWER_OUTPUT_TOKENS,
+    DEFAULT_ANSWER_CONTEXT_TOKENS,
+    DEFAULT_CONTEXT_RESOLVER_ENABLED,
     DEFAULT_EVIDENCE_GATE_POLICY,
     DEFAULT_FAITHFULNESS_POLICY,
     DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS,
@@ -47,6 +52,9 @@ class RagConfigRequest(ContractModel):
     thinking_enabled: bool = False
     json_num_predict: int = Field(default=4096, ge=256, le=32768)
     retrieval_token_budget: int = Field(default=12000, ge=1000, le=200000)
+    answer_output_tokens: int = Field(default=DEFAULT_ANSWER_OUTPUT_TOKENS, ge=256, le=32768)
+    answer_context_tokens: int = Field(default=DEFAULT_ANSWER_CONTEXT_TOKENS, ge=2048, le=262144)
+    context_resolver_enabled: bool = DEFAULT_CONTEXT_RESOLVER_ENABLED
     query_planner_enabled: bool = True
     evidence_gate_policy: EvidenceGatePolicy = DEFAULT_EVIDENCE_GATE_POLICY
     faithfulness_policy: FaithfulnessPolicy = DEFAULT_FAITHFULNESS_POLICY
@@ -62,6 +70,12 @@ class RagConfigRequest(ContractModel):
         default=DEFAULT_FAITHFULNESS_TIMEOUT_SECONDS, ge=1.0, le=300.0
     )
     embed_timeout_seconds: float = Field(default=45.0, gt=0)
+
+    @model_validator(mode="after")
+    def validate_answer_budget(self) -> Self:
+        if self.answer_output_tokens + SYNTHESIS_PROMPT_HEADROOM_TOKENS >= self.answer_context_tokens:
+            raise ValueError("Answer output budget must leave space for input and 512 tokens of headroom.")
+        return self
 
 
 class RagModelDiscoveryRequest(ContractModel):
@@ -148,9 +162,13 @@ class RagConfigResponse(ContractModel):
     thinking_enabled: bool
     json_num_predict: int
     retrieval_token_budget: int
+    answer_output_tokens: int = Field(default=DEFAULT_ANSWER_OUTPUT_TOKENS, ge=256, le=32768)
+    answer_context_tokens: int = Field(default=DEFAULT_ANSWER_CONTEXT_TOKENS, ge=2048, le=262144)
+    context_resolver_enabled: bool = DEFAULT_CONTEXT_RESOLVER_ENABLED
     query_planner_enabled: bool
     evidence_gate_policy: EvidenceGatePolicy = DEFAULT_EVIDENCE_GATE_POLICY
     faithfulness_policy: FaithfulnessPolicy = DEFAULT_FAITHFULNESS_POLICY
+    effective_faithfulness_policy: FaithfulnessPolicy = "adaptive"
     reranker_model: str
     chat_timeout_seconds: float
     routing_timeout_seconds: float = Field(
@@ -192,6 +210,9 @@ class RagConfigTestResponse(ContractModel):
     thinking_enabled: bool
     json_num_predict: int
     retrieval_token_budget: int
+    answer_output_tokens: int = Field(default=DEFAULT_ANSWER_OUTPUT_TOKENS, ge=256, le=32768)
+    answer_context_tokens: int = Field(default=DEFAULT_ANSWER_CONTEXT_TOKENS, ge=2048, le=262144)
+    context_resolver_enabled: bool = DEFAULT_CONTEXT_RESOLVER_ENABLED
     query_planner_enabled: bool
     evidence_gate_policy: EvidenceGatePolicy = DEFAULT_EVIDENCE_GATE_POLICY
     faithfulness_policy: FaithfulnessPolicy = DEFAULT_FAITHFULNESS_POLICY

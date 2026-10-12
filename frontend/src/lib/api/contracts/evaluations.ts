@@ -3,6 +3,8 @@ import type {
   EvaluationDatasetSummary,
   EvaluationRunDetail,
   EvaluationRunSummary,
+  QueryRequest,
+  RagSseEvent,
 } from "@/types/api";
 import { apiClient } from "./apiClient";
 
@@ -35,4 +37,6 @@ export const ragEvaluationsApi = {
     apiClient.postJson<{ run: EvaluationRunSummary }>(`/api/v1/rag-evaluations/runs/${encodeURIComponent(runId)}/cancel`, null),
   retryRun: (runId: string) =>
     apiClient.postJson<{ run: EvaluationRunSummary }>(`/api/v1/rag-evaluations/runs/${encodeURIComponent(runId)}/retry`, null),
+  streamQueryTracker: (request: QueryRequest, init?: RequestInit) =>
+    apiClient.postJsonSse<RagSseEvent>("/api/v1/rag-evaluations/query-tracker/stream", request, init),
 };

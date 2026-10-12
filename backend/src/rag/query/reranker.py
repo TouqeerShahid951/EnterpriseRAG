@@ -33,6 +33,7 @@ from .reranking.models import (
     ScoredExhaustiveUnit as _ScoredExhaustiveUnit,
 )
 from .reranking.scope import (
+    exact_heading_matched_exhaustive_unit_keys as _exact_heading_matched_exhaustive_unit_keys,
     heading_matched_exhaustive_unit_keys as _heading_matched_exhaustive_unit_keys,
     is_toc_exhaustive_hit as _is_toc_exhaustive_hit,
     is_toc_only_exhaustive_unit as _is_toc_only_exhaustive_unit,
@@ -373,6 +374,11 @@ def _resolve_exhaustive_scope(
         head_limit=max_candidates or 40,
     )
     heading_keys = _heading_matched_exhaustive_unit_keys(query, eligible_units)
+    exact_heading_keys = _exact_heading_matched_exhaustive_unit_keys(
+        query, eligible_units
+    )
+    if not exclusive_keys and len(exact_heading_keys) == 1:
+        exclusive_keys = exact_heading_keys
     if exclusive_keys:
         heading_keys &= exclusive_keys
     return _ExhaustiveScope(

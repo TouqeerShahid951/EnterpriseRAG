@@ -23,7 +23,14 @@
 }
 
 .source-viewer-docx-highlight {
-  background: color-mix(in srgb, var(--color-primary) 52%, var(--source-viewer-paper));
+  background: color-mix(in srgb, var(--color-evidence-highlight) 52%, var(--source-viewer-paper));
+  color: inherit;
+  outline: 2px solid color-mix(in srgb, var(--color-evidence-highlight) 72%, transparent);
+  scroll-margin-block: 8rem;
+}
+
+.source-viewer-search-highlight {
+  background: color-mix(in srgb, var(--color-primary) 42%, var(--source-viewer-paper));
   color: inherit;
   outline: 2px solid color-mix(in srgb, var(--color-primary) 72%, transparent);
   scroll-margin-block: 8rem;

@@ -189,6 +189,24 @@ def test_upload_service_rejects_duplicate_before_scanning_or_storage() -> None:
     assert len(queue.messages) == 1
 
 
+def test_glossary_duplicate_explains_how_to_recover() -> None:
+    document_repo, identity_repo, user = _context()
+    admin = replace(user, account_type="system_admin")
+    service = _service(document_repo, identity_repo, queue=FakeQueue(), storage=FakeStorage())
+    command = replace(
+        _command(admin),
+        doc_type=ABBREVIATION_GLOSSARY_DOC_TYPE,
+        clearance_level="NATO_UNCLASSIFIED",
+    )
+    service.execute(command)
+
+    with pytest.raises(UploadRejected) as exc_info:
+        service.execute(command)
+
+    assert exc_info.value.code == "duplicate_document"
+    assert "Retry its failed import" in exc_info.value.message
+
+
 @pytest.mark.parametrize(
     ("scanner_error", "category", "code", "message"),
     [
@@ -273,7 +291,7 @@ def test_upload_service_keeps_queued_job_when_queue_is_unavailable() -> None:
     assert document_repo.audit_events[-1]["event_type"] == "upload.queued"
 
 
-def test_abbreviation_glossary_upload_requires_an_admin_and_a_pdf() -> None:
+def test_abbreviation_glossary_upload_requires_an_admin_and_a_supported_source() -> None:
     document_repo, identity_repo, contributor = _context()
     service = _service(
         document_repo,
@@ -308,7 +326,7 @@ def test_abbreviation_glossary_upload_requires_an_admin_and_a_pdf() -> None:
                 declared_content_type="application/json",
             )
         )
-    assert exc_info.value.code == "abbreviation_glossary_pdf_required"
+    assert exc_info.value.code == "abbreviation_glossary_source_required"
 
 
 def test_abbreviation_glossary_can_add_or_replace_one_pdf_source() -> None:

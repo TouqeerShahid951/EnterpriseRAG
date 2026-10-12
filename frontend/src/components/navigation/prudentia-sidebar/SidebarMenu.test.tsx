@@ -6,10 +6,10 @@ import type { RouteId } from "@/routes/routes";
 import { SidebarMenu } from "./SidebarMenu";
 
 const items = [{
-  children: [{ label: "Workspace Summary", route: "overview" as const }],
-  icon: "overview" as const,
-  id: "overview",
-  label: "System Overview",
+  children: [{ label: "Add Files", route: "upload" as const }],
+  icon: "documents" as const,
+  id: "document-intake",
+  label: "Document Intake",
   section: "Operate" as const,
 }];
 
@@ -18,12 +18,12 @@ describe("SidebarMenu groups", () => {
     const onExpand = vi.fn();
     const onNavigate = vi.fn();
 
-    topLevelButton({ expandedGroup: "overview", onExpand, onNavigate, sidebarCollapsed: false }).props.onClick();
+    topLevelButton({ expandedGroup: "document-intake", onExpand, onNavigate, sidebarCollapsed: false }).props.onClick();
     expect(onExpand).toHaveBeenCalledWith(null);
     expect(onNavigate).not.toHaveBeenCalled();
 
     topLevelButton({ expandedGroup: null, onExpand, onNavigate, sidebarCollapsed: true }).props.onClick();
-    expect(onNavigate).toHaveBeenCalledWith("overview");
+    expect(onNavigate).toHaveBeenCalledWith("upload");
   });
 
   it("renders route destinations as links", () => {

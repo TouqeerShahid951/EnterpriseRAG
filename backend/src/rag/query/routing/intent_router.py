@@ -12,13 +12,23 @@ from rag.query.routing.capability_planner import (
     CapabilityPlanDecision,
     plan_capabilities_with_llm,
 )
+from rag.query.routing.evidence_planning import (
+    INDEXED_CORPUS_SOURCE_ID,
+    KNOWLEDGE_GRAPH_SOURCE_ID,
+    compile_retrieval_capabilities,
+    default_evidence_plan,
+)
 from rag.query.routing.routing_models import (
+    EvidenceNeed,
+    EvidencePlan,
     QuerySignals,
     ResponseMode,
     RetrievalCapability,
     RouteIntent,
     RoutePenalty,
     RoutePlan,
+    SourceAssignment,
+    SummaryMode,
     public_intent_for,
 )
 from rag.query.routing.routing_signals import extract_query_signals
@@ -31,7 +41,12 @@ _NAVIGATION_RE = re.compile(
 _SUMMARY_RE = re.compile(
     r"\bsummari[sz]e\b"
     r"|\b(?:give|provide|create|write|show)\s+(?:me\s+)?(?:a|an|the)?\s*(?:overview|summary)\b"
-    r"|\b(?:overview|summary)\s+of\b",
+    r"|\b(?:overview|summary)\s+of\b"
+    r"|\bwhat\s+is\s+(?:this|that|the|selected)\s+(?:document|file|report|manual|source)\s+about\b",
+    re.IGNORECASE,
+)
+_NEGATED_SUMMARY_RE = re.compile(
+    r"\b(?:do\s+not|don't|dont|not\s+to|without)\s+summari[sz](?:e|ing)\b",
     re.IGNORECASE,
 )
 _COMPARISON_RE = re.compile(
@@ -55,7 +70,7 @@ _GLOBAL_GRAPH_RE = re.compile(
     re.IGNORECASE,
 )
 _EXHAUSTIVE_RE = re.compile(
-    r"\b(?:all|complete|comprehensive|each|entire|enumerate|every)\b",
+    r"\b(?:all|complete|comprehensive|each|entire|enumerate|every|everything)\b",
     re.IGNORECASE,
 )
 _CORPUS_SCOPE_RE = re.compile(
@@ -95,6 +110,7 @@ def route_query(
     query_planner_enabled: bool = True,
     cancellation_token: QueryCancellationToken | None = None,
     source_decision: object | None = None,
+    source_candidates: dict[str, object] | None = None,
 ) -> tuple[RoutePlan, QuerySignals]:
     """Build a validated capability plan, falling back to ordinary hybrid search."""
 
@@ -102,12 +118,22 @@ def route_query(
         cancellation_token.raise_if_cancelled()
     signals = extract_query_signals(query, turns)
     operations = _operation_signals(signals.normalized_query)
-    baseline = _baseline_capability_plan(signals, source_decision, operations)
+    baseline = _baseline_capability_plan(
+        signals,
+        source_decision,
+        operations,
+        source_candidates=source_candidates,
+    )
     decision: CapabilityPlanDecision | None = None
     penalty: RoutePenalty | None = None
     route_method: str | None = None
 
-    if not _needs_capability_planner(signals, source_decision, operations):
+    if not _needs_capability_planner(
+        signals,
+        source_decision,
+        operations,
+        source_candidates=source_candidates,
+    ):
         decision = baseline
         route_method = "rules"
     elif verifier_enabled and llm_verifier is not None:
@@ -116,6 +142,7 @@ def route_query(
                 llm_verifier,
                 model=verifier_model,
                 signals=signals,
+                source_candidates=source_candidates,
                 cancellation_token=cancellation_token,
             )
         except QueryCancelled:
@@ -137,12 +164,18 @@ def route_query(
             decision,
             operations=operations,
             source_decision=source_decision,
+            source_candidates=source_candidates,
         )
         route_method = "llm_planner"
 
     decision = _normalize_temporal_scope(decision, signals)
+    decision = _normalize_evidence_plan(decision, source_decision)
     decision = _normalize_source_capabilities(decision, source_decision)
-    decision = _normalize_scalar_lookup(decision, signals)
+    decision = _normalize_scalar_lookup(
+        decision,
+        signals,
+        source_decision=source_decision,
+    )
     settings = retrieval_settings_for(
         capabilities=decision.capabilities,
         response_mode=decision.response_mode,
@@ -154,6 +187,10 @@ def route_query(
     )
     use_query_planner = bool(settings["use_query_planner"]) and query_planner_enabled
     intent = _compatibility_intent(decision)
+    has_planned_evidence_needs = bool(
+        decision.evidence_plan is not None
+        and len(decision.evidence_plan.needs) > 1
+    )
     plan = RoutePlan(
         original_query=signals.original_query,
         resolved_query=signals.resolved_query,
@@ -162,8 +199,14 @@ def route_query(
         response_mode=decision.response_mode,
         scope=decision.scope,
         coverage=decision.coverage,
+        summary_mode=_summary_mode(signals.normalized_query, operations),
         temporal_scope=decision.temporal_scope,
-        sub_queries=decision.sub_queries if use_query_planner else (),
+        sub_queries=(
+            decision.sub_queries
+            if use_query_planner or has_planned_evidence_needs
+            else ()
+        ),
+        evidence_plan=decision.evidence_plan,
         planner_reason=decision.reason,
         confidence=0.0,
         route_method=route_method,  # type: ignore[arg-type]
@@ -177,7 +220,12 @@ def route_query(
         use_conflict_checker=bool(settings["use_conflict_checker"]),
         use_structured_query=bool(settings["use_structured_query"]),
         chunk_granularity=settings["chunk_granularity"],  # type: ignore[arg-type]
-        top_k=int(settings["top_k"]),
+        top_k=max(
+            int(settings["top_k"]),
+            50
+            if _summary_mode(signals.normalized_query, operations) == "topic"
+            else 1,
+        ),
         filters=dict(settings["filters"]),
         allow_abstain=bool(settings["allow_abstain"]),
         risk_level=settings["risk_level"],  # type: ignore[arg-type]
@@ -192,7 +240,16 @@ def _needs_capability_planner(
     signals: QuerySignals,
     source_decision: object | None,
     operations: frozenset[str],
+    *,
+    source_candidates: dict[str, object] | None = None,
 ) -> bool:
+    if _clear_document_lookup_source_id(
+        signals,
+        source_decision,
+        operations,
+        source_candidates,
+    ):
+        return False
     if _MULTIPART_QUESTION_RE.search(signals.normalized_query):
         return True
     response_operations = operations & {
@@ -209,6 +266,16 @@ def _needs_capability_planner(
     if signals.is_short_query and (
         operations
         or any(clue not in _CURRENT_ONLY_TEMPORAL_CLUES for clue in signals.temporal_clues)
+    ):
+        return True
+    if _requires_hybrid_sources(source_decision):
+        return True
+    database_candidates = (source_candidates or {}).get("databases")
+    if (
+        source_decision is not None
+        and not bool(getattr(source_decision, "explicit", False))
+        and isinstance(database_candidates, list)
+        and bool(database_candidates)
     ):
         return True
     return bool(
@@ -228,25 +295,34 @@ def _operation_signals(normalized_query: str) -> frozenset[str]:
         "global_graph": _GLOBAL_GRAPH_RE,
         "exhaustive": _EXHAUSTIVE_RE,
     }
-    return frozenset(
+    operations = {
         operation
         for operation, pattern in patterns.items()
         if pattern.search(normalized_query)
-    )
+    }
+    if _NEGATED_SUMMARY_RE.search(normalized_query):
+        operations.discard("summary")
+    return frozenset(operations)
 
 
 def _baseline_capability_plan(
     signals: QuerySignals,
     source_decision: object | None,
     operations: frozenset[str],
+    *,
+    source_candidates: dict[str, object] | None,
 ) -> CapabilityPlanDecision:
     source_mode = str(getattr(source_decision, "resolved_mode", "") or "")
     database_selected = source_mode in {"db_only", "db_first"}
-    use_live_sql = database_selected or _has_database_route_signal(source_decision)
+    use_live_sql = (
+        database_selected
+        or _has_database_route_signal(source_decision)
+        or _requires_hybrid_sources(source_decision)
+    )
     capabilities = ["general_search"]
     if use_live_sql:
         capabilities.append("live_sql")
-    elif "global_graph" in operations:
+    elif "global_graph" in operations and _graph_available(source_candidates):
         capabilities.append("global_graph")
     if not database_selected and "navigation" in operations:
         capabilities.append("document_navigation")
@@ -258,11 +334,27 @@ def _baseline_capability_plan(
 
     response_mode = _required_response_mode(operations) or "lookup"
 
-    coverage = "exhaustive" if "exhaustive" in operations else "focused"
+    summary_mode = _summary_mode(signals.normalized_query, operations)
+    document_summary = summary_mode in {"document", "section", "multi_document"}
+    coverage = (
+        "exhaustive"
+        if "exhaustive" in operations or document_summary
+        else "focused"
+    )
+    document_source_id = _clear_document_lookup_source_id(
+        signals,
+        source_decision,
+        operations,
+        source_candidates,
+    )
     document_selected = (
         getattr(source_decision, "reason", None) == "document_scope_selected"
+        or bool(document_source_id)
+        or summary_mode in {"document", "section"}
     )
-    if (
+    if summary_mode == "topic" and not document_selected:
+        scope = "corpus"
+    elif (
         use_live_sql
         or "global_graph" in operations
         or _CORPUS_SCOPE_RE.search(signals.normalized_query)
@@ -280,14 +372,114 @@ def _baseline_capability_plan(
         reasons.append("live_sql")
     if temporal_scope != "current":
         reasons.append(f"temporal_{temporal_scope}")
+    evidence_plan = default_evidence_plan(
+        signals.resolved_query,
+        source_decision=source_decision,
+    )
+    if document_source_id:
+        need = evidence_plan.needs[0]
+        evidence_plan = EvidencePlan(
+            needs=(
+                replace(
+                    need,
+                    assignments=(
+                        SourceAssignment(
+                            source_id=document_source_id,
+                            capability="indexed_search",
+                        ),
+                    ),
+                ),
+            )
+        )
+    if "global_graph" in capabilities:
+        need = evidence_plan.needs[0]
+        evidence_plan = EvidencePlan(
+            needs=(
+                replace(
+                    need,
+                    assignments=(
+                        *need.assignments,
+                        SourceAssignment(
+                            source_id=KNOWLEDGE_GRAPH_SOURCE_ID,
+                            capability="graph_query",
+                        ),
+                    ),
+                ),
+            )
+        )
     return CapabilityPlanDecision(
         capabilities=tuple(capabilities),  # type: ignore[arg-type]
         response_mode=response_mode,  # type: ignore[arg-type]
         scope=scope,  # type: ignore[arg-type]
         coverage=coverage,  # type: ignore[arg-type]
         temporal_scope=temporal_scope,  # type: ignore[arg-type]
+        evidence_plan=evidence_plan,
         reason=f"deterministic capability route: {','.join(reasons)}",
     )
+
+
+def _clear_document_lookup_source_id(
+    signals: QuerySignals,
+    source_decision: object | None,
+    operations: frozenset[str],
+    source_candidates: dict[str, object] | None,
+) -> str | None:
+    summary_request = _requires_document_summary_coverage(
+        signals.normalized_query, operations
+    )
+    scalar_request = _SCALAR_VALUE_RE.search(signals.normalized_query) is not None
+    if (
+        not summary_request and not scalar_request
+        or (summary_request and operations != {"summary"})
+        or (not summary_request and operations - {"exhaustive"})
+        or _requires_hybrid_sources(source_decision)
+        or getattr(source_decision, "preferred_source", None) != "corpus"
+        or int(getattr(source_decision, "document_match_score", 0) or 0)
+        < (1 if summary_request else 2)
+    ):
+        return None
+    documents = [
+        item
+        for item in (source_candidates or {}).get("documents", [])
+        if isinstance(item, dict)
+        and item.get("source_id")
+        and int(item.get("score", 0) or 0) >= (1 if summary_request else 2)
+    ]
+    if not documents:
+        return None
+    best_score = max(int(item.get("score", 0) or 0) for item in documents)
+    matches = [item for item in documents if int(item.get("score", 0) or 0) == best_score]
+    return str(matches[0]["source_id"]) if len(matches) == 1 else None
+
+
+def _requires_document_summary_coverage(
+    query: str, operations: frozenset[str]
+) -> bool:
+    """Require every section for a broad summary of one document."""
+
+    return _summary_mode(query, operations) == "document"
+
+
+def _summary_mode(query: str, operations: frozenset[str]) -> SummaryMode | None:
+    if "summary" not in operations:
+        return None
+    if "comparison" in operations:
+        return "multi_document"
+    if _NAVIGATION_RE.search(query):
+        return "section"
+    if re.search(
+        r"\b(?:document|file|manual|report|source)\b|\b(?:this|that|selected)\s+one\b",
+        query,
+        re.IGNORECASE,
+    ) or not re.search(r"\b(?:about|of|on|regarding|related\s+to)\b", query):
+        summary_tail = re.sub(_SUMMARY_RE, "", query).strip(" .?!")
+        if not summary_tail or summary_tail.lower() in {"this", "that", "it"}:
+            return "document"
+        if re.search(r"\b(?:document|file|manual|report|source)\b", summary_tail):
+            return "document"
+        if re.match(r"^(?:this|that|the|selected)\b", summary_tail, re.IGNORECASE):
+            return "document"
+    return "topic"
 
 
 def _merge_planner_decision(
@@ -296,10 +488,15 @@ def _merge_planner_decision(
     *,
     operations: frozenset[str],
     source_decision: object | None,
+    source_candidates: dict[str, object] | None,
 ) -> CapabilityPlanDecision:
     """Let AI refine a plan without removing explicit deterministic requirements."""
 
-    required_capabilities = _required_capabilities(operations, source_decision)
+    required_capabilities = _required_capabilities(
+        operations,
+        source_decision,
+        source_candidates=source_candidates,
+    )
     optional_capabilities = [
         capability
         for capability in planned.capabilities
@@ -344,7 +541,11 @@ def _merge_planner_decision(
     if temporal_scope != planned.temporal_scope:
         preserved.append("temporal_scope")
     if not preserved:
-        return planned
+        return (
+            planned
+            if planned.evidence_plan is not None
+            else replace(planned, evidence_plan=baseline.evidence_plan)
+        )
     reason = (
         f"{planned.reason}; preserved deterministic "
         f"{','.join(preserved)}"
@@ -356,6 +557,7 @@ def _merge_planner_decision(
         scope=scope,
         coverage=coverage,
         temporal_scope=temporal_scope,
+        evidence_plan=planned.evidence_plan or baseline.evidence_plan,
         reason=reason,
     )
 
@@ -363,11 +565,13 @@ def _merge_planner_decision(
 def _required_capabilities(
     operations: frozenset[str],
     source_decision: object | None,
+    *,
+    source_candidates: dict[str, object] | None,
 ) -> tuple[RetrievalCapability, ...]:
     source_mode = str(getattr(source_decision, "resolved_mode", "") or "")
     database_selected = source_mode in {"db_only", "db_first"}
     capabilities: list[RetrievalCapability] = ["general_search"]
-    if database_selected:
+    if database_selected or _requires_hybrid_sources(source_decision):
         capabilities.append("live_sql")
     if operations & {"comparison", "conflict"}:
         capabilities.append("decomposed_search")
@@ -375,9 +579,24 @@ def _required_capabilities(
         capabilities.append("document_navigation")
     if not database_selected and "summary" in operations:
         capabilities.append("document_search")
-    if not database_selected and "global_graph" in operations:
+    if (
+        not database_selected
+        and "global_graph" in operations
+        and _graph_available(source_candidates)
+    ):
         capabilities.append("global_graph")
     return tuple(capabilities)
+
+
+def _graph_available(source_candidates: dict[str, object] | None) -> bool:
+    if source_candidates is None:
+        return True
+    graphs = source_candidates.get("graphs")
+    return isinstance(graphs, list) and any(
+        isinstance(source, dict)
+        and "graph_query" in source.get("methods", [])
+        for source in graphs
+    )
 
 
 def _required_response_mode(
@@ -413,6 +632,25 @@ def _has_database_route_signal(source_decision: object | None) -> bool:
     )
 
 
+def _requires_hybrid_sources(source_decision: object | None) -> bool:
+    """Retain both branches when corpus and database evidence are both required."""
+
+    if source_decision is None:
+        return False
+    return bool(
+        getattr(source_decision, "resolved_mode", None) == "hybrid"
+        and (
+            getattr(source_decision, "query_source_record_id", None)
+            or getattr(source_decision, "preferred_catalog_id", None)
+        )
+        and int(getattr(source_decision, "corpus_score", 0) or 0) > 0
+        and (
+            int(getattr(source_decision, "structured_score", 0) or 0) > 0
+            or int(getattr(source_decision, "source_match_score", 0) or 0) > 0
+        )
+    )
+
+
 def _deterministic_temporal_scope(signals: QuerySignals) -> str:
     if _ALL_HISTORY_RE.search(signals.normalized_query):
         return "all"
@@ -432,6 +670,94 @@ def _normalize_temporal_scope(
     if decision.temporal_scope == "current" or signals.temporal_clues:
         return decision
     return replace(decision, temporal_scope="current")
+
+
+def _normalize_evidence_plan(
+    decision: CapabilityPlanDecision,
+    source_decision: object | None,
+) -> CapabilityPlanDecision:
+    """Validate planner assignments against an explicit source boundary."""
+
+    plan = decision.evidence_plan or default_evidence_plan(
+        " ".join(decision.sub_queries).strip() or "retrieval request",
+        source_decision=source_decision,
+    )
+    mode = str(getattr(source_decision, "resolved_mode", "") or "")
+    explicit = bool(getattr(source_decision, "explicit", False))
+    selected_source_ids = tuple(
+        str(item)
+        for item in getattr(source_decision, "query_source_ids", ())
+        if str(item)
+    )
+    selected_source_id = str(getattr(source_decision, "query_source_id", "") or "")
+    if not selected_source_ids and selected_source_id:
+        selected_source_ids = (selected_source_id,)
+    selected_source_set = set(selected_source_ids)
+    normalized_needs: list[EvidenceNeed] = []
+    for need in plan.needs:
+        assignments = list(need.assignments)
+        if explicit and mode == "corpus_only":
+            assignments = [
+                item for item in assignments if item.capability == "indexed_search"
+            ]
+        elif explicit and mode in {"db_only", "db_first"}:
+            assignments = [
+                item
+                for item in assignments
+                if item.capability == "connector_query"
+                and (not selected_source_set or item.source_id in selected_source_set)
+            ]
+        elif explicit and mode == "hybrid" and selected_source_set:
+            assignments = [
+                item
+                for item in assignments
+                if item.capability != "connector_query"
+                or item.source_id in selected_source_set
+            ]
+        assigned_connector_ids = {
+            item.source_id
+            for item in assignments
+            if item.capability == "connector_query"
+        }
+        if explicit and mode in {"db_only", "db_first", "hybrid"}:
+            assignments.extend(
+                SourceAssignment(
+                    source_id=source_id,
+                    capability="connector_query",
+                )
+                for source_id in selected_source_ids
+                if source_id not in assigned_connector_ids
+            )
+        if not assignments:
+            if explicit and mode in {"db_only", "db_first"} and selected_source_ids:
+                assignments = [
+                    SourceAssignment(
+                        source_id=source_id,
+                        capability="connector_query",
+                    )
+                    for source_id in selected_source_ids
+                ]
+            else:
+                assignments = [
+                    SourceAssignment(
+                        source_id=INDEXED_CORPUS_SOURCE_ID,
+                        capability="indexed_search",
+                    )
+                ]
+        normalized_needs.append(replace(need, assignments=tuple(assignments)))
+    normalized_plan = EvidencePlan(needs=tuple(normalized_needs))
+    capabilities = compile_retrieval_capabilities(
+        decision.capabilities, normalized_plan
+    )
+    sub_queries = decision.sub_queries
+    if len(normalized_plan.needs) > 1 and not sub_queries:
+        sub_queries = tuple(need.query for need in normalized_plan.needs)
+    return replace(
+        decision,
+        capabilities=capabilities,
+        sub_queries=sub_queries,
+        evidence_plan=normalized_plan,
+    )
 
 
 def _normalize_source_capabilities(
@@ -465,11 +791,18 @@ def _normalize_source_capabilities(
 def _normalize_scalar_lookup(
     decision: CapabilityPlanDecision,
     signals: QuerySignals,
+    *,
+    source_decision: object | None,
 ) -> CapabilityPlanDecision:
     """Keep a focused scalar fact request from expanding into a summary."""
 
     if (
-        decision.response_mode not in {"summary", "explanation"}
+        _requires_hybrid_sources(source_decision)
+        or (
+            decision.evidence_plan is not None
+            and len(decision.evidence_plan.needs) > 1
+        )
+        or decision.response_mode not in {"lookup", "summary", "explanation"}
         or not set(decision.capabilities).issubset(
             {"general_search", "decomposed_search"}
         )

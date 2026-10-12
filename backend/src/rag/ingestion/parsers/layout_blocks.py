@@ -28,6 +28,7 @@ class LayoutBlock:
     quality_flags: list[str] = field(default_factory=list)
     section_level: int | None = None
     table_json: dict[str, Any] | None = None
+    source_spans: list[dict[str, Any]] = field(default_factory=list)
 
 
 def blocks_to_items(blocks: list[LayoutBlock], *, parser: str) -> list[ParsedPdfItem]:
@@ -37,7 +38,8 @@ def blocks_to_items(blocks: list[LayoutBlock], *, parser: str) -> list[ParsedPdf
             text=block.text,
             item_type=_item_type(block.role),
             page_start=block.page_no,
-            page_end=block.page_no,
+            page_end=max((span["page"] for span in block.source_spans), default=block.page_no),
+            source_spans=block.source_spans,
             section_level=block.section_level,
             bbox=block.bbox,
             parser=parser,

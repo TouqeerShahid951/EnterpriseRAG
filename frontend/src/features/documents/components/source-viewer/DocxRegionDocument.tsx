@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { FileSearch, ImageIcon } from "lucide-react";
 
 import { fitContentWidthScale, stepSourceZoom } from "@/features/source-viewer/utils/sourceViewer";
 import {
@@ -8,13 +9,16 @@ import {
   ViewerZoomControls,
   type ContentScaleMode,
 } from "@/features/documents/components/source-viewer/DocumentRegionViewerPrimitives";
+import { SourceViewerSearch } from "@/features/documents/components/source-viewer/SourceViewerSearch";
 import type { DocumentRegion } from "@/features/documents/components/DocumentRegionViewer";
 import {
-  highlightFirstSourceText,
+  highlightExactSourceText,
+  countRenderedTextMatches,
+  highlightRenderedTextMatch,
   measureElementContent,
   readableError,
   shouldIgnoreViewerShortcut,
-  sourceTextCandidates,
+  type ExactTextTarget,
 } from "@/features/documents/utils/documentRegionViewerUtils";
 
 export function DocxRegionDocument({
@@ -22,14 +26,14 @@ export function DocxRegionDocument({
   documentId,
   fallbackMessage,
   regions,
-  textCandidates,
+  textTargets,
   toolbarEnd,
 }: {
   buffer: ArrayBuffer;
   documentId: string;
   fallbackMessage: string;
   regions: DocumentRegion[];
-  textCandidates?: string[];
+  textTargets: ExactTextTarget[];
   toolbarEnd?: ReactNode;
 }) {
   const documentRef = useRef<HTMLDivElement>(null);
@@ -41,6 +45,14 @@ export function DocxRegionDocument({
   const [contentSize, setContentSize] = useState<{ height: number; width: number } | null>(null);
   const [scaleMode, setScaleMode] = useState<ContentScaleMode>("fit");
   const [customScale, setCustomScale] = useState(1);
+  const [showOriginalDocument, setShowOriginalDocument] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeSearchQuery, setActiveSearchQuery] = useState("");
+  const [searchIndex, setSearchIndex] = useState(0);
+  const [searchMatchCount, setSearchMatchCount] = useState(0);
+  const [searchStatus, setSearchStatus] = useState<string | undefined>();
+  const [isSearching, setIsSearching] = useState(false);
+  const hasOnlyImageEvidence = textTargets.length === 0 && regions.some((region) => region.imageAssetId);
   const activeScale = contentSize && containerSize
     ? scaleMode === "fit"
       ? fitContentWidthScale({
@@ -61,6 +73,32 @@ export function DocxRegionDocument({
     setCustomScale(1);
     setScaleMode("custom");
   };
+
+  function resetSearchResults() {
+    setActiveSearchQuery("");
+    setSearchIndex(0);
+    setSearchMatchCount(0);
+    setSearchStatus(undefined);
+    setIsSearching(false);
+  }
+
+  function runSearch() {
+    const query = searchQuery.trim();
+    if (!query) {
+      resetSearchResults();
+      return;
+    }
+    setActiveSearchQuery(query);
+    setSearchIndex(0);
+    setSearchMatchCount(0);
+    setSearchStatus("Searching…");
+    setIsSearching(true);
+  }
+
+  function goToSearchResult(direction: -1 | 1) {
+    if (!searchMatchCount) return;
+    setSearchIndex((currentIndex) => (currentIndex + direction + searchMatchCount) % searchMatchCount);
+  }
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -89,7 +127,7 @@ export function DocxRegionDocument({
     const observer = new ResizeObserver(updateContainerSize);
     observer.observe(container);
     return () => observer.disconnect();
-  }, []);
+  }, [showOriginalDocument]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -125,6 +163,7 @@ export function DocxRegionDocument({
       try {
         setMatched(null);
         setRenderError(null);
+        setSearchMatchCount(0);
         docxContainer.replaceChildren();
         docxStyleContainer.replaceChildren();
         const { renderAsync } = await import("docx-preview");
@@ -136,11 +175,23 @@ export function DocxRegionDocument({
         });
         if (disposed) return;
         setContentSize(measureElementContent(docxContainer));
-        const didMatch = highlightFirstSourceText(docxContainer, sourceTextCandidates(regions, textCandidates));
+        const didMatch = highlightExactSourceText(docxContainer, textTargets);
         setMatched(didMatch);
+        const matchCount = activeSearchQuery ? countRenderedTextMatches(docxContainer, activeSearchQuery) : 0;
+        setSearchMatchCount(matchCount);
+        if (activeSearchQuery) {
+          setSearchStatus(matchCount ? undefined : "No matches");
+          if (matchCount) highlightRenderedTextMatch(docxContainer, activeSearchQuery, searchIndex);
+        } else {
+          setSearchStatus(undefined);
+        }
+        setIsSearching(false);
         requestAnimationFrame(() => docxContainer.querySelector<HTMLElement>(".source-viewer-docx-highlight")?.scrollIntoView({ block: "center" }));
       } catch (docxError) {
-        if (!disposed) setRenderError(readableError(docxError, "The DOCX file could not be rendered."));
+        if (!disposed) {
+          setRenderError(readableError(docxError, "The DOCX file could not be rendered."));
+          setIsSearching(false);
+        }
       }
     }
 
@@ -148,19 +199,54 @@ export function DocxRegionDocument({
     return () => {
       disposed = true;
     };
-  }, [buffer, regions, textCandidates]);
+  }, [activeSearchQuery, buffer, searchIndex, showOriginalDocument, textTargets]);
 
   useEffect(() => {
-    if (!matched) return;
-    const highlight = documentRef.current?.querySelector<HTMLElement>(".source-viewer-docx-highlight");
+    const highlight = documentRef.current?.querySelector<HTMLElement>(".source-viewer-search-highlight, .source-viewer-docx-highlight");
     requestAnimationFrame(() => highlight?.scrollIntoView({ block: "center" }));
-  }, [activeScale, matched]);
+  }, [activeScale, activeSearchQuery, matched, searchIndex]);
+
+  if (hasOnlyImageEvidence && !showOriginalDocument) {
+    return (
+      <div className="source-viewer-document source-viewer-image-evidence">
+        <div className="source-viewer-toolbar">
+          <div className="source-viewer-toolbar-main">
+            <div className="source-viewer-file-label">Extracted DOCX image</div>
+            <span className="source-viewer-search-unavailable" role="status">Text search is unavailable for image-only previews.</span>
+            <SourceViewerSearch disabled onQueryChange={setSearchQuery} onSearch={runSearch} query={searchQuery} />
+            <button type="button" className="sv-action-secondary source-viewer-context-toggle" onClick={() => setShowOriginalDocument(true)}>
+              <FileSearch aria-hidden="true" size={15} />
+              Show in document
+            </button>
+          </div>
+          <div className="source-viewer-toolbar-end">{toolbarEnd}</div>
+        </div>
+        <ImageAssetStrip documentId={documentId} regions={regions} />
+      </div>
+    );
+  }
 
   return (
     <div className="source-viewer-document">
       <div className="source-viewer-toolbar">
         <div className="source-viewer-toolbar-main">
           <div className="source-viewer-file-label">DOCX source</div>
+          {hasOnlyImageEvidence ? (
+            <button type="button" className="sv-action-secondary source-viewer-context-toggle" onClick={() => setShowOriginalDocument(false)}>
+              <ImageIcon aria-hidden="true" size={15} />
+              Show extracted image
+            </button>
+          ) : null}
+          <SourceViewerSearch
+            isSearching={isSearching}
+            onNext={() => goToSearchResult(1)}
+            onPrevious={() => goToSearchResult(-1)}
+            onQueryChange={(query) => { setSearchQuery(query); resetSearchResults(); }}
+            onSearch={runSearch}
+            query={searchQuery}
+            resultLabel={searchMatchCount ? `${searchIndex + 1} of ${searchMatchCount}` : undefined}
+            status={isSearching ? "Searching…" : searchStatus}
+          />
           <ViewerZoomControls
             activeMode={scaleMode}
             fitLabel="Fit width"
@@ -174,8 +260,8 @@ export function DocxRegionDocument({
         </div>
         <div className="source-viewer-toolbar-end">{toolbarEnd}</div>
       </div>
-      {matched === false ? <FallbackNotice message={fallbackMessage} /> : null}
-      <ImageAssetStrip documentId={documentId} regions={regions} />
+      {matched === false && !hasOnlyImageEvidence ? <FallbackNotice message={fallbackMessage} /> : null}
+      {!hasOnlyImageEvidence ? <ImageAssetStrip documentId={documentId} regions={regions} /> : null}
       {renderError ? <SourceViewerError message={renderError} /> : null}
       <div ref={styleRef} />
       <div ref={scrollRef} className="source-viewer-docx-scroll">

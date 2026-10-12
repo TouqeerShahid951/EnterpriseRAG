@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from statistics import median
 from typing import Any, Callable
 
@@ -48,6 +48,7 @@ PageProgressCallback = Callable[[int, int], None]
 SIMPLE_TEXT_MIN_CHARS = 80
 SIMPLE_TEXT_MAX_BLOCKS = 12
 LARGE_IMAGE_PAGE_RATIO = 0.65
+DECORATIVE_DRAWING_AREA_RATIO = 0.02
 
 
 def parse_pymupdf_pdf(file_bytes: bytes, *, page_progress_callback: PageProgressCallback | None = None) -> tuple[list[ParsedPdfItem], int]:
@@ -73,6 +74,7 @@ def parse_pymupdf_pdf_with_metadata(file_bytes: bytes, *, page_progress_callback
 def _document_items_with_metadata(document: Any, *, page_progress_callback: PageProgressCallback | None = None) -> PymuPDFParseResult:
     parsed: list[ParsedPdfItem] = []
     current_section: str | None = None
+    heading_sizes: dict[int, float] = {}
     page_text_chars: dict[int, int] = {}
     page_quality_flags: dict[int, list[str]] = {}
     page_count = int(document.page_count)
@@ -88,6 +90,11 @@ def _document_items_with_metadata(document: Any, *, page_progress_callback: Page
             text, item_type = contextualized_item(entry.text, entry.item_type, current_section)
             if entry.item_type == "heading":
                 current_section = entry.text
+            if entry.item_type == "heading":
+                sizes = [size for block in profile.text_blocks
+                         if tuple(block.get("bbox", ())) == entry.bbox for size in _span_sizes(block)]
+                if sizes:
+                    heading_sizes[len(parsed)] = max(sizes)
             parsed.append(
                 ParsedPdfItem(
                     index=len(parsed),
@@ -103,6 +110,19 @@ def _document_items_with_metadata(document: Any, *, page_progress_callback: Page
             )
         if page_progress_callback:
             page_progress_callback(page_no, page_count)
+    bookmarks = {(str(title).strip().casefold(), page): level
+                 for level, title, page, *_ in document.get_toc()} if hasattr(document, "get_toc") else {}
+    style_levels = {size: rank for rank, size in enumerate(sorted(set(heading_sizes.values()), reverse=True), 1)}
+    for index, item in enumerate(parsed):
+        if item.item_type != "heading":
+            continue
+        level = bookmarks.get((item.text.strip().casefold(), item.page_start))
+        flag = "heading_level:bookmark"
+        if level is None and len(style_levels) > 1 and index in heading_sizes:
+            level = style_levels[heading_sizes[index]]
+            flag = "heading_level:style"
+        if level is not None:
+            parsed[index] = replace(item, section_level=level, quality_flags=[*item.quality_flags, flag])
     return PymuPDFParseResult(parsed, page_count, page_text_chars, page_quality_flags)
 
 
@@ -240,6 +260,8 @@ def _quality_flags_from_blocks(
     page: Any,
 ) -> list[str]:
     flags: list[str] = []
+    if not text_blocks and not image_blocks and _drawings_are_decorative(page):
+        flags.append("confirmed_blank_page")
     rotation = getattr(page, "rotation", 0)
     if isinstance(rotation, int) and rotation % 360:
         flags.append("rotated_page")
@@ -295,6 +317,35 @@ def _has_large_image_block(blocks: list[dict[str, Any]], page: Any) -> bool:
     if page_area <= 0:
         return False
     return any(_bbox_area(_block_bbox(block)) / page_area >= LARGE_IMAGE_PAGE_RATIO for block in blocks)
+
+
+def _drawings_are_decorative(page: Any) -> bool:
+    get_drawings = getattr(page, "get_drawings", None)
+    if not callable(get_drawings):
+        return False
+    try:
+        drawings = list(get_drawings())
+    except Exception:
+        return False
+    if not drawings:
+        return True
+    page_area = _page_width(page) * _page_height(page)
+    if page_area <= 0:
+        return False
+    boxes = []
+    for drawing in drawings:
+        rect = drawing.get("rect") if isinstance(drawing, dict) else getattr(drawing, "rect", None)
+        values = tuple(getattr(rect, name, None) for name in ("x0", "y0", "x1", "y1"))
+        if all(isinstance(value, (int, float)) for value in values):
+            boxes.append(values)
+    if not boxes:
+        return False
+    left = min(box[0] for box in boxes)
+    top = min(box[1] for box in boxes)
+    right = max(box[2] for box in boxes)
+    bottom = max(box[3] for box in boxes)
+    # ponytail: a small drawing envelope covers logos such as the FSC mark; use pixel occupancy if this heuristic ever misclassifies real vector text.
+    return max(0.0, right - left) * max(0.0, bottom - top) / page_area <= DECORATIVE_DRAWING_AREA_RATIO
 
 
 def _looks_table_like_light(blocks: list[dict[str, Any]]) -> bool:

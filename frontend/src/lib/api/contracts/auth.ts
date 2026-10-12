@@ -11,6 +11,11 @@ export interface ChangePasswordRequest {
   new_password: string;
 }
 
+export interface ChangeEmailRequest {
+  current_password: string;
+  new_email: string;
+}
+
 export const authApi = {
   login: async (request: LoginRequest) => {
     const response = await apiClient.postJson<LoginResponse>("/api/v1/auth/login", request);
@@ -23,6 +28,7 @@ export const authApi = {
   },
   logout: () => apiClient.postJson<void>("/api/v1/auth/logout", null),
   changePassword: async (request: ChangePasswordRequest) => normalizeUser(await apiClient.postJson<User>("/api/v1/auth/change-password", request)),
+  changeEmail: async (request: ChangeEmailRequest) => normalizeUser(await apiClient.postJson<User>("/api/v1/auth/change-email", request)),
 };
 
 function normalizeUser(user: User): User {

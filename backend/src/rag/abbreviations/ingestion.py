@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Sequence
 from typing import Any
 
 from rag.shared.contracts.abbreviations import normalize_abbreviation_entry
 
 from .models import SourceAbbreviationConflictError
+
+logger = logging.getLogger(__name__)
 
 
 def replace_abbreviation_glossary_in_transaction(
@@ -17,7 +20,7 @@ def replace_abbreviation_glossary_in_transaction(
     document_id: str,
     entries: Sequence[tuple[str, str, int | None]],
 ) -> int:
-    normalized: dict[str, tuple[str, int | None]] = {}
+    normalized: dict[tuple[str, str], tuple[str, str, int | None]] = {}
     for raw_abbreviation, raw_expansion, source_page in entries:
         abbreviation, expansion = normalize_abbreviation_entry(
             raw_abbreviation, raw_expansion
@@ -26,10 +29,10 @@ def replace_abbreviation_glossary_in_transaction(
             not isinstance(source_page, int) or isinstance(source_page, bool) or source_page < 1
         ):
             raise ValueError("abbreviation source page must be a positive integer")
-        current = normalized.get(abbreviation)
-        if current is not None and current[0].casefold() != expansion.casefold():
-            raise ValueError(f"conflicting definitions for {abbreviation}")
-        normalized.setdefault(abbreviation, (expansion, source_page))
+        normalized.setdefault(
+            (abbreviation.casefold(), expansion.casefold()),
+            (abbreviation, expansion, source_page),
+        )
     if not normalized:
         raise ValueError("abbreviation glossary contains no usable entries")
 
@@ -74,21 +77,29 @@ def replace_abbreviation_glossary_in_transaction(
         """,
         (document_id,),
     )
-    for abbreviation, (expansion, source_page) in normalized.items():
+    for abbreviation, expansion, source_page in normalized.values():
         existing = conn.execute(
             """
             SELECT id::text AS id, expansion, source_kind
             FROM abbreviation_glossary_entries
             WHERE upper(abbreviation) = upper(%s)
+              AND lower(expansion) = lower(%s)
             FOR UPDATE
             """,
-            (abbreviation,),
+            (abbreviation, expansion),
         ).fetchone()
         if existing is not None:
             if (
                 str(existing["source_kind"]) != "pdf"
                 or str(existing["expansion"]).casefold() != expansion.casefold()
             ):
+                logger.warning(
+                    "Abbreviation glossary import rejected a conflicting term "
+                    "(document_id=%s abbreviation=%s existing_source_kind=%s)",
+                    document_id,
+                    abbreviation,
+                    existing["source_kind"],
+                )
                 raise SourceAbbreviationConflictError(
                     f"active glossary contains a conflicting definition for {abbreviation}"
                 )
@@ -123,6 +134,14 @@ def replace_abbreviation_glossary_in_transaction(
             (entry_id, document_id, source_page),
         )
     _refresh_pdf_entry_provenance(conn)
+    conn.execute(
+        """
+        UPDATE documents
+        SET ingest_status = 'complete', updated_at = NOW()
+        WHERE id = %s::uuid
+        """,
+        (document_id,),
+    )
     conn.execute(
         """
         INSERT INTO audit_log (event_type, actor_id, target_type, target_id, payload)
@@ -165,7 +184,9 @@ def remove_abbreviation_source_in_transaction(
     conn.execute(
         """
         UPDATE documents
-        SET is_current = FALSE, updated_at = NOW()
+        SET is_current = FALSE,
+            deleted_at = COALESCE(deleted_at, NOW()),
+            updated_at = NOW()
         WHERE id = %s::uuid AND doc_type = 'abbreviation_glossary'
         """,
         (document_id,),

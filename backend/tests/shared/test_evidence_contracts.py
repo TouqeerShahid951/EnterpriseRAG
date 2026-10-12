@@ -5,12 +5,19 @@ from pydantic import ValidationError
 
 from rag.query import schemas as query_schemas
 from rag.shared.contracts.evidence import (
+    CitationTarget,
     ConflictPair,
     EvidenceField,
     EvidenceWindow,
     HighlightRange,
+    ImageCitationTarget,
+    JsonCitationTarget,
+    PageCitationTarget,
+    RecordCitationTarget,
+    SlideCitationTarget,
     SourceAnchor,
-    SourceRegion,
+    SpreadsheetCitationTarget,
+    TextCitationTarget,
 )
 
 
@@ -18,7 +25,7 @@ from rag.shared.contracts.evidence import (
     ("name", "canonical_contract"),
     (
         ("HighlightRange", HighlightRange),
-        ("SourceRegion", SourceRegion),
+        ("CitationTarget", CitationTarget),
         ("EvidenceField", EvidenceField),
         ("EvidenceWindow", EvidenceWindow),
         ("SourceAnchor", SourceAnchor),
@@ -37,6 +44,56 @@ def test_highlight_range_requires_a_nonempty_range() -> None:
         ValidationError, match="highlight range end must be greater than start"
     ):
         HighlightRange(start=2, end=2)
+
+
+def test_image_target_accepts_asset_without_bounding_box() -> None:
+    assert ImageCitationTarget(image_asset_id="asset-1").bbox is None
+
+
+def test_image_target_requires_a_bounding_box_or_asset() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="image citation target requires a bounding box or image asset",
+    ):
+        ImageCitationTarget()
+
+
+@pytest.mark.parametrize(
+    ("target", "kind"),
+    (
+        (TextCitationTarget(exact_text="anchor"), "text"),
+        (PageCitationTarget(page=1, bbox=[0, 0, 1, 1]), "page"),
+        (SlideCitationTarget(page=1, bbox=[0, 0, 1, 1]), "slide"),
+        (ImageCitationTarget(bbox=[0, 0, 1, 1]), "image"),
+        (
+            SpreadsheetCitationTarget(
+                sheet_name="Sheet1",
+                start_row=1,
+                end_row=2,
+                start_column=0,
+                end_column=1,
+            ),
+            "spreadsheet",
+        ),
+        (JsonCitationTarget(pointer="/records/0"), "json"),
+        (RecordCitationTarget(record_id="record-1"), "record"),
+    ),
+)
+def test_source_anchor_accepts_each_deterministic_citation_target(
+    target: object,
+    kind: str,
+) -> None:
+    source = SourceAnchor(
+        doc_id="doc-1",
+        doc_title="Source",
+        chunk_id="chunk-1",
+        excerpt="anchor",
+        group_path="/ops",
+        citation_targets=[target],
+    )
+
+    assert source.citation_targets[0].kind == kind
+    assert "source_regions" not in source.model_dump()
 
 
 @pytest.mark.parametrize(

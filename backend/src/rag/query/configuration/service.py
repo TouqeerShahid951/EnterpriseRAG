@@ -201,6 +201,9 @@ def checked_record(
         vision_model=config_record.vision_model,
         json_num_predict=config_record.json_num_predict,
         retrieval_token_budget=config_record.retrieval_token_budget,
+        answer_output_tokens=config_record.answer_output_tokens,
+        answer_context_tokens=config_record.answer_context_tokens,
+        context_resolver_enabled=config_record.context_resolver_enabled,
         query_planner_enabled=config_record.query_planner_enabled,
         evidence_gate_policy=config_record.evidence_gate_policy,
         faithfulness_policy=config_record.faithfulness_policy,
@@ -557,28 +560,24 @@ def _ollama_chat_probe(
 ) -> None:
     selected_base_url = base_url or config_record.base_url
     selected_model = model or config_record.chat_model
+    cloud_model = is_ollama_cloud_model(selected_model)
     request_payload: dict[str, Any] = {
         "model": selected_model,
         "stream": False,
         "think": config_record.thinking_enabled,
         "keep_alive": "5m",
-        "options": {"temperature": 0, "num_predict": 16},
+        "options": {
+            "temperature": 0,
+            "num_predict": 128 if structured_output and cloud_model else 64,
+        },
         "messages": [
             {"role": "system", "content": "You are a health check endpoint. Return JSON only."},
             {"role": "user", "content": 'Return {"status":"ok"}.'},
         ],
     }
-    if structured_output and is_ollama_cloud_model(selected_model):
-        raise RagConfigValidationError(
-            code=f"{service}_structured_output_unsupported",
-            message=(
-                f"Model {selected_model!r} cannot be used for {service}: "
-                "Ollama Cloud does not support schema-constrained output."
-            ),
-        )
-    if structured_output:
+    if structured_output and not cloud_model:
         request_payload["format"] = _STRUCTURED_OUTPUT_PROBE_SCHEMA
-    elif not is_ollama_cloud_model(selected_model):
+    elif not cloud_model:
         request_payload["format"] = "json"
     try:
         payload = request_json(
@@ -591,6 +590,14 @@ def _ollama_chat_probe(
         )
         message = payload.get("message")
         content = message.get("content") if isinstance(message, dict) else None
+        if (
+            cloud_model
+            and not structured_output
+            and isinstance(message, dict)
+            and isinstance(message.get("thinking"), str)
+            and message["thinking"].strip()
+        ):
+            return
         parsed = json.loads(content) if isinstance(content, str) else None
         if not isinstance(parsed, dict) or parsed.get("status") != "ok":
             raise ServiceRequestError(service, "chat health response was invalid", 502)

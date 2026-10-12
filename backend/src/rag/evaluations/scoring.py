@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from hashlib import sha256
+from rag.query.evidence_validation import answer_claims
 from collections.abc import Callable
 from typing import Any
 
@@ -464,12 +466,49 @@ def _citation_check(case: EvaluationCase, response: RAGResponse) -> dict[str, An
     returned = {source_citation(source) for source in response.sources}
     resolved = [citation for citation in citations if citation in returned]
     unresolved = [citation for citation in citations if citation not in returned]
+    verification = response.citation_verification
+    checked = verification is not None and verification.status == "verified"
+    claims = verification.claims if verification else []
+    by_label = {source_citation(source): source for source in response.sources}
+    quotes_valid = bool(claims) and all(
+        claim.quotes and all(
+            quote.source_label in by_label
+            and by_label[quote.source_label].provenance_kind in {"native", "ocr", "structured"}
+            and by_label[quote.source_label].excerpt[quote.source_start:quote.source_end] == quote.text
+            for quote in claim.quotes
+        ) for claim in claims
+    )
+    covered = bool(claims) and len({c.claim_id for c in claims}) == len(claims) and all(
+        c.source_labels and set(c.source_labels) == {q.source_label for q in c.quotes}
+        and 0 <= c.answer_start < c.answer_end <= len(response.answer) for c in claims
+    )
+    inventory = answer_claims(response.answer)
+    covered = covered and [(c.claim_id, c.answer_start, c.answer_end, c.text, c.source_labels) for c in claims] == [
+        (c.claim_id, c.answer_start, c.answer_end, c.text, c.source_labels) for c in inventory]
+    support = bool(claims) and all(c.verdict == "supported" for c in claims)
+    bound = bool(verification and verification.answer_sha256 == sha256(response.answer.encode()).hexdigest())
+    traceable = bool(response.sources) and all(
+        source.evidence_hash == sha256(source.excerpt.encode()).hexdigest()
+        and (source.provenance_kind == "structured" or bool(source.index_generation_id and source.content_hash))
+        for source in response.sources
+    )
+    strict_passed = checked and quotes_valid and covered and support and bound
+    resolution_passed = (bool(citations) or not case.must_cite_source) and not unresolved
     return {
-        "passed": (bool(citations) or not case.must_cite_source) and not unresolved,
+        # Preserve label-resolution results for historical evaluation cohorts.
+        "passed": resolution_passed and (verification is None or strict_passed or
+            (verification.status == "not_applicable" and not case.must_cite_source)),
         "required": case.must_cite_source,
         "citations": citations,
         "resolved_citations": resolved,
         "unresolved_citations": unresolved,
+        "protocol_version": verification.version if verification else None,
+        "verification_status": verification.status if verification else "legacy",
+        "answer_revision_valid": bound if checked else None,
+        "quote_validity": quotes_valid if checked else None,
+        "claim_support": support if checked else None,
+        "all_claim_coverage": covered if checked else None,
+        "revision_traceability": traceable if checked else None,
     }
 
 

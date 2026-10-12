@@ -30,6 +30,10 @@ class IngestState(TypedDict, total=False):
     upsert_count: int
     warnings: list[str]
     abbreviation_entries: list[dict[str, Any]]
+    embedding_texts: list[str]
+    embedding_ranges: list[tuple[int, int]]
+    prepared_sha256: str
+    checkpoint_reviews: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,8 @@ class IngestDependencies:
     scanned_visual_text_mask_padding_px: int = 8
     ocr_review_confidence_threshold: float = 0.9
     vision_layout_repair_enabled: bool = False
+    checkpoint: Any | None = None
+    embedding_batch_size: int = 16
 
     @property
     def inference(self) -> IngestionInferenceClient:

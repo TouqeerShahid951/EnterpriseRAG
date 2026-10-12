@@ -18,6 +18,11 @@ _CORPUS_DIRECTIVE_RE = re.compile(
     r"\b(?:in|from|using|use|search)\s+(?:the\s+)?(?:docs?|documents?|corpus|knowledge\s+space|uploaded\s+docs?)\b",
     flags=re.IGNORECASE,
 )
+_MIXED_SOURCE_RE = re.compile(
+    r"\b(?:against|compar(?:e|ed|ing)|exceed(?:s|ed)?|meet|met|versus|violate(?:s|d)?)\b"
+    r"|\bvs\.?\b|\baccording\s+to\b",
+    flags=re.IGNORECASE,
+)
 _STRUCTURED_TERMS = {
     "average",
     "count",
@@ -54,6 +59,34 @@ _CORPUS_TERMS = {
     "summarize",
     "summary",
 }
+_MATCH_STOPWORDS = {
+    "and",
+    "are",
+    "each",
+    "for",
+    "from",
+    "has",
+    "have",
+    "how",
+    "many",
+    "that",
+    "the",
+    "their",
+    "these",
+    "this",
+    "those",
+    "used",
+    "using",
+    "was",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "with",
+}
 
 
 @dataclass(frozen=True)
@@ -77,6 +110,7 @@ def _inline_named_source(
     query: str, sources: list[VisibleQuerySource]
 ) -> VisibleQuerySource | None:
     normalized = _normalize(query)
+    matches: list[VisibleQuerySource] = []
     for source in sources:
         name = _normalize(source.name)
         if len(name) < 4:
@@ -86,14 +120,17 @@ def _inline_named_source(
             or f"using {name}" in normalized
             or f"from {name}" in normalized
         ):
-            return source
-    return None
+            matches.append(source)
+    return matches[0] if len(matches) == 1 else None
 
 
 def _strip_named_source(query: str, source: VisibleQuerySource) -> str:
     name = re.escape(source.name)
     stripped = re.sub(
-        rf"\b(?:use|using|from)\s+{name}\b", " ", query, flags=re.IGNORECASE
+        rf"\b(?:use|using|from)\s+{name}\b\s*[,;:]?",
+        " ",
+        query,
+        flags=re.IGNORECASE,
     )
     return _compact_query(stripped)
 
@@ -115,14 +152,14 @@ def _structured_score(query: str) -> int:
 
 
 def _source_match_score(query: str, source: VisibleQuerySource) -> int:
-    query_tokens = set(_tokens(query))
-    source_tokens = set(_tokens(source.match_text))
+    query_tokens = set(_tokens(query)) - _MATCH_STOPWORDS
+    source_tokens = set(_tokens(source.match_text)) - _MATCH_STOPWORDS
     return len(query_tokens & source_tokens)
 
 
 def _document_match_score(query: str, document: VisibleDocumentSource) -> int:
-    query_tokens = set(_tokens(query))
-    document_tokens = set(_tokens(document.match_text))
+    query_tokens = set(_tokens(query)) - _MATCH_STOPWORDS
+    document_tokens = set(_tokens(document.match_text)) - _MATCH_STOPWORDS
     return len(query_tokens & document_tokens)
 
 
@@ -131,8 +168,11 @@ def _best_scored_source(
 ) -> VisibleQuerySource | None:
     if not scored:
         return None
-    source, score = max(scored, key=lambda item: item[1])
-    return source if score > 0 else None
+    ranked = sorted(scored, key=lambda item: item[1], reverse=True)
+    source, score = ranked[0]
+    if score <= 0 or (len(ranked) > 1 and ranked[1][1] == score):
+        return None
+    return source
 
 
 def _deterministic_preference(
@@ -163,6 +203,20 @@ def _deterministic_preference(
     confidence = 0.5 + min(0.45, abs(margin) / max(4, total))
     reason = f"db_score={db_score},doc_score={doc_score},margin={margin}"
     return _SourcePreference(preferred, confidence, reason)
+
+
+def _requires_mixed_sources(
+    query: str,
+    *,
+    source_match_score: int,
+    corpus_score: int,
+    document_match_score: int,
+) -> bool:
+    return bool(
+        source_match_score > 0
+        and (corpus_score > 0 or document_match_score > 0)
+        and _MIXED_SOURCE_RE.search(query)
+    )
 
 
 def _conversation_source_bias(turns: list[dict[str, object]]) -> tuple[int, int]:

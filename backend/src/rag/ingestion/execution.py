@@ -20,6 +20,8 @@ from .indexing.qdrant import QdrantClient
 from .indexing.sparse import SparseEmbedder
 from .contracts import IngestJobPayload
 from .pipeline import IngestDependencies, run_ingest_graph
+from .checkpoints.adapters.storage import CheckpointObjectStorage
+from .checkpoints.worker import WorkerCheckpointClient
 from .quality import parser_tuning_for_quality_preset
 
 
@@ -438,6 +440,11 @@ def _build_dependencies(
         scanned_visual_text_mask_padding_px=config.scanned_visual_text_mask_padding_px,
         ocr_review_confidence_threshold=ingest_config.ocr_review_confidence_threshold,
         vision_layout_repair_enabled=ingest_config.vision_layout_repair_enabled,
+        checkpoint=WorkerCheckpointClient(
+            backend=backend,
+            storage=CheckpointObjectStorage(config.minio),
+        ),
+        embedding_batch_size=config.embedding_batch_size,
     )
 
 

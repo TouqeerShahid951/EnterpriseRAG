@@ -35,34 +35,36 @@ import type { UploadBatchItemView, UploadJobView } from "@/types/chat";
 import { formatFileSize } from "@/features/upload/state/pdfUploadBatch";
 import { errorMessage } from "@/lib/utils/format";
 
-export function BatchUploadStatus({ cancelingJobId, currentUser, graphStatus, graphStatusError, hideGovernance = false, items, onCancelIngestJob, onClearUploadJobs, onRetryIngestJob, onViewActivity, retryingJobId }: BatchUploadStatusProps) {
-  const { completedItems, visibleItems } = partitionUploadItems(items, graphStatus, graphStatusError);
+export function BatchUploadStatus({ cancelingJobId, currentUser, dismissible = true, graphStatus, graphStatusError, hideActivityLink = false, hideGovernance = false, items, onCancelIngestJob, onClearUploadJobs, onRetryIngestJob, onViewActivity, retryingJobId, showCompletedHistory = false, title = "Upload status" }: BatchUploadStatusProps) {
+  const { completedItems, visibleItems } = partitionUploadItems(items, graphStatus, graphStatusError, showCompletedHistory);
   if (completedItems.length === 0 && visibleItems.length === 0) return null;
   const activeCount = visibleItems.filter((item) => isUploadItemActive(item, graphStatus)).length;
+  const visibleCompletedItems = visibleItems.filter((item) => item.job?.status === "complete");
+  const completedCount = completedItems.length + visibleCompletedItems.length;
   const attentionCount = visibleItems.filter((item) => uploadItemNeedsVisibleAttention(item, graphStatus, graphStatusError)).length;
   const cancelledCount = visibleItems.filter((item) => item.job?.status === "cancelled").length;
   const statusSummary = [
     activeCount > 0 ? `${activeCount} active` : null,
-    completedItems.length > 0 ? `${completedItems.length} completed` : null,
+    completedCount > 0 ? `${completedCount} completed` : null,
     attentionCount > 0
       ? `${attentionCount} ${attentionCount === 1 ? "needs" : "need"} attention`
       : null,
     cancelledCount > 0 ? `${cancelledCount} cancelled` : null,
   ].filter(Boolean).join(" · ");
   return (
-    <section className="mt-6 border-t border-surface-border pt-5" aria-label="Document batch progress" aria-live="polite">
+    <section className="mt-6 border-t border-surface-border pt-5" aria-label={title} aria-live="polite">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="sv-section-title">Upload status</h2>
+          <h2 className="sv-section-title">{title}</h2>
           <p className="text-label-md text-secondary">{statusSummary}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="sv-action-secondary" onClick={onViewActivity}>
+          {!hideActivityLink ? <button type="button" className="sv-action-secondary" onClick={onViewActivity}>
             <Activity size={14} /> View activity
-          </button>
-          {completedItems.length > 0 ? (
-            <button type="button" className="sv-action-secondary" onClick={() => onClearUploadJobs(completedItems.map((item) => item.id))}>
-              <X size={14} /> Dismiss completed ({completedItems.length})
+          </button> : null}
+          {dismissible && completedCount > 0 ? (
+            <button type="button" className="sv-action-secondary" onClick={() => onClearUploadJobs([...completedItems, ...visibleCompletedItems].map((item) => item.id))}>
+              <X size={14} /> Dismiss completed ({completedCount})
             </button>
           ) : null}
         </div>
@@ -70,7 +72,7 @@ export function BatchUploadStatus({ cancelingJobId, currentUser, graphStatus, gr
       {completedItems.length > 0 ? (
         <div className="mt-3 flex items-start gap-3 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-body-md text-on-surface" role="status">
           <CheckCircle2 className="mt-0.5 shrink-0 text-success" size={17} />
-          <p><strong>{completedItems.length} upload{completedItems.length === 1 ? "" : "s"} completed.</strong> Full history remains available in Activity.</p>
+          <p><strong>{completedItems.length} upload{completedItems.length === 1 ? "" : "s"} completed.</strong> {hideActivityLink ? "Active PDF sources are listed above." : "Full history remains available in Activity."}</p>
         </div>
       ) : null}
       {visibleItems.length > 0 ? <ol className="mt-3 grid gap-3">
@@ -78,6 +80,7 @@ export function BatchUploadStatus({ cancelingJobId, currentUser, graphStatus, gr
           <BatchUploadRow
             cancelingJobId={cancelingJobId}
             currentUser={currentUser}
+            dismissible={dismissible}
             graphStatus={graphStatus}
             graphStatusError={graphStatusError}
             hideGovernance={hideGovernance}
@@ -94,7 +97,7 @@ export function BatchUploadStatus({ cancelingJobId, currentUser, graphStatus, gr
   );
 }
 
-function BatchUploadRow({ cancelingJobId, currentUser, graphStatus, graphStatusError, hideGovernance = false, item, onCancelIngestJob, onClearUploadJobs, onRetryIngestJob, retryingJobId }: BatchUploadRowProps) {
+function BatchUploadRow({ cancelingJobId, currentUser, dismissible = true, graphStatus, graphStatusError, hideGovernance = false, item, onCancelIngestJob, onClearUploadJobs, onRetryIngestJob, retryingJobId }: BatchUploadRowProps) {
   const job = item.job;
   const progressPct = job ? Math.max(0, Math.min(100, job.progressPct)) : item.requestState === "uploading" ? 8 : 0;
   const rowStatus = item.requestState === "failed" ? "failed" : job?.status ?? "processing";
@@ -104,7 +107,7 @@ function BatchUploadRow({ cancelingJobId, currentUser, graphStatus, graphStatusE
   const retrying = Boolean(job && retryingJobId === job.jobId);
   const stageProgress = formatSecondaryStageProgress(job?.stageProgress, job?.stageDetail);
   const graphChip = job ? graphEnrichmentForJob(job, graphStatus, graphStatusError) : null;
-  const canDismiss = isDismissibleUploadItem(item, graphChip);
+  const canDismiss = dismissible && isDismissibleUploadItem(item, graphChip);
   const error = item.uploadError
     ? errorMessage(item.uploadError, "Document upload failed.")
     : item.jobError
@@ -304,12 +307,16 @@ function CancelIngestControl({ confirming, disabled, onCancel, onConfirmingChang
   );
 }
 
-export function partitionUploadItems(items: UploadBatchItemView[], graphStatus: GraphRAGStatus | undefined, graphStatusError: string | null) {
+export function partitionUploadItems(items: UploadBatchItemView[], graphStatus: GraphRAGStatus | undefined, graphStatusError: string | null, showCompletedHistory = false) {
   const completedItems: UploadBatchItemView[] = [];
   const visibleItems: UploadBatchItemView[] = [];
   for (const item of items) {
     const job = item.job;
     if (job?.status === "complete") {
+      if (showCompletedHistory) {
+        visibleItems.push(item);
+        continue;
+      }
       const graphTask = graphEnrichmentTaskForJob(job, graphStatus);
       const graphChip = graphEnrichmentForJob(job, graphStatus, graphStatusError);
       if (job.warnings.length > 0 || graphTask || (item.isCurrentSession && graphChip?.state === "unavailable")) {
@@ -343,7 +350,7 @@ function isDismissibleUploadItem(item: UploadBatchItemView, graphChip: GraphEnri
   return item.requestState === "failed" || isUploadTerminalStatus(item.job?.status);
 }
 
-export type BatchUploadStatusProps = { cancelingJobId: string | null; currentUser: AuthUser; graphStatus: GraphRAGStatus | undefined; graphStatusError: string | null; hideGovernance?: boolean; items: UploadBatchItemView[]; onCancelIngestJob: (jobId: string) => void; onClearUploadJobs: (itemIds: string[]) => void; onRetryIngestJob: (item: UploadBatchItemView) => void; onViewActivity: () => void; retryingJobId: string | null };
+export type BatchUploadStatusProps = { cancelingJobId: string | null; currentUser: AuthUser; dismissible?: boolean; graphStatus: GraphRAGStatus | undefined; graphStatusError: string | null; hideActivityLink?: boolean; hideGovernance?: boolean; items: UploadBatchItemView[]; onCancelIngestJob: (jobId: string) => void; onClearUploadJobs: (itemIds: string[]) => void; onRetryIngestJob: (item: UploadBatchItemView) => void; onViewActivity: () => void; retryingJobId: string | null; showCompletedHistory?: boolean; title?: string };
 
 type BatchUploadRowProps = Omit<BatchUploadStatusProps, "items" | "onViewActivity"> & { item: UploadBatchItemView };
 

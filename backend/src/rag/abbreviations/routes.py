@@ -156,7 +156,7 @@ async def delete_abbreviation_entry(
         status.HTTP_403_FORBIDDEN: {"model": ErrorResponse},
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
     },
-    summary="Remove an abbreviation PDF source",
+    summary="Move an abbreviation source to Trash",
 )
 async def remove_abbreviation_source(
     document_id: UUID,

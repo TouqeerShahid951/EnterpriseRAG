@@ -4,6 +4,9 @@ from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from rag.shared.contracts.rag_defaults import (
+    DEFAULT_ANSWER_OUTPUT_TOKENS,
+    DEFAULT_ANSWER_CONTEXT_TOKENS,
+    DEFAULT_CONTEXT_RESOLVER_ENABLED,
     DEFAULT_EMBEDDING_MODEL_ID,
     DEFAULT_EMBEDDING_PROVIDER,
     DEFAULT_EMBEDDINGS_BASE_URL,
@@ -50,6 +53,7 @@ from rag.shared.contracts.rag_defaults import (
 from rag.shared.contracts.task_names import (
     DEFAULT_ARTIFACT_TASK_NAME,
     DEFAULT_EVALUATION_TASK_NAME,
+    DEFAULT_GLOSSARY_IMPORT_TASK_NAME,
     DEFAULT_GRAPHRAG_INDEX_TASK_NAME,
     DEFAULT_GRAPHRAG_PARTITION_REBUILD_TASK_NAME,
     DEFAULT_INGEST_TASK_NAME,
@@ -160,6 +164,8 @@ class Settings(BaseSettings):
     rag_json_num_predict: int = Field(
         default=DEFAULT_JSON_NUM_PREDICT, ge=256, le=32768
     )
+    rag_answer_output_tokens: int = Field(default=DEFAULT_ANSWER_OUTPUT_TOKENS, ge=256, le=32768)
+    rag_answer_context_tokens: int = Field(default=DEFAULT_ANSWER_CONTEXT_TOKENS, ge=2048, le=262144)
     rag_retrieval_token_budget: int = Field(
         default=DEFAULT_RETRIEVAL_TOKEN_BUDGET, ge=1000, le=200000
     )
@@ -204,6 +210,7 @@ class Settings(BaseSettings):
     rag_retrieval_max_retries: int = Field(
         default=DEFAULT_RETRIEVAL_MAX_RETRIES, ge=0, le=3
     )
+    rag_context_resolver_enabled: bool = DEFAULT_CONTEXT_RESOLVER_ENABLED
     rag_query_planner_enabled: bool = DEFAULT_QUERY_PLANNER_ENABLED
     rag_query_rewrite_llm_enabled: bool = DEFAULT_QUERY_REWRITE_LLM_ENABLED
     rag_evidence_gate_policy: EvidenceGatePolicy = DEFAULT_EVIDENCE_GATE_POLICY
@@ -231,6 +238,13 @@ class Settings(BaseSettings):
     evaluation_task_name: str = DEFAULT_EVALUATION_TASK_NAME
     evaluation_retention_days: int = Field(default=30, ge=1, le=365)
     evaluation_worker_timeout_seconds: float = Field(default=3600.0, ge=30.0)
+    query_analytics_retention_days: int = Field(default=30, ge=1, le=365)
+    query_analytics_lineage_retention_days: int = Field(default=7, ge=1, le=365)
+    query_analytics_maintenance_batch_size: int = Field(default=500, ge=1, le=5000)
+    query_analytics_reconciliation_grace_seconds: int = Field(default=3600, ge=60, le=604800)
+    query_analytics_maintenance_interval_seconds: int = Field(default=300, ge=30)
+    query_analytics_retrieval_lineage_max_candidates: int = Field(default=500, ge=1, le=5000)
+    query_analytics_retrieval_lineage_max_bytes: int = Field(default=512_000, ge=32_000, le=5_000_000)
     evaluation_answer_llm_verifier_enabled: bool = True
     evaluation_answer_llm_verifier_model: str | None = None
     application_image_digest: str | None = None
@@ -248,8 +262,10 @@ class Settings(BaseSettings):
     folder_sources_root: str = "/folder-sources"
     ingest_queue_backend: str = "celery"
     ingest_queue_name: str = "ingest:jobs"
+    glossary_import_queue_name: str = "glossary:imports"
     # These are compatibility identifiers for queued messages, not import paths.
     ingest_task_name: str = DEFAULT_INGEST_TASK_NAME
+    glossary_import_task_name: str = DEFAULT_GLOSSARY_IMPORT_TASK_NAME
     graphrag_queue_name: str = "graphrag:jobs"
     graphrag_index_task_name: str = DEFAULT_GRAPHRAG_INDEX_TASK_NAME
     graphrag_partition_rebuild_task_name: str = (
@@ -266,10 +282,6 @@ class Settings(BaseSettings):
     connector_live_sql_enabled: bool = True
     connector_live_sql_max_rows: int = Field(default=100, ge=1, le=10000)
     connector_live_sql_timeout_seconds: int = Field(default=15, ge=1, le=300)
-    connector_live_sql_max_scopes: int = Field(default=5, ge=1, le=50)
-    connector_live_sql_max_repair_attempts: int = Field(default=2, ge=0, le=5)
-    connector_live_sql_result_verifier_enabled: bool = True
-    connector_live_sql_verifier_sample_rows: int = Field(default=5, ge=0, le=20)
     minio_endpoint: str = "minio:9000"
     minio_access_key: str = "agenticrag"
     minio_secret_key: str = "agenticrag-local-minio-password"
@@ -302,6 +314,7 @@ class Settings(BaseSettings):
         "artifact_task_name",
         "evaluation_task_name",
         "ingest_task_name",
+        "glossary_import_task_name",
         "graphrag_index_task_name",
         "graphrag_partition_rebuild_task_name",
         mode="before",
@@ -320,6 +333,7 @@ class Settings(BaseSettings):
     def validate_document_pipeline_task_name_ownership(self) -> "Settings":
         validate_document_pipeline_task_names(
             ingest=self.ingest_task_name,
+            glossary_import=self.glossary_import_task_name,
             graphrag_index=self.graphrag_index_task_name,
             graphrag_partition_rebuild=self.graphrag_partition_rebuild_task_name,
         )

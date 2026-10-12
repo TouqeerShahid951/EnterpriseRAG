@@ -7,13 +7,68 @@
  */
 
 :root:not(.light) {
-  --color-background: oklch(0.108 0.016 285);
-  --color-surface-card: oklch(0.15 0.014 285 / 0.98);
-  --color-surface-container-low: oklch(0.17 0.014 285 / 0.96);
-  --color-surface-container-high: oklch(0.205 0.014 285 / 0.98);
-  --color-surface-container-highest: oklch(0.25 0.013 285 / 0.98);
+  --focus-ring: color-mix(in srgb, var(--color-brand-accent) 52%, var(--color-on-surface));
+  --app-bg: color-mix(in srgb, var(--color-brand-background) 16%, oklch(0.13 0.018 285));
+  --app-root-bg: color-mix(in srgb, var(--color-brand-background) 16%, oklch(0.108 0.018 285));
+  --color-background: color-mix(in srgb, var(--color-brand-background) 16%, oklch(0.108 0.016 285));
+  --color-surface: color-mix(in srgb, var(--color-brand-background) 12%, oklch(0.145 0.014 285));
+  --color-surface-card: color-mix(in srgb, var(--color-brand-background) 10%, oklch(0.15 0.014 285));
+  --color-surface-container: color-mix(in srgb, var(--color-brand-background) 14%, oklch(0.125 0.014 285));
+  --color-surface-container-low: color-mix(in srgb, var(--color-brand-background) 16%, oklch(0.17 0.014 285));
+  --color-surface-container-high: color-mix(in srgb, var(--color-brand-background) 20%, oklch(0.205 0.014 285));
+  --color-surface-container-highest: color-mix(in srgb, var(--color-brand-background) 24%, oklch(0.25 0.013 285));
   --color-on-surface-variant: oklch(0.88 0.012 285 / 0.82);
   --color-secondary: oklch(0.86 0.012 285 / 0.74);
+}
+
+:root.light {
+  --app-bg: color-mix(in srgb, var(--color-brand-background) 8%, oklch(0.975 0.008 272));
+  --app-root-bg: color-mix(in srgb, var(--color-brand-background) 8%, oklch(0.945 0.01 272));
+  --color-background: color-mix(in srgb, var(--color-brand-background) 8%, oklch(0.975 0.008 272));
+  --color-surface: color-mix(in srgb, var(--color-brand-background) 6%, oklch(0.99 0.004 272));
+  --color-surface-card: color-mix(in srgb, var(--color-brand-background) 5%, oklch(0.995 0.003 272));
+  --color-surface-container: color-mix(in srgb, var(--color-brand-background) 7%, oklch(0.96 0.009 272));
+  --color-surface-container-low: color-mix(in srgb, var(--color-brand-background) 8%, oklch(0.97 0.007 272));
+  --color-surface-container-high: color-mix(in srgb, var(--color-brand-background) 10%, oklch(0.95 0.01 272));
+  --color-surface-container-highest: color-mix(in srgb, var(--color-brand-background) 12%, oklch(0.925 0.012 272));
+  --color-themed-sidebar: color-mix(in srgb, var(--color-brand-background) 6%, oklch(0.955 0.01 272));
+}
+
+.Prudentia-page h1,
+.app-route-stage h1,
+.sv-page-title {
+  color: var(--color-heading-h1, var(--color-on-surface));
+  font-size: var(--font-size-ui-page-title);
+  font-weight: var(--font-weight-ui-page-title, 700);
+}
+
+.Prudentia-page h2,
+.app-route-stage h2,
+.sv-section-title {
+  color: var(--color-heading-h2, var(--color-on-surface));
+  font-size: var(--font-size-ui-section);
+  font-weight: var(--font-weight-ui-section, 700);
+}
+
+.Prudentia-page :is(p, li, td, th),
+.app-route-stage :is(p, li, td, th) {
+  font-size: var(--font-size-ui-body);
+}
+
+:root:not(.light) :is(.Prudentia-page, .app-route-stage) h1 {
+  color: color-mix(in srgb, var(--color-heading-h1, var(--color-on-surface)) 60%, var(--color-on-surface));
+}
+
+:root:not(.light) :is(.Prudentia-page, .app-route-stage) h2 {
+  color: color-mix(in srgb, var(--color-heading-h2, var(--color-on-surface)) 60%, var(--color-on-surface));
+}
+
+:root.light :is(.Prudentia-page, .app-route-stage) h1 {
+  color: color-mix(in srgb, var(--color-heading-h1, var(--color-on-surface)) 42%, var(--color-on-surface));
+}
+
+:root.light :is(.Prudentia-page, .app-route-stage) h2 {
+  color: color-mix(in srgb, var(--color-heading-h2, var(--color-on-surface)) 42%, var(--color-on-surface));
 }
 
 .sv-page-title,
@@ -43,4 +98,3 @@
 .sv-card .sv-panel {
   box-shadow: none;
 }
-

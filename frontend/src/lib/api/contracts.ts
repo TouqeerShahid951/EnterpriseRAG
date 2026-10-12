@@ -9,3 +9,5 @@ export * from "./contracts/audit";
 export * from "./contracts/admin";
 export * from "./contracts/review";
 export * from "./contracts/evaluations";
+export * from "./contracts/analytics";
+export { deploymentApi } from "./contracts/deployment";

@@ -74,6 +74,26 @@ export function removeActiveMention(value: string): string {
   return value.replace(/(^|\s)@([^\s@]*)$/, "$1").replace(/\s+$/, " ");
 }
 
+export function insertDocumentMention(value: string, title: string): string {
+  const base = removeActiveMention(value).trimEnd();
+  return `${base ? `${base} ` : ""}@${title} `;
+}
+
+export function removeDocumentMention(value: string, title: string): string {
+  return value
+    .replace(documentMentionPattern(title, "g"), "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+export function hasDocumentMention(value: string, title: string): boolean {
+  return documentMentionPattern(title).test(value);
+}
+
+export function documentMentionBeforeCursor(value: string, title: string, cursor: number): boolean {
+  return new RegExp(`${documentMentionPattern(title).source}\\s*$`).test(value.slice(0, cursor));
+}
+
 export function mentionSuggestionsForDocuments(documents: Document[], scopedDocumentIds: string[], mentionQuery: string | null): Document[] {
   if (mentionQuery === null) return [];
   const query = mentionQuery.trim().toLowerCase();
@@ -84,4 +104,9 @@ export function mentionSuggestionsForDocuments(documents: Document[], scopedDocu
       return `${document.title} ${document.id} ${document.group_path}`.toLowerCase().includes(query);
     })
     .slice(0, 6);
+}
+
+function documentMentionPattern(title: string, flags = ""): RegExp {
+  const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|\\s)@${escapedTitle}(?=\\s|$)`, flags);
 }

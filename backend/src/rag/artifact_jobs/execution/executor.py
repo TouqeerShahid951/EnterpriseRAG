@@ -26,6 +26,7 @@ from rag.artifact_jobs.generation.llm_json import LlmContractError
 from rag.artifact_jobs.contracts import ArtifactContentBundle, DocumentPlan, EvidenceManifest
 from rag.artifact_jobs.execution.errors import (
     ArtifactEvidenceUnavailable,
+    ArtifactCitationVerificationFailed,
     ArtifactJobCancelled as ArtifactJobCancelled,
     ArtifactJobLeaseLost as ArtifactJobLeaseLost,
     ArtifactPermissionChanged as ArtifactPermissionChanged,
@@ -34,13 +35,14 @@ from rag.artifact_jobs.execution.progress import ArtifactExecutionProgress, _pro
 from rag.artifact_jobs.execution.rendering import ArtifactFormatExecution
 from rag.artifact_jobs.execution.state import ArtifactExecutionState
 from rag.artifact_jobs.generated_models import GeneratedArtifactRepository
-from rag.artifact_jobs.generation import ArtifactJsonGenerator
+from rag.artifact_jobs.generation import ArtifactGenerationError, ArtifactJsonGenerator
 from rag.artifact_jobs.job_models import ArtifactJobRecord, ArtifactJobRepository
 from rag.artifact_jobs.generation.planner import PLANNER_PROMPT_VERSION, plan_document
 from rag.artifact_jobs.publisher import ArtifactPublisher
 from rag.artifact_jobs.retrieval import retrieve_document_evidence
 from rag.artifact_jobs.storage import GeneratedArtifactStorage
 from rag.artifact_jobs.generation.validation import validate_document_bundle
+from rag.artifact_jobs.generation.citation_validation import verify_bundle_citations
 
 
 logger = logging.getLogger("rag.artifact_jobs")
@@ -63,7 +65,9 @@ class ArtifactJobExecutor(
         inference: ArtifactJsonGenerator,
         retriever: AuthorizedCorpusRetriever,
         model_name: str,
-    ) -> None:
+        citation_model_name: str | None = None,
+        citation_timeout_seconds: float | None = None,
+        citation_output_tokens: int | None = None,    ) -> None:
         self.config = config
         self.repo_factory = repo_factory
         self.artifact_repo_factory = artifact_repo_factory
@@ -78,6 +82,9 @@ class ArtifactJobExecutor(
         self.inference = inference
         self.retriever = retriever
         self.model_name = model_name
+        self.citation_model_name = citation_model_name or config.rag_faithfulness_model or model_name
+        self.citation_timeout_seconds = citation_timeout_seconds or config.rag_faithfulness_timeout_seconds
+        self.citation_output_tokens = citation_output_tokens or config.rag_json_num_predict
         self._run_token: str | None = None
 
     def execute(
@@ -293,6 +300,37 @@ class ArtifactJobExecutor(
                 "completed_at": datetime.now(UTC),
             },
         )
+
+    def _verify_citation_support(self, job, bundle, evidence, plan):
+        deadline = perf_counter() + self.citation_timeout_seconds
+        calls = 0
+        for attempt in range(2):
+            self._check_cancelled(job.id)
+            bundle, errors, used_calls = verify_bundle_citations(
+                bundle, evidence, inference=self.inference, model=self.citation_model_name, deadline=deadline,
+                check_cancelled=lambda: self._check_cancelled(job.id), max_calls=8-calls,
+                context_tokens=self.config.ollama_num_ctx, output_tokens=self.citation_output_tokens,
+            )
+            calls += used_calls
+            if not errors:
+                bundle.citation_verification.update(repair_count=attempt, verification_calls=calls)
+                return bundle
+            remaining = deadline - perf_counter()
+            if attempt or remaining < 2 or calls >= 8:
+                break
+            try:
+                bundle = repair_document_bundle(bundle, errors=errors, evidence=evidence,
+                    inference=self.inference, model=self.model_name, timeout_seconds=remaining/2,
+                    max_tokens=self.citation_output_tokens, context_tokens=self.config.ollama_num_ctx)
+                self._check_cancelled(job.id)
+                bundle = normalize_bundle_evidence_ids(bundle, evidence)
+                if not validate_document_bundle(bundle, plan=plan, evidence=evidence).passed:
+                    break
+            except (ArtifactGenerationError, ValueError, TimeoutError):
+                break
+        self._record_error(job.id, stage="validating", code="artifact_citation_verification_failed",
+            message="Supporting citations could not be verified.")
+        raise ArtifactCitationVerificationFailed("artifact_citation_verification_failed")
 
     def _execute_seeded_response_job(self, job: ArtifactJobRecord) -> ArtifactJobRecord:
         with self._stage_timer(job.id, "planning"):

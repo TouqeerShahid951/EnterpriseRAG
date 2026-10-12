@@ -7,6 +7,9 @@ from starlette.concurrency import run_in_threadpool
 
 from ..auth.dependencies import require_csrf, require_current_user
 from ..auth.identity_models import UserRecord
+from rag.auth.context import UserContext
+from rag.documents.repository import DocumentRepository, get_document_repository
+from .history_access import visible_history_turns
 from .chat_history_models import ChatHistoryRepository, ChatSessionRecord
 from .chat_history_repository import get_chat_history_repository
 from .route_access import require_query_user
@@ -53,6 +56,7 @@ async def get_chat_session(
     session_id: str,
     user: UserRecord = Depends(require_current_user),
     repo: ChatHistoryRepository = Depends(get_chat_history_repository),
+    documents: DocumentRepository = Depends(get_document_repository),
 ) -> ChatSession:
     require_query_user(user)
     session = await run_in_threadpool(
@@ -69,7 +73,11 @@ async def get_chat_session(
                 "message": "Chat session was not found.",
             },
         )
-    return _chat_session_response(session)
+    result = _chat_session_response(session)
+    context = UserContext(user_id=user.id, email=user.email, account_type=user.account_type,
+        group_paths=user.group_paths, clearance_level=user.clearance_level, permission_version=user.permission_version)
+    turns = await run_in_threadpool(visible_history_turns, session.turns, user=context, documents=documents)
+    return result.model_copy(update={"turns": turns})
 
 
 @session_detail_router.delete(

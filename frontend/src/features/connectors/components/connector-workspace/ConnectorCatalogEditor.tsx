@@ -30,7 +30,9 @@ import {
   type SchemaCatalogFilter,
   type SchemaCatalogJson,
   type SchemaCatalogRelationship,
+  type SchemaCatalogRoutingProfile,
   type SchemaCatalogTable,
+  type SchemaCatalogVerifiedQuery,
   type SchemaJoinDraft,
 } from "@/features/connectors/utils/connectorPanelUtils";
 import { ConnectorReviewTabs, SchemaReviewMetric } from "@/features/connectors/components/connector-workspace/ConnectorCatalogPrimitives";
@@ -135,6 +137,42 @@ export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mu
 
   function updateJoinDraft(patch: Partial<SchemaJoinDraft>) {
     setJoinDraft((current) => ({ ...current, ...patch }));
+  }
+
+  function updateRoutingProfile(patch: Partial<SchemaCatalogRoutingProfile>) {
+    setDraftJson((current) => {
+      const next = normalizeCatalogJson(current);
+      return {
+        ...next,
+        routing_profile: { ...next.routing_profile!, ...patch },
+      };
+    });
+  }
+
+  function updateVerifiedQuery(index: number, patch: Partial<SchemaCatalogVerifiedQuery>) {
+    setDraftJson((current) => {
+      const next = normalizeCatalogJson(current);
+      const queries = [...(next.verified_queries ?? [])];
+      queries[index] = { ...queries[index], ...patch };
+      return { ...next, verified_queries: queries };
+    });
+  }
+
+  function addVerifiedQuery() {
+    setDraftJson((current) => {
+      const next = normalizeCatalogJson(current);
+      return {
+        ...next,
+        verified_queries: [...(next.verified_queries ?? []), { name: "", question: "", sql: "" }],
+      };
+    });
+  }
+
+  function removeVerifiedQuery(index: number) {
+    setDraftJson((current) => {
+      const next = normalizeCatalogJson(current);
+      return { ...next, verified_queries: (next.verified_queries ?? []).filter((_item, itemIndex) => itemIndex !== index) };
+    });
   }
 
   function addJoinDraft() {
@@ -258,6 +296,66 @@ export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mu
             <input value={draftJson.name ?? ""} onChange={(event) => setDraftJson((current) => ({ ...normalizeCatalogJson(current), name: event.target.value }))} placeholder={`${profile.name} Live DB access`} className="sv-input" />
           </label>
           <label className="sv-field">
+            <span className="sv-label">Database description</span>
+            <input value={draftJson.description ?? ""} onChange={(event) => setDraftJson((current) => ({ ...normalizeCatalogJson(current), description: event.target.value }))} placeholder="What business data this database owns" className="sv-input" />
+          </label>
+          <div className="grid gap-3 md:grid-cols-2">
+            {([
+              ["domains", "Business domains", "Sales, order management"],
+              ["entities", "Main entities", "Orders, customers, invoices"],
+              ["metrics", "Metrics", "Order total, outstanding amount"],
+              ["synonyms", "Search terms", "Purchases, sales orders"],
+              ["capabilities", "Retrieval capabilities", "Exact lookup, aggregation"],
+            ] as const).map(([field, label, placeholder]) => (
+              <label className="sv-field" key={field}>
+                <span className="sv-label">{label}</span>
+                <input
+                  value={(draftJson.routing_profile?.[field] ?? []).join(", ")}
+                  onChange={(event) => updateRoutingProfile({ [field]: splitCommaList(event.target.value) })}
+                  placeholder={placeholder}
+                  className="sv-input"
+                />
+              </label>
+            ))}
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {([
+              ["freshness", "Freshness", "Batch, real-time, or unspecified"],
+              ["data_origin", "Data origin", "Operational system, document extraction, or unspecified"],
+              ["provenance", "Routing provenance", "How this routing metadata was produced"],
+            ] as const).map(([field, label, placeholder]) => (
+              <label className="sv-field" key={field}>
+                <span className="sv-label">{label}</span>
+                <input
+                  value={draftJson.routing_profile?.[field] ?? ""}
+                  onChange={(event) => updateRoutingProfile({ [field]: event.target.value })}
+                  placeholder={placeholder}
+                  className="sv-input"
+                />
+              </label>
+            ))}
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="sv-field">
+              <span className="sv-label">Example questions</span>
+              <textarea
+                value={(draftJson.routing_profile?.example_questions ?? []).join("\n")}
+                onChange={(event) => updateRoutingProfile({ example_questions: event.target.value.split("\n").map((line) => line.trim()).filter(Boolean) })}
+                placeholder="One representative question per line"
+                className="sv-input min-h-24"
+              />
+            </label>
+            <label className="sv-field">
+              <span className="sv-label">Do not use for</span>
+              <textarea
+                value={(draftJson.routing_profile?.exclusions ?? []).join("\n")}
+                onChange={(event) => updateRoutingProfile({ exclusions: event.target.value.split("\n").map((line) => line.trim()).filter(Boolean) })}
+                placeholder="Topics owned by another database"
+                className="sv-input min-h-24"
+              />
+            </label>
+          </div>
+          <label className="sv-field">
             <span className="sv-label">Business Rules</span>
             <textarea
               value={(draftJson.business_rules ?? []).join("\n")}
@@ -266,6 +364,29 @@ export function ConnectorCatalogEditor({ catalog, clearanceOptions, isSaving, mu
               className="sv-input min-h-24"
             />
           </label>
+          <section className="grid gap-3 rounded-md border border-surface-border bg-surface p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="sv-label">Verified queries</p>
+                <p className="text-label-md text-secondary">Exact approved questions use this SQL without model generation.</p>
+              </div>
+              <button type="button" className="sv-action-secondary" onClick={addVerifiedQuery}>
+                <Plus size={14} /> Add query
+              </button>
+            </div>
+            {(draftJson.verified_queries ?? []).map((query, index) => (
+              <div className="grid gap-2 rounded border border-surface-border p-3" key={`${index}-${query.name}`}>
+                <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+                  <input aria-label={`Verified query ${index + 1} name`} value={query.name} onChange={(event) => updateVerifiedQuery(index, { name: event.target.value })} placeholder="Query name" className="sv-input" />
+                  <button type="button" className="sv-action-secondary" onClick={() => removeVerifiedQuery(index)} aria-label={`Remove verified query ${index + 1}`}>
+                    <Trash2 size={14} /> Remove
+                  </button>
+                </div>
+                <input aria-label={`Verified query ${index + 1} question`} value={query.question} onChange={(event) => updateVerifiedQuery(index, { question: event.target.value })} placeholder="Exact user question" className="sv-input" />
+                <textarea aria-label={`Verified query ${index + 1} SQL`} value={query.sql} onChange={(event) => updateVerifiedQuery(index, { sql: event.target.value })} placeholder="Approved read-only SELECT" className="sv-input min-h-24 font-mono" />
+              </div>
+            ))}
+          </section>
               </>
             ) : null}
           </div>

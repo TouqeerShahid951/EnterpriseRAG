@@ -5,7 +5,7 @@ import { Ban, ChevronDown, ChevronRight, FileText, FolderOpen, PauseCircle, Play
 import { folderIngestApi } from "@/lib/api/contracts";
 import { clearanceLevelDescription, clearanceLevelLabel } from "@/lib/auth/authz";
 import { InlineMessage } from "@/components/layout/Common";
-import { formatFolderCount, summarizeFolderFiles, type FolderFileEntry } from "@/features/ingestion/state/folderIngest";
+import { FOLDER_SUPPORTED_FORMATS, formatFolderCount, summarizeFolderFiles, type FolderFileEntry } from "@/features/ingestion/state/folderIngest";
 import { formatFileSize } from "@/features/upload/state/pdfUploadBatch";
 import { errorMessage } from "@/lib/utils/format";
 import { formatDateTime, formatLatestRun, sourceTypeLabel } from "@/features/connectors/utils/connectorPanelUtils";
@@ -72,7 +72,7 @@ export function FolderSnapshotReview({ label, onClear, onRemove, selection }: Fo
 
       {selection.unsupportedEntries.length > 0 ? (
         <p className="mt-3 rounded-md border border-surface-border bg-surface-container-low px-3 py-2 text-label-md text-secondary">
-          {formatFolderCount(selection.unsupportedEntries.length, "unsupported item")} will be recorded as skipped because only PDF, DOCX, JPG, PNG, and JSON files are ingested.
+          {formatFolderCount(selection.unsupportedEntries.length, "unsupported item")} will be recorded as skipped because only {FOLDER_SUPPORTED_FORMATS} files are ingested. Review the marked file below.
         </p>
       ) : null}
     </div>
@@ -95,6 +95,7 @@ function FolderSnapshotFileRow({ entry, onRemove }: FolderSnapshotFileRowProps) 
       <span className="folder-snapshot-file-copy min-w-0 flex-1">
         <strong className="block truncate text-body-md text-on-surface">{entry.file.name}</strong>
         <small className="block truncate text-secondary">{entry.relativePath}</small>
+        {!entry.supported ? <small className="block text-secondary">Rejected: unsupported file type.</small> : null}
       </span>
       <span className="folder-snapshot-file-size shrink-0 text-label-md text-secondary">{formatFileSize(entry.file.size)}</span>
       <span className={`${entry.supported ? "sv-pill sv-pill-success" : "sv-pill"} folder-snapshot-file-status shrink-0`}>{entry.supported ? "Supported" : "Skipped"}</span>

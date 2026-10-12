@@ -271,3 +271,11 @@
 .knowledge-overview-return {
   flex: 0 0 auto;
 }
+
+.knowledge-attention-item { min-width: 0; border: 1px solid var(--color-surface-border); border-radius: .5rem; padding: .75rem; }
+.knowledge-attention-item > button:first-child { width: 100%; border: 0; padding: 0; align-items: start; }
+.knowledge-attention-copy { min-width: 0; flex: 1; }
+.knowledge-attention-copy strong { overflow-wrap: anywhere; white-space: normal; }
+.knowledge-attention-item .sv-pill { flex-shrink: 0; }
+.knowledge-attention-item p, .knowledge-attention-item small { display: block; font-size: .75rem; line-height: 1.5; color: var(--color-secondary); overflow-wrap: anywhere; margin-top: .375rem; }
+.knowledge-attention-item > button:last-child:not(:first-child) { margin-top: .75rem; font-size: .75rem; }

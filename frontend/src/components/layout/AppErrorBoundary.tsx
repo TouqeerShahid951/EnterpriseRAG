@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
+const STALE_CHUNK_RELOAD_KEY = "agenticrag:stale-chunk-reload";
+
 export class AppErrorBoundary extends Component<Props, State> {
   state: State = { error: null };
 
@@ -8,6 +10,7 @@ export class AppErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    if (isStaleChunkError(error) && reloadOnceForStaleChunk()) return;
     console.error("Prudentia AI render failed", error, info.componentStack);
   }
 
@@ -33,6 +36,21 @@ export class AppErrorBoundary extends Component<Props, State> {
         </section>
       </main>
     );
+  }
+}
+
+export function isStaleChunkError(error: Error): boolean {
+  return /ChunkLoadError|Failed to fetch dynamically imported module|Importing a module script failed/i.test(error.message);
+}
+
+function reloadOnceForStaleChunk(): boolean {
+  try {
+    if (sessionStorage.getItem(STALE_CHUNK_RELOAD_KEY)) return false;
+    sessionStorage.setItem(STALE_CHUNK_RELOAD_KEY, "1");
+    window.location.reload();
+    return true;
+  } catch {
+    return false;
   }
 }
 

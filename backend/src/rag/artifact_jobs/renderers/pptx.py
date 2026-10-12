@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
 import re
+import textwrap
 
 from ..contracts import ArtifactContentBundle, ContentBlock, EvidenceCitation
 from rag.artifact_jobs.generation.layout_profiles import ArtifactLayoutProfile
@@ -104,13 +105,11 @@ def render_pptx(
             _add_slide_sources(slide, evidence_ids, citations, profile)
             record_slide(title)
     if bundle.presentation.include_references_slide:
-        slide = _add_base_content_slide(presentation, "References", content_slide_index, profile)
-        _add_reference_lines(
-            slide,
-            [_reference_line(index, citation) for index, citation in enumerate(bundle.content.citations[:18], start=1)],
-            profile,
-        )
-        record_slide("References")
+        for index, lines in enumerate(_reference_pages(bundle), start=1):
+            title = "References" if index == 1 else f"References ({index})"
+            slide = add_content_slide(title)
+            _add_reference_lines(slide, lines, profile)
+            record_slide(title)
     buffer = BytesIO()
     presentation.save(buffer)
     return buffer.getvalue()
@@ -125,7 +124,7 @@ def _pptx_render_slide_count(bundle: ArtifactContentBundle) -> int:
         else:
             total += len(_slide_line_chunks(_slide_lines(slide_spec.blocks) or ["No supported content was generated."]))
     if bundle.presentation.include_references_slide:
-        total += 1
+        total += len(_reference_pages(bundle))
     return max(total, 1)
 
 
@@ -315,16 +314,16 @@ def _add_slide_bullets(slide, lines: list[str], profile: ArtifactLayoutProfile) 
         row_top += row_height + row_gap
 
 
+def _reference_pages(bundle: ArtifactContentBundle) -> list[list[str]]:
+    lines = [line for index, citation in enumerate(bundle.content.citations, start=1)
+        for line in textwrap.wrap(_reference_line(index, citation), width=120,
+            break_long_words=False, break_on_hyphens=False)]
+    return [lines[start:start+14] for start in range(0, len(lines), 14)] or [["No references were available."]]
+
+
 def _add_reference_lines(slide, lines: list[str], profile: ArtifactLayoutProfile) -> None:
-    if not lines:
-        _add_slide_text(slide, "No references were available.", 0.95, 1.48, 10.8, 0.35, 12, profile.text_hex)
-        return
-    columns = (lines[:9], lines[9:18])
-    for column_index, column_lines in enumerate(columns):
-        left = 0.95 + column_index * 5.72
-        for row_index, line in enumerate(column_lines):
-            top = 1.46 + row_index * 0.49
-            _add_slide_text(slide, _compact(line, 155), left, top, 5.15, 0.35, 8.1, profile.text_hex)
+    for index, line in enumerate(lines):
+        _add_slide_text(slide, line, 0.95, 1.46 + index * 0.32, 11.35, 0.31, 11, profile.text_hex)
 
 
 def _pptx_bullet_row_heights(lines: list[str], font_size: float, available_height: float, row_gap: float) -> list[float]:

@@ -389,6 +389,14 @@ def _result(
         fallback=fallback,
         errors=errors,
     )
+    represented = {page for item in items if item.text.strip()
+                   for page in range(item.page_start or 0, (item.page_end or item.page_start or 0) + 1)}
+    report["page_statuses"] = [
+        {"page": page, "status": "extracted" if page in represented else
+         "confirmed_blank" if "confirmed_blank_page" in baseline.page_quality_flags.get(page, []) else "failed"}
+        for page in range(1, baseline.page_count + 1)
+    ]
+    report["content_complete"] = all(page["status"] != "failed" for page in report["page_statuses"])
     return DocumentParseResult(items=items, provenance=report)
 
 
@@ -401,7 +409,9 @@ def _fuse_pages(
     min_chars_per_page: int,
 ) -> list[ParsedPdfItem]:
     pageful_docling = [item for item in docling_items if item.page_start is not None]
-    repaired_baseline = merge_docling_repairs(baseline_items, pageful_docling, weak_pages) if weak_pages else baseline_items
+    # Whole-page replacements must pass coverage checks against the original page.
+    table_repair_pages = [page for page in weak_pages if not _needs_whole_page_repair(page)]
+    repaired_baseline = merge_docling_repairs(baseline_items, pageful_docling, table_repair_pages) if table_repair_pages else baseline_items
     baseline_by_page = _items_by_page(repaired_baseline, baseline.page_count)
     docling_by_page = _items_by_page(pageful_docling, baseline.page_count)
     fused: list[ParsedPdfItem] = []

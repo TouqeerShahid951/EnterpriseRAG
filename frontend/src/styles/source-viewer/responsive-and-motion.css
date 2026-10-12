@@ -74,6 +74,93 @@
   }
 }
 
+@media (min-width: 721px) {
+  .source-viewer-shell .source-viewer-toolbar {
+    width: min(100%, 80rem);
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .source-viewer-shell .source-viewer-toolbar-main,
+  .source-viewer-shell .source-viewer-toolbar-end {
+    width: 100%;
+  }
+
+  .source-viewer-shell .source-viewer-toolbar-end {
+    justify-content: flex-end;
+  }
+}
+
+@media (min-width: 1312px) {
+  .source-viewer-shell .source-viewer-toolbar {
+    display: block;
+  }
+
+  .source-viewer-shell .source-viewer-toolbar-main {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "page zoom citations"
+      "search search search";
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .source-viewer-shell .source-viewer-page-controls {
+    grid-area: page;
+    gap: 0.3rem;
+  }
+
+  .source-viewer-shell .source-viewer-zoom-controls {
+    grid-area: zoom;
+    gap: 0.3rem;
+  }
+
+  .source-viewer-shell .source-viewer-search {
+    width: min(100%, 28rem);
+    grid-area: search;
+  }
+
+  .source-viewer-shell .source-viewer-toolbar-end {
+    grid-area: citations;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .source-viewer-shell .source-viewer-page-controls button,
+  .source-viewer-shell .source-viewer-mode-button {
+    padding-inline: 0.5rem;
+  }
+
+  .source-viewer-shell .source-viewer-zoom-readout {
+    padding-inline: 0.5rem;
+  }
+}
+
+@media (min-width: 1440px) {
+  .source-viewer-shell .source-viewer-toolbar {
+    width: min(100%, var(--desktop-canvas-standard));
+  }
+}
+
+@media (min-width: 2200px) {
+  .source-viewer-shell .source-viewer-toolbar {
+    width: min(100%, 96rem);
+  }
+}
+
+@media (min-width: 3200px) {
+  .source-viewer-shell .source-viewer-toolbar {
+    width: min(100%, 144rem);
+  }
+}
+
+@media (min-width: 5120px) {
+  .source-viewer-shell .source-viewer-toolbar {
+    width: min(100%, 220rem);
+  }
+}
+
 @media (max-width: 720px) {
   .source-viewer-header {
     position: static;
@@ -132,6 +219,25 @@
 
   .source-viewer-mode-button {
     flex: 1 1 calc(50% - 0.4rem);
+  }
+
+  .source-viewer-search {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .source-viewer-citation-navigator {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .source-viewer-citation-navigator select {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .source-viewer-search-status {
+    min-width: 2.5rem;
   }
 
   .source-viewer-jump {

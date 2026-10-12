@@ -145,6 +145,11 @@ def _record_from_source(
         page_end=page_end,
         content_type="source_anchor",
         text=source.excerpt,
+        index_generation_id=source.index_generation_id, content_hash=source.content_hash,
+        provenance_kind=source.provenance_kind, quote_texts=source.quote_texts if source.quote_texts is not None else [
+            source.excerpt[window.quote_start:window.quote_end] for window in source.evidence_windows
+            if source.citation_protocol_version == 1 and window.support_status == "verified"
+            and window.quote_start is not None and window.quote_end is not None],
     )
 
 

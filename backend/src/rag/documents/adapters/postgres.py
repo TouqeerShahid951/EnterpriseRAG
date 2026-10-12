@@ -101,11 +101,13 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
         state: Literal["active", "deleted"] = "active",
         clearance_levels: tuple[ClearanceLevel, ...],
         group_paths: tuple[str, ...] | None,
+        exclude_abbreviation_glossary: bool = False,
     ) -> dict[str, int]:
         if state not in {"active", "deleted"}:
             raise ValueError("document state must be active or deleted")
         deleted_clause = "d.deleted_at IS NULL" if state == "active" else "d.deleted_at IS NOT NULL"
         parameters: tuple[Any, ...] = (list(clearance_levels),)
+        glossary_clause = "AND COALESCE(d.doc_type, '') <> 'abbreviation_glossary'" if exclude_abbreviation_glossary else ""
         group_clause = ""
         if group_paths is not None:
             normalized_groups = [normalize_group_path(path) for path in group_paths]
@@ -127,6 +129,7 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
             FROM documents d
             WHERE {deleted_clause}
               AND d.clearance_level = ANY(%s::text[])
+              {glossary_clause}
               {group_clause}
             GROUP BY d.group_path
             ORDER BY d.group_path
@@ -146,11 +149,13 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
         expiring_from: date,
         expiring_to: date,
         attention_limit: int,
+        exclude_abbreviation_glossary: bool = False,
     ) -> DocumentOverviewSnapshot:
         access_sql, access_params = _document_overview_access_sql(
             clearance_levels=clearance_levels,
             group_paths=group_paths,
         )
+        glossary_clause = "AND COALESCE(d.doc_type, '') <> 'abbreviation_glossary'" if exclude_abbreviation_glossary else ""
         space_path_clause = ""
         space_path_params: tuple[Any, ...] = ()
         if group_paths is not None:
@@ -192,6 +197,10 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                               AND d.ingest_status IN ('failed', 'human_review', 'unknown')
                         )::bigint AS needs_attention,
                         COUNT(*) FILTER (
+                            WHERE d.deleted_at IS NULL AND d.is_current
+                              AND d.ingest_status = 'cancelled'
+                        )::bigint AS cancelled_current,
+                        COUNT(*) FILTER (
                             WHERE d.deleted_at IS NULL AND NOT d.is_current
                         )::bigint AS superseded_versions,
                         COUNT(*) FILTER (
@@ -201,6 +210,7 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                         COUNT(*) FILTER (WHERE d.deleted_at IS NOT NULL)::bigint AS trash
                     FROM documents d
                     WHERE {access_sql}
+                      {glossary_clause}
                     """,
                     (expiring_from, expiring_to, *access_params),
                 ).fetchone()
@@ -209,6 +219,7 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                     SELECT d.*
                     FROM documents d
                     WHERE {access_sql}
+                      {glossary_clause}
                       AND d.deleted_at IS NULL
                       AND d.is_current
                       AND d.ingest_status IN ('failed', 'human_review', 'unknown')
@@ -250,6 +261,7 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                         WHERE share.document_id = d.id
                     ) visible_space
                     WHERE {access_sql}
+                      {glossary_clause}
                       {space_path_clause}
                     GROUP BY visible_space.group_path
                     HAVING COUNT(*) FILTER (WHERE d.deleted_at IS NULL) > 0
@@ -267,6 +279,7 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
             failed_current=int(values.get("failed_current", 0)),
             unknown_current=int(values.get("unknown_current", 0)),
             needs_attention=int(values.get("needs_attention", 0)),
+            cancelled_current=int(values.get("cancelled_current", 0)),
             superseded_versions=int(values.get("superseded_versions", 0)),
             expiring_soon_current=int(values.get("expiring_soon_current", 0)),
             trash=int(values.get("trash", 0)),
@@ -403,6 +416,25 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                 json.dumps(_unique_text(llm_topics)),
                 document_id,
             ),
+        )
+        return document_from_row(row) if row else None
+
+    def update_document_metadata_flag(
+        self,
+        document_id: str,
+        *,
+        key: str,
+        value: Any,
+    ) -> DocumentRecord | None:
+        row = self._execute_optional(
+            """
+            UPDATE documents
+            SET metadata_flags = jsonb_set(COALESCE(metadata_flags, '{}'::jsonb), ARRAY[%s], %s::jsonb, true),
+                updated_at = NOW()
+            WHERE id = %s AND deleted_at IS NULL
+            RETURNING *
+            """,
+            (key, json.dumps(value), document_id),
         )
         return document_from_row(row) if row else None
 
@@ -666,7 +698,9 @@ class PostgresDocumentRepository(PostgresConnectionMixin):
                                 job_id,
                                 asset.get("source_kind") or "image",
                                 asset.get("page"),
-                                json.dumps(asset.get("bbox")),
+                                json.dumps(asset["bbox"])
+                                if asset.get("bbox") is not None
+                                else None,
                                 asset["object_path"],
                                 asset.get("content_type") or "image/jpeg",
                                 asset.get("width"),

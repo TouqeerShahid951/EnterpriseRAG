@@ -27,6 +27,13 @@ class SearchHit:
     payload: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class QdrantScanResult:
+    hits: tuple[SearchHit, ...]
+    complete: bool
+    stop_reason: str | None = None
+
+
 class QdrantClient:
     def __init__(
         self,
@@ -236,9 +243,30 @@ class QdrantClient:
         deadline: float | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> list[SearchHit]:
+        return list(
+            self.scan_document_chunks(
+                document_ids=document_ids,
+                qdrant_filter=qdrant_filter,
+                structured_only=structured_only,
+                limit=limit,
+                deadline=deadline,
+                cancellation_token=cancellation_token,
+            ).hits
+        )
+
+    def scan_document_chunks(
+        self,
+        *,
+        document_ids: list[str],
+        qdrant_filter: dict[str, Any],
+        structured_only: bool,
+        limit: int,
+        deadline: float | None = None,
+        cancellation_token: QueryCancellationToken | None = None,
+    ) -> QdrantScanResult:
         scoped_ids = sorted({doc_id.strip() for doc_id in document_ids if doc_id.strip()})
         if not scoped_ids or limit <= 0:
-            return []
+            return QdrantScanResult((), complete=True)
         scoped_filter = dict(qdrant_filter)
         must = list(scoped_filter.get("must", []))
         must.append(
@@ -318,7 +346,17 @@ class QdrantClient:
             payload["artifact_scan_origin"] = "authorized_document_scope"
             payload["authorized_scan_complete"] = scan_complete
             annotated.append(SearchHit(point_id=hit.point_id, score=hit.score, payload=payload))
-        return annotated
+        return QdrantScanResult(
+            tuple(annotated),
+            complete=scan_complete,
+            stop_reason=(
+                "deadline_exceeded"
+                if deadline_exceeded
+                else "limit_reached"
+                if not scan_complete
+                else None
+            ),
+        )
 
     def retrieve_authorized_chunks(
         self,
@@ -329,8 +367,27 @@ class QdrantClient:
         deadline: float | None = None,
         cancellation_token: QueryCancellationToken | None = None,
     ) -> list[SearchHit]:
+        return list(
+            self.scan_authorized_chunks(
+                qdrant_filter=qdrant_filter,
+                structured_only=structured_only,
+                limit=limit,
+                deadline=deadline,
+                cancellation_token=cancellation_token,
+            ).hits
+        )
+
+    def scan_authorized_chunks(
+        self,
+        *,
+        qdrant_filter: dict[str, Any],
+        structured_only: bool,
+        limit: int,
+        deadline: float | None = None,
+        cancellation_token: QueryCancellationToken | None = None,
+    ) -> QdrantScanResult:
         if limit <= 0:
-            return []
+            return QdrantScanResult((), complete=True)
         scoped_filter = dict(qdrant_filter)
         must = list(scoped_filter.get("must", []))
         if structured_only:
@@ -410,7 +467,17 @@ class QdrantClient:
             payload["artifact_scan_origin"] = "authorized_scope"
             payload["authorized_scan_complete"] = scan_complete
             annotated.append(SearchHit(point_id=hit.point_id, score=hit.score, payload=payload))
-        return annotated
+        return QdrantScanResult(
+            tuple(annotated),
+            complete=scan_complete,
+            stop_reason=(
+                "deadline_exceeded"
+                if deadline_exceeded
+                else "limit_reached"
+                if not scan_complete
+                else None
+            ),
+        )
 
     def delete_document_points(self, doc_id: str, *, cancellation_token: QueryCancellationToken | None = None) -> None:
         try:

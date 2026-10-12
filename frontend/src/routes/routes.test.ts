@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { accountTypeLabel, accountTypeOptions, canAssignAccountType, canUploadToSpace, canWriteDocument } from "@/lib/auth/authz";
-import { authenticatedRouteForUser, canAccessRoute, defaultRouteForUser, navigationGroupForRoute, routeFromLocation, visibleNavigation, type RouteId } from "@/routes/routes";
+import { authenticatedRouteForUser, canAccessRoute, defaultRouteForUser, navigationGroupForRoute, routeFromLocation, routeTitles, visibleNavigation, type RouteId } from "@/routes/routes";
 import type { AccountType, ClearanceLevel, User } from "@/types/api";
 
 describe("account type route access", () => {
@@ -24,6 +24,8 @@ describe("account type route access", () => {
     expect(canAccessRoute(user, "document-trash")).toBe(true);
     expect(canAccessRoute(user, "ingestion-health")).toBe(true);
     expect(canAccessRoute(user, "ingestion-jobs")).toBe(true);
+    expect(canAccessRoute(user, "operational-analytics")).toBe(true);
+    expect(routeFromLocation("/operational-analytics", "")).toBe("operational-analytics");
     expect(defaultRouteForUser(user)).toBe("chat");
   });
 
@@ -40,6 +42,7 @@ describe("account type route access", () => {
     expect(canAccessRoute(user, "document-trash")).toBe(true);
     expect(canAccessRoute(user, "ingestion-health")).toBe(true);
     expect(canAccessRoute(user, "ingestion-jobs")).toBe(true);
+    expect(canAccessRoute(user, "operational-analytics")).toBe(false);
     expect(defaultRouteForUser(user)).toBe("chat");
   });
 
@@ -131,6 +134,7 @@ describe("account type route access", () => {
     const reviewQueue = reviewerNavigation.find((item) => item.id === "review");
     const adminNavigation = visibleNavigation(makeUser("platform_admin"));
     const evaluations = adminNavigation.find((item) => item.id === "evaluations");
+    const operationalAnalytics = adminNavigation.find((item) => item.id === "operational-analytics");
     const settings = adminNavigation.find((item) => item.id === "settings");
     const systemAdminNavigation = visibleNavigation(makeUser("system_admin"));
 
@@ -146,6 +150,7 @@ describe("account type route access", () => {
     expect(memberLibrary?.children?.map((child) => child.route)).toEqual(["document-overview", "documents", "knowledge-spaces", "document-trash"]);
     expect(reviewQueue?.badge).toBe("review");
     expect(evaluations?.label).toBe("RAG Evaluation");
+    expect(operationalAnalytics?.label).toBe("Analytics");
     expect(settings?.label).toBe("Runtime Settings");
     expect(systemAdminNavigation.some((item) => item.id === "evaluations")).toBe(false);
     expect(systemAdminNavigation.some((item) => item.id === "settings")).toBe(false);
@@ -156,7 +161,14 @@ describe("account type route access", () => {
     expect(navigationGroupForRoute("document-overview")).toBe("document-library");
     expect(navigationGroupForRoute("documents")).toBe("document-library");
     expect(navigationGroupForRoute("document-trash")).toBe("document-library");
-    expect(navigationGroupForRoute("ingestion-health")).toBe("overview");
+    expect(navigationGroupForRoute("ingestion-health")).toBe("document-intake");
+  });
+
+  it("exposes System Overview as a direct page", () => {
+    const overview = visibleNavigation(makeUser("platform_admin")).find((item) => item.id === "overview");
+    expect(overview?.route).toBe("overview");
+    expect(overview?.children).toBeUndefined();
+    expect(routeTitles.overview).toBe("System Overview");
   });
 });
 
@@ -171,3 +183,13 @@ function makeUser(accountType: AccountType, clearanceLevel: ClearanceLevel = "CO
     must_change_password: false,
   };
 }
+
+
+it("keeps Pipeline Health accessible at its existing URL without a sidebar entry", () => {
+  const user = makeUser("platform_admin");
+  const navigation = visibleNavigation(user);
+  expect(navigation.flatMap((item) => [item.route, ...(item.children ?? []).map((child) => child.route)])).not.toContain("ingestion-health");
+  expect(routeFromLocation("/ingestion-health", "")).toBe("ingestion-health");
+  expect(routeTitles["ingestion-health"]).toBe("Pipeline Health");
+  expect(canAccessRoute(user, "ingestion-health")).toBe(true);
+});

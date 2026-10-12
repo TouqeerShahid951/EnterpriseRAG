@@ -21,6 +21,15 @@ def test_public_review_summary_openapi_contract() -> None:
     assert set(schema["required"]) == {"pending_document_count"}
 
 
+def test_review_description_is_optional_and_approval_remains_transcription_only() -> None:
+    schemas = _load_api_app().openapi()["components"]["schemas"]
+    assert schemas["ReviewItem"]["properties"]["image_description"]["anyOf"] == [
+        {"type": "string"}, {"type": "null"},
+    ]
+    assert "image_description" not in schemas["ReviewItem"]["required"]
+    assert set(schemas["ReviewApproveRequest"]["properties"]) == {"corrected_text"}
+
+
 def _load_api_app() -> Any:
     module_path = BACKEND_ROOT / "apps" / "api" / "main.py"
     spec = spec_from_file_location("agenticrag_api_main", module_path)

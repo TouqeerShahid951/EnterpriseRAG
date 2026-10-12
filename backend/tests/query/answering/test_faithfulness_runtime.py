@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import replace
-from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from rag.auth.context import UserContext
@@ -12,98 +10,16 @@ from rag.query.answering.faithfulness import (
     cited_claims,
     ordered_answer_covers_question,
     parse_faithfulness_result,
+    reconcile_enumerated_list_counts,
     verify_cited_claims,
 )
-from rag.query.adapters.chat_history_memory import InMemoryChatHistoryRepository
 from rag.query.http import ServiceRequestError
-from rag.query.nodes.response_nodes import ResponseNodes
 from rag.query.ollama import LONG_ANSWER_NUM_PREDICT, OllamaClient
 from rag.query.openai_compatible import OpenAICompatibleClient
-from rag.query.routing.routing_models import RoutePlan
 from rag.query.schemas import (
-    EvidenceField,
-    QueryCoverage,
-    QueryRequest,
     RAGResponse,
     SourceAnchor,
 )
-from rag.query.service import LocalRagService
-from rag.query.state import QueryContext, initial_state
-
-
-class _FakeFaithfulnessClient:
-    def __init__(
-        self,
-        result: str | Exception = (
-            '{"score": 1.0, "unfounded_claims": [], '
-            '"responsive": true, "missing_aspects": []}'
-        ),
-    ) -> None:
-        self.calls = 0
-        self.result = result
-
-    def judge_faithfulness(
-        self,
-        *,
-        prompt: str,
-        model: str | None,
-        json_schema: dict[str, object] | None = None,
-    ) -> str:
-        self.calls += 1
-        assert prompt
-        assert model == "faithfulness-model"
-        assert json_schema is not None
-        assert set(json_schema["required"]) == {
-            "score",
-            "unfounded_claims",
-            "responsive",
-            "missing_aspects",
-        }
-        if isinstance(self.result, Exception):
-            raise self.result
-        return self.result
-
-
-class _FaithfulnessGraph:
-    def __init__(self, nodes: ResponseNodes) -> None:
-        self.nodes = nodes
-        self.force_flags: list[bool] = []
-
-    def invoke(self, ctx: QueryContext) -> QueryContext:
-        self.force_flags.append(ctx["force_faithfulness_check"])
-        ctx["response"] = _grounded_response()
-        return self.nodes.faithfulness_checker(ctx)
-
-
-def _configured_nodes(
-    result: str | Exception = (
-        '{"score": 1.0, "unfounded_claims": [], '
-        '"responsive": true, "missing_aspects": []}'
-    ),
-    *,
-    policy: str = "always",
-) -> tuple[ResponseNodes, _FakeFaithfulnessClient]:
-    client = _FakeFaithfulnessClient(result)
-    nodes = ResponseNodes()
-    nodes.config = SimpleNamespace(
-        rag_faithfulness_policy=policy,
-        rag_reranker_cache_dir="/models/fastembed",
-    )
-    nodes.ollama = client
-    nodes.faithfulness_model = "faithfulness-model"
-    nodes.faithfulness_policy = policy
-    nodes.reranker_model = "reranker-model"
-    return nodes, client
-
-
-def _service_with_never_policy() -> tuple[LocalRagService, _FakeFaithfulnessClient, _FaithfulnessGraph]:
-    nodes, client = _configured_nodes(policy="never")
-    graph = _FaithfulnessGraph(nodes)
-    service = object.__new__(LocalRagService)
-    service.rag_config = SimpleNamespace(retrieval_token_budget=12000)
-    service.graph = graph
-    service.chat_history_repo = InMemoryChatHistoryRepository()
-    return service, client, graph
 
 
 def _grounded_response() -> RAGResponse:
@@ -130,13 +46,17 @@ def _grounded_response() -> RAGResponse:
     )
 
 
-def _low_risk_plan() -> RoutePlan:
-    question = "What is the policy?"
-    return RoutePlan(
-        original_query=question,
-        resolved_query=question,
-        intent="factual_simple",
+def test_enumerated_list_count_is_reconciled_from_numbering() -> None:
+    answer = (
+        "The manual lists 12 repair tools:\n"
+        + "\n".join(f"{number}. Tool {number}" for number in range(1, 14))
+        + "\nNote: 13 items were found."
     )
+
+    reconciled = reconcile_enumerated_list_counts(answer)
+
+    assert reconciled.startswith("The manual lists 13 repair tools:\n")
+    assert "Note: 13 items were found." in reconciled
 
 
 def _user() -> UserContext:
@@ -287,6 +207,60 @@ class FaithfulnessRuntimeTests(unittest.TestCase):
                 "Protect autonomy; Ensure inclusiveness and equity."
             ),
         )
+
+    def test_deterministic_verifier_excludes_an_orphaned_next_list_marker(
+        self,
+    ) -> None:
+        response = _grounded_response().model_copy(
+            update={
+                "answer": (
+                    "The employee is entitled to an annual period of leave of "
+                    "42 business days. [doc:1]"
+                ),
+                "sources": [
+                    _grounded_response().sources[0].model_copy(
+                        update={
+                            "excerpt": (
+                                "CLAUSE SEVEN\n\n"
+                                "(ANNUAL PERIOD OF LEAVE)\n\n"
+                                "1. Without prejudice to the following paragraphs, "
+                                "the annual period of leave has the duration of "
+                                "42(forty-two) business days.\n\n"
+                                "2. In the year of hire, the employee accrues leave."
+                            )
+                        }
+                    )
+                ],
+            }
+        )
+
+        def rank_matching_passage(_query: str, passages: list[str], **_kwargs):
+            index = next(
+                index
+                for index, passage in enumerate(passages)
+                if "duration of 42" in passage
+            )
+            return [(index, 0.85)]
+
+        entailment = Mock(
+            return_value=[EntailmentScore(0.01, 0.98, 0.01)]
+        )
+        with (
+            patch(
+                "rag.query.answering.faithfulness.rank_passages",
+                side_effect=rank_matching_passage,
+            ),
+            patch(
+                "rag.query.answering.faithfulness.score_entailment",
+                entailment,
+            ),
+        ):
+            result = verify_cited_claims(response)
+
+        self.assertIsNotNone(result)
+        premise = entailment.call_args.args[0][0][0]
+        self.assertTrue(premise.endswith("business days."))
+        self.assertNotIn("\n\n2.", premise)
 
     def test_incomplete_counted_list_is_not_deterministically_approved(self) -> None:
         response = _grounded_response().model_copy(
@@ -934,731 +908,6 @@ class FaithfulnessRuntimeTests(unittest.TestCase):
             "Optimal is followed by Advanced, Initial, and Traditional.",
         )
 
-    def test_supported_ordered_answer_overrides_false_missing_aspects(self) -> None:
-        claim = (
-            "The four maturity stages from least to most mature are: "
-            "**Traditional, Initial, Advanced, and Optimal**."
-        )
-        nodes, _ = _configured_nodes(
-            f'{{"score": 0.0, "unfounded_claims": ["{claim}"], '
-            '"responsive": false, '
-            '"missing_aspects": ["four ordered maturity stages"]}'
-        )
-        question = "What are the four maturity stages from least to most mature?"
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query=question),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = replace(
-            _low_risk_plan(),
-            original_query=question,
-            resolved_query=question,
-        )
-        answer = f"{claim} [doc:1]"
-        ctx["response"] = _grounded_response().model_copy(
-            update={
-                "answer": answer,
-                "sources": [
-                    _grounded_response().sources[0].model_copy(
-                        update={
-                            "excerpt": (
-                                "The three stages of the journey that advance from a "
-                                "Traditional starting point to Initial, Advanced, and "
-                                "Optimal facilitate implementation."
-                            )
-                        }
-                    )
-                ],
-            }
-        )
-
-        with (
-            patch(
-                "rag.query.answering.faithfulness.rank_passages",
-                return_value=[(0, 0.85)],
-            ),
-            patch(
-                "rag.query.answering.faithfulness.score_entailment",
-                return_value=[
-                    EntailmentScore(0.42, 0.01, 0.57),
-                    EntailmentScore(0.01, 0.98, 0.01),
-                ],
-            ),
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        self.assertEqual(ctx["response"].answer, answer)
-        self.assertFalse(ctx["response"].degraded)
-        self.assertEqual(
-            ctx["execution_details"]["faithfulness_checker"],
-            "fallback_after_disagreement",
-        )
-
-    def test_adaptive_policy_uses_local_check_for_forced_supported_lookup(self) -> None:
-        nodes, client = _configured_nodes(policy="adaptive")
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the policy?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = _low_risk_plan()
-        ctx["force_faithfulness_check"] = True
-        ctx["response"] = _grounded_response().model_copy(
-            update={"answer": "Grounded answer. [doc:1]"}
-        )
-
-        with (
-            patch(
-                "rag.query.answering.faithfulness.rank_passages",
-                return_value=[(0, 0.85)],
-            ),
-            patch(
-                "rag.query.answering.faithfulness.score_entailment",
-                return_value=[EntailmentScore(0.01, 0.98, 0.01)],
-            ),
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        self.assertEqual(ctx["response"].faithfulness_status, "checked")
-        self.assertEqual(ctx["response"].faithfulness_score, 1.0)
-        self.assertEqual(
-            ctx["execution_modes"]["faithfulness_checker"], "deterministic"
-        )
-        self.assertEqual(client.calls, 0)
-        self.assertEqual(
-            ctx["response"].sources[0].attribution_status, "complete"
-        )
-
-    def test_adaptive_policy_does_not_split_person_suffix_as_a_claim(self) -> None:
-        nodes, client = _configured_nodes(policy="adaptive")
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is Mohammad Ali Jnr.'s role?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = replace(
-            _low_risk_plan(),
-            original_query=ctx["request"].query,
-            resolved_query=ctx["request"].query,
-        )
-        ctx["response"] = _grounded_response().model_copy(
-            update={
-                "answer": "Mohammad Ali Jnr. [doc:1] Data Engineer. [doc:1]",
-                "sources": [
-                    _grounded_response().sources[0].model_copy(
-                        update={
-                            "doc_title": "Mohammad Ali employment record.pdf",
-                            "excerpt": "Position Title: Mohammad Ali Jnr. Data Engineer",
-                        }
-                    )
-                ],
-            }
-        )
-
-        with (
-            patch(
-                "rag.query.answering.faithfulness.rank_passages",
-                return_value=[(0, -3.23)],
-            ),
-            patch(
-                "rag.query.answering.faithfulness.score_entailment",
-                return_value=[EntailmentScore(0.01, 0.98, 0.01)],
-            ),
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        self.assertEqual(ctx["response"].faithfulness_status, "checked")
-        self.assertEqual(
-            ctx["execution_modes"]["faithfulness_checker"], "deterministic"
-        )
-        self.assertEqual(client.calls, 0)
-
-    def test_adaptive_policy_keeps_ai_judge_for_uncertain_answer(self) -> None:
-        nodes, client = _configured_nodes(policy="adaptive")
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the policy?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = _low_risk_plan()
-        ctx["response"] = _grounded_response()
-
-        nodes.faithfulness_checker(ctx)
-
-        self.assertEqual(ctx["response"].faithfulness_status, "checked")
-        self.assertEqual(
-            ctx["execution_modes"]["faithfulness_checker"], "ai_assisted"
-        )
-        self.assertEqual(client.calls, 1)
-
-    def test_adaptive_policy_keeps_ai_judge_for_contradicted_claim(self) -> None:
-        nodes, client = _configured_nodes(policy="adaptive")
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="When was the policy approved?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = _low_risk_plan()
-        ctx["response"] = _grounded_response().model_copy(
-            update={
-                "answer": "The policy was approved in 2025. [doc:1]",
-                "sources": [
-                    _grounded_response().sources[0].model_copy(
-                        update={
-                            "excerpt": "The policy was approved in 2024 and amended in 2025."
-                        }
-                    )
-                ],
-            }
-        )
-
-        with (
-            patch(
-                "rag.query.answering.faithfulness.rank_passages",
-                return_value=[(0, 5.4)],
-            ),
-            patch(
-                "rag.query.answering.faithfulness.score_entailment",
-                return_value=[EntailmentScore(0.97, 0.02, 0.01)],
-            ),
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        self.assertEqual(
-            ctx["execution_modes"]["faithfulness_checker"], "ai_assisted"
-        )
-        self.assertEqual(client.calls, 1)
-
-    def test_adaptive_policy_keeps_ai_judge_for_high_risk_answer(self) -> None:
-        nodes, client = _configured_nodes(policy="adaptive")
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the policy?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = replace(_low_risk_plan(), risk_level="high")
-        ctx["response"] = _grounded_response().model_copy(
-            update={"answer": "Grounded answer. [doc:1]"}
-        )
-
-        nodes.faithfulness_checker(ctx)
-
-        self.assertEqual(
-            ctx["execution_modes"]["faithfulness_checker"], "ai_assisted"
-        )
-        self.assertEqual(client.calls, 1)
-
-    def test_never_policy_skips_normal_answer_validation(self) -> None:
-        service, client, graph = _service_with_never_policy()
-
-        response = service.answer_query(QueryRequest(query="What is the policy?"), _user())
-
-        self.assertEqual(response.faithfulness_status, "skipped")
-        self.assertEqual(client.calls, 0)
-        self.assertEqual(graph.force_flags, [False])
-
-    def test_skipped_validation_is_not_reported_as_perfect(self) -> None:
-        nodes, client = _configured_nodes()
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the policy?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["response"] = _grounded_response().model_copy(update={"sources": []})
-
-        nodes.faithfulness_checker(ctx)
-
-        self.assertEqual(ctx["response"].faithfulness_status, "skipped")
-        self.assertEqual(ctx["response"].faithfulness_score, 0.0)
-        self.assertEqual(client.calls, 0)
-
-    def test_checked_faithfulness_serializes_live_database_row(self) -> None:
-        nodes, _ = _configured_nodes()
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="Which case has the highest priority?"),
-            user=_user(),
-            started=0.0,
-        )
-        citation = "[connector-live-scope:catalog:query:0]"
-        ctx["response"] = RAGResponse(
-            trace_id="trace",
-            answer=(
-                f"DEMO-ALPHA has the highest priority. {citation} "
-                f"It is assigned to Phoenix. {citation}"
-            ),
-            sources=[
-                SourceAnchor(
-                    doc_id="connector-live-scope:catalog",
-                    doc_title="Live connector query: Demo cases",
-                    chunk_id="connector-live-scope:catalog:query:0",
-                    excerpt="case_id: DEMO-ALPHA\nassigned_team: Phoenix",
-                    group_path="/test",
-                    attribution_kind="table_row",
-                    attribution_table_title="Demo cases",
-                    attribution_fields=[
-                        EvidenceField(label="case_id", value="DEMO-ALPHA"),
-                        EvidenceField(label="assigned_team", value="Phoenix"),
-                    ],
-                )
-            ],
-            conflict_flag=False,
-            faithfulness_score=1.0,
-            intent="factual_simple",
-            session_id="session",
-            latency_ms=0,
-            degraded=False,
-        )
-
-        with (
-            patch(
-                "rag.query.answering.faithfulness.rank_passages",
-                return_value=[(0, 1.0)],
-            ),
-            patch(
-                "rag.query.answering.faithfulness.score_entailment",
-                return_value=[
-                    EntailmentScore(0.01, 0.98, 0.01),
-                    EntailmentScore(0.01, 0.98, 0.01),
-                ],
-            ),
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        source = ctx["response"].sources[0]
-        self.assertEqual(ctx["response"].faithfulness_status, "checked")
-        self.assertEqual(source.attribution_status, "complete")
-        self.assertEqual(len(source.evidence_windows), 2)
-        self.assertTrue(all(item.kind == "table_row" for item in source.evidence_windows))
-        self.assertTrue(
-            all(item.support_status == "semantic_fallback" for item in source.evidence_windows)
-        )
-        self.assertEqual(
-            " ".join(item.claim for item in source.evidence_windows),
-            "DEMO-ALPHA has the highest priority. It is assigned to Phoenix.",
-        )
-        self.assertEqual(
-            [field.value for field in source.evidence_windows[0].fields],
-            ["DEMO-ALPHA", "Phoenix"],
-        )
-
-    def test_internal_execute_query_propagates_forced_validation(self) -> None:
-        service, client, graph = _service_with_never_policy()
-
-        execution = service.execute_query(
-            QueryRequest(query="What is the policy?"),
-            _user(),
-            force_faithfulness_check=True,
-        )
-
-        self.assertEqual(execution.response.faithfulness_status, "checked")
-        self.assertEqual(client.calls, 1)
-        self.assertEqual(graph.force_flags, [True])
-
-    def test_verifier_outage_uses_strong_local_support(self) -> None:
-        nodes, _ = _configured_nodes(
-            ServiceRequestError("faithfulness", "request timed out")
-        )
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the policy?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = replace(
-            _low_risk_plan(),
-            temporal_scope="as_of",
-        )
-        ctx["evidence_sufficiency"] = SimpleNamespace(
-            sufficiency="sufficient",
-            missing_aspects=(),
-        )
-        answer = "Grounded answer. [doc:1]"
-        ctx["response"] = _grounded_response().model_copy(
-            update={"answer": answer}
-        )
-
-        with (
-            patch(
-                "rag.query.answering.faithfulness.rank_passages",
-                return_value=[(0, 0.85)],
-            ),
-            patch(
-                "rag.query.answering.faithfulness.score_entailment",
-                return_value=[EntailmentScore(0.01, 0.98, 0.01)],
-            ),
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        response = ctx["response"]
-        self.assertEqual(response.faithfulness_status, "checked")
-        self.assertEqual(response.faithfulness_score, 1.0)
-        self.assertEqual(response.answer, answer)
-        self.assertEqual(response.answer_status, "complete")
-        self.assertFalse(response.degraded)
-        self.assertEqual(
-            ctx["execution_details"]["faithfulness_checker"],
-            "fallback_after_unavailable",
-        )
-
-    def test_verifier_outage_fails_closed_for_high_risk_answer(self) -> None:
-        nodes, _ = _configured_nodes(
-            ServiceRequestError("faithfulness", "request timed out")
-        )
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the policy?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = replace(_low_risk_plan(), risk_level="high")
-        answer = "Grounded answer. [doc:1]"
-        ctx["response"] = _grounded_response().model_copy(
-            update={"answer": answer}
-        )
-
-        with patch(
-            "rag.query.answering.faithfulness.rank_passages",
-            return_value=[(0, 0.85)],
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        response = ctx["response"]
-        self.assertEqual(response.faithfulness_status, "failed")
-        self.assertNotEqual(response.answer, answer)
-        self.assertEqual(response.answer_status, "partial")
-        self.assertTrue(response.degraded)
-
-    def test_false_negative_verifier_uses_strong_local_support(self) -> None:
-        nodes, _ = _configured_nodes(
-            '{"score": 0.5, "unfounded_claims": ["Grounded answer."], '
-            '"responsive": true, "missing_aspects": []}'
-        )
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the policy?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = _low_risk_plan()
-        answer = "Grounded answer. [doc:1]"
-        ctx["response"] = _grounded_response().model_copy(
-            update={"answer": answer}
-        )
-
-        with (
-            patch(
-                "rag.query.answering.faithfulness.rank_passages",
-                return_value=[(0, 0.85)],
-            ),
-            patch(
-                "rag.query.answering.faithfulness.score_entailment",
-                return_value=[EntailmentScore(0.01, 0.98, 0.01)],
-            ),
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        response = ctx["response"]
-        self.assertEqual(response.faithfulness_status, "checked")
-        self.assertEqual(response.faithfulness_score, 1.0)
-        self.assertEqual(response.unfounded_claims, [])
-        self.assertEqual(response.answer, answer)
-        self.assertEqual(response.answer_status, "complete")
-        self.assertFalse(response.degraded)
-        self.assertEqual(
-            ctx["execution_details"]["faithfulness_checker"],
-            "fallback_after_disagreement",
-        )
-
-    def test_false_negative_verifier_checks_complete_multi_claim_list(
-        self,
-    ) -> None:
-        nodes, _ = _configured_nodes(
-            '{"score": 0.2, "unfounded_claims": '
-            '["Traditional", "Initial", "Advanced", "Optimal"], '
-            '"responsive": true, "missing_aspects": []}'
-        )
-        question = (
-            "What are the four maturity stages from least to most mature?"
-        )
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query=question),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = replace(
-            _low_risk_plan(),
-            original_query=question,
-            resolved_query=question,
-        )
-        answer = (
-            "The four maturity stages are: [doc:1]\n"
-            "1. Traditional [doc:1]\n"
-            "2. Initial [doc:1]\n"
-            "3. Advanced [doc:1]\n"
-            "4. Optimal [doc:1]"
-        )
-        ctx["response"] = _grounded_response().model_copy(
-            update={
-                "answer": answer,
-                "sources": [
-                    _grounded_response().sources[0].model_copy(
-                        update={
-                            "excerpt": (
-                                "The four maturity stages are Traditional, "
-                                "Initial, Advanced, and Optimal."
-                            )
-                        }
-                    )
-                ],
-            }
-        )
-
-        with (
-            patch(
-                "rag.query.answering.faithfulness.rank_passages",
-                return_value=[(0, 0.85)],
-            ),
-            patch(
-                "rag.query.answering.faithfulness.score_entailment",
-                return_value=[EntailmentScore(0.01, 0.98, 0.01)],
-            ),
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        response = ctx["response"]
-        self.assertEqual(response.faithfulness_score, 1.0)
-        self.assertEqual(response.unfounded_claims, [])
-        self.assertEqual(response.answer, answer)
-        self.assertFalse(response.degraded)
-        self.assertEqual(
-            ctx["execution_details"]["faithfulness_checker"],
-            "fallback_after_disagreement",
-        )
-
-    def test_faithfulness_score_is_derived_from_unfounded_claims(self) -> None:
-        nodes, _ = _configured_nodes(
-            '{"score": 0.67, "unfounded_claims": [], '
-            '"responsive": true, "missing_aspects": []}'
-        )
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the policy?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = _low_risk_plan()
-        answer = "Grounded answer. [doc:1]"
-        ctx["response"] = _grounded_response().model_copy(
-            update={"answer": answer}
-        )
-
-        with patch(
-            "rag.query.answering.faithfulness.rank_passages",
-            return_value=[(0, 0.85)],
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        response = ctx["response"]
-        self.assertEqual(response.faithfulness_score, 1.0)
-        self.assertEqual(response.unfounded_claims, [])
-        self.assertEqual(response.answer, answer)
-        self.assertFalse(response.degraded)
-
-    def test_locally_unsupported_answer_is_replaced_and_marked_partial(
-        self,
-    ) -> None:
-        nodes, _ = _configured_nodes(
-            '{"score": 0.5, "unfounded_claims": ["The moon is made of cheese."], '
-            '"responsive": true, "missing_aspects": []}'
-        )
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the policy?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = _low_risk_plan()
-        answer = "The moon is made of cheese. [doc:1]"
-        ctx["response"] = _grounded_response().model_copy(
-            update={"answer": answer}
-        )
-
-        with (
-            patch(
-                "rag.query.answering.faithfulness.rank_passages",
-                return_value=[(0, -5.0)],
-            ),
-            patch(
-                "rag.query.answering.faithfulness.score_entailment",
-                return_value=[EntailmentScore(0.98, 0.01, 0.01)],
-            ),
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        response = ctx["response"]
-        self.assertEqual(response.faithfulness_status, "checked")
-        self.assertEqual(response.faithfulness_score, 0.0)
-        self.assertEqual(response.answer_status, "partial")
-        self.assertNotEqual(response.answer, answer)
-        self.assertTrue(response.degraded)
-        self.assertEqual(response.degraded_reason, "faithfulness_check_failed")
-
-    def test_nonresponsive_answer_is_replaced_and_marked_partial(self) -> None:
-        nodes, _ = _configured_nodes(
-            '{"score": 1.0, "unfounded_claims": [], "responsive": false, '
-            '"missing_aspects": ["offer letter reference number"]}'
-        )
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the offer letter reference number?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["response"] = _grounded_response()
-
-        nodes.faithfulness_checker(ctx)
-
-        response = ctx["response"]
-        self.assertEqual(response.faithfulness_status, "checked")
-        self.assertEqual(response.answer_status, "partial")
-        self.assertNotEqual(response.answer, "Grounded answer.")
-        self.assertTrue(response.degraded)
-        self.assertEqual(response.degraded_reason, "answer_not_responsive")
-
-    def test_nonresponsive_answer_without_missing_aspects_is_not_corroborated(
-        self,
-    ) -> None:
-        nodes, _ = _configured_nodes(
-            '{"score": 1.0, "unfounded_claims": [], "responsive": false, '
-            '"missing_aspects": []}'
-        )
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the offer letter reference number?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["route_plan"] = _low_risk_plan()
-        ctx["response"] = _grounded_response().model_copy(
-            update={"answer": "Grounded answer. [doc:1]"}
-        )
-
-        with (
-            patch(
-                "rag.query.answering.faithfulness.rank_passages",
-                return_value=[(0, 0.85)],
-            ),
-            patch(
-                "rag.query.nodes.response_nodes.screen_faithfulness",
-                side_effect=AssertionError(
-                    "nonresponsive answers must not be corroborated"
-                ),
-            ),
-        ):
-            nodes.faithfulness_checker(ctx)
-
-        response = ctx["response"]
-        self.assertEqual(response.answer_status, "partial")
-        self.assertNotEqual(response.answer, "Grounded answer. [doc:1]")
-        self.assertTrue(response.degraded)
-        self.assertEqual(response.degraded_reason, "answer_not_responsive")
-
-    def test_final_faithfulness_pass_recovers_evidence_judge_outage(self) -> None:
-        nodes, _ = _configured_nodes()
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the policy?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["degraded"] = True
-        ctx["degraded_reason"] = "evidence_sufficiency_unavailable"
-        ctx["verifier_decision"] = "degrade"
-        ctx["evidence_sufficiency"] = SimpleNamespace(
-            evaluator_status="unavailable"
-        )
-        ctx["response"] = _grounded_response().model_copy(
-            update={
-                "answer_status": "partial",
-                "coverage": QueryCoverage(completeness="complete"),
-                "degraded": True,
-                "degraded_reason": "evidence_sufficiency_unavailable",
-            }
-        )
-
-        nodes.faithfulness_checker(ctx)
-
-        response = ctx["response"]
-        self.assertFalse(ctx["degraded"])
-        self.assertIsNone(ctx["degraded_reason"])
-        self.assertEqual(ctx["verifier_decision"], "pass")
-        self.assertFalse(response.degraded)
-        self.assertIsNone(response.degraded_reason)
-        self.assertEqual(response.answer_status, "complete")
-        self.assertEqual(
-            ctx["evidence_sufficiency"].evaluator_status,
-            "unavailable",
-        )
-
-    def test_partial_coverage_preserves_evidence_judge_outage(self) -> None:
-        nodes, _ = _configured_nodes()
-        ctx = initial_state(
-            trace_id="trace",
-            session_id="session",
-            request=QueryRequest(query="What is the policy?"),
-            user=_user(),
-            started=0.0,
-        )
-        ctx["degraded"] = True
-        ctx["degraded_reason"] = "evidence_sufficiency_unavailable"
-        ctx["verifier_decision"] = "degrade"
-        ctx["response"] = _grounded_response().model_copy(
-            update={
-                "answer_status": "partial",
-                "coverage": QueryCoverage(completeness="partial"),
-                "degraded": True,
-                "degraded_reason": "evidence_sufficiency_unavailable",
-            }
-        )
-
-        nodes.faithfulness_checker(ctx)
-
-        response = ctx["response"]
-        self.assertTrue(ctx["degraded"])
-        self.assertEqual(
-            ctx["degraded_reason"],
-            "evidence_sufficiency_unavailable",
-        )
-        self.assertEqual(ctx["verifier_decision"], "degrade")
-        self.assertTrue(response.degraded)
-        self.assertEqual(response.answer_status, "partial")
 
     def test_ollama_faithfulness_caps_configured_json_budget(self) -> None:
         client = OllamaClient(

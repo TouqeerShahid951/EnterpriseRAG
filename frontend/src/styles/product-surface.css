@@ -9,7 +9,7 @@
 
 .Prudentia-shell,
 :root.light .Prudentia-shell {
-  background: transparent;
+  background: var(--color-background);
 }
 
 .Prudentia-main,
@@ -20,7 +20,7 @@
 .Prudentia-sidebar,
 :root.light .Prudentia-sidebar,
 :root:not(.light) .Prudentia-sidebar {
-  background: var(--color-surface-container);
+  background: var(--color-themed-sidebar);
   background-image: none;
   box-shadow: none;
   backdrop-filter: none;
@@ -43,9 +43,8 @@
   box-shadow: none;
 }
 
-.sv-action-primary,
-:root.light .sv-action-primary {
-  background: var(--color-primary);
+.sv-action-primary {
+  background: var(--color-primary-action);
   background-image: none;
   box-shadow: none;
 }
@@ -66,7 +65,7 @@
 }
 
 .sv-action-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-primary) 90%, var(--color-on-surface));
+  background: var(--color-primary-action);
   box-shadow: none;
   filter: none;
   transform: none;
@@ -129,6 +128,10 @@
   color: var(--color-on-surface);
 }
 
+.Prudentia-page {
+  background: var(--color-background);
+}
+
 .route-loading-inner {
   display: grid;
   width: min(100%, 68rem);
@@ -137,7 +140,7 @@
 
 @media (max-width: 900px) {
   .Prudentia-mobile-nav-bar {
-    background: var(--color-surface-container);
+    background: var(--color-themed-sidebar);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }

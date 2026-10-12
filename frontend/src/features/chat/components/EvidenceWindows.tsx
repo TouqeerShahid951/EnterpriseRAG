@@ -3,13 +3,15 @@ import { CheckCircle2, ChevronDown, ChevronUp, Search, TextSearch } from "lucide
 
 import type { EvidenceField, EvidenceWindow, HighlightRange, SourceAnchor } from "@/types/api";
 import { isLiveDatabaseSource, isManagedAbbreviationSource } from "@/features/chat/utils/sourceEvidence";
+import { sourceViewerHref } from "@/features/source-viewer/utils/sourceViewer";
 import { HighlightedExcerpt } from "./HighlightedExcerpt";
 
-export function EvidenceWindows({ source }: { source: SourceAnchor }) {
+export function EvidenceWindows({ citationChunkIds, returnSessionId, returnTurnId, source }: { citationChunkIds?: string[]; returnSessionId?: string | null; returnTurnId?: string | null; source: SourceAnchor }) {
   const [expanded, setExpanded] = useState(false);
-  const windows = source.evidence_windows;
+  const windows = source.evidence_windows?.map((window) => source.citation_protocol_version === 1 ? window : { ...window, support_status: "semantic_fallback" as const });
   const isLegacy = windows === undefined && source.attribution_status === undefined;
   const liveDatabase = isLiveDatabaseSource(source) || isManagedAbbreviationSource(source);
+  const sourceHref = liveDatabase ? null : sourceViewerHref(source, { citationChunkIds, sessionId: returnSessionId ?? null, turnId: returnTurnId ?? null });
 
   useEffect(() => {
     setExpanded(false);
@@ -39,6 +41,7 @@ export function EvidenceWindows({ source }: { source: SourceAnchor }) {
 
   return (
     <section className="rag-evidence-attribution" aria-label="Claim evidence">
+      <p className="rag-evidence-source-kind">{source.provenance_kind === "ocr" ? "Quotes match extracted OCR text; compare with the original page." : source.provenance_kind === "structured" ? "Evidence from a structured record." : source.provenance_kind === "native" ? "Native document text. Verified passages have an exact text match and an automated support check." : source.provenance_kind === "generated" ? "Generated visual description; this is not original document text." : "Extraction provenance is unavailable."}</p>
       {hasFocusedWindows ? (
         <div className="rag-evidence-window-list">
           {windows?.map((window) => (
@@ -53,12 +56,27 @@ export function EvidenceWindows({ source }: { source: SourceAnchor }) {
         <RetrievedContext source={source} expanded={expanded} liveDatabase={liveDatabase} />
       )}
 
-      {expanded && hasFocusedWindows ? (
-        <div className="rag-evidence-context" aria-label={liveDatabase ? "Query context" : "Surrounding source context"}>
+      {expanded && hasFocusedWindows ? sourceHref ? (
+        <a
+          aria-label="Open full retrieved chunk in document preview"
+          className="rag-evidence-context rag-evidence-context-link"
+          href={sourceHref}
+          rel="noreferrer"
+          target="_blank"
+        >
           <div className="rag-evidence-section-heading">
-            <span>{liveDatabase ? "Query context" : "Surrounding source context"}</span>
+            <span>{liveDatabase ? "Query context" : "Full retrieved chunk"}</span>
           </div>
           <div className={`rag-evidence-excerpt ${liveDatabase ? "is-query-context" : ""}`}>
+            <HighlightedExcerpt excerpt={source.excerpt} ranges={verifiedQuoteRanges} />
+          </div>
+        </a>
+      ) : (
+        <div className="rag-evidence-context" aria-label="Query context">
+          <div className="rag-evidence-section-heading">
+            <span>Query context</span>
+          </div>
+          <div className="rag-evidence-excerpt is-query-context">
             <HighlightedExcerpt excerpt={source.excerpt} ranges={verifiedQuoteRanges} />
           </div>
         </div>
@@ -72,7 +90,13 @@ export function EvidenceWindows({ source }: { source: SourceAnchor }) {
           onClick={() => setExpanded((value) => !value)}
         >
           {expanded ? <ChevronUp aria-hidden="true" size={15} /> : <ChevronDown aria-hidden="true" size={15} />}
-          {expanded ? "Show focused evidence" : liveDatabase ? "Show query context" : "Show surrounding context"}
+          {expanded
+            ? liveDatabase
+              ? "Hide query context"
+              : "Hide full retrieved chunk"
+            : liveDatabase
+              ? "Show query context"
+              : "Show full retrieved chunk"}
         </button>
       ) : null}
     </section>
@@ -82,13 +106,13 @@ export function EvidenceWindows({ source }: { source: SourceAnchor }) {
 function EvidenceWindowView({ liveDatabase, window }: { liveDatabase: boolean; window: EvidenceWindow }) {
   const verified = window.support_status === "verified";
   const StatusIcon = verified ? CheckCircle2 : Search;
-  const statusLabel = liveDatabase
+  const statusLabel = window.support_status === "source_matched" ? "Source text matched; claim support not checked" : liveDatabase
     ? verified
       ? "Claim supported by returned row"
       : "Relevant returned row, not verified"
     : verified
       ? "Verified supporting passage"
-      : "Likely relevant passage, not verified";
+      : "Candidate passage from retrieved chunk — not verified";
   return (
     <article className={`rag-evidence-window ${verified ? "is-verified" : "is-fallback"}`}>
       <div className="rag-evidence-window-status">
@@ -98,7 +122,7 @@ function EvidenceWindowView({ liveDatabase, window }: { liveDatabase: boolean; w
         </span>
       </div>
       <div className="rag-evidence-claim">
-        <span>Supports claim</span>
+        <span>{verified ? "Supports claim" : "Related answer claim"}</span>
         <p>{window.claim}</p>
       </div>
       {window.kind === "table_row" && window.fields.length > 0 ? (
@@ -106,7 +130,7 @@ function EvidenceWindowView({ liveDatabase, window }: { liveDatabase: boolean; w
       ) : (
         <p className="rag-evidence-excerpt">
           {window.truncated_start ? <span aria-hidden="true">... </span> : null}
-          <HighlightedExcerpt excerpt={window.passage} ranges={verified ? window.highlight_ranges : []} />
+          <HighlightedExcerpt excerpt={window.passage} ranges={verified || window.support_status === "source_matched" ? window.highlight_ranges : []} />
           {window.truncated_end ? <span aria-hidden="true"> ...</span> : null}
         </p>
       )}
@@ -131,7 +155,7 @@ function EvidenceTable({
           <div key={`${field.label}-${field.value}`}>
             <dt>{field.label}</dt>
             <dd>
-              {verified && field.supports_claim ? <mark>{field.value}</mark> : field.value}
+              {verified && field.supports_claim ? <mark className="rag-evidence-highlight">{field.value}</mark> : field.value}
             </dd>
           </div>
         ))}
@@ -179,7 +203,7 @@ function verifiedRanges(windows: EvidenceWindow[]): HighlightRange[] {
   return windows
     .filter(
       (window) =>
-        window.support_status === "verified"
+        (window.support_status === "verified" || window.support_status === "source_matched")
         && window.quote_start !== null
         && window.quote_end !== null,
     )

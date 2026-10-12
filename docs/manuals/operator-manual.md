@@ -1,6 +1,6 @@
 # Prudentia AI Operator Manual
 
-Last updated: 2026-07-02
+Last updated: 2026-09-09
 
 This manual explains how to run the local Prudentia AI deployment. It is written
 for the person responsible for Docker Desktop, Ollama, model caches, startup,
@@ -31,6 +31,34 @@ The API is reached through the frontend reverse proxy:
 ```text
 http://localhost:3000/api/v1
 ```
+
+### Citation protocol rollout
+
+Normal chat uses single-pass generation and local quote matching. Adaptive and
+Never faithfulness policies make no citation judge or answer-repair calls.
+Strict (Always), forced internal verification, and artifact verification retain
+model-based support checks with the configured deadline and bounded repair.
+
+Distinguish `source_matched` from semantic `verified` in logs and evaluations.
+An `unverified` local result preserves the answer with incomplete-match labeling;
+source-access and revision failures still block delivery. Measure time to first
+text and total generation separately from optional semantic verification.
+Provider connection failures can still prevent generation in either mode.
+
+Previously indexed documents may lack original-text provenance. Reingest selected
+documents explicitly to populate native/OCR/generated span classifications and
+revision identity; this upgrade does not automatically reingest the corpus.
+Missing caches still fail under the airgap policy. Do not download models during
+a query to make verification succeed.
+
+`source_revision_unavailable` means the cited generation, file or evidence no
+longer matches, or the evidence is no longer accessible. Investigate the source's
+lifecycle and ingestion state without substituting a newer file into an old
+citation. Historic file retention is unchanged. An
+`artifact_citation_verification_failed` job has exhausted its single citation
+repair and ends without publishing unsupported files; queue redelivery does not
+repeat that repair. A user can explicitly retry after the underlying issue is
+resolved.
 
 ## 2. Prerequisites
 
@@ -171,8 +199,9 @@ Use these checks after startup:
 ```powershell
 docker compose --env-file .env.windows-airgap ps
 Invoke-RestMethod http://localhost:3000/healthz
+$ApiHealth = "http://127.0.0.1:8000/health/live"
 docker compose --env-file .env.windows-airgap exec api `
-  python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=8)"
+  python -c "import urllib.request as u;print(u.urlopen('$ApiHealth').status)"
 docker compose --env-file .env.windows-airgap logs --tail 100 api
 docker compose --env-file .env.windows-airgap logs --tail 100 ingestion-worker
 ```
@@ -181,7 +210,7 @@ Check container-to-host Ollama connectivity:
 
 ```powershell
 docker compose --env-file .env.windows-airgap exec api `
-  python -c "import urllib.request; print(urllib.request.urlopen('http://host.docker.internal:11434/api/tags', timeout=5).read().decode()[:1000])"
+  python -c "import socket;socket.create_connection(('host.docker.internal',11434),5)"
 ```
 
 ## 10. Stop And Restart
@@ -344,10 +373,13 @@ pointing at unavailable endpoints.
 | Chat fails | `RAG_MODEL_PROVIDER`, Ollama URL, model names, Ollama reachability | Verify Ollama host service and container-to-host API tags request. |
 | Upload fails immediately | ClamAV, file type, file size, MinIO | Check ClamAV status, upload limits, and API logs. |
 | PDF ingestion fails offline | Docling or OCR cache missing | Run Docling verify-only command from ingestion worker. |
+| PPTX ingestion reports renderer missing | LibreOffice Impress is absent from the document-pipeline image | Rebuild the ingestion-worker image and verify `soffice --version` inside it. |
+| PPTX visual analysis fails | Slide render, vision endpoint, or model unavailable | Check ingestion-worker logs, LibreOffice, and the configured vision model endpoint. |
 | Reranking fails | FastEmbed cache missing | Run FastEmbed verify-only command from API container. |
 | Jobs stay queued | Ingestion worker not healthy or Redis unavailable | Check `ingestion-worker` logs and Redis health. |
 | GraphRAG unavailable | `graphrag-worker` or Neo4j unhealthy | Check `graphrag-worker`, `neo4j`, and Ingestion Health. |
-| Live DB query fails | Connector target unreachable or catalog mismatch | Verify network route, credentials, approved catalog, and timeout. |
+| Live DB asks for a database | Routing metadata is missing or multiple catalogs match | Review each approved catalog's description, entities, metrics, examples, and exclusions. |
+| Live DB query fails | Connector target unreachable, generated SQL rejected, or catalog mismatch | Check source-routing and `sql_generation`, `sql_validation`, and `sql_execution` timings; verify network route, credentials, approved catalog, and timeout. |
 
 Docling cache verification:
 

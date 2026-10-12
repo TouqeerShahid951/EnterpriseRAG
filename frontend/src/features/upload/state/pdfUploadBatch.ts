@@ -23,7 +23,7 @@ export function validateDocumentFiles(files: File[]): DocumentFileValidation {
 
   for (const file of files) {
     if (!isSupportedDocumentFile(file)) {
-      rejectedMessages.push(`${file.name} is not a PDF, DOCX, JPG, PNG, or JSON file.`);
+      rejectedMessages.push(`${file.name} is not a PDF, DOCX, PPTX, CSV, XLSX, JPG, PNG, or JSON file.`);
       continue;
     }
     if (file.size === 0) {
@@ -44,8 +44,8 @@ export function validateGlossaryPdfFiles(files: File[]): DocumentFileValidation 
   const validation = validateDocumentFiles(files);
   const accepted: File[] = [];
   for (const file of validation.accepted) {
-    if (isPdfFile(file)) accepted.push(file);
-    else validation.rejectedMessages.push(`${file.name} is not a PDF.`);
+    if (isPdfFile(file) || isXlsxFile(file)) accepted.push(file);
+    else validation.rejectedMessages.push(`${file.name} is not a PDF or XLSX file.`);
   }
   return { accepted, rejectedMessages: validation.rejectedMessages };
 }
@@ -70,6 +70,7 @@ export function toUploadRequests(draft: PdfUploadDraft, docType?: string | null)
     description: draft.description.trim() || null,
     ...(docType ? { doc_type: docType } : {}),
     supersedes,
+    analyze_slide_visuals: draft.analyzeSlideVisuals,
   }));
 }
 
@@ -82,6 +83,10 @@ export function formatFileSize(bytes: number): string {
 
 function isPdfFile(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+function isXlsxFile(file: File): boolean {
+  return file.type === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" || file.name.toLowerCase().endsWith(".xlsx");
 }
 
 function fileKey(file: File): string {

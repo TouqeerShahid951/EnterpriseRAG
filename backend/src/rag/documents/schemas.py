@@ -8,6 +8,10 @@ from rag.shared.contracts.http import ContractModel
 from rag.documents.upload.schemas import DocType, UploadJobState
 
 
+class DocumentSlidesResponse(ContractModel):
+    slides: list[int]
+
+
 class DocumentEntity(ContractModel):
     text: str
     type: str
@@ -82,6 +86,11 @@ class DocumentOverviewAttentionItem(ContractModel):
     title: str
     group_path: str
     ingest_status: UploadJobState | Literal["unknown"]
+    latest_job_id: str | None = None
+    latest_job_status: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    updated_at: datetime | None = None
 
 
 class DocumentOverviewSpace(ContractModel):
@@ -95,6 +104,7 @@ class DocumentOverviewSpace(ContractModel):
 
 
 class DocumentOverviewResponse(ContractModel):
+    cancelled_current: int = Field(0, ge=0)
     library_documents: int = Field(..., ge=0)
     current_versions: int = Field(..., ge=0)
     indexed_current: int = Field(..., ge=0)

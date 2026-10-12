@@ -10,3 +10,6 @@
 @import "./styles/product-surface.css";
 @import "./styles/adaptive-desktop.css";
 @import "./styles/interface-polish.css";
+@import "./styles/overview-dashboard.css";
+@import "./styles/document-dashboard.css";
+@import "./styles/analytics-dashboard.css";

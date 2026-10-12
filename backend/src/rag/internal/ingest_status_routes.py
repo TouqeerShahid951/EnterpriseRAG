@@ -49,7 +49,12 @@ async def get_ingest_job_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "job_not_found", "message": "Ingestion job was not found."},
         )
-    return InternalJobStatusResponse(job_id=job.id, doc_id=job.doc_id, status=job.status)  # type: ignore[arg-type]
+    return InternalJobStatusResponse(
+        job_id=job.id,
+        doc_id=job.doc_id,
+        status=job.status,  # type: ignore[arg-type]
+        retry_of_job_id=job.retry_of_job_id,
+    )
 
 
 @router.post(

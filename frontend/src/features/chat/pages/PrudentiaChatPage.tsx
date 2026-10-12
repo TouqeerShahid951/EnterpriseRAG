@@ -11,14 +11,16 @@ import {
   chatStreamPositionKey,
   documentsInActiveSpace,
   isNearChatBottom,
-  selectedSourceNumber,
+  restoredChatTurnKey,
 } from "@/features/chat/utils/chatPageUtils";
+import { sourcesForTurn } from "@/features/chat/utils/sourceGroups";
 import { ChatTurns } from "@/features/chat/components/ChatTurns";
 import { ChatComposer } from "@/features/chat/components/ChatComposer";
 
 const CHAT_HISTORY_COLLAPSED_STORAGE_KEY = "Prudentia-chat-history-collapsed";
 
 export function PrudentiaChatPage(props: Props) {
+  const returnTurnId = new URLSearchParams(location.search).get("turnId");
   const activeSpaceDocuments = useMemo(
     () => documentsInActiveSpace(props.documents, props.activeSpacePath),
     [props.activeSpacePath, props.documents],
@@ -29,15 +31,22 @@ export function PrudentiaChatPage(props: Props) {
   );
   const hasCorpus = activeCurrentDocuments.length > 0;
   const source = props.selectedSource ? withSourceDocumentTitle(props.selectedSource, props.documents) : null;
-  const sourceCount = props.latestResponse?.sources.length ?? 0;
-  const sourceNumber = selectedSourceNumber(props.latestResponse?.sources ?? [], props.selectedSource);
+  const selectedTurnSources = useMemo(
+    () => sourcesForTurn(props.chatTurns.find((turn) => turn.id === props.selectedSourceTurnId)),
+    [props.chatTurns, props.selectedSourceTurnId],
+  );
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const shouldFollowStreamRef = useRef(true);
   const streamIdentityRef = useRef<string | null>(null);
+  const restoredTurnRef = useRef<string | null>(null);
   const mobileHistoryRef = useRef<HTMLDivElement | null>(null);
   const mobileEvidenceRef = useRef<HTMLElement | null>(null);
   const streamPositionKey = useMemo(() => chatStreamPositionKey(props.chatTurns), [props.chatTurns]);
+  const restoredTurnKey = useMemo(
+    () => restoredChatTurnKey(props.activeSessionId, returnTurnId, props.chatTurns),
+    [props.activeSessionId, props.chatTurns, returnTurnId],
+  );
   const lastTurnId = props.chatTurns.at(-1)?.id ?? "empty";
   const streamIdentity = `${props.activeSessionId ?? "new"}:${lastTurnId}`;
   const [historyCollapsed, setHistoryCollapsed] = useState(() => readStoredBoolean(CHAT_HISTORY_COLLAPSED_STORAGE_KEY, false));
@@ -63,11 +72,22 @@ export function PrudentiaChatPage(props: Props) {
       const scrollNode = scrollRef.current;
       const evidenceNode = mobileEvidenceRef.current;
       if (!scrollNode || !evidenceNode) return;
+      if (window.matchMedia("(max-width: 980px)").matches) {
+        evidenceNode.scrollIntoView({ block: "start", behavior: "auto" });
+        return;
+      }
       const top = evidenceNode.getBoundingClientRect().top - scrollNode.getBoundingClientRect().top + scrollNode.scrollTop;
       scrollNode.scrollTo({ top, behavior: "auto" });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [source?.chunk_id, source?.doc_id]);
+
+  useEffect(() => {
+    if (!restoredTurnKey || !returnTurnId || restoredTurnRef.current === restoredTurnKey) return;
+    restoredTurnRef.current = restoredTurnKey;
+    const frame = window.requestAnimationFrame(() => document.getElementById(`chat-turn-${returnTurnId}`)?.scrollIntoView({ block: "center" }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [restoredTurnKey, returnTurnId]);
 
   useEffect(() => () => {
     if (scrollFrameRef.current !== null) {
@@ -103,6 +123,10 @@ export function PrudentiaChatPage(props: Props) {
     shouldFollowStreamRef.current = isNearChatBottom(scrollNode);
   }
 
+  function focusComposer() {
+    window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".rag-composer-input")?.focus());
+  }
+
   function handleMobileHistoryKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -133,6 +157,19 @@ export function PrudentiaChatPage(props: Props) {
     historyCollapsed ? "rag-chat-body-history-collapsed" : "",
   ].filter(Boolean).join(" ");
 
+  function loadChatSession(sessionId: string) {
+    props.onNavigate("chat", { replace: true });
+    props.loadChatSession(sessionId);
+  }
+
+  function resetChat() {
+    props.onNavigate("chat", { replace: true });
+    props.onReset();
+  }
+
+  const isEmpty = props.chatTurns.length === 0;
+  const composer = <ChatComposer activeDocuments={activeSpaceDocuments} emptyState={isEmpty} hasCorpus={hasCorpus} {...props} />;
+
   return (
     <PrudentiaWorkspace activeRoute="chat" onLogout={props.onLogout} onNavigate={props.onNavigate} user={props.user}>
       <main className="rag-chat-page" id="main-content">
@@ -144,9 +181,9 @@ export function PrudentiaChatPage(props: Props) {
             generatingSessionId={props.generatingSessionId}
             onCollapsedChange={setHistoryCollapsed}
             onDeleteSession={props.deleteChatSession}
-            onLoadSession={props.loadChatSession}
+            onLoadSession={loadChatSession}
             onLoadMoreSessions={props.loadMoreSavedSessions}
-            onReset={props.onReset}
+            onReset={resetChat}
             loading={props.savedSessionsLoading}
             loadingSessionId={props.loadingSessionId}
             errorMessage={props.savedSessionsError}
@@ -158,27 +195,29 @@ export function PrudentiaChatPage(props: Props) {
           />
           <section className="rag-chat-thread" aria-label="Document chat">
             <div className="rag-chat-scroll" onScroll={handleChatScroll} ref={scrollRef}>
-              <div className={props.chatTurns.length === 0 ? "rag-chat-inner rag-chat-inner-empty" : "rag-chat-inner"}>
-                {props.chatTurns.length === 0 ? (
-                  <ChatEmptyState hasCorpus={hasCorpus} />
+              <div className={isEmpty ? "rag-chat-inner rag-chat-inner-empty" : "rag-chat-inner"}>
+                {isEmpty ? (
+                  <ChatEmptyState composer={composer} hasCorpus={hasCorpus} onFocusComposer={focusComposer} onNavigate={props.onNavigate} user={props.user} />
                 ) : (
                   <ChatTurns
                     chatTurns={props.chatTurns}
                     documents={props.documents}
                     onCancelArtifactJob={props.onCancelArtifactJob}
                     onClarifyArtifactJob={props.onClarifyArtifactJob}
+                    onChooseQuerySource={props.onChooseQuerySource}
                     onExpandSourceSearch={props.onExpandSourceSearch}
+                    onReplyToTurn={props.onReplyToTurn}
                     onRetryArtifactJob={props.onRetryArtifactJob}
                     onSelectSource={props.onSelectSource}
                     selectedSource={props.selectedSource}
                   />
                 )}
-                {source ? <MobileEvidencePanel panelRef={mobileEvidenceRef} onClose={() => props.onSelectSource(null)} source={source} sourceCount={sourceCount} sourceNumber={sourceNumber} /> : null}
+                {source ? <MobileEvidencePanel panelRef={mobileEvidenceRef} onClose={() => props.onSelectSource(null)} returnSessionId={props.activeSessionId} returnTurnId={props.selectedSourceTurnId} source={source} sources={selectedTurnSources} /> : null}
               </div>
             </div>
-            <ChatComposer activeDocuments={activeSpaceDocuments} hasCorpus={hasCorpus} {...props} />
+            {isEmpty ? null : composer}
           </section>
-          {source ? <EvidenceInspector onClose={() => props.onSelectSource(null)} source={source} sourceCount={sourceCount} sourceNumber={sourceNumber} /> : null}
+          {source ? <EvidenceInspector onClose={() => props.onSelectSource(null)} returnSessionId={props.activeSessionId} returnTurnId={props.selectedSourceTurnId} source={source} sources={selectedTurnSources} /> : null}
         </div>
         {mobileHistoryOpen ? (
           <div className="rag-mobile-history-layer">
@@ -198,12 +237,12 @@ export function PrudentiaChatPage(props: Props) {
                 onCollapsedChange={closeMobileHistory}
                 onDeleteSession={props.deleteChatSession}
                 onLoadSession={(sessionId) => {
-                  props.loadChatSession(sessionId);
+                  loadChatSession(sessionId);
                   closeMobileHistory();
                 }}
                 onLoadMoreSessions={props.loadMoreSavedSessions}
                 onReset={() => {
-                  props.onReset();
+                  resetChat();
                   closeMobileHistory();
                 }}
                 loading={props.savedSessionsLoading}

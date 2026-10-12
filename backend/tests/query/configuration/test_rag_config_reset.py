@@ -25,6 +25,7 @@ def test_saved_workspace_config_takes_precedence_over_environment_until_deleted(
         rag_model_provider="ollama",
         ollama_base_url="http://environment:11434",
         ollama_chat_model="environment-chat",
+        rag_context_resolver_enabled=True,
         rag_reasoning_timeout_seconds=41,
         rag_faithfulness_timeout_seconds=39,
     )
@@ -38,6 +39,7 @@ def test_saved_workspace_config_takes_precedence_over_environment_until_deleted(
     assert saved.sql_generation_model == "workspace-sql"
     assert saved.evidence_gate_policy == "never"
     assert saved.faithfulness_policy == "never"
+    assert saved.context_resolver_enabled is False
     assert saved.reasoning_timeout_seconds == 31
     assert saved.faithfulness_timeout_seconds == 29
 
@@ -50,6 +52,7 @@ def test_saved_workspace_config_takes_precedence_over_environment_until_deleted(
     assert fallback.base_url == "http://environment:11434"
     assert fallback.evidence_gate_policy == "adaptive"
     assert fallback.faithfulness_policy == "adaptive"
+    assert fallback.context_resolver_enabled is True
     assert fallback.reasoning_timeout_seconds == 41
     assert fallback.faithfulness_timeout_seconds == 39
 
@@ -176,10 +179,15 @@ def test_postgres_save_persists_ai_gate_policies(monkeypatch) -> None:
     query, params = calls[0]
     assert "evidence_gate_policy" in query
     assert "faithfulness_policy" in query
+    assert "context_resolver_enabled" in query
     assert "routing_timeout_seconds" in query
     assert "reasoning_timeout_seconds" in query
     assert "faithfulness_timeout_seconds" in query
     assert "sql_generation_model" in query
+    columns = query.split("INSERT INTO workspace_rag_config (")[1].split(")")[0]
+    values = dict(zip((name.strip() for name in columns.split(",")), params, strict=True))
+    assert values["answer_output_tokens"] == 4096
+    assert values["answer_context_tokens"] == 16384
     assert query.count("%s") == len(params)
     assert 7 in params
     assert "never" in params
@@ -232,6 +240,7 @@ def _workspace_record() -> RagConfigRecord:
         embed_model="workspace-embed",
         sql_generation_model="workspace-sql",
         faithfulness_model=None,
+        context_resolver_enabled=False,
         evidence_gate_policy="never",
         faithfulness_policy="never",
         chat_timeout_seconds=30,

@@ -1,35 +1,73 @@
-import { type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
-import { jsonDocumentText, jsonHighlightRange } from "@/features/source-viewer/utils/sourceViewer";
+import { jsonDocumentText, jsonPointerRange, sourceTextMatchRanges, type SourceTextRange } from "@/features/source-viewer/utils/sourceViewer";
 import { FallbackNotice } from "@/features/documents/components/source-viewer/DocumentRegionViewerPrimitives";
-import type { DocumentRegion } from "@/features/documents/components/DocumentRegionViewer";
-import { sourceTextCandidates } from "@/features/documents/utils/documentRegionViewerUtils";
+import { SourceViewerSearch } from "@/features/documents/components/source-viewer/SourceViewerSearch";
+import type { CitationTarget } from "@/types/query";
 
 export function JsonRegionDocument({
   buffer,
   fallbackMessage,
-  regions,
-  textCandidates,
+  targets,
   toolbarEnd,
 }: {
   buffer: ArrayBuffer;
   fallbackMessage: string;
-  regions: DocumentRegion[];
-  textCandidates?: string[];
+  targets: Array<Extract<CitationTarget, { kind: "json" }>>;
   toolbarEnd?: ReactNode;
 }) {
   const { prettyText, rawText } = jsonDocumentText(buffer);
-  const candidates = sourceTextCandidates(regions, textCandidates);
-  const prettyHighlight = jsonHighlightRange(prettyText, candidates);
-  const rawHighlight = prettyHighlight ? null : jsonHighlightRange(rawText, candidates);
-  const highlight = prettyHighlight ?? rawHighlight;
-  const displayText = rawHighlight ? rawText : prettyText || rawText;
+  const displayText = prettyText || rawText;
+  const highlight = targets.map((target) => jsonPointerRange(displayText, target.pointer)).find(Boolean) ?? null;
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchRanges, setSearchRanges] = useState<SourceTextRange[]>([]);
+  const [searchIndex, setSearchIndex] = useState(-1);
+  const [searchStatus, setSearchStatus] = useState<string | undefined>();
   const lines = jsonLines(displayText);
+
+  function resetSearch() {
+    setSearchRanges([]);
+    setSearchIndex(-1);
+    setSearchStatus(undefined);
+  }
+
+  function runSearch() {
+    const query = searchQuery.trim();
+    if (!query) {
+      resetSearch();
+      return;
+    }
+    const ranges = sourceTextMatchRanges(displayText, query);
+    setSearchRanges(ranges);
+    setSearchIndex(ranges.length ? 0 : -1);
+    setSearchStatus(ranges.length ? undefined : "No matches");
+  }
+
+  function goToSearchResult(direction: -1 | 1) {
+    if (!searchRanges.length) return;
+    setSearchIndex((currentIndex) => (currentIndex + direction + searchRanges.length) % searchRanges.length);
+  }
+
+  useEffect(() => {
+    if (searchIndex < 0) return;
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(".source-viewer-json-search-highlight.is-active")?.scrollIntoView({ block: "center" }));
+  }, [searchIndex, searchRanges]);
+
+  const activeSearchRange = searchRanges[searchIndex] ?? null;
   return (
     <div className="source-viewer-document">
       <div className="source-viewer-toolbar">
         <div className="source-viewer-toolbar-main">
           <div className="source-viewer-file-label">JSON source</div>
+          <SourceViewerSearch
+            onNext={() => goToSearchResult(1)}
+            onPrevious={() => goToSearchResult(-1)}
+            onQueryChange={(query) => { setSearchQuery(query); resetSearch(); }}
+            onSearch={runSearch}
+            query={searchQuery}
+            resultLabel={searchRanges.length ? `${searchIndex + 1} of ${searchRanges.length}` : undefined}
+            status={searchStatus}
+          />
         </div>
         <div className="source-viewer-toolbar-end">{toolbarEnd}</div>
       </div>
@@ -42,7 +80,7 @@ export function JsonRegionDocument({
               <span className="source-viewer-json-line" key={line.number}>
                 <span className="source-viewer-json-line-number" aria-hidden="true">{line.number}</span>
                 <span className="source-viewer-json-line-content">
-                  {renderJsonLine(line, highlight)}
+                  {renderJsonLine(line, highlight, searchRanges, activeSearchRange)}
                 </span>
               </span>
             ))}
@@ -67,19 +105,34 @@ function jsonLines(text: string): Array<{ end: number; number: number; start: nu
 function renderJsonLine(
   line: { end: number; start: number; text: string },
   highlight: { start: number; end: number } | null,
+  searchRanges: SourceTextRange[],
+  activeSearchRange: SourceTextRange | null,
 ) {
-  if (!highlight || highlight.end <= line.start || highlight.start >= line.end) {
+  const ranges = [
+    ...(highlight && highlight.end > line.start && highlight.start < line.end ? [highlight] : []),
+    ...searchRanges.filter((range) => range.end > line.start && range.start < line.end),
+  ];
+  if (!ranges.length) {
     return <>{renderJsonSyntax(line.text || " ", "plain")}</>;
   }
-  const highlightStart = Math.max(0, highlight.start - line.start);
-  const highlightEnd = Math.min(line.text.length, highlight.end - line.start);
-  return (
-    <>
-      {renderJsonSyntax(line.text.slice(0, highlightStart), "before")}
-      <mark className="source-viewer-json-highlight">{renderJsonSyntax(line.text.slice(highlightStart, highlightEnd), "highlight")}</mark>
-      {renderJsonSyntax(line.text.slice(highlightEnd) || " ", "after")}
-    </>
-  );
+  const boundaries = new Set([line.start, line.end]);
+  for (const range of ranges) {
+    boundaries.add(Math.max(line.start, range.start));
+    boundaries.add(Math.min(line.end, range.end));
+  }
+  const offsets = [...boundaries].sort((left, right) => left - right);
+  return offsets.slice(0, -1).map((start, index) => {
+    const end = offsets[index + 1];
+    const content = renderJsonSyntax(line.text.slice(start - line.start, end - line.start), `segment-${start}`);
+    const citation = highlight && highlight.start <= start && highlight.end >= end;
+    const search = ranges.some((range) => searchRanges.includes(range) && range.start <= start && range.end >= end);
+    const active = activeSearchRange && searchRanges.includes(activeSearchRange)
+      && activeSearchRange.start <= start && activeSearchRange.end >= end;
+    let rendered: ReactNode = content;
+    if (citation) rendered = <mark className="source-viewer-json-highlight">{rendered}</mark>;
+    if (search) rendered = <mark className={active ? "source-viewer-json-search-highlight is-active" : "source-viewer-json-search-highlight"}>{rendered}</mark>;
+    return <span key={`${start}-${end}`}>{rendered}</span>;
+  });
 }
 
 function renderJsonSyntax(text: string, keyPrefix: string) {

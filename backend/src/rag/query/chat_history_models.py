@@ -54,6 +54,7 @@ class ChatHistoryRepository(Protocol):
         assistant_turn: dict[str, Any],
         client_request_id: str | None = None,
         request_fingerprint: str | None = None,
+        continue_source_clarification: bool = False,
     ) -> ChatSessionRecord: ...
     def update_assistant_response(
         self,
@@ -96,13 +97,15 @@ def context_turns_from_payloads(
             exchange: dict[str, object] = {
                 "query": query.strip(),
                 "answer": answer,
+                "answer_status": response.get("answer_status"),
                 "intent": response.get("intent"),
                 "sources": sources if isinstance(sources, list) else [],
                 "source_mode": response.get("source_mode"),
                 "source_decision_reason": response.get("source_decision_reason"),
                 "group_path": payload.get("groupPath"),
                 "document_ids": payload.get("documentIds") or [],
-                "query_source_id": payload.get("querySourceId"),
+                "query_source_id": payload.get("querySourceId") or response.get("query_source_id"),
+                "query_source_ids": payload.get("querySourceIds") or [],
                 "faithfulness_score": response.get("faithfulness_score"),
                 "faithfulness_status": response.get("faithfulness_status"),
                 "degraded": response.get("degraded"),
@@ -110,6 +113,26 @@ def context_turns_from_payloads(
             turn_id = pending_user.get("id")
             if isinstance(turn_id, str) and turn_id.strip():
                 exchange["turn_id"] = turn_id.strip()
+            assistant_turn_id = payload.get("id")
+            if isinstance(assistant_turn_id, str) and assistant_turn_id.strip():
+                exchange["assistant_turn_id"] = assistant_turn_id.strip()
             exchanges.append(exchange)
         pending_user = None
     return exchanges[-limit:]
+
+
+def context_turn_for_message_id(
+    payloads: tuple[dict[str, Any], ...] | list[dict[str, Any]],
+    message_id: str,
+) -> dict[str, object] | None:
+    """Return the complete exchange containing one persisted user or assistant message."""
+
+    for index, payload in enumerate(payloads):
+        if payload.get("id") != message_id:
+            continue
+        start = index if payload.get("role") == "user" else index - 1
+        if start < 0:
+            return None
+        turns = context_turns_from_payloads(list(payloads[start : start + 2]), limit=1)
+        return turns[0] if turns else None
+    return None

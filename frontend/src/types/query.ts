@@ -30,11 +30,14 @@ export interface QueryRequest {
   query: string;
   session_id: string | null;
   client_request_id?: string | null;
+  reply_to_turn_id?: string | null;
   group_path?: string | null;
   document_ids?: string[];
   source_mode?: QuerySourceMode;
   query_source_id?: string | null;
+  query_source_ids?: string[];
   allow_source_expansion?: boolean;
+  continue_source_clarification?: boolean;
 }
 
 export interface QuerySource {
@@ -48,6 +51,17 @@ export interface QuerySource {
   clearance_level: ClearanceLevel;
 }
 
+export interface QuerySourceClarificationOption {
+  source_id: string;
+  name: string;
+  description: string | null;
+}
+
+export interface QuerySourceClarification {
+  question: string;
+  options: QuerySourceClarificationOption[];
+}
+
 interface SourceExpansion {
   available: boolean;
   reason: string;
@@ -59,16 +73,35 @@ export interface HighlightRange {
   end: number;
 }
 
-interface SourceRegion {
-  page: number | null;
-  bbox: [number, number, number, number] | null;
-  text: string;
-  region_type: string;
+interface VisualCitationTarget {
+  exact_text: string;
   confidence: number | null;
   image_asset_id?: string | null;
   image_source_kind?: string | null;
   extraction_method?: string | null;
 }
+
+export type CitationTarget =
+  | {
+      kind: "text";
+      exact_text: string;
+      prefix: string;
+      suffix: string;
+      occurrence: number;
+    }
+  | (VisualCitationTarget & { kind: "page" | "slide"; page: number; region_type: string; bbox: [number, number, number, number] })
+  | (VisualCitationTarget & { kind: "image"; bbox: [number, number, number, number] | null })
+  | {
+      kind: "spreadsheet";
+      sheet_name: string;
+      start_row: number;
+      end_row: number;
+      start_column: number;
+      end_column: number;
+      exact_text: string;
+    }
+  | { kind: "json"; pointer: string; exact_text: string }
+  | { kind: "record"; record_id: string; fields: string[]; exact_text: string };
 
 export interface EvidenceField {
   label: string;
@@ -82,7 +115,7 @@ export interface EvidenceWindow {
   kind: "text" | "table_row";
   passage: string;
   highlight_ranges: HighlightRange[];
-  support_status: "verified" | "semantic_fallback";
+  support_status: "verified" | "source_matched" | "semantic_fallback";
   support_score: number;
   source_start: number;
   source_end: number;
@@ -94,7 +127,29 @@ export interface EvidenceWindow {
   fields: EvidenceField[];
 }
 
-export interface SourceAnchor {
+export interface SourceRevision {
+  index_generation_id?: string | null;
+  content_hash?: string | null;
+  evidence_hash?: string | null;
+}
+
+interface CitationVerification {
+  version: 1;
+  offset_unit: "unicode_code_point";
+  answer_sha256: string;
+  status: "verified" | "source_matched" | "unverified" | "abstained" | "unavailable" | "not_applicable";
+  repair_count: number;
+  claims: {
+    claim_id: string; answer_start: number; answer_end: number; text: string;
+    source_labels: string[]; verdict: "supported" | "unsupported" | "unknown";
+    reason: string | null;
+    quotes: { source_label: string; text: string; source_start: number; source_end: number }[];
+  }[];
+}
+
+export interface SourceAnchor extends SourceRevision {
+  citation_protocol_version?: 1 | null;
+  provenance_kind?: "native" | "ocr" | "structured" | "generated" | "unknown";
   doc_id: string;
   doc_title: string;
   chunk_id: string;
@@ -106,7 +161,7 @@ export interface SourceAnchor {
   clearance_level: ClearanceLevel;
   effective_date: ISODateString | null;
   highlight_ranges: HighlightRange[];
-  source_regions?: SourceRegion[];
+  citation_targets: CitationTarget[];
   evidence_windows?: EvidenceWindow[];
   attribution_status?: "pending" | "complete" | "unavailable";
 }
@@ -145,7 +200,16 @@ interface QueryCoverage {
   warnings: string[];
 }
 
+export interface QueryOperationalFailure {
+  stage: "selection" | "generation" | "validation" | "execution";
+  code: string;
+  retryable: boolean;
+  source_id: string | null;
+  message: string;
+}
+
 export interface RAGResponse {
+  citation_verification?: CitationVerification | null;
   trace_id: string;
   answer: string;
   answer_status?: AnswerStatus;
@@ -164,9 +228,12 @@ export interface RAGResponse {
   node_timings?: QueryNodeTiming[];
   degraded: boolean;
   degraded_reason: string | null;
+  operational_failures?: QueryOperationalFailure[];
   source_mode?: string | null;
+  query_source_id?: string | null;
   source_decision_reason?: string | null;
   source_expansion?: SourceExpansion | null;
+  source_clarification?: QuerySourceClarification | null;
 }
 
 export interface GeneratedArtifact {
@@ -229,7 +296,35 @@ export interface ArtifactJobDetail extends ArtifactJobSummary {
   last_heartbeat_at?: ISODateString | null;
 }
 
-type SseEventType = "trace" | "intent" | "token" | "source" | "artifact" | "artifact_job" | "warning" | "done" | "verified" | "error";
+export type RetrievalStageName = "retrieved" | "rerank_input" | "reranked" | "post_policy" | "final_evidence";
+
+export interface RetrievalStageCandidate {
+  rank: number;
+  point_id: string;
+  doc_id?: string;
+  doc_title?: string;
+  chunk_id: string;
+  page?: number;
+  page_start?: number;
+  page_end?: number;
+  group_path?: string;
+  chunk_type?: string;
+  retrieval_score: number;
+  rerank_score?: number;
+  rerank_adjusted_score?: number;
+  rerank_status?: string;
+  excerpt: string;
+}
+
+export interface RetrievalStage {
+  name: RetrievalStageName;
+  attempt: number;
+  status: "completed" | "skipped";
+  candidate_count: number;
+  candidates: RetrievalStageCandidate[];
+}
+
+type SseEventType = "trace" | "retrieval_stage" | "intent" | "token" | "source" | "artifact" | "artifact_job" | "warning" | "done" | "verified" | "error";
 
 interface SseEventBase<TType extends SseEventType, TData> {
   event: TType;
@@ -238,8 +333,9 @@ interface SseEventBase<TType extends SseEventType, TData> {
 
 export type RagSseEvent =
   | SseEventBase<"trace", { trace_id?: string; session_id?: string; node?: string; agent?: string | null; execution_mode?: string; detail?: string | null }>
+  | SseEventBase<"retrieval_stage", RetrievalStage>
   | SseEventBase<"intent", { intent: QueryIntent }>
-  | SseEventBase<"token", { text: string }>
+  | SseEventBase<"token", { text: string; draft?: boolean }>
   | SseEventBase<"source", SourceAnchor>
   | SseEventBase<"artifact", GeneratedArtifact>
   | SseEventBase<"artifact_job", ArtifactJobSummary>

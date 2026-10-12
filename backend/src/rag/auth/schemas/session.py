@@ -37,5 +37,10 @@ class ChangePasswordRequest(ContractModel):
     new_password: str = Field(..., min_length=8)
 
 
+class ChangeEmailRequest(ContractModel):
+    current_password: str = Field(..., min_length=1)
+    new_email: str = Field(..., min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 class LogoutResponse(ContractModel):
     status: Literal["accepted"] = "accepted"

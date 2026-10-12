@@ -28,11 +28,6 @@
     line-height: 1.55;
   }
 
-  .rag-assistant-prose {
-    width: min(100%, 72ch);
-    max-width: 72ch;
-  }
-
   .rag-corpus-rail {
     gap: 0.8rem;
     padding: 1rem 0.875rem;

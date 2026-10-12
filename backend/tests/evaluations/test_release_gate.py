@@ -265,7 +265,9 @@ def _result(
                 "passed": True,
                 "llm_verifier": {"status": "checked"},
             },
-            "citation": {"passed": True, "unresolved_citations": []},
+            "citation": {"passed": True, "unresolved_citations": [], "protocol_version": 1,
+                "verification_status": "verified", "answer_revision_valid": True, "quote_validity": True,
+                "claim_support": True, "all_claim_coverage": True, "revision_traceability": True},
             "faithfulness": {"status": "passed"},
         },
         "sources": [],
@@ -315,3 +317,11 @@ def _set_anchor_diagnostic(
             }
         ],
     }
+
+
+def test_release_gate_never_treats_legacy_citations_as_protocol_one():
+    runs, gold, cases, pins = _fixture()
+    runs[0]["cases"][0]["checks"]["citation"] = {"passed": True, "unresolved_citations": []}
+    report = evaluate_release_gate(runs, ranking_gold=gold, dataset_cases=cases, expected_pins=pins)
+    assert report["passed"] is False
+    assert any("metric_unavailable:citation_protocol" in failure for failure in report["failures"])

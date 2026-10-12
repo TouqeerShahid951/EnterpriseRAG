@@ -5,12 +5,15 @@ from __future__ import annotations
 import re
 
 SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+LIST_MARKER = re.compile(r"(?:\d{1,3}|[A-Za-z]|[ivxlcdmIVXLCDM]{1,8})[.)]")
 CHARS_PER_TOKEN_GUARD = 3
 
 
 def split_text(text: str, *, target_tokens: int, overlap_tokens: int) -> list[str]:
     max_chars = target_tokens * CHARS_PER_TOKEN_GUARD
-    sentences = [item.strip() for item in SENTENCE_BOUNDARY.split(text) if item.strip()]
+    sentences = _join_list_markers(
+        [item.strip() for item in SENTENCE_BOUNDARY.split(text) if item.strip()]
+    )
     if len(sentences) > 1:
         chunks = _pack_sentences(sentences, target_tokens, max_chars)
     else:
@@ -18,7 +21,23 @@ def split_text(text: str, *, target_tokens: int, overlap_tokens: int) -> list[st
     return [chunk for chunk in chunks if chunk]
 
 
-def _pack_sentences(sentences: list[str], target_tokens: int, max_chars: int) -> list[str]:
+def _join_list_markers(sentences: list[str]) -> list[str]:
+    joined: list[str] = []
+    index = 0
+    while index < len(sentences):
+        sentence = sentences[index]
+        if LIST_MARKER.fullmatch(sentence) and index + 1 < len(sentences):
+            joined.append(f"{sentence} {sentences[index + 1]}")
+            index += 2
+            continue
+        joined.append(sentence)
+        index += 1
+    return joined
+
+
+def _pack_sentences(
+    sentences: list[str], target_tokens: int, max_chars: int
+) -> list[str]:
     chunks: list[str] = []
     current: list[str] = []
     for sentence in sentences:
@@ -35,7 +54,9 @@ def _pack_sentences(sentences: list[str], target_tokens: int, max_chars: int) ->
     return chunks
 
 
-def _token_windows(tokens: list[str], target_tokens: int, overlap_tokens: int, max_chars: int) -> list[str]:
+def _token_windows(
+    tokens: list[str], target_tokens: int, overlap_tokens: int, max_chars: int
+) -> list[str]:
     tokens = _split_large_tokens(tokens, max_chars)
     chunks: list[str] = []
     start = 0
@@ -56,7 +77,11 @@ def _split_large_tokens(tokens: list[str], max_chars: int) -> list[str]:
 
 
 def _char_windows(text: str, max_chars: int) -> list[str]:
-    return [text[start : start + max_chars] for start in range(0, len(text), max_chars)] if len(text) > max_chars else [text]
+    return (
+        [text[start : start + max_chars] for start in range(0, len(text), max_chars)]
+        if len(text) > max_chars
+        else [text]
+    )
 
 
 def _too_large(text: str, target_tokens: int, max_chars: int) -> bool:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
 from rag.shared.contracts.http import ContractModel
 from rag.shared.contracts.clearance import ClearanceLevel, DEFAULT_CLEARANCE_LEVEL
@@ -87,3 +87,73 @@ class DocumentReingestResponse(ContractModel):
 
 class DocumentReingestRequest(ContractModel):
     retry_of_job_id: str | None = None
+
+
+class SpreadsheetColumnReview(ContractModel):
+    index: int = Field(..., ge=0, lt=256)
+    name: str = Field(..., min_length=1, max_length=200)
+    type: str = Field(default="mixed", max_length=40)
+    description: str = Field(default="", max_length=500)
+    aliases: list[str] = Field(default_factory=list, max_length=5)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        if not (cleaned := " ".join(value.split())):
+            raise ValueError("column name must not be blank")
+        return cleaned
+
+    @field_validator("aliases")
+    @classmethod
+    def validate_aliases(cls, values: list[str]) -> list[str]:
+        aliases = [" ".join(value.split()) for value in values]
+        if any(not value or len(value) > 80 for value in aliases):
+            raise ValueError("aliases must contain 1 to 80 characters")
+        if len({value.lower() for value in aliases}) != len(aliases):
+            raise ValueError("aliases must be unique")
+        return aliases
+
+
+class SpreadsheetSheetReview(ContractModel):
+    source_name: str = Field(..., min_length=1, max_length=200)
+    table_name: str = Field(..., min_length=1, max_length=200)
+    header_rows: list[int] = Field(..., min_length=1, max_length=3)
+    header_candidates: list[int] = Field(default_factory=list, max_length=10)
+    excluded: bool = False
+    description: str = Field(default="", max_length=500)
+    columns: list[SpreadsheetColumnReview] = Field(default_factory=list, max_length=256)
+
+    @field_validator("source_name", "table_name")
+    @classmethod
+    def validate_names(cls, value: str) -> str:
+        if not (cleaned := " ".join(value.split())):
+            raise ValueError("sheet and table names must not be blank")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_rows_and_columns(self) -> "SpreadsheetSheetReview":
+        if self.header_rows != sorted(set(self.header_rows)) or any(row < 1 for row in self.header_rows):
+            raise ValueError("header_rows must contain unique positive row numbers in ascending order")
+        if len({column.index for column in self.columns}) != len(self.columns):
+            raise ValueError("column indexes must be unique within a sheet")
+        return self
+
+
+class SpreadsheetReviewRequest(ContractModel):
+    sheets: list[SpreadsheetSheetReview] = Field(..., min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_sheets(self) -> "SpreadsheetReviewRequest":
+        if len({sheet.source_name for sheet in self.sheets}) != len(self.sheets):
+            raise ValueError("sheet source names must be unique")
+        if all(sheet.excluded for sheet in self.sheets):
+            raise ValueError("at least one sheet must be included")
+        return self
+
+
+class SpreadsheetReviewResponse(SpreadsheetReviewRequest):
+    document_id: str
+
+
+class SpreadsheetReviewUpdateResponse(DocumentReingestResponse):
+    pass

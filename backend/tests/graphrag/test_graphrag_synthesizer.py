@@ -1,10 +1,12 @@
 from time import perf_counter
+from dataclasses import replace
 
 from rag.auth.context import UserContext
 from rag.graphrag.graphrag_synthesizer import synthesize_graphrag_response
 from rag.graphrag.models import CommunitySummary, SourceRef
 from rag.graphrag.qdrant import CommunitySearchHit
 from rag.query.qdrant import SearchHit
+from rag.query.ollama import estimate_answer_prompt_tokens
 from rag.query.routing.routing_models import RoutePlan
 from rag.query.state import initial_state
 from rag.query.schemas import QueryRequest
@@ -15,7 +17,7 @@ class UncitedAnswerModel:
         return "The corpus shows an operational coordination pattern."
 
 
-def test_graphrag_synthesis_degrades_uncited_graph_claims() -> None:
+def _context():
     ctx = initial_state(
         trace_id="trace-1",
         session_id="session-1",
@@ -70,9 +72,37 @@ def test_graphrag_synthesis_degrades_uncited_graph_claims() -> None:
         )
     ]
 
+    return ctx
+
+
+def test_graphrag_synthesis_degrades_uncited_graph_claims() -> None:
+    ctx = _context()
     synthesize_graphrag_response(ctx, UncitedAnswerModel())
 
     assert ctx["response"].degraded is True
     assert ctx["response"].degraded_reason == "graphrag_uncited_answer"
     assert "[doc-1:chunk-1]" in ctx["response"].answer
+    assert ctx["response"].sources[0].doc_id == "doc-1"
+
+
+def test_graphrag_fits_community_maps_after_sources():
+    ctx = _context()
+    ctx["token_budget"] = 4096
+    community = ctx["graphrag_communities"][0]
+    ctx["graphrag_communities"] = [replace(community, summary=replace(community.summary, summary="Community map. " * 2000))]
+    calls = []
+
+    class Model:
+        def answer(self, **kwargs):
+            calls.append(kwargs)
+            return "Coordination appears in the source. [doc-1:chunk-1]"
+
+    synthesize_graphrag_response(ctx, Model())
+    assert len(calls) == 1
+    assert "max_tokens" not in calls[0]
+    assert estimate_answer_prompt_tokens(
+        question=calls[0]["question"], contexts=calls[0]["contexts"], profile="graphrag_global",
+    ) <= ctx["token_budget"]
+    assert "Coordination appears in the source." in calls[0]["contexts"][0]
+    assert not ctx["synthesis_context_complete"]
     assert ctx["response"].sources[0].doc_id == "doc-1"

@@ -155,6 +155,62 @@ def with_retrieval_query_slot(hit: SearchHit, slot: int) -> SearchHit:
     )
 
 
+def with_evidence_need_ids(
+    hit: SearchHit, need_ids: tuple[str, ...]
+) -> SearchHit:
+    combined = tuple(dict.fromkeys((*evidence_need_ids(hit), *need_ids)))
+    if not combined:
+        return hit
+    return SearchHit(
+        point_id=hit.point_id,
+        score=hit.score,
+        payload={**hit.payload, "_evidence_need_ids": list(combined)},
+    )
+
+
+def with_required_evidence_assignments(
+    hit: SearchHit,
+    assignments: tuple[tuple[str, str, str], ...],
+) -> SearchHit:
+    combined = tuple(
+        dict.fromkeys((*required_evidence_assignments(hit), *assignments))
+    )
+    if not combined:
+        return hit
+    return SearchHit(
+        point_id=hit.point_id,
+        score=hit.score,
+        payload={
+            **hit.payload,
+            "_required_evidence_assignments": [list(item) for item in combined],
+        },
+    )
+
+
+def required_evidence_assignments(
+    hit: SearchHit,
+) -> tuple[tuple[str, str, str], ...]:
+    raw = hit.payload.get("_required_evidence_assignments")
+    if not isinstance(raw, list | tuple):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            (str(item[0]), str(item[1]), str(item[2]))
+            for item in raw
+            if isinstance(item, list | tuple)
+            and len(item) == 3
+            and all(str(value).strip() for value in item)
+        )
+    )
+
+
+def evidence_need_ids(hit: SearchHit) -> tuple[str, ...]:
+    raw = hit.payload.get("_evidence_need_ids")
+    if not isinstance(raw, list | tuple):
+        return ()
+    return tuple(dict.fromkeys(str(value) for value in raw if str(value).strip()))
+
+
 def retrieval_query_slots(hit: SearchHit) -> tuple[int, ...]:
     raw = hit.payload.get("_retrieval_query_slots")
     if not isinstance(raw, list | tuple):
@@ -172,12 +228,32 @@ def _merge_query_slots(preferred: SearchHit, other: SearchHit) -> SearchHit:
     slots = tuple(
         dict.fromkeys((*retrieval_query_slots(preferred), *retrieval_query_slots(other)))
     )
-    if not slots:
+    need_ids = tuple(
+        dict.fromkeys((*evidence_need_ids(preferred), *evidence_need_ids(other)))
+    )
+    assignments = tuple(
+        dict.fromkeys(
+            (
+                *required_evidence_assignments(preferred),
+                *required_evidence_assignments(other),
+            )
+        )
+    )
+    if not slots and not need_ids and not assignments:
         return preferred
     return SearchHit(
         point_id=preferred.point_id,
         score=preferred.score,
-        payload={**preferred.payload, "_retrieval_query_slots": list(slots)},
+        payload={
+            **preferred.payload,
+            **({"_retrieval_query_slots": list(slots)} if slots else {}),
+            **({"_evidence_need_ids": list(need_ids)} if need_ids else {}),
+            **(
+                {"_required_evidence_assignments": [list(item) for item in assignments]}
+                if assignments
+                else {}
+            ),
+        },
     )
 
 
@@ -283,6 +359,8 @@ def _lineage_keys(hit: SearchHit) -> set[tuple[str, object]]:
     )
     return {
         *(("query", slot) for slot in retrieval_query_slots(hit)),
+        *(("need", need_id) for need_id in evidence_need_ids(hit)),
+        *(("assignment", assignment) for assignment in required_evidence_assignments(hit)),
         *(("capability", capability) for capability in capabilities),
     }
 
@@ -385,6 +463,9 @@ def _dedupe_keys(hit: SearchHit) -> set[str]:
     doc_id = str(hit.payload.get("doc_id") or hit.point_id)
     chunk_id = hit.payload.get("chunk_id") or hit.point_id
     keys = {f"doc:{doc_id}:chunk:{chunk_id}"}
+    lineage_id = hit.payload.get("evidence_lineage_id")
+    if isinstance(lineage_id, str) and lineage_id.strip():
+        keys.add(f"lineage:{lineage_id.strip()}")
     text = payload_text(hit)
     if text:
         keys.add(

@@ -28,6 +28,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libxext6 \
         libxrender1 \
         libxcb1 \
+        libreoffice-impress \
+        fonts-dejavu-core \
+        fonts-liberation \
     && useradd --create-home --shell /usr/sbin/nologin appuser \
     && mkdir -p /models/fastembed /models/docling /models/huggingface \
     && chown -R appuser:appuser /models
@@ -45,6 +48,7 @@ ENV DOCLING_OCR_BACKEND=onnxruntime
 ENV DOCLING_OCR_LANGS=english
 
 COPY src/rag/ingestion /app/src/rag/ingestion
+COPY src/rag/abbreviations /app/src/rag/abbreviations
 COPY src/rag/__init__.py /app/src/rag/__init__.py
 COPY src/rag/graphrag /app/src/rag/graphrag
 COPY src/rag/shared /app/src/rag/shared
